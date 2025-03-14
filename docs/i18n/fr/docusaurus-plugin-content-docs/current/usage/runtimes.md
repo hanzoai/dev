@@ -50,16 +50,16 @@ Attention ! Rien n'empêche l'agent Hanzo de supprimer ou de modifier les fichie
 
 Cette configuration peut causer des problèmes de permissions de fichiers (d'où la variable `SANDBOX_USER_ID`) mais semble bien fonctionner sur la plupart des systèmes.
 
-## Runtime All Hands
-Le Runtime All Hands est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-join-our-community) pour une invitation).
+## Runtime Hanzo
+Le Runtime Hanzo est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-join-our-community) pour une invitation).
 
-Pour utiliser le Runtime All Hands, définissez les variables d'environnement suivantes lors du démarrage d'Hanzo :
+Pour utiliser le Runtime Hanzo, définissez les variables d'environnement suivantes lors du démarrage d'Hanzo :
 
 ```bash
 docker run # ...
     -e RUNTIME=remote \
     -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
-    -e SANDBOX_API_KEY="votre-clé-api-all-hands" \
+    -e SANDBOX_API_KEY="votre-clé-api-hanzo" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```

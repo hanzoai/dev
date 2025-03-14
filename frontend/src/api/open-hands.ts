@@ -11,8 +11,8 @@ import {
   Conversation,
   ResultSet,
   GetTrajectoryResponse,
-} from "./open-hands.types";
-import { hanzo } from "./open-hands-axios";
+} from "./hanzo.types";
+import { hanzo } from "./hanzo-axios";
 import { ApiSettings, PostApiSettings } from "#/types/settings";
 
 class Hanzo {

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { useConversation } from "#/context/conversation-context";
 
 export const useVSCodeUrl = (config: { enabled: boolean }) => {

@@ -1,18 +1,18 @@
-import AllHandsLogo from "#/assets/branding/all-hands-logo.svg?react";
+import HanzoLogo from "#/assets/branding/hanzo-logo.svg?react";
 import { TooltipButton } from "./tooltip-button";
 
-interface AllHandsLogoButtonProps {
+interface HanzoLogoButtonProps {
   onClick: () => void;
 }
 
-export function AllHandsLogoButton({ onClick }: AllHandsLogoButtonProps) {
+export function HanzoLogoButton({ onClick }: HanzoLogoButtonProps) {
   return (
     <TooltipButton
-      tooltip="All Hands AI"
-      ariaLabel="All Hands Logo"
+      tooltip="Hanzo AI"
+      ariaLabel="Hanzo Logo"
       onClick={onClick}
     >
-      <AllHandsLogo width={34} height={34} />
+      <HanzoLogo width={34} height={34} />
     </TooltipButton>
   );
 }

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
-import { Feedback } from "#/api/open-hands.types";
-import Hanzo from "#/api/open-hands";
+import { Feedback } from "#/api/hanzo.types";
+import Hanzo from "#/api/hanzo";
 import { useConversation } from "#/context/conversation-context";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 

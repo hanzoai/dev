@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 
 export const setupTestConfig = () => {
   const getConfigSpy = vi.spyOn(Hanzo, "getConfig");

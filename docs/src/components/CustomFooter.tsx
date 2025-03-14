@@ -21,7 +21,7 @@ function CustomFooter() {
         <div className="footer-bottom">
           <p>
             <Translate id="footer.copyright" values={{ year: new Date().getFullYear() }}>
-              {'Copyright © {year} All Hands AI, Inc'}
+              {'Copyright © {year} Hanzo AI, Inc'}
             </Translate>
           </p>
         </div>

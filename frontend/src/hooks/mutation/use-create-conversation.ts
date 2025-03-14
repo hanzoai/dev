@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import posthog from "posthog-js";
 import { useDispatch, useSelector } from "react-redux";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { setInitialPrompt } from "#/state/initial-query-slice";
 import { RootState } from "#/store";
 

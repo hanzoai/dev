@@ -8,9 +8,9 @@
 export const generateGitHubAuthUrl = (clientId: string, requestUrl: URL) => {
   const redirectUri = `${requestUrl.origin}/oauth/keycloak/callback`;
   const authUrl = requestUrl.hostname
-    .replace(/(^|\.)staging\.all-hands\.dev$/, "$1auth.staging.hanzo.ai")
-    .replace(/(^|\.)app\.all-hands\.dev$/, "auth.app.hanzo.ai")
-    .replace(/(^|\.)localhost$/, "auth.staging.hanzo.ai");
+    .replace(/(^|\.)staging\.hanzo\.build$/, "$1auth.staging.hanzo.build")
+    .replace(/(^|\.)app\.hanzo\.build$/, "auth.app.hanzo.build")
+    .replace(/(^|\.)localhost$/, "auth.staging.hanzo.build");
   const scope = "openid email profile";
-  return `https://${authUrl}/realms/allhands/protocol/openid-connect/auth?client_id=github&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
+  return `https://${authUrl}/realms/hanzo/protocol/openid-connect/auth?client_id=github&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
 };

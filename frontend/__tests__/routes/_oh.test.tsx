@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import MainApp from "#/routes/_oh/route";
 import i18n from "#/i18n";
 import * as CaptureConsent from "#/utils/handle-capture-consent";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 
 describe("frontend/routes/_oh", () => {
   const RouteStub = createRoutesStub([{ Component: MainApp, path: "/" }]);

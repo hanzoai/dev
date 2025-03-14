@@ -1,4 +1,4 @@
-import { hanzo } from "./open-hands-axios";
+import { hanzo } from "./hanzo-axios";
 
 class InvariantService {
   static async getPolicy() {

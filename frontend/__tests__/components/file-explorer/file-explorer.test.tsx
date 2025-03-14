@@ -4,7 +4,7 @@ import { renderWithProviders } from "test-utils";
 import { describe, it, expect, vi, Mock, afterEach } from "vitest";
 import toast from "#/utils/toast";
 import { AgentState } from "#/types/agent-state";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { FileExplorer } from "#/components/features/file-explorer/file-explorer";
 
 const toastSpy = vi.spyOn(toast, "error");

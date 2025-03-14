@@ -1,4 +1,4 @@
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 
 /**
  * Downloads the current workspace as a .zip file.

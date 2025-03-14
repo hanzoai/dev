@@ -1,6 +1,6 @@
 import React from "react";
 import { generateGitHubAuthUrl } from "#/utils/generate-github-auth-url";
-import { GetConfigResponse } from "#/api/open-hands.types";
+import { GetConfigResponse } from "#/api/hanzo.types";
 import { useAuth } from "#/context/auth-context";
 
 interface UseGitHubAuthUrlConfig {

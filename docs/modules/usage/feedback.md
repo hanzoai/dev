@@ -26,7 +26,7 @@ However, a link with a unique ID will still be created that you can share public
 
 ### Who collects and stores the data?
 
-The data is collected and stored by [All Hands AI](https://hanzo.ai), a company founded by Hanzo maintainers to support and improve Hanzo.
+The data is collected and stored by [Hanzo AI](https://hanzo.ai), a company founded by Hanzo maintainers to support and improve Hanzo.
 
 ### How will public data be released?
 
@@ -40,7 +40,7 @@ removing email submitter email addresses, and attempting to remove any sensitive
 
 ### What if I want my data deleted?
 
-For data on the All Hands AI servers, we are happy to delete it at request:
+For data on the Hanzo AI servers, we are happy to delete it at request:
 
 **One Piece of Data:** If you want one piece of data deleted, we will shortly be adding a mechanism to delete pieces of
 data using the link and password that is displayed on the interface when you submit data.

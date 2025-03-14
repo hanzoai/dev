@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { useConfig } from "./use-config";
 import { useAuth } from "#/context/auth-context";
 

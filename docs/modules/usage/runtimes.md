@@ -71,7 +71,7 @@ starting Hanzo:
 docker run # ...
     -e RUNTIME=remote \
     -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
-    -e SANDBOX_API_KEY="your-all-hands-api-key" \
+    -e SANDBOX_API_KEY="your-hanzo-api-key" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```

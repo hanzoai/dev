@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 
 export const useGetTrajectory = () =>
   useMutation({

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { PaymentForm } from "#/components/features/payment/payment-form";
 import * as featureFlags from "#/utils/feature-flags";
 

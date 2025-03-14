@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import posthog from "posthog-js";
 import { useConfig } from "./use-config";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { useAuth } from "#/context/auth-context";
 import { useLogout } from "../mutation/use-logout";
 import { useCurrentSettings } from "#/context/settings-context";

@@ -1,4 +1,4 @@
-import { ErrorResponse, FileUploadSuccessResponse } from "./open-hands.types";
+import { ErrorResponse, FileUploadSuccessResponse } from "./hanzo.types";
 
 export const isHanzoErrorResponse = (
   data: ErrorResponse | FileUploadSuccessResponse,

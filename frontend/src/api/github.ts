@@ -1,5 +1,5 @@
 import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
-import { hanzo } from "./open-hands-axios";
+import { hanzo } from "./hanzo-axios";
 
 /**
  * Retrieves repositories where Hanzo Github App has been installed

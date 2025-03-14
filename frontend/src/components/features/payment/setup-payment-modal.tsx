@@ -1,9 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { Trans, useTranslation } from "react-i18next";
-import AllHandsLogo from "#/assets/branding/all-hands-logo.svg?react";
+import HanzoLogo from "#/assets/branding/hanzo-logo.svg?react";
 import { ModalBackdrop } from "#/components/shared/modals/modal-backdrop";
 import { ModalBody } from "#/components/shared/modals/modal-body";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { BrandButton } from "../settings/brand-button";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 
@@ -22,7 +22,7 @@ export function SetupPaymentModal() {
   return (
     <ModalBackdrop>
       <ModalBody className="border border-tertiary">
-        <AllHandsLogo width={68} height={46} />
+        <HanzoLogo width={68} height={46} />
         <div className="flex flex-col gap-2 w-full items-center text-center">
           <h1 className="text-2xl font-bold">{t("BILLING$YOUVE_GOT_50")}</h1>
           <p>

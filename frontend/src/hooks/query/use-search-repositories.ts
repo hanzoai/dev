@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 
 export function useSearchRepositories(query: string) {
   return useQuery({

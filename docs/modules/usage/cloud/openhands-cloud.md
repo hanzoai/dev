@@ -1,6 +1,6 @@
 # Hanzo Cloud
 
-Hanzo Cloud is the cloud hosted version of Hanzo by All Hands AI.
+Hanzo Cloud is the cloud hosted version of Hanzo by Hanzo AI.
 
 ## Accessing Hanzo Cloud
 

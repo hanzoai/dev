@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConfig } from "./use-config";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { BILLING_SETTINGS } from "#/utils/feature-flags";
 
 export const useBalance = () => {

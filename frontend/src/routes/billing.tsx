@@ -1,7 +1,7 @@
 import { redirect, useSearchParams } from "react-router";
 import React from "react";
 import { PaymentForm } from "#/components/features/payment/payment-form";
-import { GetConfigResponse } from "#/api/open-hands.types";
+import { GetConfigResponse } from "#/api/hanzo.types";
 import { queryClient } from "#/entry.client";
 import {
   displayErrorToast,

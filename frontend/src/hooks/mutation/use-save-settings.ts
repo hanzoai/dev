@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { DEFAULT_SETTINGS } from "#/services/settings";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { PostSettings, PostApiSettings } from "#/types/settings";
 
 const saveSettingsMutationFn = async (settings: Partial<PostSettings>) => {

@@ -1,4 +1,4 @@
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { downloadWorkspace } from "./download-workspace";
 
 interface DownloadProgress {

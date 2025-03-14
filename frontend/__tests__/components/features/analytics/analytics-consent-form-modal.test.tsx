@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AnalyticsConsentFormModal } from "#/components/features/analytics/analytics-consent-form-modal";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { SettingsProvider } from "#/context/settings-context";
 import { AuthProvider } from "#/context/auth-context";
 

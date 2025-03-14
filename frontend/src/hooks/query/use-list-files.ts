@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSelector } from "react-redux";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { useConversation } from "#/context/conversation-context";
 import { RootState } from "#/store";
 import { RUNTIME_INACTIVE_STATES } from "#/types/agent-state";

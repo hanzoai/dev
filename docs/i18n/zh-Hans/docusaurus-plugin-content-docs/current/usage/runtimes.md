@@ -48,16 +48,16 @@ docker run # ...
 
 此设置可能会导致一些文件权限问题（因此有 `SANDBOX_USER_ID` 变量），但似乎在大多数系统上都能很好地工作。
 
-## All Hands 运行时
-All Hands 运行时目前处于测试阶段。您可以通过加入 Slack 上的 #remote-runtime-limited-beta 频道来请求访问权限（[请参阅自述文件](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-join-our-community)以获取邀请）。
+## Hanzo 运行时
+Hanzo 运行时目前处于测试阶段。您可以通过加入 Slack 上的 #remote-runtime-limited-beta 频道来请求访问权限（[请参阅自述文件](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-join-our-community)以获取邀请）。
 
-要使用 All Hands 运行时，请在启动 Hanzo 时设置以下环境变量：
+要使用 Hanzo 运行时，请在启动 Hanzo 时设置以下环境变量：
 
 ```bash
 docker run # ...
     -e RUNTIME=remote \
     -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
-    -e SANDBOX_API_KEY="your-all-hands-api-key" \
+    -e SANDBOX_API_KEY="your-hanzo-api-key" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```

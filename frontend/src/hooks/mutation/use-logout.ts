@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import Hanzo from "#/api/open-hands";
+import Hanzo from "#/api/hanzo";
 import { useAuth } from "#/context/auth-context";
 
 export const useLogout = () => {

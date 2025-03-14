@@ -2,7 +2,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import React from "react";
 import { useSelector } from "react-redux";
-import { hanzo } from "#/api/open-hands-axios";
+import { hanzo } from "#/api/hanzo-axios";
 import { RUNTIME_INACTIVE_STATES } from "#/types/agent-state";
 import { RootState } from "#/store";
 import { useConversation } from "#/context/conversation-context";
