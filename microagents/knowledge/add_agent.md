@@ -35,4 +35,4 @@ When creating a new microagent:
 
 For detailed information, see:
 * [Microagents Overview](https://docs.hanzo.ai/modules/usage/prompting/microagents-overview)
-* [Example GitHub Microagent](https://github.com/hanzoai/Hanzo/blob/main/microagents/knowledge/github.md)
+* [Example GitHub Microagent](https://github.com/hanzoai/build/blob/main/microagents/knowledge/github.md)

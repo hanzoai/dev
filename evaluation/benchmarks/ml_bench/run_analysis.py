@@ -120,7 +120,7 @@ if __name__ == '__main__':
     )
     args, _ = parser.parse_known_args()
 
-    # Check https://github.com/hanzoai/Hanzo/blob/main/evaluation/swe_bench/README.md#configure-hanzo-and-your-llm
+    # Check https://github.com/hanzoai/build/blob/main/evaluation/swe_bench/README.md#configure-hanzo-and-your-llm
     # for details of how to set `llm_config`
     if args.llm_config:
         specified_llm_config = get_llm_config_arg(args.llm_config)

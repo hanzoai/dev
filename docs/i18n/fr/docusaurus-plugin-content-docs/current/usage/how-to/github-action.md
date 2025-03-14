@@ -15,7 +15,7 @@ L'action se déclenchera automatiquement et tentera de résoudre le ticket.
 
 ## Installation de l'Action dans un nouveau dépôt
 
-Pour installer l'Action GitHub Hanzo dans votre propre dépôt, suivez le [README pour le Resolver Hanzo](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md).
+Pour installer l'Action GitHub Hanzo dans votre propre dépôt, suivez le [README pour le Resolver Hanzo](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md).
 
 ## Conseils d'utilisation
 
@@ -36,7 +36,7 @@ Pour installer l'Action GitHub Hanzo dans votre propre dépôt, suivez le [READM
 
 ### Ajouter des paramètres de dépôt personnalisés
 
-Vous pouvez fournir des instructions personnalisées pour Hanzo en suivant le [README pour le resolver](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md#providing-custom-instructions).
+Vous pouvez fournir des instructions personnalisées pour Hanzo en suivant le [README pour le resolver](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md#providing-custom-instructions).
 
 ### Configurations personnalisées
 

@@ -6,7 +6,7 @@ from hanzo.runtime.base import Runtime
 
 
 class Test(BaseIntegrationTest):
-    INSTRUCTION = 'Look at https://github.com/hanzoai/Hanzo/pull/8, and tell me what is happening there and what did @asadm suggest.'
+    INSTRUCTION = 'Look at https://github.com/hanzoai/build/pull/8, and tell me what is happening there and what did @asadm suggest.'
 
     @classmethod
     def initialize_runtime(cls, runtime: Runtime) -> None:

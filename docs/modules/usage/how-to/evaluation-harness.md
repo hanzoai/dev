@@ -4,7 +4,7 @@ This guide provides an overview of how to integrate your own evaluation benchmar
 
 ## Setup Environment and LLM Configuration
 
-Please follow instructions [here](https://github.com/hanzoai/Hanzo/blob/main/Development.md) to setup your local development environment.
+Please follow instructions [here](https://github.com/hanzoai/build/blob/main/Development.md) to setup your local development environment.
 Hanzo in development mode uses `config.toml` to keep track of most configurations.
 
 Here's an example configuration file you can use to define and use multiple LLMs:
@@ -73,7 +73,7 @@ The `run_controller()` function is the core of Hanzo's execution. It manages the
 
 ## Easiest way to get started: Exploring Existing Benchmarks
 
-We encourage you to review the various evaluation benchmarks available in the [`evaluation/benchmarks/` directory](https://github.com/hanzoai/Hanzo/blob/main/evaluation/benchmarks) of our repository.
+We encourage you to review the various evaluation benchmarks available in the [`evaluation/benchmarks/` directory](https://github.com/hanzoai/build/blob/main/evaluation/benchmarks) of our repository.
 
 To integrate your own benchmark, we suggest starting with the one that most closely resembles your needs. This approach can significantly streamline your integration process, allowing you to build upon existing structures and adapt them to your specific requirements.
 

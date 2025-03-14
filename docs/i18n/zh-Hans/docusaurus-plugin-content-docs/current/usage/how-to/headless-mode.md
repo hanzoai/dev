@@ -10,7 +10,7 @@
 ## 使用 Python
 
 要在 Python 中以无头模式运行 Hanzo,
-[请按照开发设置说明](https://github.com/hanzoai/Hanzo/blob/main/Development.md),
+[请按照开发设置说明](https://github.com/hanzoai/build/blob/main/Development.md),
 然后运行:
 
 ```bash
@@ -18,7 +18,7 @@ poetry run python -m hanzo.core.main -t "write a bash script that prints hi"
 ```
 
 你需要确保通过环境变量
-[或 `config.toml` 文件](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml)
+[或 `config.toml` 文件](https://github.com/hanzoai/build/blob/main/config.template.toml)
 设置你的模型、API 密钥和其他设置。
 
 ## 使用 Docker
@@ -47,7 +47,7 @@ LLM_API_KEY="sk_test_12345"
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -57,6 +57,6 @@ docker run -it \
     -v /var/run/docker.sock:/var/run/docker.sock \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app-$(date +%Y%m%d%H%M%S) \
-    docker.hanzo.ai/hanzoai/hanzo:0.28 \
+    hanzoai/hanzo:0.28 \
     python -m hanzo.core.main -t "write a bash script that prints hi" --no-auto-continue
 ```

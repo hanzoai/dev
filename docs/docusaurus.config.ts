@@ -91,7 +91,7 @@ const config: Config = {
           position: "right",
         },
         {
-          href: "https://github.com/hanzoai/Hanzo",
+          href: "https://github.com/hanzoai/build",
           label: "GitHub",
           position: "right",
         },

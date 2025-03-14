@@ -13,7 +13,7 @@ C'est le Runtime par défaut qui est utilisé lorsque vous démarrez Hanzo. Vous
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -51,7 +51,7 @@ Attention ! Rien n'empêche l'agent Hanzo de supprimer ou de modifier les fichie
 Cette configuration peut causer des problèmes de permissions de fichiers (d'où la variable `SANDBOX_USER_ID`) mais semble bien fonctionner sur la plupart des systèmes.
 
 ## Runtime Hanzo
-Le Runtime Hanzo est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-join-our-community) pour une invitation).
+Le Runtime Hanzo est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/hanzoai/build?tab=readme-ov-file#-join-our-community) pour une invitation).
 
 Pour utiliser le Runtime Hanzo, définissez les variables d'environnement suivantes lors du démarrage d'Hanzo :
 

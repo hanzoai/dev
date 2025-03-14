@@ -27,7 +27,7 @@ This is the frontend of the Hanzo project. It is a React application that provid
 
 ```sh
 # Clone the repository
-git clone https://github.com/hanzoai/Hanzo.git
+git clone https://github.com/hanzoai/build.git
 
 # Change the directory to the frontend
 cd Hanzo/frontend

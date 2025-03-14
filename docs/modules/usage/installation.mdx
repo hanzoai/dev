@@ -58,17 +58,17 @@ A system with a modern processor and a minimum of **4GB RAM** is recommended to 
 The easiest way to run Hanzo is in Docker.
 
 ```bash
-docker pull docker.hanzo.ai/hanzoai/runtime:0.28
+docker pull hanzoai/runtime:0.28
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v ~/.hanzo-state:/.hanzo-state \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app \
-    docker.hanzo.ai/hanzoai/hanzo:0.28
+    hanzoai/hanzo:0.28
 ```
 
 You'll find Hanzo running at http://localhost:3000!
@@ -99,6 +99,6 @@ This version is unstable and is recommended for testing or development purposes 
 
 You can choose the tag that best suits your needs based on stability requirements and desired features.
 
-For the development workflow, see [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+For the development workflow, see [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 Are you having trouble? Check out our [Troubleshooting Guide](https://docs.hanzo.ai/modules/usage/troubleshooting).

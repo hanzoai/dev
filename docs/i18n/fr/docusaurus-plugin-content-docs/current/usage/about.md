@@ -25,4 +25,4 @@ Veuillez noter que la sélection de ces technologies est en cours et que des tec
 
 ## Licence
 
-Distribué sous la [Licence](https://github.com/hanzoai/Hanzo/blob/main/LICENSE) MIT.
+Distribué sous la [Licence](https://github.com/hanzoai/build/blob/main/LICENSE) MIT.

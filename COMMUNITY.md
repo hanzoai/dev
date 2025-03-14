@@ -8,7 +8,7 @@ If this resonates with you, we'd love to have you join us in our quest!
 
 ## 🤝 How to Join
 
-Check out our [How to Join the Community section.](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-how-to-join-the-community)
+Check out our [How to Join the Community section.](https://github.com/hanzoai/build?tab=readme-ov-file#-how-to-join-the-community)
 
 ## 💪 Becoming a Contributor
 

@@ -56,7 +56,7 @@ docker run -it --rm --pull=always \
 
 ### Setup
 
-First, ensure you can run Hanzo by following the instructions in [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+First, ensure you can run Hanzo by following the instructions in [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 ### Specify the Base Sandbox Image
 

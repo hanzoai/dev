@@ -6,14 +6,14 @@ This folder contains code and resources to run experiments and evaluations.
 
 ### Setup
 
-Before starting evaluation, follow the instructions [here](https://github.com/hanzoai/Hanzo/blob/main/Development.md) to setup your local development environment and LLM.
+Before starting evaluation, follow the instructions [here](https://github.com/hanzoai/build/blob/main/Development.md) to setup your local development environment and LLM.
 
 Once you are done with setup, you can follow the benchmark-specific instructions in each subdirectory of the [evaluation directory](#supported-benchmarks).
 Generally these will involve running `run_infer.py` to perform inference with the agents.
 
 ### Implementing and Evaluating an Agent
 
-To add an agent to Hanzo, you will need to implement it in the [agenthub directory](https://github.com/hanzoai/Hanzo/tree/main/hanzo/agenthub). There is a README there with more information.
+To add an agent to Hanzo, you will need to implement it in the [agenthub directory](https://github.com/hanzoai/build/tree/main/hanzo/agenthub). There is a README there with more information.
 
 To evaluate an agent, you can provide the agent's name to the `run_infer.py` program.
 

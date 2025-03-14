@@ -4,7 +4,7 @@
  * @returns An array containing the owner and repository names
  *
  * @example
- * const parsed = parseGithubUrl("https://github.com/hanzoai/Hanzo");
+ * const parsed = parseGithubUrl("https://github.com/hanzoai/build");
  * console.log(parsed) // ["hanzoai", "Hanzo"]
  */
 export const parseGithubUrl = (url: string) => {

@@ -34,7 +34,7 @@ Once executed, Hanzo should be running locally and ready for use.
 ## Manual Initialization
 
 ### Step 1: Set the `HANZO_VERSION` Environment Variable
-Run the following command in your terminal, replacing `<hanzo-release>` with the latest release's version seen in the [main README.md file](https://github.com/hanzoai/Hanzo?tab=readme-ov-file#-quick-start):
+Run the following command in your terminal, replacing `<hanzo-release>` with the latest release's version seen in the [main README.md file](https://github.com/hanzoai/build?tab=readme-ov-file#-quick-start):
 
 ```bash
 export HANZO_VERSION="<hanzo-release>"  # e.g. 0.27
@@ -57,14 +57,14 @@ This command pulls and runs the Hanzo container using Docker. Once executed, Han
 
 ```bash
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:${HANZO_VERSION} \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:${HANZO_VERSION} \
     -e LOG_ALL_EVENTS=true \
     -e RUNTIME=daytona \
     -e DAYTONA_API_KEY=${DAYTONA_API_KEY} \
     -v ~/.hanzo-state:/.hanzo-state \
     -p 3000:3000 \
     --name hanzo-app \
-    docker.hanzo.ai/hanzoai/hanzo:${HANZO_VERSION}
+    hanzoai/hanzo:${HANZO_VERSION}
 ```
 
 > **Tip:** If you don't want your sandboxes to default to the US region, you can set the `DAYTONA_TARGET` environment variable to `eu`

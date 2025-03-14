@@ -1,6 +1,6 @@
 # 💿 如何创建自定义 Docker 沙箱
 
-默认的 Hanzo 沙箱包含一个[最小化 ubuntu 配置](https://github.com/hanzoai/Hanzo/blob/main/containers/sandbox/Dockerfile)。您的应用场景可能需要在默认状态下安装额外的软件。本指南将教您如何通过使用自定义 Docker 映像来实现这一目标。
+默认的 Hanzo 沙箱包含一个[最小化 ubuntu 配置](https://github.com/hanzoai/build/blob/main/containers/sandbox/Dockerfile)。您的应用场景可能需要在默认状态下安装额外的软件。本指南将教您如何通过使用自定义 Docker 映像来实现这一目标。
 
 目前提供两种实现方案：
 1. 从 Docker Hub 拉取已有镜像。例如，如果您想安装 `nodejs` ，您可以通过使用 `node:20` 镜像来实现。
@@ -21,7 +21,7 @@
 
 ## 环境设置
 
-确保您能够首先通过 [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md) 运行 Hanzo。
+确保您能够首先通过 [Development.md](https://github.com/hanzoai/build/blob/main/Development.md) 运行 Hanzo。
 
 ## 创建您的 Docker 映像
 

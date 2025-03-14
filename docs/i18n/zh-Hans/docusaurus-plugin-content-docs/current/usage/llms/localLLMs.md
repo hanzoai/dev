@@ -60,7 +60,7 @@ docker run \
 
 ### 从源代码构建
 
-使用[Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md)中的说明构建 Hanzo。
+使用[Development.md](https://github.com/hanzoai/build/blob/main/Development.md)中的说明构建 Hanzo。
 通过运行 `make setup-config` 确保 `config.toml` 存在，这将为您创建一个。在 `config.toml` 中，输入以下内容：
 
 ```

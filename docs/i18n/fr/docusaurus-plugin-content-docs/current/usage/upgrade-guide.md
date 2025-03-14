@@ -10,7 +10,7 @@ Dans cette version, nous avons introduit quelques changements importants dans le
 Si vous avez uniquement utilisé Hanzo via l'interface frontend (interface web), aucune action n'est nécessaire.
 
 Voici une liste des changements importants dans les configurations. Ils ne s'appliquent qu'aux utilisateurs qui
-utilisent Hanzo CLI via `main.py`. Pour plus de détails, voir [#2756](https://github.com/hanzoai/Hanzo/pull/2756).
+utilisent Hanzo CLI via `main.py`. Pour plus de détails, voir [#2756](https://github.com/hanzoai/build/pull/2756).
 
 #### Suppression de l'option --model-name de main.py
 

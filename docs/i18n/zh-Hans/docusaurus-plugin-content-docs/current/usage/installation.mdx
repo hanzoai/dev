@@ -11,16 +11,16 @@
 在 Docker 中运行 Hanzo 是最简单的方式。
 
 ```bash
-docker pull docker.hanzo.ai/hanzoai/runtime:0.28
+docker pull hanzoai/runtime:0.28
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app \
-    docker.hanzo.ai/hanzoai/hanzo:0.28
+    hanzoai/hanzo:0.28
 ```
 
 你也可以在可脚本化的[无头模式](https://docs.hanzo.ai/modules/usage/how-to/headless-mode)下运行 Hanzo，作为[交互式 CLI](https://docs.hanzo.ai/modules/usage/how-to/cli-mode)，或使用 [Hanzo GitHub Action](https://docs.hanzo.ai/modules/usage/how-to/github-action)。
@@ -43,12 +43,12 @@ docker run -it --rm --pull=always \
 ## 版本
 
 上述命令拉取最新的 Hanzo 稳定版本。你还有其他选择：
-- 对于特定版本，使用 `docker.hanzo.ai/hanzoai/hanzo:$VERSION`，将 $VERSION 替换为版本号。
+- 对于特定版本，使用 `hanzoai/hanzo:$VERSION`，将 $VERSION 替换为版本号。
 - 我们使用语义化版本，并发布主要版本、次要版本和补丁标签。因此，`0.9` 将自动指向最新的 `0.9.x` 版本，而 `0` 将指向最新的 `0.x.x` 版本。
-- 对于最新的开发版本，你可以使用 `docker.hanzo.ai/hanzoai/hanzo:main`。此版本不稳定，仅建议用于测试或开发目的。
+- 对于最新的开发版本，你可以使用 `hanzoai/hanzo:main`。此版本不稳定，仅建议用于测试或开发目的。
 
 你可以根据稳定性要求和所需功能选择最适合你需求的标签。
 
-有关开发工作流程，请参阅 [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md)。
+有关开发工作流程，请参阅 [Development.md](https://github.com/hanzoai/build/blob/main/Development.md)。
 
 遇到问题了吗？查看我们的[故障排除指南](https://docs.hanzo.ai/modules/usage/troubleshooting)。

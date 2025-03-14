@@ -379,9 +379,9 @@ jobs:
             -p 3000:3000 \
             -v /var/run/docker.sock:/var/run/docker.sock \
             --add-host host.docker.internal:host-gateway \
-            -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:$SHORT_SHA \
+            -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:$SHORT_SHA \
             --name hanzo-app-$SHORT_SHA \
-            docker.hanzo.ai/hanzoai/hanzo:$SHORT_SHA"
+            hanzoai/hanzo:$SHORT_SHA"
 
           PR_BODY=$(gh pr view $PR_NUMBER --json body --jq .body)
 

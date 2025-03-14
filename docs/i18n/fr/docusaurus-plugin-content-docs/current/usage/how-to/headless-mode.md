@@ -10,7 +10,7 @@ Ceci est différent du [Mode CLI](cli-mode), qui est interactif et mieux adapté
 ## Avec Python
 
 Pour exécuter Hanzo en mode sans interface avec Python,
-[suivez les instructions de configuration de développement](https://github.com/hanzoai/Hanzo/blob/main/Development.md),
+[suivez les instructions de configuration de développement](https://github.com/hanzoai/build/blob/main/Development.md),
 puis exécutez :
 
 ```bash
@@ -18,7 +18,7 @@ poetry run python -m hanzo.core.main -t "write a bash script that prints hi"
 ```
 
 Vous devrez vous assurer de définir votre modèle, votre clé API et d'autres paramètres via des variables d'environnement
-[ou le fichier `config.toml`](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml).
+[ou le fichier `config.toml`](https://github.com/hanzoai/build/blob/main/config.template.toml).
 
 ## Avec Docker
 
@@ -46,7 +46,7 @@ LLM_API_KEY="sk_test_12345"
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -56,6 +56,6 @@ docker run -it \
     -v /var/run/docker.sock:/var/run/docker.sock \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app-$(date +%Y%m%d%H%M%S) \
-    docker.hanzo.ai/hanzoai/hanzo:0.28 \
+    hanzoai/hanzo:0.28 \
     python -m hanzo.core.main -t "write a bash script that prints hi" --no-auto-continue
 ```

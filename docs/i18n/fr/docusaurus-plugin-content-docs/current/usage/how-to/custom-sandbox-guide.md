@@ -40,7 +40,7 @@ Cela produira une nouvelle image appelée `custom-image`, qui sera disponible da
 
 ### Configuration
 
-Tout d'abord, assurez-vous de pouvoir exécuter Hanzo en suivant les instructions dans [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+Tout d'abord, assurez-vous de pouvoir exécuter Hanzo en suivant les instructions dans [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 ### Spécifier l'Image de Base du Sandbox
 

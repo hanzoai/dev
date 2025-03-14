@@ -4,7 +4,7 @@ Le sandbox par défaut Hanzo est équipé d'une configuration ubuntu minimaliste
 
 ## Configuration
 
-Assurez-vous de pouvoir utiliser Hanzo en suivant la documentation [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+Assurez-vous de pouvoir utiliser Hanzo en suivant la documentation [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 ## Créer Votre Image Docker
 
@@ -62,7 +62,7 @@ Félicitations !
 
 Lorsqu'une image personnalisée est utilisée pour la première fois, elle ne sera pas trouvée et donc elle sera construite (à l'exécution ultérieure, l'image construite sera trouvée et renvoyée).
 
-L'image personnalisée est construite avec [_build_sandbox_image()](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/docker/image_agnostic_util.py#L29), qui crée un fichier docker en utilisant votre image personnalisée comme base et configure ensuite l'environnement pour Hanzo, comme ceci:
+L'image personnalisée est construite avec [_build_sandbox_image()](https://github.com/hanzoai/build/blob/main/hanzo/runtime/docker/image_agnostic_util.py#L29), qui crée un fichier docker en utilisant votre image personnalisée comme base et configure ensuite l'environnement pour Hanzo, comme ceci:
 
 ```python
 dockerfile_content = (
@@ -78,7 +78,7 @@ dockerfile_content = (
     ).strip()
 ```
 
-> Remarque: Le nom de l'image est modifié via [_get_new_image_name()](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/docker/image_agnostic_util.py#L63) et c'est ce nom modifié qui sera recherché lors des exécutions ultérieures.
+> Remarque: Le nom de l'image est modifié via [_get_new_image_name()](https://github.com/hanzoai/build/blob/main/hanzo/runtime/docker/image_agnostic_util.py#L63) et c'est ce nom modifié qui sera recherché lors des exécutions ultérieures.
 
 ## Dépannage / Erreurs
 

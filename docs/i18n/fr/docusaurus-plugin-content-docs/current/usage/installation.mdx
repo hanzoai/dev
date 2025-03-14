@@ -13,16 +13,16 @@
 La façon la plus simple d'exécuter Hanzo est avec Docker.
 
 ```bash
-docker pull docker.hanzo.ai/hanzoai/runtime:0.28
+docker pull hanzoai/runtime:0.28
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app \
-    docker.hanzo.ai/hanzoai/hanzo:0.28
+    hanzoai/hanzo:0.28
 ```
 
 Vous pouvez également exécuter Hanzo en mode [headless scriptable](https://docs.hanzo.ai/modules/usage/how-to/headless-mode), en tant que [CLI interactive](https://docs.hanzo.ai/modules/usage/how-to/cli-mode), ou en utilisant l'[Action GitHub Hanzo](https://docs.hanzo.ai/modules/usage/how-to/github-action).
@@ -46,12 +46,12 @@ Les `Options avancées` vous permettent également de spécifier une `URL de bas
 ## Versions
 
 La commande ci-dessus récupère la version stable la plus récente d'Hanzo. Vous avez également d'autres options :
-- Pour une version spécifique, utilisez `docker.hanzo.ai/hanzoai/hanzo:$VERSION`, en remplaçant $VERSION par le numéro de version.
+- Pour une version spécifique, utilisez `hanzoai/hanzo:$VERSION`, en remplaçant $VERSION par le numéro de version.
 - Nous utilisons semver et publions des tags majeurs, mineurs et de patch. Ainsi, `0.9` pointera automatiquement vers la dernière version `0.9.x`, et `0` pointera vers la dernière version `0.x.x`.
-- Pour la version de développement la plus à jour, vous pouvez utiliser `docker.hanzo.ai/hanzoai/hanzo:main`. Cette version est instable et n'est recommandée qu'à des fins de test ou de développement.
+- Pour la version de développement la plus à jour, vous pouvez utiliser `hanzoai/hanzo:main`. Cette version est instable et n'est recommandée qu'à des fins de test ou de développement.
 
 Vous pouvez choisir le tag qui convient le mieux à vos besoins en fonction des exigences de stabilité et des fonctionnalités souhaitées.
 
-Pour le workflow de développement, consultez [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+Pour le workflow de développement, consultez [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 Vous rencontrez des problèmes ? Consultez notre [Guide de dépannage](https://docs.hanzo.ai/modules/usage/troubleshooting).

@@ -14,7 +14,7 @@ The action will automatically trigger and attempt to resolve the issue.
 ## Installing the Action in a New Repository
 
 To install the Hanzo GitHub Action in your own repository, follow
-the [README for the Hanzo Resolver](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md).
+the [README for the Hanzo Resolver](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md).
 
 ## Usage Tips
 
@@ -35,7 +35,7 @@ the [README for the Hanzo Resolver](https://github.com/hanzoai/Hanzo/blob/main/h
 
 ### Add custom repository settings
 
-You can provide custom directions for Hanzo by following the [README for the resolver](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md#providing-custom-instructions).
+You can provide custom directions for Hanzo by following the [README for the resolver](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md#providing-custom-instructions).
 
 ### Custom configurations
 

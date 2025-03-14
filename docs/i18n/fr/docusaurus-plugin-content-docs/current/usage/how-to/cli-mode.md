@@ -10,7 +10,7 @@ Ce mode est différent du [mode headless](headless-mode), qui est non interactif
 
 Pour démarrer une session Hanzo interactive via la ligne de commande, suivez ces étapes :
 
-1. Assurez-vous d'avoir suivi les [instructions de configuration de développement](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+1. Assurez-vous d'avoir suivi les [instructions de configuration de développement](https://github.com/hanzoai/build/blob/main/Development.md).
 
 2. Exécutez la commande suivante :
 
@@ -21,7 +21,7 @@ poetry run python -m hanzo.core.cli
 Cette commande démarrera une session interactive où vous pourrez saisir des tâches et recevoir des réponses d'Hanzo.
 
 Vous devrez vous assurer de définir votre modèle, votre clé API et d'autres paramètres via des variables d'environnement
-[ou le fichier `config.toml`](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml).
+[ou le fichier `config.toml`](https://github.com/hanzoai/build/blob/main/config.template.toml).
 
 
 ## Avec Docker
@@ -52,7 +52,7 @@ LLM_API_KEY="sk_test_12345"
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -61,7 +61,7 @@ docker run -it \
     -v /var/run/docker.sock:/var/run/docker.sock \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app-$(date +%Y%m%d%H%M%S) \
-    docker.hanzo.ai/hanzoai/hanzo:0.28 \
+    hanzoai/hanzo:0.28 \
     python -m hanzo.core.cli
 ```
 

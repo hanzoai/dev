@@ -252,7 +252,7 @@ class AgentController:
             reported = RuntimeError(
                 'There was an unexpected error while running the agent. Please '
                 'report this error to the developers by opening an issue at '
-                'https://github.com/hanzoai/Hanzo. Your session ID is '
+                'https://github.com/hanzoai/build. Your session ID is '
                 f' {self.id}. Error type: {e.__class__.__name__}'
             )
             if (

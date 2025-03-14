@@ -19,7 +19,7 @@ some flags being passed to `docker run` that make this possible:
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -120,7 +120,7 @@ bash -i <(curl -sL https://get.daytona.io/hanzo)
 
 Once executed, Hanzo should be running locally and ready for use.
 
-For more details and manual initialization, view the entire [README.md](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/impl/daytona/README.md)
+For more details and manual initialization, view the entire [README.md](https://github.com/hanzoai/build/blob/main/hanzo/runtime/impl/daytona/README.md)
 
 ## Local Runtime
 
@@ -134,12 +134,12 @@ The Local Runtime allows the Hanzo agent to execute actions directly on your loc
 
 Before using the Local Runtime, ensure you have the following dependencies installed:
 
-1. You have followed the [Development setup instructions](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+1. You have followed the [Development setup instructions](https://github.com/hanzoai/build/blob/main/Development.md).
 2. tmux is available on your system.
 
 ### Configuration
 
-To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml) when starting Hanzo:
+To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/hanzoai/build/blob/main/config.template.toml) when starting Hanzo:
 
 - Via environment variables:
 

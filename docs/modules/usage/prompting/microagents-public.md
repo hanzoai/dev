@@ -4,7 +4,7 @@
 
 Public microagents are specialized guidelines triggered by keywords for all Hanzo users.
 They are defined in markdown files under the
-[`microagents/knowledge/`](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge) directory.
+[`microagents/knowledge/`](https://github.com/hanzoai/build/tree/main/microagents/knowledge) directory.
 
 Public microagents:
 - Monitor incoming commands for their trigger words.
@@ -15,7 +15,7 @@ Public microagents:
 ## Current Public Microagents
 
 For more information about specific microagents, refer to their individual documentation files in
-the [`microagents/knowledge/`](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge/) directory.
+the [`microagents/knowledge/`](https://github.com/hanzoai/build/tree/main/microagents/knowledge/) directory.
 
 ### GitHub Agent
 **File**: `github.md`
@@ -59,7 +59,7 @@ yes | npm install package-name
 ## Contributing a Public Microagent
 
 You can create your own public microagents by adding new markdown files to the
-[`microagents/knowledge/`](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge/) directory.
+[`microagents/knowledge/`](https://github.com/hanzoai/build/tree/main/microagents/knowledge/) directory.
 
 ### Public Microagents Best Practices
 
@@ -81,7 +81,7 @@ Before creating a public microagent, consider:
 
 #### 2. Create File
 
-Create a new markdown file in [`microagents/knowledge/`](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge/)
+Create a new markdown file in [`microagents/knowledge/`](https://github.com/hanzoai/build/tree/main/microagents/knowledge/)
 with a descriptive name (e.g., `docker.md` for a Docker-focused agent).
 
 Update the file with the required frontmatter [according to the required format](./microagents-overview#microagent-format)
@@ -149,5 +149,5 @@ Remember to:
 - Optimize for build time and image size
 ```
 
-See the [current public micro-agents](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge) for
+See the [current public micro-agents](https://github.com/hanzoai/build/tree/main/microagents/knowledge) for
 more examples.

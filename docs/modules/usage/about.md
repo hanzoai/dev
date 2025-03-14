@@ -25,4 +25,4 @@ enhance the capabilities of Hanzo.
 
 ## License
 
-Distributed under MIT [License](https://github.com/hanzoai/Hanzo/blob/main/LICENSE).
+Distributed under MIT [License](https://github.com/hanzoai/build/blob/main/LICENSE).

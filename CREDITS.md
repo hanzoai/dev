@@ -2,7 +2,7 @@
 
 ## Contributors
 
-We would like to thank all the [contributors](https://github.com/hanzoai/Hanzo/graphs/contributors) who have helped make Hanzo possible. We greatly appreciate your dedication and hard work.
+We would like to thank all the [contributors](https://github.com/hanzoai/build/graphs/contributors) who have helped make Hanzo possible. We greatly appreciate your dedication and hard work.
 
 ## Open Source Projects
 
@@ -14,7 +14,7 @@ Hanzo includes and adapts the following open source projects. We are grateful fo
 
 #### [Aider](https://github.com/paul-gauthier/aider)
    - License: Apache License 2.0
-   - Description: AI pair programming tool. Hanzo has adapted and integrated its linter module for code-related tasks in [`agentskills utilities`](https://github.com/hanzoai/Hanzo/tree/main/hanzo/runtime/plugins/agent_skills/utils/aider)
+   - Description: AI pair programming tool. Hanzo has adapted and integrated its linter module for code-related tasks in [`agentskills utilities`](https://github.com/hanzoai/build/tree/main/hanzo/runtime/plugins/agent_skills/utils/aider)
 
 #### [BrowserGym](https://github.com/ServiceNow/BrowserGym)
    - License: Apache License 2.0

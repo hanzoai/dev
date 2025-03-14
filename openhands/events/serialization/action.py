@@ -43,7 +43,7 @@ ACTION_TYPE_TO_CLASS = {action_class.action: action_class for action_class in ac
 
 
 def handle_action_deprecated_args(args: dict) -> dict:
-    # keep_prompt has been deprecated in https://github.com/hanzoai/Hanzo/pull/4881
+    # keep_prompt has been deprecated in https://github.com/hanzoai/build/pull/4881
     if 'keep_prompt' in args:
         args.pop('keep_prompt')
 

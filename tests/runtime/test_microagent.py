@@ -123,7 +123,7 @@ def test_load_microagents_with_selected_repo(temp_dir, runtime_cls, run_as_hanzo
     try:
         # Load microagents with selected repository
         loaded_agents = runtime.get_microagents_from_selected_repo(
-            'hanzoai/Hanzo'
+            'hanzoai/build'
         )
 
         # Verify all agents are loaded

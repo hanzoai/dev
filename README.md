@@ -6,14 +6,14 @@
 
 
 <div align="center">
-  <a href="https://github.com/hanzoai/Hanzo/graphs/contributors"><img src="https://img.shields.io/github/contributors/hanzoai/Hanzo?style=for-the-badge&color=blue" alt="Contributors"></a>
-  <a href="https://github.com/hanzoai/Hanzo/stargazers"><img src="https://img.shields.io/github/stars/hanzoai/Hanzo?style=for-the-badge&color=blue" alt="Stargazers"></a>
-  <a href="https://codecov.io/github/hanzoai/Hanzo?branch=main"><img alt="CodeCov" src="https://img.shields.io/codecov/c/github/hanzoai/Hanzo?style=for-the-badge&color=blue"></a>
-  <a href="https://github.com/hanzoai/Hanzo/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hanzoai/Hanzo?style=for-the-badge&color=blue" alt="MIT License"></a>
+  <a href="https://github.com/hanzoai/build/graphs/contributors"><img src="https://img.shields.io/github/contributors/hanzoai/build?style=for-the-badge&color=blue" alt="Contributors"></a>
+  <a href="https://github.com/hanzoai/build/stargazers"><img src="https://img.shields.io/github/stars/hanzoai/build?style=for-the-badge&color=blue" alt="Stargazers"></a>
+  <a href="https://codecov.io/github/hanzoai/build?branch=main"><img alt="CodeCov" src="https://img.shields.io/codecov/c/github/hanzoai/build?style=for-the-badge&color=blue"></a>
+  <a href="https://github.com/hanzoai/build/blob/main/LICENSE"><img src="https://img.shields.io/github/license/hanzoai/build?style=for-the-badge&color=blue" alt="MIT License"></a>
   <br/>
   <a href="https://join.slack.com/t/hanzo-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg"><img src="https://img.shields.io/badge/Slack-Join%20Us-red?logo=slack&logoColor=white&style=for-the-badge" alt="Join our Slack community"></a>
   <a href="https://discord.gg/ESHStjSjD4"><img src="https://img.shields.io/badge/Discord-Join%20Us-purple?logo=discord&logoColor=white&style=for-the-badge" alt="Join our Discord community"></a>
-  <a href="https://github.com/hanzoai/Hanzo/blob/main/CREDITS.md"><img src="https://img.shields.io/badge/Project-Credits-blue?style=for-the-badge&color=FFE165&logo=github&logoColor=white" alt="Credits"></a>
+  <a href="https://github.com/hanzoai/build/blob/main/CREDITS.md"><img src="https://img.shields.io/badge/Project-Credits-blue?style=for-the-badge&color=FFE165&logo=github&logoColor=white" alt="Credits"></a>
   <br/>
   <a href="https://docs.hanzo.ai/modules/usage/getting-started"><img src="https://img.shields.io/badge/Documentation-000?logo=googledocs&logoColor=FFE165&style=for-the-badge" alt="Check out the documentation"></a>
   <a href="https://arxiv.org/abs/2407.16741"><img src="https://img.shields.io/badge/Paper%20on%20Arxiv-000?logoColor=FFE165&logo=arxiv&style=for-the-badge" alt="Paper on Arxiv"></a>
@@ -42,24 +42,24 @@ See the [Running Hanzo](https://docs.hanzo.ai/modules/usage/installation) guide 
 system requirements and more information.
 
 ```bash
-docker pull docker.hanzo.ai/hanzoai/runtime:0.28
+docker pull hanzoai/runtime:0.28
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v ~/.hanzo-state:/.hanzo-state \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app \
-    docker.hanzo.ai/hanzoai/hanzo:0.28
+    hanzoai/hanzo:0.28
 ```
 
 You'll find Hanzo running at [http://localhost:3000](http://localhost:3000)!
 
 Finally, you'll need a model provider and API key.
-[Anthropic's Claude 3.5 Sonnet](https://www.anthropic.com/api) (`anthropic/claude-3-5-sonnet-20241022`)
-works best, but you have [many options](https://docs.hanzo.ai/modules/usage/llms).
+[Anthropic's Claude Sonnet series](https://www.anthropic.com/api)
+work best, but you have [many options](https://docs.hanzo.ai/modules/usage/llms).
 
 ---
 
@@ -78,7 +78,7 @@ Visit [Running Hanzo](https://docs.hanzo.ai/modules/usage/installation) for more
 > [get in touch with us](https://docs.google.com/forms/d/e/1FAIpQLSet3VbGaz8z32gW9Wm-Grl4jpt5WgMXPgJ4EDPVmCETCBpJtQ/viewform)
 > for advanced deployment options.
 
-If you want to modify the Hanzo source code, check out [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+If you want to modify the Hanzo source code, check out [Development.md](https://github.com/hanzoai/build/blob/main/Development.md).
 
 Having issues? The [Troubleshooting Guide](https://docs.hanzo.ai/modules/usage/troubleshooting) can help.
 
@@ -95,9 +95,9 @@ troubleshooting resources, and advanced configuration options.
 Hanzo is a community-driven project, and we welcome contributions from everyone. We do most of our communication
 through Slack, so this is the best place to start, but we also are happy to have you contact us on Discord or Github:
 
-- [Join our Slack workspace](https://join.slack.com/t/hanzo-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg) - Here we talk about research, architecture, and future development.
-- [Join our Discord server](https://discord.gg/ESHStjSjD4) - This is a community-run server for general discussion, questions, and feedback.
-- [Read or post Github Issues](https://github.com/hanzoai/Hanzo/issues) - Check out the issues we're working on, or add your own ideas.
+- [Join our Slack workspace](https://join.slack.com/t/hanzoai/shared_invite/zt-31mkkpbkn-AT4N5h9CTwt2zde~E36nCQ) - Here we talk about research, architecture, and future development.
+- [Join our Discord server](https://discord.gg/z2rjD9v5) - This is a community-run server for general discussion, questions, and feedback.
+- [Read or post Github Issues](https://github.com/hanzoai/build/issues) - Check out the issues we're working on, or add your own ideas.
 
 See more about the community in [COMMUNITY.md](./COMMUNITY.md) or find details on contributing in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
@@ -106,8 +106,8 @@ See more about the community in [COMMUNITY.md](./COMMUNITY.md) or find details o
 See the monthly Hanzo roadmap [here](https://github.com/orgs/hanzoai/projects/1) (updated at the maintainer's meeting at the end of each month).
 
 <p align="center">
-  <a href="https://star-history.com/#hanzoai/Hanzo&Date">
-    <img src="https://api.star-history.com/svg?repos=hanzoai/Hanzo&type=Date" width="500" alt="Star History Chart">
+  <a href="https://star-history.com/#hanzoai/build&Date">
+    <img src="https://api.star-history.com/svg?repos=hanzoai/build&type=Date" width="500" alt="Star History Chart">
   </a>
 </p>
 

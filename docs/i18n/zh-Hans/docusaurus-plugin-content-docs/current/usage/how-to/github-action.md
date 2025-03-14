@@ -13,7 +13,7 @@
 
 ## 在新仓库中安装 Action
 
-要在你自己的仓库中安装 Hanzo GitHub Action，请按照 [Hanzo Resolver 的 README](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md) 进行操作。
+要在你自己的仓库中安装 Hanzo GitHub Action，请按照 [Hanzo Resolver 的 README](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md) 进行操作。
 
 ## 使用技巧
 
@@ -34,7 +34,7 @@
 
 ### 添加自定义仓库设置
 
-你可以按照 [resolver 的 README](https://github.com/hanzoai/Hanzo/blob/main/hanzo/resolver/README.md#providing-custom-instructions) 为 Hanzo 提供自定义指令。
+你可以按照 [resolver 的 README](https://github.com/hanzoai/build/blob/main/hanzo/resolver/README.md#providing-custom-instructions) 为 Hanzo 提供自定义指令。
 
 ### 自定义配置
 

@@ -68,7 +68,7 @@ Key characteristics:
 - **Reusable**: Knowledge can be applied across multiple projects
 - **Versioned**: Support multiple versions of tools/frameworks
 
-You can see an example of a knowledge-based agent in [Hanzo's github microagent](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge/github.md).
+You can see an example of a knowledge-based agent in [Hanzo's github microagent](https://github.com/hanzoai/build/tree/main/microagents/knowledge/github.md).
 
 ### 2. Repository Agents
 
@@ -84,7 +84,7 @@ Key features:
 - **Always active**: Automatically loaded for the repository
 - **Locally maintained**: Updated with the project
 
-You can see an example of a repo agent in [the agent for the Hanzo repo itself](https://github.com/hanzoai/Hanzo/blob/main/.hanzo/microagents/repo.md).
+You can see an example of a repo agent in [the agent for the Hanzo repo itself](https://github.com/hanzoai/build/blob/main/.hanzo/microagents/repo.md).
 
 ### 3. Task Agents
 
@@ -101,7 +101,7 @@ Key capabilities:
 - **Reproducible**: Ensure consistent outcomes
 
 Example workflow:
-You can see an example of a task-based agent in [Hanzo's pull request updating microagent](https://github.com/hanzoai/Hanzo/tree/main/microagents/tasks/update_pr_description.md).
+You can see an example of a task-based agent in [Hanzo's pull request updating microagent](https://github.com/hanzoai/build/tree/main/microagents/tasks/update_pr_description.md).
 
 ## Contributing
 

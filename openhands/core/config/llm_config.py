@@ -164,6 +164,6 @@ class LLMConfig(BaseModel):
 
         # Assign an API version for Azure models
         # While it doesn't seem required, the format supported by the API without version seems old and will likely break.
-        # Azure issue: https://github.com/hanzoai/Hanzo/issues/6777
+        # Azure issue: https://github.com/hanzoai/build/issues/6777
         if self.model.startswith('azure') and self.api_version is None:
             self.api_version = '2024-08-01-preview'

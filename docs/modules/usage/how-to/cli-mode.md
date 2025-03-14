@@ -8,7 +8,7 @@ This mode is different from the [headless mode](headless-mode), which is non-int
 
 To start an interactive Hanzo session via the command line:
 
-1. Ensure you have followed the [Development setup instructions](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
+1. Ensure you have followed the [Development setup instructions](https://github.com/hanzoai/build/blob/main/Development.md).
 2. Run the following command:
 
 ```bash
@@ -18,7 +18,7 @@ poetry run python -m hanzo.core.cli
 This command will start an interactive session where you can input tasks and receive responses from Hanzo.
 
 You'll need to be sure to set your model, API key, and other settings via environment variables
-[or the `config.toml` file](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml).
+[or the `config.toml` file](https://github.com/hanzoai/build/blob/main/config.template.toml).
 
 ## With Docker
 
@@ -35,7 +35,7 @@ To run Hanzo in CLI mode with Docker:
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=hanzoai/runtime:0.28 \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -45,7 +45,7 @@ docker run -it \
     -v ~/.hanzo-state:/.hanzo-state \
     --add-host host.docker.internal:host-gateway \
     --name hanzo-app-$(date +%Y%m%d%H%M%S) \
-    docker.hanzo.ai/hanzoai/hanzo:0.28 \
+    hanzoai/hanzo:0.28 \
     python -m hanzo.core.cli
 ```
 

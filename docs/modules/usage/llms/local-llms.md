@@ -57,7 +57,7 @@ When running `hanzo`, you'll need to set the following in the Hanzo UI through t
 
 ### Build from Source
 
-Use the instructions in [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md) to build Hanzo.
+Use the instructions in [Development.md](https://github.com/hanzoai/build/blob/main/Development.md) to build Hanzo.
 Make sure `config.toml` is there by running `make setup-config` which will create one for you. In `config.toml`, enter the followings:
 
 ```

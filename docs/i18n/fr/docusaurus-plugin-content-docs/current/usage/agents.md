@@ -16,10 +16,10 @@ L'idée conceptuelle est illustrée ci-dessous. À chaque tour, l'agent peut :
 - Exécuter n'importe quelle commande Linux `bash` valide
 - Exécuter n'importe quel code `Python` valide avec [un interpréteur Python interactif](https://ipython.org/). Ceci est simulé via une commande `bash`, voir le système de plugin ci-dessous pour plus de détails.
 
-![image](https://github.com/hanzoai/Hanzo/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
+![image](https://github.com/hanzoai/build/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
 
 ### Démo
 
-https://github.com/hanzoai/Hanzo/assets/38853559/f592a192-e86c-4f48-ad31-d69282d5f6ac
+https://github.com/hanzoai/build/assets/38853559/f592a192-e86c-4f48-ad31-d69282d5f6ac
 
 _Exemple de CodeActAgent avec `gpt-4-turbo-2024-04-09` effectuant une tâche de science des données (régression linéaire)_.

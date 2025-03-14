@@ -6,7 +6,7 @@ test("parseGithubUrl", () => {
     parseGithubUrl("https://github.com/alexreardon/tiny-invariant"),
   ).toEqual(["alexreardon", "tiny-invariant"]);
 
-  expect(parseGithubUrl("https://github.com/hanzoai/Hanzo")).toEqual([
+  expect(parseGithubUrl("https://github.com/hanzoai/build")).toEqual([
     "hanzoai",
     "Hanzo",
   ]);

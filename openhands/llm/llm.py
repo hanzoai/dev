@@ -148,7 +148,7 @@ class LLM(RetryMixin, DebugMixin):
             kwargs.pop(
                 'temperature'
             )  # temperature is not supported for reasoning models
-        # Azure issue: https://github.com/hanzoai/Hanzo/issues/6777
+        # Azure issue: https://github.com/hanzoai/build/issues/6777
         if self.config.model.startswith('azure'):
             kwargs['max_tokens'] = self.config.max_output_tokens
             kwargs.pop('max_completion_tokens')

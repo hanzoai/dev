@@ -68,7 +68,7 @@ Le rôle du client :
 
 L'approche d'Hanzo pour la construction et la gestion des images runtime assure l'efficacité, la cohérence et la flexibilité dans la création et la maintenance des images Docker pour les environnements de production et de développement.
 
-Consultez le [code pertinent](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/utils/runtime_build.py) si vous souhaitez plus de détails.
+Consultez le [code pertinent](https://github.com/hanzoai/build/blob/main/hanzo/runtime/utils/runtime_build.py) si vous souhaitez plus de détails.
 
 ### Système de balises d'images
 
@@ -125,7 +125,7 @@ Cette approche de balisage permet à Hanzo de gérer efficacement les environnem
 
 Le Runtime d'Hanzo prend en charge un système de plugins qui permet d'étendre les fonctionnalités et de personnaliser l'environnement d'exécution. Les plugins sont initialisés lorsque le client runtime démarre.
 
-Consultez [un exemple de plugin Jupyter ici](https://github.com/hanzoai/Hanzo/blob/ecf4aed28b0cf7c18d4d8ff554883ba182fc6bdd/hanzo/runtime/plugins/jupyter/__init__.py#L21-L55) si vous souhaitez implémenter votre propre plugin.
+Consultez [un exemple de plugin Jupyter ici](https://github.com/hanzoai/build/blob/ecf4aed28b0cf7c18d4d8ff554883ba182fc6bdd/hanzo/runtime/plugins/jupyter/__init__.py#L21-L55) si vous souhaitez implémenter votre propre plugin.
 
 *Plus de détails sur le système de plugins sont encore en construction - les contributions sont les bienvenues !*
 

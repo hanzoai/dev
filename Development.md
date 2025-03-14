@@ -1,6 +1,6 @@
 # Development Guide
 This guide is for people working on Hanzo and editing the source code.
-If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/hanzoai/Hanzo/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
+If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/hanzoai/build/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
 Otherwise, you can clone the Hanzo project directly.
 
 ## Start the Server for Development

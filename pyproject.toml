@@ -5,7 +5,7 @@ description = "Hanzo: Code Less, Make More"
 authors = ["Hanzo"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/hanzoai/Hanzo"
+repository = "https://github.com/hanzoai/build"
 packages = [
   { include = "hanzo/**/*" },
   { include = "pyproject.toml", to = "hanzo" },

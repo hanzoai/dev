@@ -61,7 +61,7 @@ Vous devriez maintenant pouvoir vous connecter à `http://localhost:3000/`
 
 ### Compiler à partir des sources
 
-Utilisez les instructions dans [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md) pour compiler Hanzo.
+Utilisez les instructions dans [Development.md](https://github.com/hanzoai/build/blob/main/Development.md) pour compiler Hanzo.
 Assurez-vous que `config.toml` soit présent en exécutant `make setup-config` qui en créera un pour vous. Dans `config.toml`, saisissez les éléments suivants :
 
 ```

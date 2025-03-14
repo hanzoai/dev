@@ -38,7 +38,7 @@ docker build -t custom-image .
 
 ### 设置
 
-首先，按照 [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md) 中的说明，确保你可以运行 Hanzo。
+首先，按照 [Development.md](https://github.com/hanzoai/build/blob/main/Development.md) 中的说明，确保你可以运行 Hanzo。
 
 ### 指定基础沙箱镜像
 

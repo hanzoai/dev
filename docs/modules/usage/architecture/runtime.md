@@ -65,7 +65,7 @@ The role of the client:
 
 Hanzo' approach to building and managing runtime images ensures efficiency, consistency, and flexibility in creating and maintaining Docker images for both production and development environments.
 
-Check out the [relevant code](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/utils/runtime_build.py) if you are interested in more details.
+Check out the [relevant code](https://github.com/hanzoai/build/blob/main/hanzo/runtime/utils/runtime_build.py) if you are interested in more details.
 
 ### Image Tagging System
 
@@ -121,7 +121,7 @@ This tagging approach allows Hanzo to efficiently manage both development and pr
 
 The Hanzo Runtime supports a plugin system that allows for extending functionality and customizing the runtime environment. Plugins are initialized when the runtime client starts up.
 
-Check [an example of Jupyter plugin here](https://github.com/hanzoai/Hanzo/blob/ecf4aed28b0cf7c18d4d8ff554883ba182fc6bdd/hanzo/runtime/plugins/jupyter/__init__.py#L21-L55) if you want to implement your own plugin.
+Check [an example of Jupyter plugin here](https://github.com/hanzoai/build/blob/ecf4aed28b0cf7c18d4d8ff554883ba182fc6bdd/hanzo/runtime/plugins/jupyter/__init__.py#L21-L55) if you want to implement your own plugin.
 
 *More details about the Plugin system are still under construction - contributions are welcomed!*
 

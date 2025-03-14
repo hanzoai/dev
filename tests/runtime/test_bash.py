@@ -181,7 +181,7 @@ def test_no_ps2_in_output(temp_dir, runtime_cls, run_as_hanzo):
 
 
 def test_multiline_command_loop(temp_dir, runtime_cls):
-    # https://github.com/hanzoai/Hanzo/issues/3143
+    # https://github.com/hanzoai/build/issues/3143
     init_cmd = """mkdir -p _modules && \
 for month in {01..04}; do
     for day in {01..05}; do
@@ -951,7 +951,7 @@ def test_bash_remove_prefix(temp_dir, runtime_cls, run_as_hanzo):
     try:
         # create a git repo
         action = CmdRunAction(
-            'git init && git remote add origin https://github.com/hanzoai/Hanzo'
+            'git init && git remote add origin https://github.com/hanzoai/build'
         )
         obs = runtime.run_action(action)
         # logger.info(obs, extra={'msg_type': 'OBSERVATION'})
@@ -961,7 +961,7 @@ def test_bash_remove_prefix(temp_dir, runtime_cls, run_as_hanzo):
         obs = runtime.run_action(CmdRunAction('git remote -v'))
         # logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         assert obs.metadata.exit_code == 0
-        assert 'https://github.com/hanzoai/Hanzo' in obs.content
+        assert 'https://github.com/hanzoai/build' in obs.content
         assert 'git remote -v' not in obs.content
 
     finally:
