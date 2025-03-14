@@ -1,7 +1,7 @@
 <a name="readme-top"></a>
 
 <div align="center">
-  <h1 align="center">Hanzo Build</h1>
+  <h1 align="center">Hanzo Dev</h1>
 </div>
 
 
@@ -21,10 +21,11 @@
   <hr>
 </div>
 
-Welcome to Hanzo Build, AI app builder for the Hanzo Platform.
+Hello! Please Meet Dev, your new AI engineer and pair programming buddy.
 
-Hanzo agents can do anything a human developer can: modify code, run commands, browse the web,
-call APIs, and yes—even copy code snippets from StackOverflow.
+Dev can do anything a human developer can: modify code, run commands, browse the web,
+call APIs, and yes—even copy code snippets from StackOverflow and has full
+computer usage through the Hanzo Cloud or local Hanzo Runtime.
 
 Learn more at [docs.hanzo.ai](https://docs.hanzo.ai), or jump to the [Quick Start](#-quick-start).
 
