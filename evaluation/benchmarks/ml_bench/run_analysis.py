@@ -4,9 +4,9 @@ import pprint
 
 import tqdm
 
-from openhands.core.config import get_llm_config_arg, get_parser, load_app_config
-from openhands.core.logger import openhands_logger as logger
-from openhands.llm.llm import LLM
+from hanzo.core.config import get_llm_config_arg, get_parser, load_app_config
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.llm.llm import LLM
 
 config = load_app_config()
 
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     )
     args, _ = parser.parse_known_args()
 
-    # Check https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation/swe_bench/README.md#configure-openhands-and-your-llm
+    # Check https://github.com/hanzoai/Hanzo/blob/main/evaluation/swe_bench/README.md#configure-hanzo-and-your-llm
     # for details of how to set `llm_config`
     if args.llm_config:
         specified_llm_config = get_llm_config_arg(args.llm_config)

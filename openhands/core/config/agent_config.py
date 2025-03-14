@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, ValidationError
 
-from openhands.core.config.condenser_config import CondenserConfig, NoOpCondenserConfig
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.config.condenser_config import CondenserConfig, NoOpCondenserConfig
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class AgentConfig(BaseModel):

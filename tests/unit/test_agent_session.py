@@ -2,16 +2,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State
-from openhands.core.config import AppConfig, LLMConfig
-from openhands.events import EventStream, EventStreamSubscriber
-from openhands.llm import LLM
-from openhands.llm.metrics import Metrics
-from openhands.runtime.base import Runtime
-from openhands.server.session.agent_session import AgentSession
-from openhands.storage.memory import InMemoryFileStore
+from hanzo.controller.agent import Agent
+from hanzo.controller.agent_controller import AgentController
+from hanzo.controller.state.state import State
+from hanzo.core.config import AppConfig, LLMConfig
+from hanzo.events import EventStream, EventStreamSubscriber
+from hanzo.llm import LLM
+from hanzo.llm.metrics import Metrics
+from hanzo.runtime.base import Runtime
+from hanzo.server.session.agent_session import AgentSession
+from hanzo.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -80,12 +80,12 @@ async def test_agent_session_start_with_no_state(mock_agent):
 
     # Patch AgentController and State.restore_from_session to fail
     with patch(
-        'openhands.server.session.agent_session.AgentController', SpyAgentController
+        'hanzo.server.session.agent_session.AgentController', SpyAgentController
     ), patch(
-        'openhands.server.session.agent_session.EventStream',
+        'hanzo.server.session.agent_session.EventStream',
         return_value=mock_event_stream,
     ), patch(
-        'openhands.controller.state.state.State.restore_from_session',
+        'hanzo.controller.state.state.State.restore_from_session',
         side_effect=Exception('No state found'),
     ):
         await session.start(
@@ -161,12 +161,12 @@ async def test_agent_session_start_with_restored_state(mock_agent):
 
     # Patch AgentController and State.restore_from_session to succeed
     with patch(
-        'openhands.server.session.agent_session.AgentController', SpyAgentController
+        'hanzo.server.session.agent_session.AgentController', SpyAgentController
     ), patch(
-        'openhands.server.session.agent_session.EventStream',
+        'hanzo.server.session.agent_session.EventStream',
         return_value=mock_event_stream,
     ), patch(
-        'openhands.controller.state.state.State.restore_from_session',
+        'hanzo.controller.state.state.State.restore_from_session',
         return_value=mock_restored_state,
     ):
         await session.start(

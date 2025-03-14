@@ -1,10 +1,10 @@
 from typing import TypedDict
 
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig
-from openhands.core.schema import AgentState
-from openhands.events.action import (
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig
+from hanzo.core.schema import AgentState
+from hanzo.events.action import (
     Action,
     AgentFinishAction,
     AgentRejectAction,
@@ -15,7 +15,7 @@ from openhands.events.action import (
     FileWriteAction,
     MessageAction,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     AgentStateChangedObservation,
     BrowserOutputObservation,
     CmdOutputMetadata,
@@ -24,8 +24,8 @@ from openhands.events.observation import (
     FileWriteObservation,
     Observation,
 )
-from openhands.events.serialization.event import event_to_dict
-from openhands.llm.llm import LLM
+from hanzo.events.serialization.event import event_to_dict
+from hanzo.llm.llm import LLM
 
 """
 FIXME: There are a few problems this surfaced

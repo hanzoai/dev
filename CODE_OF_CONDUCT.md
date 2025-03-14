@@ -61,7 +61,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-contact@all-hands.dev.
+contact@hanzo.ai.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
@@ -121,10 +121,10 @@ These Slack and Discord etiquette guidelines are designed to foster an inclusive
 - Use threads for specific discussions to keep channels organized and easier to follow.
 - Tag others only when their input is critical or urgent, and use @here, @channel or @everyone sparingly to minimize disruptions.
 - Be patient, as open-source contributors and maintainers often have other commitments and may need time to respond.
-- Post questions or discussions in the most relevant channel (e.g., for [slack - #general](https://app.slack.com/client/T06P212QSEA/C06P5NCGSFP) for general topics, [slack - #questions](https://openhands-ai.slack.com/archives/C06U8UTKSAD) for queries/questions, [discord - #general](https://discord.com/channels/1222935860639563850/1222935861386018885)).
+- Post questions or discussions in the most relevant channel (e.g., for [slack - #general](https://app.slack.com/client/T06P212QSEA/C06P5NCGSFP) for general topics, [slack - #questions](https://hanzo-ai.slack.com/archives/C06U8UTKSAD) for queries/questions, [discord - #general](https://discord.com/channels/1222935860639563850/1222935861386018885)).
 - When asking for help or raising issues, include necessary details like links, screenshots, or clear explanations to provide context.
 - Keep discussions in public channels whenever possible to allow others to benefit from the conversation, unless the matter is sensitive or private.
-- Always adhere to [our standards](https://github.com/All-Hands-AI/OpenHands/blob/main/CODE_OF_CONDUCT.md#our-standards) to ensure a welcoming and collaborative environment.
+- Always adhere to [our standards](https://github.com/hanzoai/Hanzo/blob/main/CODE_OF_CONDUCT.md#our-standards) to ensure a welcoming and collaborative environment.
 - If you choose to mute a channel, consider setting up alerts for topics that still interest you to stay engaged. For Slack, Go to Settings → Notifications → My Keywords to add specific keywords that will notify you when mentioned. For example, if you're here for discussions about LLMs, mute the channel if it’s too busy, but set notifications to alert you only when “LLMs” appears in messages. Also for Discord, go to the channel notifications and choose the option that best describes your need.
 
 ## Attribution

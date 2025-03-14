@@ -1,9 +1,9 @@
-# OpenHands Runtime
+# Hanzo Runtime
 
 ## Introduction
 
-The OpenHands Runtime folder contains the core components responsible for executing actions and managing the runtime environment for the OpenHands project. This README provides an overview of the main components and their interactions.
-You can learn more about how the runtime works in the [Docker Runtime](https://docs.all-hands.dev/modules/usage/architecture/runtime) documentation.
+The Hanzo Runtime folder contains the core components responsible for executing actions and managing the runtime environment for the Hanzo project. This README provides an overview of the main components and their interactions.
+You can learn more about how the runtime works in the [Docker Runtime](https://docs.hanzo.ai/modules/usage/architecture/runtime) documentation.
 
 ## Main Components
 
@@ -86,7 +86,7 @@ runtime = "app.my.CustomRuntime"
 6. **Sandbox Environment**:
    - The `ActionExecutor` sets up a sandboxed environment inside a Docker container.
    - User environment and bash shell are initialized.
-   - Actions received from the OpenHands backend are executed in this sandboxed environment.
+   - Actions received from the Hanzo backend are executed in this sandboxed environment.
 
 7. **Browser Interactions**:
    - Web browsing actions are handled using the `BrowserEnv` class.
@@ -116,7 +116,7 @@ Key features:
 - Faster execution due to local resources
 - Container isolation for security
 
-This is the default runtime used within OpenHands.
+This is the default runtime used within Hanzo.
 
 ### Local Runtime
 
@@ -133,7 +133,7 @@ Key features:
 - No container overhead
 - Fastest execution speed
 
-**Important: This runtime provides no isolation as it runs directly on the host machine. All actions are executed with the same permissions as the user running OpenHands. For secure execution with proper isolation, use the Docker Runtime instead.**
+**Important: This runtime provides no isolation as it runs directly on the host machine. All actions are executed with the same permissions as the user running Hanzo. For secure execution with proper isolation, use the Docker Runtime instead.**
 
 ### Remote Runtime
 
@@ -150,12 +150,12 @@ Key features:
 - Support for cloud-based deployments
 - Potential for improved security through isolation
 
-At the time of this writing, this is mostly used in parallel evaluation, such as this example for [SWE-Bench](https://github.com/All-Hands-AI/OpenHands/tree/main/evaluation/benchmarks/swe_bench#run-inference-on-remoteruntime-experimental).
+At the time of this writing, this is mostly used in parallel evaluation, such as this example for [SWE-Bench](https://github.com/hanzoai/Hanzo/tree/main/evaluation/benchmarks/swe_bench#run-inference-on-remoteruntime-experimental).
 
 ## Related Components
 
-- The runtime interacts closely with the event system defined in the `openhands.events` module.
-- It relies on configuration classes from `openhands.core.config`.
-- Logging is handled through `openhands.core.logger`.
+- The runtime interacts closely with the event system defined in the `hanzo.events` module.
+- It relies on configuration classes from `hanzo.core.config`.
+- Logging is handled through `hanzo.core.logger`.
 
-This section provides an overview of the OpenHands Runtime folder. For more detailed information on specific components or usage, please refer to the individual files and their docstrings.
+This section provides an overview of the Hanzo Runtime folder. For more detailed information on specific components or usage, please refer to the individual files and their docstrings.

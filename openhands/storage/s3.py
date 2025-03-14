@@ -3,7 +3,7 @@ import os
 import boto3
 import botocore
 
-from openhands.storage.files import FileStore
+from hanzo.storage.files import FileStore
 
 
 class S3FileStore(FileStore):

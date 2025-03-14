@@ -11,11 +11,11 @@ import pytest
 import toml
 from pytest import TempPathFactory
 
-import openhands
-from openhands import __version__ as oh_version
-from openhands.core.logger import openhands_logger as logger
-from openhands.runtime.builder.docker import DockerRuntimeBuilder
-from openhands.runtime.utils.runtime_build import (
+import hanzo
+from hanzo import __version__ as oh_version
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.runtime.builder.docker import DockerRuntimeBuilder
+from hanzo.runtime.utils.runtime_build import (
     BuildFromImageType,
     _generate_dockerfile,
     build_runtime_image,
@@ -61,22 +61,22 @@ def _check_source_code_in_dir(temp_dir):
     # check the source file is the same as the current code base
     assert os.path.exists(os.path.join(code_dir, 'pyproject.toml'))
 
-    # The source code should only include the `openhands` folder,
+    # The source code should only include the `hanzo` folder,
     # and pyproject.toml & poetry.lock that are needed to build the runtime image
     assert set(os.listdir(code_dir)) == {
-        'openhands',
+        'hanzo',
         'pyproject.toml',
         'poetry.lock',
     }
-    assert os.path.exists(os.path.join(code_dir, 'openhands'))
-    assert os.path.isdir(os.path.join(code_dir, 'openhands'))
+    assert os.path.exists(os.path.join(code_dir, 'hanzo'))
+    assert os.path.isdir(os.path.join(code_dir, 'hanzo'))
 
     # make sure the version from the pyproject.toml is the same as the current version
     with open(os.path.join(code_dir, 'pyproject.toml'), 'r') as f:
         pyproject = toml.load(f)
 
     _pyproject_version = pyproject['tool']['poetry']['version']
-    assert _pyproject_version == version('openhands-ai')
+    assert _pyproject_version == version('hanzo-ai')
 
 
 def test_prep_build_folder(temp_dir):
@@ -118,7 +118,7 @@ def test_get_hash_for_source_files():
         result = get_hash_for_source_files()
         assert result == truncate_hash(dirhash_mock.return_value)
         dirhash_mock.assert_called_once_with(
-            Path(openhands.__file__).parent,
+            Path(hanzo.__file__).parent,
             'md5',
             ignore=[
                 '.*/',  # hidden directories
@@ -141,9 +141,9 @@ def test_generate_dockerfile_build_from_scratch():
     assert 'python=3.12' in dockerfile_content
 
     # Check the update command
-    assert 'COPY ./code/openhands /openhands/code/openhands' in dockerfile_content
+    assert 'COPY ./code/hanzo /hanzo/code/hanzo' in dockerfile_content
     assert (
-        '/openhands/micromamba/bin/micromamba run -n openhands poetry install'
+        '/hanzo/micromamba/bin/micromamba run -n hanzo poetry install'
         in dockerfile_content
     )
 
@@ -163,7 +163,7 @@ def test_generate_dockerfile_build_from_lock():
     assert 'poetry install' not in dockerfile_content
 
     # These update commands SHOULD still in the dockerfile
-    assert 'COPY ./code/openhands /openhands/code/openhands' in dockerfile_content
+    assert 'COPY ./code/hanzo /hanzo/code/hanzo' in dockerfile_content
 
 
 def test_generate_dockerfile_build_from_versioned():
@@ -181,7 +181,7 @@ def test_generate_dockerfile_build_from_versioned():
 
     # this SHOULD exist when build from versioned
     assert 'poetry install' in dockerfile_content
-    assert 'COPY ./code/openhands /openhands/code/openhands' in dockerfile_content
+    assert 'COPY ./code/hanzo /hanzo/code/hanzo' in dockerfile_content
 
 
 def test_get_runtime_image_repo_and_tag_eventstream():
@@ -437,10 +437,10 @@ def live_docker_image():
     RUN apt-get update && apt-get install -y wget curl sudo apt-utils
 
     FROM base AS intermediate
-    RUN mkdir -p /openhands
+    RUN mkdir -p /hanzo
 
     FROM intermediate AS final
-    RUN echo "Hello, OpenHands!" > /openhands/hello.txt
+    RUN echo "Hello, Hanzo!" > /hanzo/hello.txt
     """
 
     with tempfile.TemporaryDirectory() as temp_dir:

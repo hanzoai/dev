@@ -4,7 +4,7 @@ from typing import Any, Literal
 import requests
 from pydantic import BaseModel
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class FeedbackDataModel(BaseModel):

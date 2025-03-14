@@ -62,9 +62,9 @@ jobs:
 
       - name: Run SWE-Bench evaluation
         env:
-          ALLHANDS_API_KEY: ${{ secrets.ALLHANDS_EVAL_RUNTIME_API_KEY }}
+          HANZO_API_KEY: ${{ secrets.HANZO_EVAL_RUNTIME_API_KEY }}
           RUNTIME: remote
-          SANDBOX_REMOTE_RUNTIME_API_URL: https://runtime.eval.all-hands.dev
+          SANDBOX_REMOTE_RUNTIME_API_URL: https://runtime.eval.hanzo.ai
           EVAL_DOCKER_IMAGE_PREFIX: us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images
 
         run: |
@@ -113,7 +113,7 @@ jobs:
         uses: 'google-github-actions/upload-cloud-storage@v2'
         with:
           path: 'evaluation/evaluation_outputs/outputs'
-          destination: 'openhands-oss-eval-results/${{ env.TIMESTAMP }}-${{ env.TRIGGER_REASON }}'
+          destination: 'hanzo-oss-eval-results/${{ env.TIMESTAMP }}-${{ env.TRIGGER_REASON }}'
 
       - name: Comment with evaluation results and artifact link
         id: create_comment

@@ -4,33 +4,33 @@ import os
 from pathlib import Path
 from typing import Callable, Protocol
 
-import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import (
+import hanzo.agenthub  # noqa F401 (we import this to get the agents registered)
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AppConfig,
     parse_arguments,
     setup_config_from_args,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.loop import run_agent_until_done
-from openhands.core.schema import AgentState
-from openhands.core.setup import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.loop import run_agent_until_done
+from hanzo.core.schema import AgentState
+from hanzo.core.setup import (
     create_agent,
     create_controller,
     create_runtime,
     generate_sid,
     initialize_repository_for_runtime,
 )
-from openhands.events import EventSource, EventStreamSubscriber
-from openhands.events.action import MessageAction, NullAction
-from openhands.events.action.action import Action
-from openhands.events.event import Event
-from openhands.events.observation import AgentStateChangedObservation
-from openhands.events.serialization import event_from_dict
-from openhands.io import read_input, read_task
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from hanzo.events import EventSource, EventStreamSubscriber
+from hanzo.events.action import MessageAction, NullAction
+from hanzo.events.action.action import Action
+from hanzo.events.event import Event
+from hanzo.events.observation import AgentStateChangedObservation
+from hanzo.events.serialization import event_from_dict
+from hanzo.io import read_input, read_task
+from hanzo.runtime.base import Runtime
+from hanzo.utils.async_utils import call_async_from_sync
 
 
 class FakeUserResponseFunc(Protocol):
@@ -54,7 +54,7 @@ async def run_controller(
 ) -> State | None:
     """Main coroutine to run the agent controller with task input flexibility.
 
-    It's only used when you launch openhands backend directly via cmdline.
+    It's only used when you launch hanzo backend directly via cmdline.
 
     Args:
         config: The app config.

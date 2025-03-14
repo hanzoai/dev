@@ -4,27 +4,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openhands.core.config import LLMConfig
-from openhands.events.action import CmdRunAction
-from openhands.events.observation import (
+from hanzo.core.config import LLMConfig
+from hanzo.events.action import CmdRunAction
+from hanzo.events.observation import (
     CmdOutputMetadata,
     CmdOutputObservation,
     NullObservation,
 )
-from openhands.llm.llm import LLM
-from openhands.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
-from openhands.resolver.interfaces.issue import Issue, ReviewThread
-from openhands.resolver.interfaces.issue_definitions import (
+from hanzo.llm.llm import LLM
+from hanzo.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
+from hanzo.resolver.interfaces.issue import Issue, ReviewThread
+from hanzo.resolver.interfaces.issue_definitions import (
     ServiceContextIssue,
     ServiceContextPR,
 )
-from openhands.resolver.resolve_issue import (
+from hanzo.resolver.resolve_issue import (
     complete_runtime,
     initialize_runtime,
     process_issue,
 )
-from openhands.resolver.resolver_output import ResolverOutput
-from openhands.resolver.utils import Platform
+from hanzo.resolver.resolver_output import ResolverOutput
+from hanzo.resolver.utils import Platform
 
 
 @pytest.fixture
@@ -92,14 +92,14 @@ def test_initialize_runtime():
 
 @pytest.mark.asyncio
 async def test_resolve_issue_no_issues_found():
-    from openhands.resolver.resolve_issue import resolve_issue
+    from hanzo.resolver.resolve_issue import resolve_issue
 
     # Mock dependencies
     mock_handler = MagicMock()
     mock_handler.get_converted_issues.return_value = []  # Return empty list
 
     with patch(
-        'openhands.resolver.resolve_issue.issue_handler_factory',
+        'hanzo.resolver.resolve_issue.issue_handler_factory',
         return_value=mock_handler,
     ):
         with pytest.raises(ValueError) as exc_info:
@@ -424,20 +424,20 @@ async def test_process_issue(mock_output_dir, mock_prompt_template):
 
         with (
             patch(
-                'openhands.resolver.resolve_issue.create_runtime', mock_create_runtime
+                'hanzo.resolver.resolve_issue.create_runtime', mock_create_runtime
             ),
             patch(
-                'openhands.resolver.resolve_issue.initialize_runtime',
+                'hanzo.resolver.resolve_issue.initialize_runtime',
                 mock_initialize_runtime,
             ),
             patch(
-                'openhands.resolver.resolve_issue.run_controller', mock_run_controller
+                'hanzo.resolver.resolve_issue.run_controller', mock_run_controller
             ),
             patch(
-                'openhands.resolver.resolve_issue.complete_runtime',
+                'hanzo.resolver.resolve_issue.complete_runtime',
                 mock_complete_runtime,
             ),
-            patch('openhands.resolver.resolve_issue.logger'),
+            patch('hanzo.resolver.resolve_issue.logger'),
         ):
             # Call the function
             result = await process_issue(
@@ -538,8 +538,8 @@ def test_file_instruction():
         title='Test Issue',
         body='This is a test issue ![image](https://sampleimage.com/sample.png)',
     )
-    # load prompt from openhands/resolver/prompts/resolve/basic.jinja
-    with open('openhands/resolver/prompts/resolve/basic.jinja', 'r') as f:
+    # load prompt from hanzo/resolver/prompts/resolve/basic.jinja
+    with open('hanzo/resolver/prompts/resolve/basic.jinja', 'r') as f:
         prompt = f.read()
     # Test without thread comments
     mock_llm_config = LLMConfig(model='test_model', api_key='test_api_key')
@@ -572,12 +572,12 @@ def test_file_instruction_with_repo_instruction():
         title='Test Issue',
         body='This is a test issue',
     )
-    # load prompt from openhands/resolver/prompts/resolve/basic.jinja
-    with open('openhands/resolver/prompts/resolve/basic.jinja', 'r') as f:
+    # load prompt from hanzo/resolver/prompts/resolve/basic.jinja
+    with open('hanzo/resolver/prompts/resolve/basic.jinja', 'r') as f:
         prompt = f.read()
-    # load repo instruction from openhands/resolver/prompts/repo_instructions/all-hands-ai___openhands-resolver.txt
+    # load repo instruction from hanzo/resolver/prompts/repo_instructions/hanzoai___hanzo-resolver.txt
     with open(
-        'openhands/resolver/prompts/repo_instructions/all-hands-ai___openhands-resolver.txt',
+        'hanzo/resolver/prompts/repo_instructions/hanzoai___hanzo-resolver.txt',
         'r',
     ) as f:
         repo_instruction = f.read()
@@ -601,7 +601,7 @@ IMPORTANT: You should ONLY interact with the environment provided to you AND NEV
 You SHOULD INCLUDE PROPER INDENTATION in your edit commands.
 
 Some basic information about this repository:
-This is a Python repo for openhands-resolver, a library that attempts to resolve github issues with the AI agent OpenHands.
+This is a Python repo for hanzo-resolver, a library that attempts to resolve github issues with the AI agent Hanzo.
 
 - Setup: `poetry install --with test --with dev`
 - Testing: `poetry run pytest tests/test_*.py`
@@ -704,7 +704,7 @@ def test_instruction_with_thread_comments():
     )
 
     # Load the basic prompt template
-    with open('openhands/resolver/prompts/resolve/basic.jinja', 'r') as f:
+    with open('hanzo/resolver/prompts/resolve/basic.jinja', 'r') as f:
         prompt = f.read()
 
     llm_config = LLMConfig(model='test', api_key='test')

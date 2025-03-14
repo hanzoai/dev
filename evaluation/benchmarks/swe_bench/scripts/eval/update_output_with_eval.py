@@ -24,7 +24,7 @@ instance_id_to_status = defaultdict(
 
 # Process official report if it exists
 swebench_official_report_json = os.path.join(dirname, 'report.json')
-openhands_remote_report_jsonl = args.input_file.replace(
+hanzo_remote_report_jsonl = args.input_file.replace(
     '.jsonl', '.swebench_eval.jsonl'
 )
 
@@ -83,7 +83,7 @@ if os.path.exists(swebench_official_report_json):
     with open(output_md_filepath, 'w') as f:
         f.write(output_md)
 
-elif os.path.exists(openhands_remote_report_jsonl):
+elif os.path.exists(hanzo_remote_report_jsonl):
     output_md_filepath = args.input_file.replace('.jsonl', '.swebench_eval.md')
 
     # First pass: Read eval report and count instances
@@ -101,7 +101,7 @@ elif os.path.exists(openhands_remote_report_jsonl):
 
     # Process eval report
     n_eval_instances = 0
-    with open(openhands_remote_report_jsonl, 'r') as f:
+    with open(hanzo_remote_report_jsonl, 'r') as f:
         for line in tqdm(f, desc='Processing eval report'):
             data = json.loads(line)
             instance_id = data['instance_id']
@@ -196,7 +196,7 @@ elif os.path.exists(openhands_remote_report_jsonl):
 
 else:
     print(
-        f'No report file found: Both {swebench_official_report_json} and {openhands_remote_report_jsonl} do not exist.'
+        f'No report file found: Both {swebench_official_report_json} and {hanzo_remote_report_jsonl} do not exist.'
     )
     exit()
 

@@ -9,17 +9,17 @@ function activate(context) {
     memoryMonitor.context = context;
 
     // Register memory monitor start command
-    let startMonitorCommand = vscode.commands.registerCommand('openhands-memory-monitor.startMemoryMonitor', function () {
+    let startMonitorCommand = vscode.commands.registerCommand('hanzo-memory-monitor.startMemoryMonitor', function () {
         memoryMonitor.start();
     });
 
     // Register memory monitor stop command
-    let stopMonitorCommand = vscode.commands.registerCommand('openhands-memory-monitor.stopMemoryMonitor', function () {
+    let stopMonitorCommand = vscode.commands.registerCommand('hanzo-memory-monitor.stopMemoryMonitor', function () {
         memoryMonitor.stop();
     });
 
     // Register memory details command
-    let showMemoryDetailsCommand = vscode.commands.registerCommand('openhands-memory-monitor.showMemoryDetails', function () {
+    let showMemoryDetailsCommand = vscode.commands.registerCommand('hanzo-memory-monitor.showMemoryDetails', function () {
         memoryMonitor.showDetails();
     });
 

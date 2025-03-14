@@ -9,14 +9,14 @@ from pydantic import (
 )
 from pydantic.json import pydantic_encoder
 
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.config.utils import load_app_config
-from openhands.integrations.provider import ProviderToken, ProviderType, SecretStore
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.config.utils import load_app_config
+from hanzo.integrations.provider import ProviderToken, ProviderType, SecretStore
 
 
 class Settings(BaseModel):
     """
-    Persisted settings for OpenHands sessions
+    Persisted settings for Hanzo sessions
     """
 
     language: str | None = None

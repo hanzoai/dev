@@ -1,6 +1,6 @@
 from pydantic import Field, SecretStr
 
-from openhands.server.settings import Settings
+from hanzo.server.settings import Settings
 
 
 class ConversationInitData(Settings):

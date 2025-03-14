@@ -1,11 +1,11 @@
 import os
 
-from openhands.core.exceptions import BrowserUnavailableException
-from openhands.core.schema import ActionType
-from openhands.events.action import BrowseInteractiveAction, BrowseURLAction
-from openhands.events.observation import BrowserOutputObservation
-from openhands.runtime.browser.browser_env import BrowserEnv
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.core.exceptions import BrowserUnavailableException
+from hanzo.core.schema import ActionType
+from hanzo.events.action import BrowseInteractiveAction, BrowseURLAction
+from hanzo.events.observation import BrowserOutputObservation
+from hanzo.runtime.browser.browser_env import BrowserEnv
+from hanzo.utils.async_utils import call_sync_from_async
 
 
 async def browse(

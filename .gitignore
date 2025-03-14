@@ -177,7 +177,7 @@ evaluation/toolqa/data
 evaluation/scienceagentbench/benchmark
 evaluation/commit0_bench/repos
 
-# openhands resolver
+# hanzo resolver
 output/
 
 # frontend

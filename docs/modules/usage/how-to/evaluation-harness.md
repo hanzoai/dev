@@ -1,11 +1,11 @@
 # Evaluation
 
-This guide provides an overview of how to integrate your own evaluation benchmark into the OpenHands framework.
+This guide provides an overview of how to integrate your own evaluation benchmark into the Hanzo framework.
 
 ## Setup Environment and LLM Configuration
 
-Please follow instructions [here](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md) to setup your local development environment.
-OpenHands in development mode uses `config.toml` to keep track of most configurations.
+Please follow instructions [here](https://github.com/hanzoai/Hanzo/blob/main/Development.md) to setup your local development environment.
+Hanzo in development mode uses `config.toml` to keep track of most configurations.
 
 Here's an example configuration file you can use to define and use multiple LLMs:
 
@@ -28,12 +28,12 @@ temperature = 0.0
 ```
 
 
-## How to use OpenHands in the command line
+## How to use Hanzo in the command line
 
-OpenHands can be run from the command line using the following format:
+Hanzo can be run from the command line using the following format:
 
 ```bash
-poetry run python ./openhands/core/main.py \
+poetry run python ./hanzo/core/main.py \
         -i <max_iterations> \
         -t "<task_description>" \
         -c <agent_class> \
@@ -43,22 +43,22 @@ poetry run python ./openhands/core/main.py \
 For example:
 
 ```bash
-poetry run python ./openhands/core/main.py \
+poetry run python ./hanzo/core/main.py \
         -i 10 \
         -t "Write me a bash script that prints hello world." \
         -c CodeActAgent \
         -l llm
 ```
 
-This command runs OpenHands with:
+This command runs Hanzo with:
 - A maximum of 10 iterations
 - The specified task description
 - Using the CodeActAgent
 - With the LLM configuration defined in the `llm` section of your `config.toml` file
 
-## How does OpenHands work
+## How does Hanzo work
 
-The main entry point for OpenHands is in `openhands/core/main.py`. Here's a simplified flow of how it works:
+The main entry point for Hanzo is in `hanzo/core/main.py`. Here's a simplified flow of how it works:
 
 1. Parse command-line arguments and load the configuration
 2. Create a runtime environment using `create_runtime()`
@@ -68,12 +68,12 @@ The main entry point for OpenHands is in `openhands/core/main.py`. Here's a simp
    - Executes the agent's task
    - Returns a final state when complete
 
-The `run_controller()` function is the core of OpenHands's execution. It manages the interaction between the agent, the runtime, and the task, handling things like user input simulation and event processing.
+The `run_controller()` function is the core of Hanzo's execution. It manages the interaction between the agent, the runtime, and the task, handling things like user input simulation and event processing.
 
 
 ## Easiest way to get started: Exploring Existing Benchmarks
 
-We encourage you to review the various evaluation benchmarks available in the [`evaluation/benchmarks/` directory](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation/benchmarks) of our repository.
+We encourage you to review the various evaluation benchmarks available in the [`evaluation/benchmarks/` directory](https://github.com/hanzoai/Hanzo/blob/main/evaluation/benchmarks) of our repository.
 
 To integrate your own benchmark, we suggest starting with the one that most closely resembles your needs. This approach can significantly streamline your integration process, allowing you to build upon existing structures and adapt them to your specific requirements.
 
@@ -82,9 +82,9 @@ To integrate your own benchmark, we suggest starting with the one that most clos
 
 To create an evaluation workflow for your benchmark, follow these steps:
 
-1. Import relevant OpenHands utilities:
+1. Import relevant Hanzo utilities:
    ```python
-    import openhands.agenthub
+    import hanzo.agenthub
     from evaluation.utils.shared import (
         EvalMetadata,
         EvalOutput,
@@ -93,18 +93,18 @@ To create an evaluation workflow for your benchmark, follow these steps:
         reset_logger_for_multiprocessing,
         run_evaluation,
     )
-    from openhands.controller.state.state import State
-    from openhands.core.config import (
+    from hanzo.controller.state.state import State
+    from hanzo.core.config import (
         AppConfig,
         SandboxConfig,
         get_llm_config_arg,
         parse_arguments,
     )
-    from openhands.core.logger import openhands_logger as logger
-    from openhands.core.main import create_runtime, run_controller
-    from openhands.events.action import CmdRunAction
-    from openhands.events.observation import CmdOutputObservation, ErrorObservation
-    from openhands.runtime.runtime import Runtime
+    from hanzo.core.logger import hanzo_logger as logger
+    from hanzo.core.main import create_runtime, run_controller
+    from hanzo.events.action import CmdRunAction
+    from hanzo.events.observation import CmdOutputObservation, ErrorObservation
+    from hanzo.runtime.runtime import Runtime
    ```
 
 2. Create a configuration:
@@ -134,7 +134,7 @@ To create an evaluation workflow for your benchmark, follow these steps:
 
 4. Create a function to process each instance:
    ```python
-   from openhands.utils.async_utils import call_async_from_sync
+   from hanzo.utils.async_utils import call_async_from_sync
    def process_instance(instance: pd.Series, metadata: EvalMetadata) -> EvalOutput:
        config = get_config(instance, metadata)
        runtime = create_runtime(config)
@@ -183,12 +183,12 @@ This workflow sets up the configuration, initializes the runtime environment, pr
 
 Remember to customize the `get_instruction`, `your_user_response_function`, and `evaluate_agent_actions` functions according to your specific benchmark requirements.
 
-By following this structure, you can create a robust evaluation workflow for your benchmark within the OpenHands framework.
+By following this structure, you can create a robust evaluation workflow for your benchmark within the Hanzo framework.
 
 
 ## Understanding the `user_response_fn`
 
-The `user_response_fn` is a crucial component in OpenHands's evaluation workflow. It simulates user interaction with the agent, allowing for automated responses during the evaluation process. This function is particularly useful when you want to provide consistent, predefined responses to the agent's queries or actions.
+The `user_response_fn` is a crucial component in Hanzo's evaluation workflow. It simulates user interaction with the agent, allowing for automated responses during the evaluation process. This function is particularly useful when you want to provide consistent, predefined responses to the agent's queries or actions.
 
 
 ### Workflow and Interaction

@@ -13,25 +13,25 @@ from pathspec import PathSpec
 from pathspec.patterns import GitWildMatchPattern
 from starlette.background import BackgroundTask
 
-from openhands.core.exceptions import AgentRuntimeUnavailableError
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.core.exceptions import AgentRuntimeUnavailableError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     ErrorObservation,
     FileReadObservation,
     FileWriteObservation,
 )
-from openhands.runtime.base import Runtime
-from openhands.server.file_config import (
+from hanzo.runtime.base import Runtime
+from hanzo.server.file_config import (
     FILES_TO_IGNORE,
     MAX_FILE_SIZE_MB,
     is_extension_allowed,
     sanitize_filename,
 )
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.utils.async_utils import call_sync_from_async
 
 app = APIRouter(prefix='/api/conversations/{conversation_id}')
 

@@ -4,13 +4,13 @@
 
 ## Introduction
 
-OpenHands fournit un mode Interface Graphique (GUI) convivial pour interagir avec l'assistant IA. Ce mode offre une façon intuitive de configurer l'environnement, gérer les paramètres et communiquer avec l'IA.
+Hanzo fournit un mode Interface Graphique (GUI) convivial pour interagir avec l'assistant IA. Ce mode offre une façon intuitive de configurer l'environnement, gérer les paramètres et communiquer avec l'IA.
 
 ## Installation et Configuration
 
-1. Suivez les instructions du guide [Installation](../installation) pour installer OpenHands.
+1. Suivez les instructions du guide [Installation](../installation) pour installer Hanzo.
 
-2. Après avoir exécuté la commande, accédez à OpenHands à l'adresse [http://localhost:3000](http://localhost:3000).
+2. Après avoir exécuté la commande, accédez à Hanzo à l'adresse [http://localhost:3000](http://localhost:3000).
 
 ## Interagir avec l'Interface Graphique
 
@@ -23,7 +23,7 @@ OpenHands fournit un mode Interface Graphique (GUI) convivial pour interagir ave
 
 ### Configuration du Jeton GitHub
 
-OpenHands exporte automatiquement un `GITHUB_TOKEN` vers l'environnement shell s'il est disponible. Cela peut se produire de deux manières :
+Hanzo exporte automatiquement un `GITHUB_TOKEN` vers l'environnement shell s'il est disponible. Cela peut se produire de deux manières :
 
 1. **Localement (OSS)** : L'utilisateur saisit directement son jeton GitHub
 2. **En ligne (SaaS)** : Le jeton est obtenu via l'authentification OAuth GitHub
@@ -38,7 +38,7 @@ OpenHands exporte automatiquement un `GITHUB_TOKEN` vers l'environnement shell s
      - `workflow` (Mettre à jour les workflows GitHub Action)
      - `read:org` (Lire les données de l'organisation)
 
-2. **Entrer le Jeton dans OpenHands** :
+2. **Entrer le Jeton dans Hanzo** :
    - Cliquez sur le bouton Paramètres (icône d'engrenage) en haut à droite
    - Accédez à la section "GitHub"
    - Collez votre jeton dans le champ "Jeton GitHub"
@@ -61,7 +61,7 @@ Si vous travaillez avec des dépôts organisationnels, une configuration supplé
 
 #### Authentification OAuth (Mode En Ligne)
 
-Lorsque vous utilisez OpenHands en mode en ligne, le flux OAuth GitHub :
+Lorsque vous utilisez Hanzo en mode en ligne, le flux OAuth GitHub :
 
 1. Demande les autorisations suivantes :
    - Accès au dépôt (lecture/écriture)
@@ -71,7 +71,7 @@ Lorsque vous utilisez OpenHands en mode en ligne, le flux OAuth GitHub :
 2. Étapes d'authentification :
    - Cliquez sur "Se connecter avec GitHub" lorsque vous y êtes invité
    - Examinez les autorisations demandées
-   - Autorisez OpenHands à accéder à votre compte GitHub
+   - Autorisez Hanzo à accéder à votre compte GitHub
    - Si vous utilisez une organisation, autorisez l'accès à l'organisation si vous y êtes invité
 
 #### Dépannage
@@ -124,4 +124,4 @@ L'interface principale se compose de plusieurs composants clés :
 2. Utilisez le panneau d'espace de travail pour explorer la structure de votre projet.
 3. Utilisez l'un des modèles recommandés, comme décrit dans la section [LLMs](usage/llms/llms.md).
 
-N'oubliez pas que le mode Interface Graphique d'OpenHands est conçu pour rendre votre interaction avec l'assistant IA aussi fluide et intuitive que possible. N'hésitez pas à explorer ses fonctionnalités pour maximiser votre productivité.
+N'oubliez pas que le mode Interface Graphique d'Hanzo est conçu pour rendre votre interaction avec l'assistant IA aussi fluide et intuitive que possible. N'hésitez pas à explorer ses fonctionnalités pour maximiser votre productivité.

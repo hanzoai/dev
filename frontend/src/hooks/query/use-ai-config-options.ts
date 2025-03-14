@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 
 const fetchAiConfigOptions = async () => ({
-  models: await OpenHands.getModels(),
-  agents: await OpenHands.getAgents(),
-  securityAnalyzers: await OpenHands.getSecurityAnalyzers(),
+  models: await Hanzo.getModels(),
+  agents: await Hanzo.getAgents(),
+  securityAnalyzers: await Hanzo.getSecurityAnalyzers(),
 });
 
 export const useAIConfigOptions = () =>

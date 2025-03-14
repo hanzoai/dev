@@ -12,11 +12,11 @@ import docker
 from dirhash import dirhash
 from jinja2 import Environment, FileSystemLoader
 
-import openhands
-from openhands import __version__ as oh_version
-from openhands.core.exceptions import AgentRuntimeBuildError
-from openhands.core.logger import openhands_logger as logger
-from openhands.runtime.builder import DockerRuntimeBuilder, RuntimeBuilder
+import hanzo
+from hanzo import __version__ as oh_version
+from hanzo.core.exceptions import AgentRuntimeBuildError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.runtime.builder import DockerRuntimeBuilder, RuntimeBuilder
 
 
 class BuildFromImageType(Enum):
@@ -26,7 +26,7 @@ class BuildFromImageType(Enum):
 
 
 def get_runtime_image_repo():
-    return os.getenv('OH_RUNTIME_RUNTIME_IMAGE_REPO', 'ghcr.io/all-hands-ai/runtime')
+    return os.getenv('OH_RUNTIME_RUNTIME_IMAGE_REPO', 'ghcr.io/hanzoai/runtime')
 
 
 def _generate_dockerfile(
@@ -115,7 +115,7 @@ def build_runtime_image(
 ) -> str:
     """Prepares the final docker build folder.
 
-    If dry_run is False, it will also build the OpenHands runtime Docker image using the docker build folder.
+    If dry_run is False, it will also build the Hanzo runtime Docker image using the docker build folder.
 
     Parameters:
     - base_image (str): The name of the base Docker image to use
@@ -130,7 +130,7 @@ def build_runtime_image(
     Returns:
     - str: <image_repo>:<MD5 hash>. Where MD5 hash is the hash of the docker build folder
 
-    See https://docs.all-hands.dev/modules/usage/architecture/runtime for more details.
+    See https://docs.hanzo.ai/modules/usage/architecture/runtime for more details.
     """
     if build_folder is None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -255,14 +255,14 @@ def prep_build_folder(
 ):
     # Copy the source code to directory. It will end up in build_folder/code
     # If package is not found, build from source code
-    openhands_source_dir = Path(openhands.__file__).parent
-    project_root = openhands_source_dir.parent
+    hanzo_source_dir = Path(hanzo.__file__).parent
+    project_root = hanzo_source_dir.parent
     logger.debug(f'Building source distribution using project root: {project_root}')
 
-    # Copy the 'openhands' directory (Source code)
+    # Copy the 'hanzo' directory (Source code)
     shutil.copytree(
-        openhands_source_dir,
-        Path(build_folder, 'code', 'openhands'),
+        hanzo_source_dir,
+        Path(build_folder, 'code', 'hanzo'),
         ignore=shutil.ignore_patterns(
             '.*/',
             '__pycache__/',
@@ -273,7 +273,7 @@ def prep_build_folder(
 
     # Copy pyproject.toml and poetry.lock files
     for file in ['pyproject.toml', 'poetry.lock']:
-        src = Path(openhands_source_dir, file)
+        src = Path(hanzo_source_dir, file)
         if not src.exists():
             src = Path(project_root, file)
         shutil.copy2(src, Path(build_folder, 'code', file))
@@ -302,13 +302,13 @@ def truncate_hash(hash: str) -> str:
 
 
 def get_hash_for_lock_files(base_image: str):
-    openhands_source_dir = Path(openhands.__file__).parent
+    hanzo_source_dir = Path(hanzo.__file__).parent
     md5 = hashlib.md5()
     md5.update(base_image.encode())
     for file in ['pyproject.toml', 'poetry.lock']:
-        src = Path(openhands_source_dir, file)
+        src = Path(hanzo_source_dir, file)
         if not src.exists():
-            src = Path(openhands_source_dir.parent, file)
+            src = Path(hanzo_source_dir.parent, file)
         with open(src, 'rb') as f:
             for chunk in iter(lambda: f.read(4096), b''):
                 md5.update(chunk)
@@ -323,9 +323,9 @@ def get_tag_for_versioned_image(base_image: str):
 
 
 def get_hash_for_source_files():
-    openhands_source_dir = Path(openhands.__file__).parent
+    hanzo_source_dir = Path(hanzo.__file__).parent
     dir_hash = dirhash(
-        openhands_source_dir,
+        hanzo_source_dir,
         'md5',
         ignore=[
             '.*/',  # hidden directories

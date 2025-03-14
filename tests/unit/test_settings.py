@@ -2,13 +2,13 @@ from unittest.mock import patch
 
 from pydantic import SecretStr
 
-from openhands.core.config.app_config import AppConfig
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.config.sandbox_config import SandboxConfig
-from openhands.core.config.security_config import SecurityConfig
-from openhands.integrations.provider import ProviderToken, ProviderType
-from openhands.server.routes.settings import convert_to_settings
-from openhands.server.settings import POSTSettingsModel, Settings
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.config.sandbox_config import SandboxConfig
+from hanzo.core.config.security_config import SecurityConfig
+from hanzo.integrations.provider import ProviderToken, ProviderType
+from hanzo.server.routes.settings import convert_to_settings
+from hanzo.server.settings import POSTSettingsModel, Settings
 
 
 def test_settings_from_config():
@@ -30,7 +30,7 @@ def test_settings_from_config():
     )
 
     with patch(
-        'openhands.server.settings.load_app_config', return_value=mock_app_config
+        'hanzo.server.settings.load_app_config', return_value=mock_app_config
     ):
         settings = Settings.from_config()
 
@@ -64,7 +64,7 @@ def test_settings_from_config_no_api_key():
     )
 
     with patch(
-        'openhands.server.settings.load_app_config', return_value=mock_app_config
+        'hanzo.server.settings.load_app_config', return_value=mock_app_config
     ):
         settings = Settings.from_config()
         assert settings is None

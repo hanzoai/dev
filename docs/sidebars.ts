@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     {
       type: 'doc',
-      label: 'Running OpenHands',
+      label: 'Running Hanzo',
       id: 'usage/installation',
     },
     {
@@ -75,8 +75,8 @@ const sidebars: SidebarsConfig = {
           items: [
             {
               type: 'doc',
-              label: 'Openhands Cloud',
-              id: 'usage/cloud/openhands-cloud',
+              label: 'Hanzo Cloud',
+              id: 'usage/cloud/hanzo-cloud',
             },
 
             {
@@ -168,7 +168,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'For OpenHands Developers',
+      label: 'For Hanzo Developers',
       items: [
         {
           type: 'category',

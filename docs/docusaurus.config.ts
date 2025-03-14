@@ -3,17 +3,17 @@ import type { Config } from "@docusaurus/types";
 import { themes as prismThemes } from "prism-react-renderer";
 
 const config: Config = {
-  title: "OpenHands",
+  title: "Hanzo",
   tagline: "Code Less, Make More",
   favicon: "img/logo-square.png",
 
   // Set the production url of your site here
-  url: "https://docs.all-hands.dev",
+  url: "https://docs.hanzo.ai",
   baseUrl: "/",
 
   // GitHub pages deployment config.
-  organizationName: "All-Hands-AI",
-  projectName: "OpenHands",
+  organizationName: "hanzoai",
+  projectName: "Hanzo",
   trailingSlash: false,
 
   onBrokenLinks: "throw",
@@ -63,9 +63,9 @@ const config: Config = {
   themeConfig: {
     image: "img/docusaurus.png",
     navbar: {
-      title: "OpenHands",
+      title: "Hanzo",
       logo: {
-        alt: "OpenHands",
+        alt: "Hanzo",
         src: "img/logo.png",
       },
       items: [
@@ -86,12 +86,12 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: "https://all-hands.dev",
+          href: "https://hanzo.ai",
           label: "Company",
           position: "right",
         },
         {
-          href: "https://github.com/All-Hands-AI/OpenHands",
+          href: "https://github.com/hanzoai/Hanzo",
           label: "GitHub",
           position: "right",
         },

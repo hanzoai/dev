@@ -5,12 +5,12 @@ import time
 
 import docker
 
-from openhands import __version__ as oh_version
-from openhands.core.exceptions import AgentRuntimeBuildError
-from openhands.core.logger import RollingLogger
-from openhands.core.logger import openhands_logger as logger
-from openhands.runtime.builder.base import RuntimeBuilder
-from openhands.utils.term_color import TermColor, colorize
+from hanzo import __version__ as oh_version
+from hanzo.core.exceptions import AgentRuntimeBuildError
+from hanzo.core.logger import RollingLogger
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.runtime.builder.base import RuntimeBuilder
+from hanzo.utils.term_color import TermColor, colorize
 
 
 class DockerRuntimeBuilder(RuntimeBuilder):
@@ -91,12 +91,12 @@ class DockerRuntimeBuilder(RuntimeBuilder):
             raise AgentRuntimeBuildError('Podman server version must be >= 4.9.0')
 
         if not DockerRuntimeBuilder.check_buildx(self.is_podman):
-            # when running openhands in a container, there might not be a "docker"
+            # when running hanzo in a container, there might not be a "docker"
             # binary available, in which case we need to download docker binary.
-            # since the official openhands app image is built from debian, we use
+            # since the official hanzo app image is built from debian, we use
             # debian way to install docker binary
             logger.info(
-                'No docker binary available inside openhands-app container, trying to download online...'
+                'No docker binary available inside hanzo-app container, trying to download online...'
             )
             commands = [
                 'apt-get update',
@@ -131,8 +131,8 @@ class DockerRuntimeBuilder(RuntimeBuilder):
             'buildx',
             'build',
             '--progress=plain',
-            f'--build-arg=OPENHANDS_RUNTIME_VERSION={oh_version}',
-            f'--build-arg=OPENHANDS_RUNTIME_BUILD_TIME={datetime.datetime.now().isoformat()}',
+            f'--build-arg=HANZO_RUNTIME_VERSION={oh_version}',
+            f'--build-arg=HANZO_RUNTIME_BUILD_TIME={datetime.datetime.now().isoformat()}',
             f'--tag={target_image_hash_name}',
             '--load',
         ]

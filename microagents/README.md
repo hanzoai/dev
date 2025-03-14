@@ -1,20 +1,20 @@
-# OpenHands MicroAgents
+# Hanzo MicroAgents
 
-MicroAgents are specialized prompts that enhance OpenHands with domain-specific knowledge and task-specific workflows. They help developers by providing expert guidance, automating common tasks, and ensuring consistent practices across projects. Each microagent is designed to excel in a specific area, from Git operations to code review processes.
+MicroAgents are specialized prompts that enhance Hanzo with domain-specific knowledge and task-specific workflows. They help developers by providing expert guidance, automating common tasks, and ensuring consistent practices across projects. Each microagent is designed to excel in a specific area, from Git operations to code review processes.
 
 ## Sources of Microagents
 
-OpenHands loads microagents from two sources:
+Hanzo loads microagents from two sources:
 
 ### 1. Shareable Microagents (Public)
-This directory (`OpenHands/microagents/`) contains shareable microagents that are:
-- Available to all OpenHands users
-- Maintained in the OpenHands repository
+This directory (`Hanzo/microagents/`) contains shareable microagents that are:
+- Available to all Hanzo users
+- Maintained in the Hanzo repository
 - Perfect for reusable knowledge and common workflows
 
 Directory structure:
 ```
-OpenHands/microagents/
+Hanzo/microagents/
 ├── knowledge/     # Keyword-triggered expertise
 │   ├── git.md      # Git operations
 │   ├── testing.md  # Testing practices
@@ -26,7 +26,7 @@ OpenHands/microagents/
 ```
 
 ### 2. Repository Instructions (Private)
-Each repository can have its own instructions in `.openhands/microagents/repo.md`. These instructions are:
+Each repository can have its own instructions in `.hanzo/microagents/repo.md`. These instructions are:
 - Private to that repository
 - Automatically loaded when working with that repository
 - Perfect for repository-specific guidelines and team practices
@@ -34,7 +34,7 @@ Each repository can have its own instructions in `.openhands/microagents/repo.md
 Example repository structure:
 ```
 your-repository/
-└── .openhands/
+└── .hanzo/
     └── microagents/
         └── repo.md    # Repository-specific instructions
         └── knowledges/  # Private micro-agents that are only available inside this repo
@@ -44,8 +44,8 @@ your-repository/
 
 ## Loading Order
 
-When OpenHands works with a repository, it:
-1. Loads repository-specific instructions from `.openhands/microagents/repo.md` if present
+When Hanzo works with a repository, it:
+1. Loads repository-specific instructions from `.hanzo/microagents/repo.md` if present
 2. Loads relevant knowledge agents based on keywords in conversations
 3. Enable task agent if user select one of them
 
@@ -68,12 +68,12 @@ Key characteristics:
 - **Reusable**: Knowledge can be applied across multiple projects
 - **Versioned**: Support multiple versions of tools/frameworks
 
-You can see an example of a knowledge-based agent in [OpenHands's github microagent](https://github.com/All-Hands-AI/OpenHands/tree/main/microagents/knowledge/github.md).
+You can see an example of a knowledge-based agent in [Hanzo's github microagent](https://github.com/hanzoai/Hanzo/tree/main/microagents/knowledge/github.md).
 
 ### 2. Repository Agents
 
 Repository agents provide repository-specific knowledge and guidelines. They are:
-- Loaded from `.openhands/microagents/repo.md`
+- Loaded from `.hanzo/microagents/repo.md`
 - Specific to individual repositories
 - Automatically activated for their repository
 - Perfect for team practices and project conventions
@@ -84,7 +84,7 @@ Key features:
 - **Always active**: Automatically loaded for the repository
 - **Locally maintained**: Updated with the project
 
-You can see an example of a repo agent in [the agent for the OpenHands repo itself](https://github.com/All-Hands-AI/OpenHands/blob/main/.openhands/microagents/repo.md).
+You can see an example of a repo agent in [the agent for the Hanzo repo itself](https://github.com/hanzoai/Hanzo/blob/main/.hanzo/microagents/repo.md).
 
 ### 3. Task Agents
 
@@ -101,7 +101,7 @@ Key capabilities:
 - **Reproducible**: Ensure consistent outcomes
 
 Example workflow:
-You can see an example of a task-based agent in [OpenHands's pull request updating microagent](https://github.com/All-Hands-AI/OpenHands/tree/main/microagents/tasks/update_pr_description.md).
+You can see an example of a task-based agent in [Hanzo's pull request updating microagent](https://github.com/hanzoai/Hanzo/tree/main/microagents/tasks/update_pr_description.md).
 
 ## Contributing
 
@@ -153,11 +153,11 @@ You can see an example of a task-based agent in [OpenHands's pull request updati
 1. Create your agent file in the appropriate directory:
    - `knowledge/` for expertise (public, shareable)
    - `tasks/` for workflows (public, shareable)
-   - Note: Repository agents should remain in their respective repositories' `.openhands/microagents/` directory
+   - Note: Repository agents should remain in their respective repositories' `.hanzo/microagents/` directory
 2. Test thoroughly
-3. Submit a pull request to OpenHands
+3. Submit a pull request to Hanzo
 
 
 ## License
 
-All microagents are subject to the same license as OpenHands. See the root LICENSE file for details.
+All microagents are subject to the same license as Hanzo. See the root LICENSE file for details.

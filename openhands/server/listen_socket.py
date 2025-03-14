@@ -2,23 +2,23 @@ from urllib.parse import parse_qs
 
 from socketio.exceptions import ConnectionRefusedError
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     NullAction,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     NullObservation,
 )
-from openhands.events.observation.agent import AgentStateChangedObservation
-from openhands.events.serialization import event_to_dict
-from openhands.events.stream import AsyncEventStreamWrapper
-from openhands.server.shared import (
+from hanzo.events.observation.agent import AgentStateChangedObservation
+from hanzo.events.serialization import event_to_dict
+from hanzo.events.stream import AsyncEventStreamWrapper
+from hanzo.server.shared import (
     SettingsStoreImpl,
     config,
     conversation_manager,
     sio,
 )
-from openhands.storage.conversation.conversation_validator import (
+from hanzo.storage.conversation.conversation_validator import (
     ConversationValidatorImpl,
 )
 

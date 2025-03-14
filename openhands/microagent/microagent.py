@@ -5,11 +5,11 @@ from typing import Union
 import frontmatter
 from pydantic import BaseModel
 
-from openhands.core.exceptions import (
+from hanzo.core.exceptions import (
     MicroAgentValidationError,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.microagent.types import MicroAgentMetadata, MicroAgentType
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.microagent.types import MicroAgentMetadata, MicroAgentType
 
 
 class BaseMicroAgent(BaseModel):
@@ -33,8 +33,8 @@ class BaseMicroAgent(BaseModel):
             with open(path) as f:
                 file_content = f.read()
 
-        # Legacy repo instructions are stored in .openhands_instructions
-        if path.name == '.openhands_instructions':
+        # Legacy repo instructions are stored in .hanzo_instructions
+        if path.name == '.hanzo_instructions':
             return RepoMicroAgent(
                 name='repo_legacy',
                 content=file_content,
@@ -102,7 +102,7 @@ class KnowledgeMicroAgent(BaseMicroAgent):
 class RepoMicroAgent(BaseMicroAgent):
     """MicroAgent specialized for repository-specific knowledge and guidelines.
 
-    RepoMicroAgents are loaded from `.openhands/microagents/repo.md` files within repositories
+    RepoMicroAgents are loaded from `.hanzo/microagents/repo.md` files within repositories
     and contain private, repository-specific instructions that are automatically loaded when
     working with that repository. They are ideal for:
         - Repository-specific guidelines
@@ -136,7 +136,7 @@ def load_microagents_from_dir(
     Note, legacy repo instructions will not be loaded here.
 
     Args:
-        microagent_dir: Path to the microagents directory (e.g. .openhands/microagents)
+        microagent_dir: Path to the microagents directory (e.g. .hanzo/microagents)
 
     Returns:
         Tuple of (repo_agents, knowledge_agents, task_agents) dictionaries
@@ -148,7 +148,7 @@ def load_microagents_from_dir(
     knowledge_agents = {}
     task_agents = {}
 
-    # Load all agents from .openhands/microagents directory
+    # Load all agents from .hanzo/microagents directory
     logger.debug(f'Loading agents from {microagent_dir}')
     if microagent_dir.exists():
         for file in microagent_dir.rglob('*.md'):

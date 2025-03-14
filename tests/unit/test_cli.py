@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
-from openhands.core.config import AppConfig
-from openhands.io import read_input
+from hanzo.core.config import AppConfig
+from hanzo.io import read_input
 
 
 def test_single_line_input():

@@ -1,8 +1,8 @@
-from openhands.core.exceptions import (
+from hanzo.core.exceptions import (
     LLMMalformedActionError,
     TaskInvalidStateError,
 )
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 OPEN_STATE = 'open'
 COMPLETED_STATE = 'completed'

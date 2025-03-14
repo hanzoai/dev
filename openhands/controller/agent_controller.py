@@ -12,12 +12,12 @@ from litellm.exceptions import (
     RateLimitError,
 )
 
-from openhands.controller.agent import Agent
-from openhands.controller.replay import ReplayManager
-from openhands.controller.state.state import State, TrafficControlState
-from openhands.controller.stuck import StuckDetector
-from openhands.core.config import AgentConfig, LLMConfig
-from openhands.core.exceptions import (
+from hanzo.controller.agent import Agent
+from hanzo.controller.replay import ReplayManager
+from hanzo.controller.state.state import State, TrafficControlState
+from hanzo.controller.stuck import StuckDetector
+from hanzo.core.config import AgentConfig, LLMConfig
+from hanzo.core.exceptions import (
     AgentStuckInLoopError,
     FunctionCallNotExistsError,
     FunctionCallValidationError,
@@ -26,11 +26,11 @@ from openhands.core.exceptions import (
     LLMNoActionError,
     LLMResponseError,
 )
-from openhands.core.logger import LOG_ALL_EVENTS
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.schema import AgentState
-from openhands.events import EventSource, EventStream, EventStreamSubscriber
-from openhands.events.action import (
+from hanzo.core.logger import LOG_ALL_EVENTS
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.schema import AgentState
+from hanzo.events import EventSource, EventStream, EventStreamSubscriber
+from hanzo.events.action import (
     Action,
     ActionConfirmationStatus,
     AgentDelegateAction,
@@ -42,8 +42,8 @@ from openhands.events.action import (
     MessageAction,
     NullAction,
 )
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     AgentCondensationObservation,
     AgentDelegateObservation,
     AgentStateChangedObservation,
@@ -51,9 +51,9 @@ from openhands.events.observation import (
     NullObservation,
     Observation,
 )
-from openhands.events.serialization.event import event_to_trajectory, truncate_content
-from openhands.llm.llm import LLM
-from openhands.llm.metrics import Metrics, TokenUsage
+from hanzo.events.serialization.event import event_to_trajectory, truncate_content
+from hanzo.llm.llm import LLM
+from hanzo.llm.metrics import Metrics, TokenUsage
 
 # note: RESUME is only available on web GUI
 TRAFFIC_CONTROL_REMINDER = (
@@ -252,7 +252,7 @@ class AgentController:
             reported = RuntimeError(
                 'There was an unexpected error while running the agent. Please '
                 'report this error to the developers by opening an issue at '
-                'https://github.com/All-Hands-AI/OpenHands. Your session ID is '
+                'https://github.com/hanzoai/Hanzo. Your session ID is '
                 f' {self.id}. Error type: {e.__class__.__name__}'
             )
             if (
@@ -537,8 +537,8 @@ class AgentController:
     async def start_delegate(self, action: AgentDelegateAction) -> None:
         """Start a delegate agent to handle a subtask.
 
-        OpenHands is a multi-agentic system. A `task` is a conversation between
-        OpenHands (the whole system) and the user, which might involve one or more inputs
+        Hanzo is a multi-agentic system. A `task` is a conversation between
+        Hanzo (the whole system) and the user, which might involve one or more inputs
         from the user. It starts with an initial input (typically a task statement) from
         the user, and ends with either an `AgentFinishAction` initiated by the agent, a
         stop initiated by the user, or an error.

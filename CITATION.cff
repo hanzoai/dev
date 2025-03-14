@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it using the following metadata."
-title: "OpenHands: An Open Platform for AI Software Developers as Generalist Agents"
+title: "Hanzo: An Open Platform for AI Software Developers as Generalist Agents"
 authors:
   - family-names: Wang
     given-names: Xingyao

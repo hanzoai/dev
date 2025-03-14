@@ -3,12 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Iterable
 
-from openhands.core.config.app_config import AppConfig
-from openhands.storage.data_models.conversation_metadata import ConversationMetadata
-from openhands.storage.data_models.conversation_metadata_result_set import (
+from hanzo.core.config.app_config import AppConfig
+from hanzo.storage.data_models.conversation_metadata import ConversationMetadata
+from hanzo.storage.data_models.conversation_metadata_result_set import (
     ConversationMetadataResultSet,
 )
-from openhands.utils.async_utils import wait_all
+from hanzo.utils.async_utils import wait_all
 
 
 class ConversationStore(ABC):

@@ -1,7 +1,7 @@
 import json
 from typing import Iterable
 
-from openhands.resolver.resolver_output import ResolverOutput
+from hanzo.resolver.resolver_output import ResolverOutput
 
 
 def load_all_resolver_outputs(output_jsonl: str) -> Iterable[ResolverOutput]:

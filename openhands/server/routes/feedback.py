@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.serialization import event_to_dict
-from openhands.events.stream import AsyncEventStreamWrapper
-from openhands.server.data_models.feedback import FeedbackDataModel, store_feedback
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.serialization import event_to_dict
+from hanzo.events.stream import AsyncEventStreamWrapper
+from hanzo.server.data_models.feedback import FeedbackDataModel, store_feedback
+from hanzo.utils.async_utils import call_sync_from_async
 
 app = APIRouter(prefix='/api/conversations/{conversation_id}')
 

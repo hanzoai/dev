@@ -1,6 +1,6 @@
 import pytest
 
-from openhands.utils.chunk_localizer import (
+from hanzo.utils.chunk_localizer import (
     Chunk,
     create_chunks,
     get_top_k_chunk_matches,

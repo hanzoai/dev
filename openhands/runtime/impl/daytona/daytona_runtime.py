@@ -10,17 +10,17 @@ from daytona_sdk import (
     Workspace,
 )
 
-from openhands.core.config.app_config import AppConfig
-from openhands.events.stream import EventStream
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.core.config.app_config import AppConfig
+from hanzo.events.stream import EventStream
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.plugins.requirement import PluginRequirement
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.runtime.plugins.requirement import PluginRequirement
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
-WORKSPACE_PREFIX = 'openhands-sandbox-'
+WORKSPACE_PREFIX = 'hanzo-sandbox-'
 
 
 class DaytonaRuntime(ActionExecutionClient):
@@ -152,7 +152,7 @@ class DaytonaRuntime(ActionExecutionClient):
             plugins=self.plugins,
             app_config=self.config,
             override_user_id=1000,
-            override_username='openhands',
+            override_username='hanzo',
         )
         start_command_str: str = ' '.join(start_command)
 
@@ -165,7 +165,7 @@ class DaytonaRuntime(ActionExecutionClient):
         self.workspace.process.create_session(exec_session_id)
         self.workspace.process.execute_session_command(
             exec_session_id,
-            SessionExecuteRequest(command='cd /openhands/code', var_async=True),
+            SessionExecuteRequest(command='cd /hanzo/code', var_async=True),
         )
 
         exec_command = self.workspace.process.execute_session_command(

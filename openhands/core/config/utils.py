@@ -12,21 +12,21 @@ import toml
 from dotenv import load_dotenv
 from pydantic import BaseModel, SecretStr, ValidationError
 
-from openhands import __version__
-from openhands.core import logger
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.config.app_config import AppConfig
-from openhands.core.config.condenser_config import condenser_config_from_toml_section
-from openhands.core.config.config_utils import (
+from hanzo import __version__
+from hanzo.core import logger
+from hanzo.core.config.agent_config import AgentConfig
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.config.condenser_config import condenser_config_from_toml_section
+from hanzo.core.config.config_utils import (
     OH_DEFAULT_AGENT,
     OH_MAX_ITERATIONS,
 )
-from openhands.core.config.extended_config import ExtendedConfig
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.config.sandbox_config import SandboxConfig
-from openhands.core.config.security_config import SecurityConfig
-from openhands.storage import get_file_store
-from openhands.storage.files import FileStore
+from hanzo.core.config.extended_config import ExtendedConfig
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.config.sandbox_config import SandboxConfig
+from hanzo.core.config.security_config import SecurityConfig
+from hanzo.storage import get_file_store
+from hanzo.storage.files import FileStore
 
 JWT_SECRET = '.jwt_secret'
 load_dotenv()
@@ -88,7 +88,7 @@ def load_from_env(
                         cast_value = field_type(value)
                     setattr(sub_config, field_name, cast_value)
                 except (ValueError, TypeError):
-                    logger.openhands_logger.error(
+                    logger.hanzo_logger.error(
                         f'Error setting env var {env_var_name}={value}: check that the value is of the right type'
                     )
 
@@ -120,14 +120,14 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
     except FileNotFoundError:
         return
     except toml.TomlDecodeError as e:
-        logger.openhands_logger.warning(
+        logger.hanzo_logger.warning(
             f'Cannot parse config from toml, toml values have not been applied.\nError: {e}',
         )
         return
 
     # Check for the [core] section
     if 'core' not in toml_config:
-        logger.openhands_logger.warning(
+        logger.hanzo_logger.warning(
             f'No [core] section found in {toml_file}. Core settings will use defaults.'
         )
         core_config = {}
@@ -139,7 +139,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
         if hasattr(cfg, key):
             setattr(cfg, key, value)
         else:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Unknown config key "{key}" in [core] section'
             )
 
@@ -150,7 +150,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
             for agent_key, agent_conf in agent_mapping.items():
                 cfg.set_agent_config(agent_conf, agent_key)
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [agent] config from toml, values have not been applied.\nError: {e}'
             )
 
@@ -161,7 +161,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
             for llm_key, llm_conf in llm_mapping.items():
                 cfg.set_llm_config(llm_conf, llm_key)
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [llm] config from toml, values have not been applied.\nError: {e}'
             )
 
@@ -173,7 +173,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
             if 'security' in security_mapping:
                 cfg.security = security_mapping['security']
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [security] config from toml, values have not been applied.\nError: {e}'
             )
         except ValueError:
@@ -188,7 +188,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
             if 'sandbox' in sandbox_mapping:
                 cfg.sandbox = sandbox_mapping['sandbox']
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [sandbox] config from toml, values have not been applied.\nError: {e}'
             )
         except ValueError:
@@ -207,17 +207,17 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
                 # Get the default agent config and assign the condenser config to it
                 default_agent_config = cfg.get_agent_config()
                 default_agent_config.condenser = condenser_mapping['condenser']
-                logger.openhands_logger.debug(
+                logger.hanzo_logger.debug(
                     'Default condenser configuration loaded from config toml and assigned to default agent'
                 )
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [condenser] config from toml, values have not been applied.\nError: {e}'
             )
     # If no condenser section is in toml but enable_default_condenser is True,
     # set LLMSummarizingCondenserConfig as default
     elif cfg.enable_default_condenser:
-        from openhands.core.config.condenser_config import LLMSummarizingCondenserConfig
+        from hanzo.core.config.condenser_config import LLMSummarizingCondenserConfig
 
         # Get default agent config
         default_agent_config = cfg.get_agent_config()
@@ -229,7 +229,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
 
         # Set as default condenser
         default_agent_config.condenser = default_condenser
-        logger.openhands_logger.debug(
+        logger.hanzo_logger.debug(
             'Default LLM summarizing condenser assigned to default agent (no condenser in config)'
         )
 
@@ -238,7 +238,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
         try:
             cfg.extended = ExtendedConfig(toml_config['extended'])
         except (TypeError, KeyError, ValidationError) as e:
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'Cannot parse [extended] config from toml, values have not been applied.\nError: {e}'
             )
 
@@ -254,7 +254,7 @@ def load_from_toml(cfg: AppConfig, toml_file: str = 'config.toml') -> None:
     }
     for key in toml_config:
         if key.lower() not in known_sections:
-            logger.openhands_logger.warning(f'Unknown section [{key}] in {toml_file}')
+            logger.hanzo_logger.warning(f'Unknown section [{key}] in {toml_file}')
 
 
 def get_or_create_jwt_secret(file_store: FileStore) -> str:
@@ -284,7 +284,7 @@ def finalize_config(cfg: AppConfig):
         llm.log_completions_folder = os.path.abspath(llm.log_completions_folder)
 
     if cfg.sandbox.use_host_network and platform.system() == 'Darwin':
-        logger.openhands_logger.warning(
+        logger.hanzo_logger.warning(
             'Please upgrade to Docker Desktop 4.29.0 or later to use host network mode on macOS. '
             'See https://github.com/docker/roadmap/issues/238#issuecomment-2044688144 for more information.'
         )
@@ -332,17 +332,17 @@ def get_agent_config_arg(
     if agent_config_arg.startswith('agent.'):
         agent_config_arg = agent_config_arg[6:]
 
-    logger.openhands_logger.debug(f'Loading agent config from {agent_config_arg}')
+    logger.hanzo_logger.debug(f'Loading agent config from {agent_config_arg}')
 
     # load the toml file
     try:
         with open(toml_file, 'r', encoding='utf-8') as toml_contents:
             toml_config = toml.load(toml_contents)
     except FileNotFoundError as e:
-        logger.openhands_logger.error(f'Config file not found: {e}')
+        logger.hanzo_logger.error(f'Config file not found: {e}')
         return None
     except toml.TomlDecodeError as e:
-        logger.openhands_logger.error(
+        logger.hanzo_logger.error(
             f'Cannot parse agent group from {agent_config_arg}. Exception: {e}'
         )
         return None
@@ -350,7 +350,7 @@ def get_agent_config_arg(
     # update the agent config with the specified section
     if 'agent' in toml_config and agent_config_arg in toml_config['agent']:
         return AgentConfig(**toml_config['agent'][agent_config_arg])
-    logger.openhands_logger.debug(f'Loading from toml failed for {agent_config_arg}')
+    logger.hanzo_logger.debug(f'Loading from toml failed for {agent_config_arg}')
     return None
 
 
@@ -389,17 +389,17 @@ def get_llm_config_arg(
     if llm_config_arg.startswith('llm.'):
         llm_config_arg = llm_config_arg[4:]
 
-    logger.openhands_logger.debug(f'Loading llm config from {llm_config_arg}')
+    logger.hanzo_logger.debug(f'Loading llm config from {llm_config_arg}')
 
     # load the toml file
     try:
         with open(toml_file, 'r', encoding='utf-8') as toml_contents:
             toml_config = toml.load(toml_contents)
     except FileNotFoundError as e:
-        logger.openhands_logger.error(f'Config file not found: {e}')
+        logger.hanzo_logger.error(f'Config file not found: {e}')
         return None
     except toml.TomlDecodeError as e:
-        logger.openhands_logger.error(
+        logger.hanzo_logger.error(
             f'Cannot parse llm group from {llm_config_arg}. Exception: {e}'
         )
         return None
@@ -407,7 +407,7 @@ def get_llm_config_arg(
     # update the llm config with the specified section
     if 'llm' in toml_config and llm_config_arg in toml_config['llm']:
         return LLMConfig(**toml_config['llm'][llm_config_arg])
-    logger.openhands_logger.debug(f'Loading from toml failed for {llm_config_arg}')
+    logger.hanzo_logger.debug(f'Loading from toml failed for {llm_config_arg}')
     return None
 
 
@@ -538,7 +538,7 @@ def parse_arguments() -> argparse.Namespace:
     args = parser.parse_args()
 
     if args.version:
-        print(f'OpenHands version: {__version__}')
+        print(f'Hanzo version: {__version__}')
         sys.exit(0)
 
     return args

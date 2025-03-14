@@ -4819,9 +4819,9 @@ datalib = ["numpy (>=1)", "pandas (>=1.2.3)", "pandas-stubs (>=1.1.0.11)"]
 realtime = ["websockets (>=13,<15)"]
 
 [[package]]
-name = "openhands-aci"
+name = "hanzo-aci"
 version = "0.2.6"
-description = "An Agent-Computer Interface (ACI) designed for software development agents OpenHands."
+description = "An Agent-Computer Interface (ACI) designed for software development agents Hanzo."
 optional = false
 python-versions = "^3.12"
 groups = ["main"]
@@ -4849,7 +4849,7 @@ whatthepatch = "^1.0.6"
 
 [package.source]
 type = "git"
-url = "https://github.com/All-Hands-AI/openhands-aci.git"
+url = "https://github.com/hanzoai/hanzo-aci.git"
 reference = "add-encoding-detection"
 resolved_reference = "040d9578d90894409f51ecca877b120fe696fe0b"
 

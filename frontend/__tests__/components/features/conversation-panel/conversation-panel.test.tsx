@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
 import React from "react";
 import { ConversationPanel } from "#/components/features/conversation-panel/conversation-panel";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { AuthProvider } from "#/context/auth-context";
 import { clickOnEditButton } from "./utils";
 import { queryClientConfig } from "#/query-client-config";
@@ -68,7 +68,7 @@ describe("ConversationPanel", () => {
   });
 
   it("should display an empty state when there are no conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Hanzo, "getUserConversations");
     getUserConversationsSpy.mockResolvedValue([]);
 
     renderConversationPanel();
@@ -78,7 +78,7 @@ describe("ConversationPanel", () => {
   });
 
   it("should handle an error when fetching conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Hanzo, "getUserConversations");
     getUserConversationsSpy.mockRejectedValue(
       new Error("Failed to fetch conversations"),
     );
@@ -172,7 +172,7 @@ describe("ConversationPanel", () => {
 
   it("should rename a conversation", async () => {
     const updateUserConversationSpy = vi.spyOn(
-      OpenHands,
+      Hanzo,
       "updateUserConversation",
     );
 
@@ -196,7 +196,7 @@ describe("ConversationPanel", () => {
 
   it("should not rename a conversation when the name is unchanged", async () => {
     const updateUserConversationSpy = vi.spyOn(
-      OpenHands,
+      Hanzo,
       "updateUserConversation",
     );
 
@@ -259,7 +259,7 @@ describe("ConversationPanel", () => {
       },
     ]);
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Hanzo, "getUserConversations");
     render(<MyRouterStub />, {
       wrapper: ({ children }) => (
         <AuthProvider>

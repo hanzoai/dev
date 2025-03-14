@@ -1,6 +1,6 @@
 """
 This is the main file for the runtime client.
-It is responsible for executing actions received from OpenHands backend and producing observations.
+It is responsible for executing actions received from Hanzo backend and producing observations.
 
 NOTE: this will be executed inside the docker sandbox.
 """
@@ -22,17 +22,17 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import APIKeyHeader
-from openhands_aci.editor.editor import OHEditor
-from openhands_aci.editor.exceptions import ToolError
-from openhands_aci.editor.results import ToolResult
-from openhands_aci.utils.diff import get_diff
+from hanzo_aci.editor.editor import OHEditor
+from hanzo_aci.editor.exceptions import ToolError
+from hanzo_aci.editor.results import ToolResult
+from hanzo_aci.utils.diff import get_diff
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from uvicorn import run
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     Action,
     BrowseInteractiveAction,
     BrowseURLAction,
@@ -42,8 +42,8 @@ from openhands.events.action import (
     FileWriteAction,
     IPythonRunCellAction,
 )
-from openhands.events.event import FileEditSource, FileReadSource
-from openhands.events.observation import (
+from hanzo.events.event import FileEditSource, FileReadSource
+from hanzo.events.observation import (
     CmdOutputObservation,
     ErrorObservation,
     FileEditObservation,
@@ -52,16 +52,16 @@ from openhands.events.observation import (
     IPythonRunCellObservation,
     Observation,
 )
-from openhands.events.serialization import event_from_dict, event_to_dict
-from openhands.runtime.browser import browse
-from openhands.runtime.browser.browser_env import BrowserEnv
-from openhands.runtime.plugins import ALL_PLUGINS, JupyterPlugin, Plugin, VSCodePlugin
-from openhands.runtime.utils.bash import BashSession
-from openhands.runtime.utils.files import insert_lines, read_lines
-from openhands.runtime.utils.memory_monitor import MemoryMonitor
-from openhands.runtime.utils.runtime_init import init_user_and_working_directory
-from openhands.runtime.utils.system_stats import get_system_stats
-from openhands.utils.async_utils import call_sync_from_async, wait_all
+from hanzo.events.serialization import event_from_dict, event_to_dict
+from hanzo.runtime.browser import browse
+from hanzo.runtime.browser.browser_env import BrowserEnv
+from hanzo.runtime.plugins import ALL_PLUGINS, JupyterPlugin, Plugin, VSCodePlugin
+from hanzo.runtime.utils.bash import BashSession
+from hanzo.runtime.utils.files import insert_lines, read_lines
+from hanzo.runtime.utils.memory_monitor import MemoryMonitor
+from hanzo.runtime.utils.runtime_init import init_user_and_working_directory
+from hanzo.runtime.utils.system_stats import get_system_stats
+from hanzo.utils.async_utils import call_sync_from_async, wait_all
 
 
 class ActionRequest(BaseModel):
@@ -134,7 +134,7 @@ def _execute_file_editor(
 
 class ActionExecutor:
     """ActionExecutor is running inside docker sandbox.
-    It is responsible for executing actions received from OpenHands backend and producing observations.
+    It is responsible for executing actions received from Hanzo backend and producing observations.
     """
 
     def __init__(
@@ -210,7 +210,7 @@ class ActionExecutor:
         if 'agent_skills' in self.plugins and 'jupyter' in self.plugins:
             obs = await self.run_ipython(
                 IPythonRunCellAction(
-                    code='from openhands.runtime.plugins.agent_skills.agentskills import *\n'
+                    code='from hanzo.runtime.plugins.agent_skills.agentskills import *\n'
                 )
             )
             logger.debug(f'AgentSkills initialized: {obs}')
@@ -239,9 +239,9 @@ class ActionExecutor:
 
     async def _init_bash_commands(self):
         INIT_COMMANDS = [
-            'git config --file ./.git_config user.name "openhands" && git config --file ./.git_config user.email "openhands@all-hands.dev" && alias git="git --no-pager" && export GIT_CONFIG=$(pwd)/.git_config'
+            'git config --file ./.git_config user.name "hanzo" && git config --file ./.git_config user.email "hanzo@hanzo.ai" && alias git="git --no-pager" && export GIT_CONFIG=$(pwd)/.git_config'
             if os.environ.get('LOCAL_RUNTIME_MODE') == '1'
-            else 'git config --global user.name "openhands" && git config --global user.email "openhands@all-hands.dev" && alias git="git --no-pager"'
+            else 'git config --global user.name "hanzo" && git config --global user.email "hanzo@hanzo.ai" && alias git="git --no-pager"'
         ]
         logger.debug(f'Initializing by running {len(INIT_COMMANDS)} bash commands...')
         for command in INIT_COMMANDS:
@@ -477,7 +477,7 @@ if __name__ == '__main__':
     parser.add_argument('--working-dir', type=str, help='Working directory')
     parser.add_argument('--plugins', type=str, help='Plugins to initialize', nargs='+')
     parser.add_argument(
-        '--username', type=str, help='User to run as', default='openhands'
+        '--username', type=str, help='User to run as', default='hanzo'
     )
     parser.add_argument('--user-id', type=int, help='User ID to run as', default=1000)
     parser.add_argument(

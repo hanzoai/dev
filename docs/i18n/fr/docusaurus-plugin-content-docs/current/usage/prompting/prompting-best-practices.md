@@ -2,7 +2,7 @@
 
 # Meilleures pratiques pour les prompts
 
-Lorsque vous travaillez avec le développeur de logiciels OpenHands AI, il est crucial de fournir des prompts clairs et efficaces. Ce guide décrit les meilleures pratiques pour créer des prompts qui produiront les réponses les plus précises et les plus utiles.
+Lorsque vous travaillez avec le développeur de logiciels Hanzo AI, il est crucial de fournir des prompts clairs et efficaces. Ce guide décrit les meilleures pratiques pour créer des prompts qui produiront les réponses les plus précises et les plus utiles.
 
 ## Caractéristiques des bons prompts
 
@@ -38,6 +38,6 @@ Les bons prompts sont :
 4. Incluez tous les messages d'erreur ou logs pertinents.
 5. Spécifiez le langage de programmation ou le framework s'il n'est pas évident d'après le contexte.
 
-N'oubliez pas, plus votre prompt est précis et informatif, mieux l'IA pourra vous aider à développer ou à modifier le logiciel OpenHands.
+N'oubliez pas, plus votre prompt est précis et informatif, mieux l'IA pourra vous aider à développer ou à modifier le logiciel Hanzo.
 
-Voir [Démarrer avec OpenHands](../getting-started) pour plus d'exemples de prompts utiles.
+Voir [Démarrer avec Hanzo](../getting-started) pour plus d'exemples de prompts utiles.

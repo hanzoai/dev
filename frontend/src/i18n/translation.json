@@ -30,19 +30,19 @@
         "de": "Browser"
     },
     "BROWSER$EMPTY_MESSAGE": {
-        "en": "If you tell OpenHands to start a web server, the app will appear here.",
-        "ja": "OpenHandsにWebサーバーの起動を指示すると、ここにアプリが表示されます。",
-        "zh-CN": "如果您告诉OpenHands启动Web服务器，应用将在此处显示。",
-        "zh-TW": "如果您要求 OpenHands 啟動網頁伺服器，應用程式將會顯示在此處。",
-        "ko-KR": "OpenHands에게 웹 서버를 시작하도록 지시하면 여기에 앱이 표시됩니다.",
-        "no": "Hvis du ber OpenHands om å starte en webserver, vil appen vises her.",
-        "it": "Se chiedi a OpenHands di avviare un server web, l'app apparirà qui.",
-        "pt": "Se você disser ao OpenHands para iniciar um servidor web, o aplicativo aparecerá aqui.",
-        "es": "Si le dices a OpenHands que inicie un servidor web, la aplicación aparecerá aquí.",
-        "ar": "إذا طلبت من OpenHands بدء خادم ويب، سيظهر التطبيق هنا.",
-        "fr": "Si vous demandez à OpenHands de démarrer un serveur web, l'application apparaîtra ici.",
-        "tr": "OpenHands'e bir web sunucusu başlatmasını söylerseniz, uygulama burada görünecektir.",
-        "de": "Wenn Sie OpenHands anweisen, einen Webserver zu starten, erscheint die App hier."
+        "en": "If you tell Hanzo to start a web server, the app will appear here.",
+        "ja": "HanzoにWebサーバーの起動を指示すると、ここにアプリが表示されます。",
+        "zh-CN": "如果您告诉Hanzo启动Web服务器，应用将在此处显示。",
+        "zh-TW": "如果您要求 Hanzo 啟動網頁伺服器，應用程式將會顯示在此處。",
+        "ko-KR": "Hanzo에게 웹 서버를 시작하도록 지시하면 여기에 앱이 표시됩니다.",
+        "no": "Hvis du ber Hanzo om å starte en webserver, vil appen vises her.",
+        "it": "Se chiedi a Hanzo di avviare un server web, l'app apparirà qui.",
+        "pt": "Se você disser ao Hanzo para iniciar um servidor web, o aplicativo aparecerá aqui.",
+        "es": "Si le dices a Hanzo que inicie un servidor web, la aplicación aparecerá aquí.",
+        "ar": "إذا طلبت من Hanzo بدء خادم ويب، سيظهر التطبيق هنا.",
+        "fr": "Si vous demandez à Hanzo de démarrer un serveur web, l'application apparaîtra ici.",
+        "tr": "Hanzo'e bir web sunucusu başlatmasını söylerseniz, uygulama burada görünecektir.",
+        "de": "Wenn Sie Hanzo anweisen, einen Webserver zu starten, erscheint die App hier."
     },
     "SETTINGS$TITLE": {
         "en": "Settings",
@@ -509,20 +509,20 @@
         "fr": "Nettoyer les dépendances",
         "tr": "Bağımlılıkları temizle"
     },
-    "CONFIGURATION$OPENHANDS_WORKSPACE_DIRECTORY_INPUT_LABEL": {
-        "en": "OpenHands Workspace directory",
-        "zh-CN": "OpenHands工作区目录",
-        "de": "OpenHands Arbeitsverzeichnis",
-        "ko-KR": "OpenHands 워크스페이스 디렉토리",
-        "no": "OpenHands arbeidsmappe",
-        "zh-TW": "OpenHands 工作區目錄",
-        "it": "Directory dell'area di lavoro OpenHands",
-        "pt": "Diretório do espaço de trabalho OpenHands",
-        "es": "Directorio del espacio de trabajo de OpenHands",
+    "CONFIGURATION$HANZO_WORKSPACE_DIRECTORY_INPUT_LABEL": {
+        "en": "Hanzo Workspace directory",
+        "zh-CN": "Hanzo工作区目录",
+        "de": "Hanzo Arbeitsverzeichnis",
+        "ko-KR": "Hanzo 워크스페이스 디렉토리",
+        "no": "Hanzo arbeidsmappe",
+        "zh-TW": "Hanzo 工作區目錄",
+        "it": "Directory dell'area di lavoro Hanzo",
+        "pt": "Diretório do espaço de trabalho Hanzo",
+        "es": "Directorio del espacio de trabajo de Hanzo",
         "ar": "مجلد مساحة عمل أوبنديفين",
-        "fr": "Répertoire de l'espace de travail OpenHands",
-        "tr": "OpenHands çalışma alanı dizini",
-        "ja": "OpenHands ワークスペースディレクトリ"
+        "fr": "Répertoire de l'espace de travail Hanzo",
+        "tr": "Hanzo çalışma alanı dizini",
+        "ja": "Hanzo ワークスペースディレクトリ"
     },
     "LLM$PROVIDER": {
         "en": "LLM Provider",
@@ -899,7 +899,7 @@
         "tr": "LLM Modeli",
         "de": "LLM-Modell"
     },
-    "CONFIGURATION$OPENHANDS_WORKSPACE_DIRECTORY_INPUT_PLACEHOLDER": {
+    "CONFIGURATION$HANZO_WORKSPACE_DIRECTORY_INPUT_PLACEHOLDER": {
         "en": "Default: ./workspace",
         "zh-CN": "输入工作区目录路径",
         "de": "Standard: ./workspace",
@@ -1884,19 +1884,19 @@
         "ja": "不変条件アナライザー"
     },
     "INVARIANT$INVARIANT_ANALYZER_MESSAGE": {
-        "en": "Invariant Analyzer continuously monitors your OpenHands agent for security issues.",
-        "es": "Analizador de invariantes continuamente monitorea tu agente de OpenHands por problemas de seguridad.",
-        "zh-CN": "不变量分析器持续监控您的 OpenHands 代理的安全问题。",
-        "zh-TW": "不變量分析器持續監控您的 OpenHands 代理的安全問題。",
-        "ko-KR": "불변성 분석기는 OpenHands 에이전트의 보안 문제를 지속적으로 모니터링합니다.",
-        "no": "Invariant-analysatoren overvåker kontinuerlig OpenHands-agenten din for sikkerhetsproblemer.",
-        "ar": "يراقب محلل الثوابت وكيل OpenHands الخاص بك باستمرار للتحقق من المشاكل الأمنية.",
-        "de": "Der Invarianten-Analysator überwacht kontinuierlich Ihren OpenHands-Agenten auf Sicherheitsprobleme.",
-        "fr": "L'analyseur d'invariants surveille en permanence votre agent OpenHands pour détecter les problèmes de sécurité.",
-        "it": "L'analizzatore di invarianti monitora continuamente il tuo agente OpenHands per problemi di sicurezza.",
-        "pt": "O analisador de invariantes monitora continuamente seu agente OpenHands em busca de problemas de segurança.",
-        "tr": "Değişmez Analizörü, OpenHands ajanınızı güvenlik sorunları için sürekli olarak izler.",
-        "ja": "不変条件アナライザーは、OpenHandsエージェントのセキュリティ問題を継続的に監視します。"
+        "en": "Invariant Analyzer continuously monitors your Hanzo agent for security issues.",
+        "es": "Analizador de invariantes continuamente monitorea tu agente de Hanzo por problemas de seguridad.",
+        "zh-CN": "不变量分析器持续监控您的 Hanzo 代理的安全问题。",
+        "zh-TW": "不變量分析器持續監控您的 Hanzo 代理的安全問題。",
+        "ko-KR": "불변성 분석기는 Hanzo 에이전트의 보안 문제를 지속적으로 모니터링합니다.",
+        "no": "Invariant-analysatoren overvåker kontinuerlig Hanzo-agenten din for sikkerhetsproblemer.",
+        "ar": "يراقب محلل الثوابت وكيل Hanzo الخاص بك باستمرار للتحقق من المشاكل الأمنية.",
+        "de": "Der Invarianten-Analysator überwacht kontinuierlich Ihren Hanzo-Agenten auf Sicherheitsprobleme.",
+        "fr": "L'analyseur d'invariants surveille en permanence votre agent Hanzo pour détecter les problèmes de sécurité.",
+        "it": "L'analizzatore di invarianti monitora continuamente il tuo agente Hanzo per problemi di sicurezza.",
+        "pt": "O analisador de invariantes monitora continuamente seu agente Hanzo em busca de problemas de segurança.",
+        "tr": "Değişmez Analizörü, Hanzo ajanınızı güvenlik sorunları için sürekli olarak izler.",
+        "ja": "不変条件アナライザーは、Hanzoエージェントのセキュリティ問題を継続的に監視します。"
     },
     "INVARIANT$CLICK_TO_LEARN_MORE_LABEL": {
         "en": "Click to learn more",
@@ -2109,18 +2109,18 @@
         "tr": "Hadi inşa etmeye başlayalım!"
     },
     "LANDING$SUBTITLE": {
-        "en": "OpenHands makes it easy to build and maintain software using a simple prompt.",
-        "ja": "OpenHandsは、シンプルなプロンプトを使用してソフトウェアの開発と保守を簡単にします。",
-        "zh-CN": "OpenHands 使用简单的提示来轻松构建和维护软件。",
-        "zh-TW": "OpenHands 使用簡單的提示來輕鬆建構和維護軟體。",
-        "ko-KR": "OpenHands는 간단한 프롬프트를 사용하여 소프트웨어를 쉽게 구축하고 유지관리할 수 있게 해줍니다.",
-        "fr": "OpenHands facilite la construction et la maintenance de logiciels à l'aide d'une invite simple.",
-        "es": "OpenHands facilita la construcción y el mantenimiento de software usando un prompt simple.",
-        "de": "OpenHands macht es einfach, Software mit einem einfachen Prompt zu erstellen und zu warten.",
-        "it": "OpenHands rende facile costruire e mantenere software usando un prompt semplice.",
-        "pt": "OpenHands torna fácil construir e manter software usando um prompt simples.",
-        "ar": "يجعل OpenHands من السهل بناء وصيانة البرمجيات باستخدام موجه بسيط.",
-        "no": "OpenHands gjør det enkelt å bygge og vedlikeholde programvare ved hjelp av en enkel prompt.",
+        "en": "Hanzo makes it easy to build and maintain software using a simple prompt.",
+        "ja": "Hanzoは、シンプルなプロンプトを使用してソフトウェアの開発と保守を簡単にします。",
+        "zh-CN": "Hanzo 使用简单的提示来轻松构建和维护软件。",
+        "zh-TW": "Hanzo 使用簡單的提示來輕鬆建構和維護軟體。",
+        "ko-KR": "Hanzo는 간단한 프롬프트를 사용하여 소프트웨어를 쉽게 구축하고 유지관리할 수 있게 해줍니다.",
+        "fr": "Hanzo facilite la construction et la maintenance de logiciels à l'aide d'une invite simple.",
+        "es": "Hanzo facilita la construcción y el mantenimiento de software usando un prompt simple.",
+        "de": "Hanzo macht es einfach, Software mit einem einfachen Prompt zu erstellen und zu warten.",
+        "it": "Hanzo rende facile costruire e mantenere software usando un prompt semplice.",
+        "pt": "Hanzo torna fácil construir e manter software usando um prompt simples.",
+        "ar": "يجعل Hanzo من السهل بناء وصيانة البرمجيات باستخدام موجه بسيط.",
+        "no": "Hanzo gjør det enkelt å bygge og vedlikeholde programvare ved hjelp av en enkel prompt.",
         "tr": "Yapay zeka destekli yazılım geliştirme"
     },
     "LANDING$START_HELP": {
@@ -2919,17 +2919,17 @@
         "ja": "画像をアップロード"
     },
     "CHAT_INTERFACE$INITIAL_MESSAGE": {
-        "en": "Hi! I'm OpenHands, an AI Software Engineer. What would you like to build with me today?",
-        "zh-CN": "你好！我是 OpenHands，一名 AI 软件工程师。今天想和我一起编写什么程序呢?",
-        "de": "Hi! Ich bin OpenHands, ein KI-Softwareingenieur. Was möchten Sie heute mit mir erstellen?",
-        "ko-KR": "안녕하세요! 저는 오픈데빈(OpenHands), AI 소프트웨어 엔지니어입니다. 오늘은 저와 함께 무엇을 만들어 볼까요?",
-        "no": "Hi! I'm OpenHands, an AI Software Engineer. What would you like to build with me today?",
-        "zh-TW": "嗨！我是 OpenHands，一位人工智慧軟體工程師。你今天想和我一起建造什麼？",
-        "it": "Hi! I'm OpenHands, an AI Software Engineer. What would you like to build with me today?",
-        "pt": "Hi! I'm OpenHands, an AI Software Engineer. What would you like to build with me today?",
-        "es": "Hi! I'm OpenHands, an AI Software Engineer. What would you like to build with me today?",
-        "ar": "مرحبا! أنا OpenHands، مهندس برمجيات AI. ماذا تود أن تبني معي اليوم؟",
-        "fr": "Salut! Je suis OpenHands, un ingénieur logiciel en IA. Que voudriez-vous construire avec moi aujourd'hui?",
+        "en": "Hi! I'm Hanzo, an AI Software Engineer. What would you like to build with me today?",
+        "zh-CN": "你好！我是 Hanzo，一名 AI 软件工程师。今天想和我一起编写什么程序呢?",
+        "de": "Hi! Ich bin Hanzo, ein KI-Softwareingenieur. Was möchten Sie heute mit mir erstellen?",
+        "ko-KR": "안녕하세요! 저는 오픈데빈(Hanzo), AI 소프트웨어 엔지니어입니다. 오늘은 저와 함께 무엇을 만들어 볼까요?",
+        "no": "Hi! I'm Hanzo, an AI Software Engineer. What would you like to build with me today?",
+        "zh-TW": "嗨！我是 Hanzo，一位人工智慧軟體工程師。你今天想和我一起建造什麼？",
+        "it": "Hi! I'm Hanzo, an AI Software Engineer. What would you like to build with me today?",
+        "pt": "Hi! I'm Hanzo, an AI Software Engineer. What would you like to build with me today?",
+        "es": "Hi! I'm Hanzo, an AI Software Engineer. What would you like to build with me today?",
+        "ar": "مرحبا! أنا Hanzo، مهندس برمجيات AI. ماذا تود أن تبني معي اليوم؟",
+        "fr": "Salut! Je suis Hanzo, un ingénieur logiciel en IA. Que voudriez-vous construire avec moi aujourd'hui?",
         "ja": "何を作りたいですか？",
         "tr": "Ne yapmak istersiniz?"
     },
@@ -3834,19 +3834,19 @@
         "tr": "Çalışma zamanına bağlanırken bir hata oluştu. Lütfen sayfayı yenileyin."
     },
     "STATUS$ERROR_LLM_OUT_OF_CREDITS": {
-        "en": "You're out of OpenHands Credits",
-        "ja": "OpenHandsクレジットが不足しています",
-        "zh-CN": "您的OpenHands点数已用完",
-        "zh-TW": "您的OpenHands點數已用完",
-        "ko-KR": "OpenHands 크레딧이 소진되었습니다",
-        "no": "Du er tom for OpenHands-kreditter",
-        "it": "Hai esaurito i crediti OpenHands",
-        "pt": "Você está sem créditos OpenHands",
-        "es": "Te has quedado sin créditos de OpenHands",
-        "ar": "لقد نفدت رصيدك من OpenHands",
-        "fr": "Vous n'avez plus de crédits OpenHands",
-        "tr": "OpenHands kredileriniz tükendi",
-        "de": "Ihre OpenHands-Guthaben sind aufgebraucht"
+        "en": "You're out of Hanzo Credits",
+        "ja": "Hanzoクレジットが不足しています",
+        "zh-CN": "您的Hanzo点数已用完",
+        "zh-TW": "您的Hanzo點數已用完",
+        "ko-KR": "Hanzo 크레딧이 소진되었습니다",
+        "no": "Du er tom for Hanzo-kreditter",
+        "it": "Hai esaurito i crediti Hanzo",
+        "pt": "Você está sem créditos Hanzo",
+        "es": "Te has quedado sin créditos de Hanzo",
+        "ar": "لقد نفدت رصيدك من Hanzo",
+        "fr": "Vous n'avez plus de crédits Hanzo",
+        "tr": "Hanzo kredileriniz tükendi",
+        "de": "Ihre Hanzo-Guthaben sind aufgebraucht"
     },
     "STATUS$ERROR_RUNTIME_DISCONNECTED": {
         "en": "There was an error while connecting to the runtime. Please refresh the page.",
@@ -4341,7 +4341,7 @@
         "ar": "للمتابعة، قم بتوصيل حساب OpenAI أو Anthropic أو حساب LLM آخر",
         "fr": "Pour continuer, connectez un compte OpenAI, Anthropic ou autre LLM",
         "tr": "Devam etmek için bir OpenAI, Anthropic veya başka bir LLM hesabı bağlayın",
-        "de": "Konfigurieren Sie Ihre OpenHands-Umgebung"
+        "de": "Konfigurieren Sie Ihre Hanzo-Umgebung"
     },
     "SETTINGS$WARNING": {
         "en": "Changing settings during an active session will end the session",
@@ -4649,19 +4649,19 @@
         "de": "Guthaben zu Ihrem Konto hinzufügen"
     },
     "BILLING$YOUVE_GOT_50": {
-        "en": "You've got $50 in free OpenHands credits",
-        "ja": "OpenHandsの無料クレジット$50を獲得しました",
-        "zh-CN": "您获得了 $50 的 OpenHands 免费额度",
-        "zh-TW": "您獲得了 $50 的 OpenHands 免費額度",
-        "ko-KR": "OpenHands 무료 크레딧 $50를 받았습니다",
-        "no": "Du har fått $50 i gratis OpenHands-kreditter",
-        "it": "Hai ottenuto $50 in crediti gratuiti OpenHands",
-        "pt": "Você ganhou $50 em créditos gratuitos OpenHands",
-        "es": "Has recibido $50 en créditos gratuitos de OpenHands",
-        "ar": "لديك 50$ من رصيد OpenHands المجاني",
-        "fr": "Vous avez reçu $50 de crédits OpenHands gratuits",
-        "tr": "OpenHands'de $50 ücretsiz kredi kazandınız",
-        "de": "Sie haben $50 in kostenlosen OpenHands-Guthaben erhalten"
+        "en": "You've got $50 in free Hanzo credits",
+        "ja": "Hanzoの無料クレジット$50を獲得しました",
+        "zh-CN": "您获得了 $50 的 Hanzo 免费额度",
+        "zh-TW": "您獲得了 $50 的 Hanzo 免費額度",
+        "ko-KR": "Hanzo 무료 크레딧 $50를 받았습니다",
+        "no": "Du har fått $50 i gratis Hanzo-kreditter",
+        "it": "Hai ottenuto $50 in crediti gratuiti Hanzo",
+        "pt": "Você ganhou $50 em créditos gratuitos Hanzo",
+        "es": "Has recibido $50 en créditos gratuitos de Hanzo",
+        "ar": "لديك 50$ من رصيد Hanzo المجاني",
+        "fr": "Vous avez reçu $50 de crédits Hanzo gratuits",
+        "tr": "Hanzo'de $50 ücretsiz kredi kazandınız",
+        "de": "Sie haben $50 in kostenlosen Hanzo-Guthaben erhalten"
     },
     "BILLING$ERROR_WHILE_CREATING_SESSION": {
         "en": "Error occurred while setting up your payment session. Please try again later.",

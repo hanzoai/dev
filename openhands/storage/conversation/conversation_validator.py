@@ -1,6 +1,6 @@
 import os
 
-from openhands.utils.import_utils import get_impl
+from hanzo.utils.import_utils import get_impl
 
 
 class ConversationValidator:
@@ -11,7 +11,7 @@ class ConversationValidator:
 
 
 conversation_validator_cls = os.environ.get(
-    'OPENHANDS_CONVERSATION_VALIDATOR_CLS',
-    'openhands.storage.conversation.conversation_validator.ConversationValidator',
+    'HANZO_CONVERSATION_VALIDATOR_CLS',
+    'hanzo.storage.conversation.conversation_validator.ConversationValidator',
 )
 ConversationValidatorImpl = get_impl(ConversationValidator, conversation_validator_cls)

@@ -2,7 +2,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import React from "react";
 import { useSelector } from "react-redux";
-import { openHands } from "#/api/open-hands-axios";
+import { hanzo } from "#/api/open-hands-axios";
 import { RUNTIME_INACTIVE_STATES } from "#/types/agent-state";
 import { RootState } from "#/store";
 import { useConversation } from "#/context/conversation-context";
@@ -16,7 +16,7 @@ export const useActiveHost = () => {
   const { data } = useQuery({
     queryKey: [conversationId, "hosts"],
     queryFn: async () => {
-      const response = await openHands.get<{ hosts: string[] }>(
+      const response = await hanzo.get<{ hosts: string[] }>(
         `/api/conversations/${conversationId}/web-hosts`,
       );
       return { hosts: Object.keys(response.data.hosts) };

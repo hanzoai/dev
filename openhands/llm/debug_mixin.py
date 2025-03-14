@@ -1,7 +1,7 @@
 from typing import Any
 
-from openhands.core.logger import llm_prompt_logger, llm_response_logger
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import llm_prompt_logger, llm_response_logger
+from hanzo.core.logger import hanzo_logger as logger
 
 MESSAGE_SEPARATOR = '\n\n----------\n\n'
 

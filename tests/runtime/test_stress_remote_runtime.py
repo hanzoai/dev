@@ -3,9 +3,9 @@
 Example usage:
 
 ```bash
-export ALLHANDS_API_KEY="YOUR_API_KEY"
+export HANZO_API_KEY="YOUR_API_KEY"
 export RUNTIME=remote
-export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.staging.all-hands.dev"
+export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.staging.hanzo.ai"
 poetry run pytest -vvxss tests/runtime/test_stress_remote_runtime.py
 ```
 
@@ -33,27 +33,27 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.agenthub import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from hanzo.agenthub import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AgentConfig,
     AppConfig,
     LLMConfig,
     SandboxConfig,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.main import create_runtime, run_controller
+from hanzo.events.action import (
     CmdRunAction,
     FileEditAction,
     FileWriteAction,
     MessageAction,
 )
-from openhands.events.observation import CmdOutputObservation
-from openhands.events.serialization.event import event_to_dict
-from openhands.llm import LLM
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from hanzo.events.observation import CmdOutputObservation
+from hanzo.events.serialization.event import event_to_dict
+from hanzo.llm import LLM
+from hanzo.runtime.base import Runtime
+from hanzo.utils.async_utils import call_async_from_sync
 
 AGENT_CLS_TO_FAKE_USER_RESPONSE_FN = {
     'CodeActAgent': codeact_user_response,
@@ -62,7 +62,7 @@ AGENT_CLS_TO_FAKE_USER_RESPONSE_FN = {
 
 def get_config() -> AppConfig:
     config = AppConfig(
-        run_as_openhands=False,
+        run_as_hanzo=False,
         runtime=os.environ.get('RUNTIME', 'remote'),
         sandbox=SandboxConfig(
             base_container_image='python:3.11-bookworm',
@@ -70,7 +70,7 @@ def get_config() -> AppConfig:
             use_host_network=False,
             # large enough timeout, since some testcases take very long to run
             timeout=300,
-            api_key=os.environ.get('ALLHANDS_API_KEY', None),
+            api_key=os.environ.get('HANZO_API_KEY', None),
             remote_runtime_api_url=os.environ.get(
                 'SANDBOX_REMOTE_RUNTIME_API_URL', None
             ),
@@ -306,7 +306,7 @@ def test_stress_remote_runtime_long_output_with_soft_and_hard_timeout():
 
             # Check action_execution_server mem
             mem_action = CmdRunAction(
-                'ps aux | awk \'{printf "%8.1f MB  %s\\n", $6/1024, $0}\' | sort -nr | grep "action_execution_server" | grep "/openhands/poetry" | grep -v grep | awk \'{print $1}\''
+                'ps aux | awk \'{printf "%8.1f MB  %s\\n", $6/1024, $0}\' | sort -nr | grep "action_execution_server" | grep "/hanzo/poetry" | grep -v grep | awk \'{print $1}\''
             )
             mem_obs = runtime.run_action(mem_action)
             assert mem_obs.exit_code == 0

@@ -2,9 +2,9 @@ import os
 import subprocess
 import tempfile
 
-from openhands.resolver.interfaces.issue import Issue
-from openhands.resolver.send_pull_request import make_commit
-from openhands.resolver.utils import Platform
+from hanzo.resolver.interfaces.issue import Issue
+from hanzo.resolver.send_pull_request import make_commit
+from hanzo.resolver.utils import Platform
 
 
 def test_commit_message_with_quotes():
@@ -90,7 +90,7 @@ def test_pr_title_with_quotes(monkeypatch):
     monkeypatch.setattr('requests.post', mock_post)
     monkeypatch.setattr('requests.get', lambda *args, **kwargs: MockGetResponse())
     monkeypatch.setattr(
-        'openhands.resolver.interfaces.github.GithubIssueHandler.branch_exists',
+        'hanzo.resolver.interfaces.github.GithubIssueHandler.branch_exists',
         lambda *args, **kwargs: False,
     )
 
@@ -154,7 +154,7 @@ def test_pr_title_with_quotes(monkeypatch):
 
         # Try to send a PR - this will fail if the title is incorrectly escaped
         print('Sending PR...')
-        from openhands.resolver.send_pull_request import send_pull_request
+        from hanzo.resolver.send_pull_request import send_pull_request
 
         send_pull_request(
             issue=issue,

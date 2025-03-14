@@ -13,35 +13,35 @@ from uuid import uuid4
 from pydantic import SecretStr
 from termcolor import colored
 
-import openhands
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig, AppConfig, LLMConfig, SandboxConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.event import Event
-from openhands.events.observation import (
+import hanzo
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig, AppConfig, LLMConfig, SandboxConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.main import create_runtime, run_controller
+from hanzo.events.action import CmdRunAction, MessageAction
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     CmdOutputObservation,
     ErrorObservation,
     Observation,
 )
-from openhands.events.stream import EventStreamSubscriber
-from openhands.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
-from openhands.resolver.interfaces.gitlab import GitlabIssueHandler, GitlabPRHandler
-from openhands.resolver.interfaces.issue import Issue
-from openhands.resolver.interfaces.issue_definitions import (
+from hanzo.events.stream import EventStreamSubscriber
+from hanzo.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
+from hanzo.resolver.interfaces.gitlab import GitlabIssueHandler, GitlabPRHandler
+from hanzo.resolver.interfaces.issue import Issue
+from hanzo.resolver.interfaces.issue_definitions import (
     ServiceContextIssue,
     ServiceContextPR,
 )
-from openhands.resolver.resolver_output import ResolverOutput
-from openhands.resolver.utils import (
+from hanzo.resolver.resolver_output import ResolverOutput
+from hanzo.resolver.utils import (
     Platform,
     codeact_user_response,
     get_unique_uid,
     identify_token,
     reset_logger_for_multiprocessing,
 )
-from openhands.runtime.base import Runtime
+from hanzo.runtime.base import Runtime
 
 # Don't make this confgurable for now, unless we have other competitive agents
 AGENT_CLASS = 'CodeActAgent'
@@ -449,10 +449,10 @@ async def resolve_issue(
     logger.info(f'Base commit: {base_commit}')
 
     if repo_instruction is None:
-        # Check for .openhands_instructions file in the workspace directory
-        openhands_instructions_path = os.path.join(repo_dir, '.openhands_instructions')
-        if os.path.exists(openhands_instructions_path):
-            with open(openhands_instructions_path, 'r') as f:
+        # Check for .hanzo_instructions file in the workspace directory
+        hanzo_instructions_path = os.path.join(repo_dir, '.hanzo_instructions')
+        if os.path.exists(hanzo_instructions_path):
+            with open(hanzo_instructions_path, 'r') as f:
                 repo_instruction = f.read()
 
     # OUTPUT FILE
@@ -635,7 +635,7 @@ def main() -> None:
     runtime_container_image = my_args.runtime_container_image
     if runtime_container_image is None and not my_args.is_experimental:
         runtime_container_image = (
-            f'ghcr.io/all-hands-ai/runtime:{openhands.__version__}-nikolaik'
+            f'ghcr.io/hanzoai/runtime:{hanzo.__version__}'
         )
 
     parts = my_args.repo.rsplit('/', 1)

@@ -2,21 +2,21 @@ from typing import Union
 
 from pydantic import BaseModel, Field
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     Action,
     ChangeAgentStateAction,
     MessageAction,
     NullAction,
 )
-from openhands.events.event import EventSource
-from openhands.events.observation import (
+from hanzo.events.event import EventSource
+from hanzo.events.observation import (
     AgentStateChangedObservation,
     NullObservation,
     Observation,
 )
-from openhands.events.serialization.event import event_to_dict
-from openhands.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
+from hanzo.events.serialization.event import event_to_dict
+from hanzo.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
 
 TraceElement = Union[Message, ToolCall, ToolOutput, Function]
 

@@ -1,8 +1,8 @@
-import { OpenHandsAction } from "./actions";
-import { OpenHandsObservation } from "./observations";
-import { OpenHandsVariance } from "./variances";
+import { HanzoAction } from "./actions";
+import { HanzoObservation } from "./observations";
+import { HanzoVariance } from "./variances";
 
-export type OpenHandsParsedEvent =
-  | OpenHandsAction
-  | OpenHandsObservation
-  | OpenHandsVariance;
+export type HanzoParsedEvent =
+  | HanzoAction
+  | HanzoObservation
+  | HanzoVariance;

@@ -1,12 +1,12 @@
 import asyncio
 
-from openhands.core.config import AppConfig
-from openhands.events.stream import EventStream
-from openhands.runtime import get_runtime_cls
-from openhands.runtime.base import Runtime
-from openhands.security import SecurityAnalyzer, options
-from openhands.storage.files import FileStore
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.core.config import AppConfig
+from hanzo.events.stream import EventStream
+from hanzo.runtime import get_runtime_cls
+from hanzo.runtime.base import Runtime
+from hanzo.security import SecurityAnalyzer, options
+from hanzo.storage.files import FileStore
+from hanzo.utils.async_utils import call_sync_from_async
 
 
 class Conversation:

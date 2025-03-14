@@ -1,7 +1,7 @@
-from openhands.events.action import MessageAction
-from openhands.events.observation import CmdOutputMetadata, CmdOutputObservation
-from openhands.events.serialization import event_from_dict, event_to_dict
-from openhands.llm.metrics import Cost, Metrics, ResponseLatency, TokenUsage
+from hanzo.events.action import MessageAction
+from hanzo.events.observation import CmdOutputMetadata, CmdOutputObservation
+from hanzo.events.serialization import event_from_dict, event_to_dict
+from hanzo.llm.metrics import Cost, Metrics, ResponseLatency, TokenUsage
 
 
 def test_command_output_success_serialization():

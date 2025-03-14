@@ -3,9 +3,9 @@ from enum import Enum
 from pydantic import BaseModel, SecretStr, SerializationInfo, field_serializer
 from pydantic.json import pydantic_encoder
 
-from openhands.integrations.github.github_service import GithubServiceImpl
-from openhands.integrations.gitlab.gitlab_service import GitLabServiceImpl
-from openhands.integrations.service_types import (
+from hanzo.integrations.github.github_service import GithubServiceImpl
+from hanzo.integrations.gitlab.gitlab_service import GitLabServiceImpl
+from hanzo.integrations.service_types import (
     AuthenticationError,
     GitService,
     Repository,

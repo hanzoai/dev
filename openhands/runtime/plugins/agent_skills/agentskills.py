@@ -1,7 +1,7 @@
 from inspect import signature
 
-from openhands.runtime.plugins.agent_skills import file_ops, file_reader
-from openhands.runtime.plugins.agent_skills.utils.dependency import import_functions
+from hanzo.runtime.plugins.agent_skills import file_ops, file_reader
+from hanzo.runtime.plugins.agent_skills.utils.dependency import import_functions
 
 import_functions(
     module=file_ops, function_names=file_ops.__all__, target_globals=globals()
@@ -26,6 +26,6 @@ for func_name in __all__:
 
 
 # Add file_editor (a function)
-from openhands.runtime.plugins.agent_skills.file_editor import file_editor  # noqa: E402
+from hanzo.runtime.plugins.agent_skills.file_editor import file_editor  # noqa: E402
 
 __all__ += ['file_editor']

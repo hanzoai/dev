@@ -16,16 +16,16 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AppConfig,
     get_llm_config_arg,
     parse_arguments,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import MessageAction
-from openhands.utils.async_utils import call_async_from_sync
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.main import create_runtime, run_controller
+from hanzo.events.action import MessageAction
+from hanzo.utils.async_utils import call_async_from_sync
 
 # Only CodeActAgent can delegate to BrowsingAgent
 SUPPORTED_AGENT_CLS = {'CodeActAgent'}
@@ -41,7 +41,7 @@ def get_config(
     sandbox_config.base_container_image = 'python:3.12-bookworm'
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_hanzo=False,
         runtime='docker',
         max_iterations=metadata.max_iterations,
         sandbox=sandbox_config,
@@ -137,7 +137,7 @@ def process_instance(
 if __name__ == '__main__':
     args = parse_arguments()
 
-    dataset = load_dataset('OpenHands/eval-browsing-instructions')
+    dataset = load_dataset('Hanzo/eval-browsing-instructions')
     dataset = dataset['train'].to_pandas()
     assert dataset.columns.tolist() == ['instance_id', 'instruction']
 

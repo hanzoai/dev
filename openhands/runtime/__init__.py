@@ -1,16 +1,16 @@
 from typing import Type
 
-from openhands.runtime.base import Runtime
-from openhands.runtime.impl.daytona.daytona_runtime import DaytonaRuntime
-from openhands.runtime.impl.docker.docker_runtime import (
+from hanzo.runtime.base import Runtime
+from hanzo.runtime.impl.daytona.daytona_runtime import DaytonaRuntime
+from hanzo.runtime.impl.docker.docker_runtime import (
     DockerRuntime,
 )
-from openhands.runtime.impl.e2b.e2b_runtime import E2BRuntime
-from openhands.runtime.impl.local.local_runtime import LocalRuntime
-from openhands.runtime.impl.modal.modal_runtime import ModalRuntime
-from openhands.runtime.impl.remote.remote_runtime import RemoteRuntime
-from openhands.runtime.impl.runloop.runloop_runtime import RunloopRuntime
-from openhands.utils.import_utils import get_impl
+from hanzo.runtime.impl.e2b.e2b_runtime import E2BRuntime
+from hanzo.runtime.impl.local.local_runtime import LocalRuntime
+from hanzo.runtime.impl.modal.modal_runtime import ModalRuntime
+from hanzo.runtime.impl.remote.remote_runtime import RemoteRuntime
+from hanzo.runtime.impl.runloop.runloop_runtime import RunloopRuntime
+from hanzo.utils.import_utils import get_impl
 
 # mypy: disable-error-code="type-abstract"
 _DEFAULT_RUNTIME_CLASSES: dict[str, Type[Runtime]] = {

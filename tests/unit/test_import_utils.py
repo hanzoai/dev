@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 
-from openhands.utils.import_utils import get_impl
+from hanzo.utils.import_utils import get_impl
 
 
 class Shape:

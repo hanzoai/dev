@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from openhands.core.schema import ObservationType
-from openhands.events.event import FileEditSource, FileReadSource
-from openhands.events.observation.observation import Observation
+from hanzo.core.schema import ObservationType
+from hanzo.events.event import FileEditSource, FileReadSource
+from hanzo.events.observation.observation import Observation
 
 
 @dataclass

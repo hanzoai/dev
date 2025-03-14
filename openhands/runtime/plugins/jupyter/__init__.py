@@ -3,13 +3,13 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import Action, IPythonRunCellAction
-from openhands.events.observation import IPythonRunCellObservation
-from openhands.runtime.plugins.jupyter.execute_server import JupyterKernel
-from openhands.runtime.plugins.requirement import Plugin, PluginRequirement
-from openhands.runtime.utils import find_available_tcp_port
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import Action, IPythonRunCellAction
+from hanzo.events.observation import IPythonRunCellObservation
+from hanzo.runtime.plugins.jupyter.execute_server import JupyterKernel
+from hanzo.runtime.plugins.requirement import Plugin, PluginRequirement
+from hanzo.runtime.utils import find_available_tcp_port
+from hanzo.utils.shutdown_listener import should_continue
 
 
 @dataclass
@@ -20,27 +20,27 @@ class JupyterRequirement(PluginRequirement):
 class JupyterPlugin(Plugin):
     name: str = 'jupyter'
 
-    async def initialize(self, username: str, kernel_id: str = 'openhands-default'):
+    async def initialize(self, username: str, kernel_id: str = 'hanzo-default'):
         self.kernel_gateway_port = find_available_tcp_port(40000, 49999)
         self.kernel_id = kernel_id
-        if username in ['root', 'openhands']:
+        if username in ['root', 'hanzo']:
             # Non-LocalRuntime
             prefix = f'su - {username} -s '
             # cd to code repo, setup all env vars and run micromamba
             poetry_prefix = (
-                'cd /openhands/code\n'
-                'export POETRY_VIRTUALENVS_PATH=/openhands/poetry;\n'
-                'export PYTHONPATH=/openhands/code:$PYTHONPATH;\n'
-                'export MAMBA_ROOT_PREFIX=/openhands/micromamba;\n'
-                '/openhands/micromamba/bin/micromamba run -n openhands '
+                'cd /hanzo/code\n'
+                'export POETRY_VIRTUALENVS_PATH=/hanzo/poetry;\n'
+                'export PYTHONPATH=/hanzo/code:$PYTHONPATH;\n'
+                'export MAMBA_ROOT_PREFIX=/hanzo/micromamba;\n'
+                '/hanzo/micromamba/bin/micromamba run -n hanzo '
             )
         else:
             # LocalRuntime
             prefix = ''
-            code_repo_path = os.environ.get('OPENHANDS_REPO_PATH')
+            code_repo_path = os.environ.get('HANZO_REPO_PATH')
             if not code_repo_path:
                 raise ValueError(
-                    'OPENHANDS_REPO_PATH environment variable is not set. '
+                    'HANZO_REPO_PATH environment variable is not set. '
                     'This is required for the jupyter plugin to work with LocalRuntime.'
                 )
             # assert POETRY_VIRTUALENVS_PATH is set

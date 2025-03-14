@@ -6,8 +6,8 @@ from glob import glob
 from e2b import Sandbox as E2BSandbox
 from e2b.exceptions import TimeoutException
 
-from openhands.core.config import SandboxConfig
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.config import SandboxConfig
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class E2BBox:
@@ -20,7 +20,7 @@ class E2BBox:
         self,
         config: SandboxConfig,
         e2b_api_key: str,
-        template: str = 'openhands',
+        template: str = 'hanzo',
     ):
         self.config = copy.deepcopy(config)
         self.initialize_plugins: bool = config.initialize_plugins

@@ -5,26 +5,26 @@ from urllib.parse import urlparse
 import requests
 import tenacity
 
-from openhands.core.config import AppConfig
-from openhands.core.exceptions import (
+from hanzo.core.config import AppConfig
+from hanzo.core.exceptions import (
     AgentRuntimeDisconnectedError,
     AgentRuntimeError,
     AgentRuntimeNotFoundError,
     AgentRuntimeNotReadyError,
     AgentRuntimeUnavailableError,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventStream
-from openhands.runtime.builder.remote import RemoteRuntimeBuilder
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventStream
+from hanzo.runtime.builder.remote import RemoteRuntimeBuilder
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.runtime.utils.request import send_request
-from openhands.runtime.utils.runtime_build import build_runtime_image
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.runtime.utils.request import send_request
+from hanzo.runtime.utils.runtime_build import build_runtime_image
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
 
 class RemoteRuntime(ActionExecutionClient):
@@ -228,7 +228,7 @@ class RemoteRuntime(ActionExecutionClient):
         start_request = {
             'image': self.container_image,
             'command': command,
-            'working_dir': '/openhands/code/',
+            'working_dir': '/hanzo/code/',
             'environment': environment,
             'session_id': self.sid,
             'resource_factor': self.config.sandbox.remote_runtime_resource_factor,

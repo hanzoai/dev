@@ -1,4 +1,4 @@
-from openhands.events.action import (
+from hanzo.events.action import (
     Action,
     AgentFinishAction,
     AgentRejectAction,
@@ -10,9 +10,9 @@ from openhands.events.action import (
     FileWriteAction,
     MessageAction,
 )
-from openhands.events.action.action import ActionConfirmationStatus
-from openhands.events.action.files import FileEditSource, FileReadSource
-from openhands.events.serialization import (
+from hanzo.events.action.action import ActionConfirmationStatus
+from hanzo.events.action.files import FileEditSource, FileReadSource
+from hanzo.events.serialization import (
     event_from_dict,
     event_to_dict,
     event_to_memory,

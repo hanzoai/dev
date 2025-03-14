@@ -1,5 +1,5 @@
-from openhands.events.action.action import Action, ActionConfirmationStatus
-from openhands.events.action.agent import (
+from hanzo.events.action.action import Action, ActionConfirmationStatus
+from hanzo.events.action.agent import (
     AgentDelegateAction,
     AgentFinishAction,
     AgentRejectAction,
@@ -7,15 +7,15 @@ from openhands.events.action.agent import (
     AgentThinkAction,
     ChangeAgentStateAction,
 )
-from openhands.events.action.browse import BrowseInteractiveAction, BrowseURLAction
-from openhands.events.action.commands import CmdRunAction, IPythonRunCellAction
-from openhands.events.action.empty import NullAction
-from openhands.events.action.files import (
+from hanzo.events.action.browse import BrowseInteractiveAction, BrowseURLAction
+from hanzo.events.action.commands import CmdRunAction, IPythonRunCellAction
+from hanzo.events.action.empty import NullAction
+from hanzo.events.action.files import (
     FileEditAction,
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.action.message import MessageAction
+from hanzo.events.action.message import MessageAction
 
 __all__ = [
     'Action',

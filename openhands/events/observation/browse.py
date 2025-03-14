@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 
 from browsergym.utils.obs import flatten_axtree_to_str
 
-from openhands.core.schema import ActionType, ObservationType
-from openhands.events.observation.observation import Observation
+from hanzo.core.schema import ActionType, ObservationType
+from hanzo.events.observation.observation import Observation
 
 
 @dataclass

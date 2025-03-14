@@ -1,5 +1,5 @@
-from openhands.events.event import Event
-from openhands.llm.metrics import Metrics, TokenUsage
+from hanzo.events.event import Event
+from hanzo.llm.metrics import Metrics, TokenUsage
 
 
 def get_token_usage_for_event(event: Event, metrics: Metrics) -> TokenUsage | None:

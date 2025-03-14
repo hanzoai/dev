@@ -2,19 +2,19 @@
 
 ## Overview
 
-OpenHands can be customized to work more effectively with specific repositories by providing repository-specific context
-and guidelines. This section explains how to optimize OpenHands for your project.
+Hanzo can be customized to work more effectively with specific repositories by providing repository-specific context
+and guidelines. This section explains how to optimize Hanzo for your project.
 
 ## Creating a Repository Micro-Agent
 
-You can customize OpenHands' behavior for your repository by creating a `.openhands/microagents/` directory in your repository's root.
+You can customize Hanzo' behavior for your repository by creating a `.hanzo/microagents/` directory in your repository's root.
 At minimum it should contain the file
-`.openhands/microagents/repo.md`, which includes instructions that will
+`.hanzo/microagents/repo.md`, which includes instructions that will
 be given to the agent every time it works with this repository.
 
 ### Repository Microagents Best Practices
 
-- **Keep Instructions Updated**: Regularly update your `.openhands/microagents/` directory as your project evolves.
+- **Keep Instructions Updated**: Regularly update your `.hanzo/microagents/` directory as your project evolves.
 - **Be Specific**: Include specific paths, patterns, and requirements unique to your project.
 - **Document Dependencies**: List all tools and dependencies required for development.
 - **Include Examples**: Provide examples of good code patterns from your project.
@@ -32,7 +32,7 @@ When creating a repository-specific micro-agent, we suggest including the follow
 
 #### 2. Create File
 
-Create a file in your repository under `.openhands/microagents/` (Example: `.openhands/microagents/repo.md`)
+Create a file in your repository under `.hanzo/microagents/` (Example: `.hanzo/microagents/repo.md`)
 
 Update the file with the required frontmatter [according to the required format](./microagents-overview#microagent-format)
 and the required specialized guidelines for your repository.

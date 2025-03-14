@@ -12,7 +12,7 @@ import {
 } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent, { UserEvent } from "@testing-library/user-event";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { AuthProvider } from "#/context/auth-context";
 import SettingsScreen from "#/routes/settings";
 import * as AdvancedSettingsUtlls from "#/utils/has-advanced-settings-set";
@@ -28,9 +28,9 @@ const toggleAdvancedSettings = async (user: UserEvent) => {
 };
 
 describe("Settings Screen", () => {
-  const getSettingsSpy = vi.spyOn(OpenHands, "getSettings");
-  const saveSettingsSpy = vi.spyOn(OpenHands, "saveSettings");
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getSettingsSpy = vi.spyOn(Hanzo, "getSettings");
+  const saveSettingsSpy = vi.spyOn(Hanzo, "saveSettings");
+  const getConfigSpy = vi.spyOn(Hanzo, "getConfig");
 
   const { handleLogoutMock } = vi.hoisted(() => ({
     handleLogoutMock: vi.fn(),

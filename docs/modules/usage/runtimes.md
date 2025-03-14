@@ -1,25 +1,25 @@
 # Runtime Configuration
 
-A Runtime is an environment where the OpenHands agent can edit files and run
+A Runtime is an environment where the Hanzo agent can edit files and run
 commands.
 
-By default, OpenHands uses a Docker-based runtime, running on your local computer.
+By default, Hanzo uses a Docker-based runtime, running on your local computer.
 This means you only have to pay for the LLM you're using, and your code is only ever sent to the LLM.
 
 We also support "remote" runtimes, which are typically managed by third-parties.
 They can make setup a bit simpler and more scalable, especially
-if you're running many OpenHands conversations in parallel (e.g. to do evaluation).
+if you're running many Hanzo conversations in parallel (e.g. to do evaluation).
 
 Additionally, we provide a "local" runtime that runs directly on your machine without Docker,
 which can be useful in controlled environments like CI pipelines.
 
 ## Docker Runtime
-This is the default Runtime that's used when you start OpenHands. You might notice
+This is the default Runtime that's used when you start Hanzo. You might notice
 some flags being passed to `docker run` that make this possible:
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.28-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -36,12 +36,12 @@ One useful feature here is the ability to connect to your local filesystem. To m
     export WORKSPACE_BASE=/path/to/your/code
 
     # Linux and Mac Example
-    # export WORKSPACE_BASE=$HOME/OpenHands
-    # Will set $WORKSPACE_BASE to /home/<username>/OpenHands
+    # export WORKSPACE_BASE=$HOME/Hanzo
+    # Will set $WORKSPACE_BASE to /home/<username>/Hanzo
     #
     # WSL on Windows Example
-    # export WORKSPACE_BASE=/mnt/c/dev/OpenHands
-    # Will set $WORKSPACE_BASE to C:\dev\OpenHands
+    # export WORKSPACE_BASE=/mnt/c/dev/Hanzo
+    # Will set $WORKSPACE_BASE to C:\dev\Hanzo
     ```
 2. Add the following options to the `docker run` command:
 
@@ -53,35 +53,35 @@ One useful feature here is the ability to connect to your local filesystem. To m
         # ...
     ```
 
-Be careful! There's nothing stopping the OpenHands agent from deleting or modifying
+Be careful! There's nothing stopping the Hanzo agent from deleting or modifying
 any files that are mounted into its workspace.
 
 This setup can cause some issues with file permissions (hence the `SANDBOX_USER_ID` variable)
 but seems to work well on most systems.
 
-## OpenHands Remote Runtime
+## Hanzo Remote Runtime
 
-OpenHands Remote Runtime is currently in beta (read [here](https://runtime.all-hands.dev/) for more details), it allows you to launch runtimes in parallel in the cloud.
+Hanzo Remote Runtime is currently in beta (read [here](https://runtime.hanzo.ai/) for more details), it allows you to launch runtimes in parallel in the cloud.
 Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZjCtr7aoBFI2Mwdan3f75J_TrdMS1JV2g/viewform) to apply if you want to try this out!
 
-To use the OpenHands Remote Runtime, set the following environment variables when
-starting OpenHands:
+To use the Hanzo Remote Runtime, set the following environment variables when
+starting Hanzo:
 
 ```bash
 docker run # ...
     -e RUNTIME=remote \
-    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.all-hands.dev" \
+    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
     -e SANDBOX_API_KEY="your-all-hands-api-key" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```
 
 ## Modal Runtime
-Our partners at [Modal](https://modal.com/) have also provided a runtime for OpenHands.
+Our partners at [Modal](https://modal.com/) have also provided a runtime for Hanzo.
 
 To use the Modal Runtime, create an account, and then [create an API key.](https://modal.com/settings)
 
-You'll then need to set the following environment variables when starting OpenHands:
+You'll then need to set the following environment variables when starting Hanzo:
 ```bash
 docker run # ...
     -e RUNTIME=modal \
@@ -105,26 +105,26 @@ Run the following command in your terminal, replacing `<your-api-key>` with the 
 export DAYTONA_API_KEY="<your-api-key>"
 ```
 
-This step ensures that OpenHands can authenticate with the Daytona platform when it runs.
+This step ensures that Hanzo can authenticate with the Daytona platform when it runs.
 
-### Step 3: Run OpenHands Locally Using Docker
-To start the latest version of OpenHands on your machine, execute the following command in your terminal:
+### Step 3: Run Hanzo Locally Using Docker
+To start the latest version of Hanzo on your machine, execute the following command in your terminal:
 ```bash
-bash -i <(curl -sL https://get.daytona.io/openhands)
+bash -i <(curl -sL https://get.daytona.io/hanzo)
 ```
 
 #### What This Command Does:
-- Downloads the latest OpenHands release script.
+- Downloads the latest Hanzo release script.
 - Runs the script in an interactive Bash session.
-- Automatically pulls and runs the OpenHands container using Docker.
+- Automatically pulls and runs the Hanzo container using Docker.
 
-Once executed, OpenHands should be running locally and ready for use.
+Once executed, Hanzo should be running locally and ready for use.
 
-For more details and manual initialization, view the entire [README.md](https://github.com/All-Hands-AI/OpenHands/blob/main/openhands/runtime/impl/daytona/README.md)
+For more details and manual initialization, view the entire [README.md](https://github.com/hanzoai/Hanzo/blob/main/hanzo/runtime/impl/daytona/README.md)
 
 ## Local Runtime
 
-The Local Runtime allows the OpenHands agent to execute actions directly on your local machine without using Docker. This runtime is primarily intended for controlled environments like CI pipelines or testing scenarios where Docker is not available.
+The Local Runtime allows the Hanzo agent to execute actions directly on your local machine without using Docker. This runtime is primarily intended for controlled environments like CI pipelines or testing scenarios where Docker is not available.
 
 :::caution
 **Security Warning**: The Local Runtime runs without any sandbox isolation. The agent can directly access and modify files on your machine. Only use this runtime in controlled environments or when you fully understand the security implications.
@@ -134,12 +134,12 @@ The Local Runtime allows the OpenHands agent to execute actions directly on your
 
 Before using the Local Runtime, ensure you have the following dependencies installed:
 
-1. You have followed the [Development setup instructions](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+1. You have followed the [Development setup instructions](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
 2. tmux is available on your system.
 
 ### Configuration
 
-To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/All-Hands-AI/OpenHands/blob/main/config.template.toml) when starting OpenHands:
+To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml) when starting Hanzo:
 
 - Via environment variables:
 
@@ -163,7 +163,7 @@ If `WORKSPACE_BASE` is not set, the runtime will create a temporary directory fo
 
 ### Example Usage
 
-Here's an example of how to start OpenHands with the Local Runtime in Headless Mode:
+Here's an example of how to start Hanzo with the Local Runtime in Headless Mode:
 
 ```bash
 # Set the runtime type to local
@@ -172,8 +172,8 @@ export RUNTIME=local
 # Optionally set a workspace directory
 export WORKSPACE_BASE=/path/to/your/project
 
-# Start OpenHands
-poetry run python -m openhands.core.main -t "write a bash script that prints hi"
+# Start Hanzo
+poetry run python -m hanzo.core.main -t "write a bash script that prints hi"
 ```
 
 ### Use Cases
@@ -181,6 +181,6 @@ poetry run python -m openhands.core.main -t "write a bash script that prints hi"
 The Local Runtime is particularly useful for:
 
 - CI/CD pipelines where Docker is not available.
-- Testing and development of OpenHands itself.
+- Testing and development of Hanzo itself.
 - Environments where container usage is restricted.
 - Scenarios where direct file system access is required.

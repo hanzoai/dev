@@ -23,10 +23,10 @@ export default function Home(): JSX.Element {
       <div style={{ textAlign: 'center', padding: '0.5rem 2rem 1.5rem' }}>
         <h2>Most Popular Links</h2>
         <ul style={{ listStyleType: 'none'}}>
-          <li><a href="/modules/usage/prompting/microagents-repo">Customizing OpenHands to a repository</a></li>
-          <li><a href="/modules/usage/how-to/github-action">Integrating OpenHands with Github</a></li>
+          <li><a href="/modules/usage/prompting/microagents-repo">Customizing Hanzo to a repository</a></li>
+          <li><a href="/modules/usage/how-to/github-action">Integrating Hanzo with Github</a></li>
           <li><a href="/modules/usage/llms#model-recommendations">Recommended models to use</a></li>
-          <li><a href="/modules/usage/runtimes#connecting-to-your-filesystem">Connecting OpenHands to your filesystem</a></li>
+          <li><a href="/modules/usage/runtimes#connecting-to-your-filesystem">Connecting Hanzo to your filesystem</a></li>
         </ul>
       </div>
     </Layout>

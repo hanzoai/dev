@@ -1,8 +1,8 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 
-from openhands.events.action import Action
-from openhands.events.observation import Observation
+from hanzo.events.action import Action
+from hanzo.events.observation import Observation
 
 
 class Plugin:

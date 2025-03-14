@@ -1,4 +1,4 @@
-# 关于 OpenHands
+# 关于 Hanzo
 
 ## 研究策略
 
@@ -15,12 +15,12 @@
 
 ## 构建技术
 
-OpenHands 使用强大的框架和库组合构建，为其开发提供了坚实的基础。以下是项目中使用的关键技术：
+Hanzo 使用强大的框架和库组合构建，为其开发提供了坚实的基础。以下是项目中使用的关键技术：
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-black?style=for-the-badge) ![uvicorn](https://img.shields.io/badge/uvicorn-black?style=for-the-badge) ![LiteLLM](https://img.shields.io/badge/LiteLLM-black?style=for-the-badge) ![Docker](https://img.shields.io/badge/Docker-black?style=for-the-badge) ![Ruff](https://img.shields.io/badge/Ruff-black?style=for-the-badge) ![MyPy](https://img.shields.io/badge/MyPy-black?style=for-the-badge) ![LlamaIndex](https://img.shields.io/badge/LlamaIndex-black?style=for-the-badge) ![React](https://img.shields.io/badge/React-black?style=for-the-badge)
 
-请注意，这些技术的选择正在进行中，随着项目的发展，可能会添加其他技术或删除现有技术。我们努力采用最合适和最有效的工具来增强 OpenHands 的能力。
+请注意，这些技术的选择正在进行中，随着项目的发展，可能会添加其他技术或删除现有技术。我们努力采用最合适和最有效的工具来增强 Hanzo 的能力。
 
 ## 许可证
 
-根据 MIT [许可证](https://github.com/All-Hands-AI/OpenHands/blob/main/LICENSE) 分发。
+根据 MIT [许可证](https://github.com/hanzoai/Hanzo/blob/main/LICENSE) 分发。

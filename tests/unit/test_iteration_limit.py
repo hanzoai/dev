@@ -2,12 +2,12 @@ import asyncio
 
 import pytest
 
-from openhands.controller.agent_controller import AgentController
-from openhands.core.schema import AgentState
-from openhands.events import EventStream
-from openhands.events.action import MessageAction
-from openhands.events.event import EventSource
-from openhands.llm.metrics import Metrics
+from hanzo.controller.agent_controller import AgentController
+from hanzo.core.schema import AgentState
+from hanzo.events import EventStream
+from hanzo.events.action import MessageAction
+from hanzo.events.event import EventSource
+from hanzo.llm.metrics import Metrics
 
 
 class DummyAgent:
@@ -29,7 +29,7 @@ class DummyAgent:
 @pytest.mark.asyncio
 async def test_iteration_limit_extends_on_user_message():
     # Initialize test components
-    from openhands.storage.memory import InMemoryFileStore
+    from hanzo.storage.memory import InMemoryFileStore
 
     file_store = InMemoryFileStore()
     event_stream = EventStream(sid='test', file_store=file_store)

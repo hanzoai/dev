@@ -1,8 +1,8 @@
-# Getting Started with the OpenHands Frontend
+# Getting Started with the Hanzo Frontend
 
 ## Overview
 
-This is the frontend of the OpenHands project. It is a React application that provides a web interface for the OpenHands project.
+This is the frontend of the Hanzo project. It is a React application that provides a web interface for the Hanzo project.
 
 ## Tech Stack
 
@@ -27,10 +27,10 @@ This is the frontend of the OpenHands project. It is a React application that pr
 
 ```sh
 # Clone the repository
-git clone https://github.com/All-Hands-AI/OpenHands.git
+git clone https://github.com/hanzoai/Hanzo.git
 
 # Change the directory to the frontend
-cd OpenHands/frontend
+cd Hanzo/frontend
 
 # Install the dependencies
 npm install

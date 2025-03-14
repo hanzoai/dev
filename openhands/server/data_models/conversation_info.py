@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from openhands.storage.data_models.conversation_status import ConversationStatus
+from hanzo.storage.data_models.conversation_status import ConversationStatus
 
 
 @dataclass

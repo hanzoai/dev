@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from openhands.core.config.condenser_config import LLMSummarizingCondenserConfig
-from openhands.core.message import Message, TextContent
-from openhands.events.event import Event
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.llm import LLM
-from openhands.memory.condenser.condenser import RollingCondenser
+from hanzo.core.config.condenser_config import LLMSummarizingCondenserConfig
+from hanzo.core.message import Message, TextContent
+from hanzo.events.event import Event
+from hanzo.events.observation.agent import AgentCondensationObservation
+from hanzo.llm import LLM
+from hanzo.memory.condenser.condenser import RollingCondenser
 
 
 class LLMSummarizingCondenser(RollingCondenser):

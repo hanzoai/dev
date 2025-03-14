@@ -1,9 +1,9 @@
 {
-    "name": "openhands-hello-world",
-    "displayName": "OpenHands Hello World",
-    "description": "A simple hello world extension for OpenHands",
+    "name": "hanzo-hello-world",
+    "displayName": "Hanzo Hello World",
+    "description": "A simple hello world extension for Hanzo",
     "version": "0.0.1",
-    "publisher": "openhands",
+    "publisher": "hanzo",
     "engines": {
         "vscode": "^1.94.0"
     },
@@ -11,13 +11,13 @@
         "Other"
     ],
     "activationEvents": [
-        "onCommand:openhands-hello-world.helloWorld"
+        "onCommand:hanzo-hello-world.helloWorld"
     ],
     "main": "./extension.js",
     "contributes": {
         "commands": [{
-            "command": "openhands-hello-world.helloWorld",
-            "title": "Hello World from OpenHands"
+            "command": "hanzo-hello-world.helloWorld",
+            "title": "Hello World from Hanzo"
         }]
     }
 }

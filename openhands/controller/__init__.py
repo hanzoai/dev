@@ -1,4 +1,4 @@
-from openhands.controller.agent_controller import AgentController
+from hanzo.controller.agent_controller import AgentController
 
 __all__ = [
     'AgentController',

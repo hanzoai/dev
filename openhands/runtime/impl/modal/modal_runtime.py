@@ -7,19 +7,19 @@ import modal
 import requests
 import tenacity
 
-from openhands.core.config import AppConfig
-from openhands.events import EventStream
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.core.config import AppConfig
+from hanzo.events import EventStream
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.runtime.utils.runtime_build import (
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.runtime.utils.runtime_build import (
     BuildFromImageType,
     prep_build_folder,
 )
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
 # FIXME: this will not work in HA mode. We need a better way to track IDs
 MODAL_RUNTIME_IDS: dict[str, str] = {}
@@ -38,7 +38,7 @@ class ModalRuntime(ActionExecutionClient):
         env_vars (dict[str, str] | None, optional): Environment variables to set. Defaults to None.
     """
 
-    container_name_prefix = 'openhands-sandbox-'
+    container_name_prefix = 'hanzo-sandbox-'
     sandbox: modal.Sandbox | None
     sid: str
 
@@ -65,7 +65,7 @@ class ModalRuntime(ActionExecutionClient):
             config.modal_api_token_secret.get_secret_value(),
         )
         self.app = modal.App.lookup(
-            'openhands', create_if_missing=True, client=self.modal_client
+            'hanzo', create_if_missing=True, client=self.modal_client
         )
 
         # workspace_base cannot be used because we can't bind mount into a sandbox.
@@ -230,7 +230,7 @@ echo 'export INPUTRC=/etc/inputrc' >> /etc/bash.bashrc
             self.sandbox = modal.Sandbox.create(
                 *sandbox_start_cmd,
                 secrets=[env_secret],
-                workdir='/openhands/code',
+                workdir='/hanzo/code',
                 encrypted_ports=[self.container_port, self._vscode_port],
                 image=self.image,
                 app=self.app,

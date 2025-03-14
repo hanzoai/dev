@@ -27,10 +27,10 @@ if [ -z "$DATA_SPLIT" ]; then
   DATA_SPLIT="gpqa_diamond"
 fi
 
-get_openhands_version
+get_hanzo_version
 
 echo "AGENT: $AGENT"
-echo "OPENHANDS_VERSION: $OPENHANDS_VERSION"
+echo "HANZO_VERSION: $HANZO_VERSION"
 echo "MODEL_CONFIG: $MODEL_CONFIG"
 
 COMMAND="poetry run python evaluation/benchmarks/gpqa/run_infer.py \
@@ -39,7 +39,7 @@ COMMAND="poetry run python evaluation/benchmarks/gpqa/run_infer.py \
   --max-iterations 10 \
   --eval-num-workers $NUM_WORKERS \
   --data-split $DATA_SPLIT \
-  --eval-note $OPENHANDS_VERSION"
+  --eval-note $HANZO_VERSION"
 
 if [ -n "$EVAL_LIMIT" ]; then
   echo "EVAL_LIMIT: $EVAL_LIMIT"

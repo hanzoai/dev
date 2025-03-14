@@ -9,12 +9,12 @@ from zipfile import ZipFile
 
 import requests
 
-from openhands.core.config import AppConfig
-from openhands.core.exceptions import (
+from hanzo.core.config import AppConfig
+from hanzo.core.exceptions import (
     AgentRuntimeTimeoutError,
 )
-from openhands.events import EventStream
-from openhands.events.action import (
+from hanzo.events import EventStream
+from hanzo.events.action import (
     ActionConfirmationStatus,
     AgentThinkAction,
     BrowseInteractiveAction,
@@ -25,21 +25,21 @@ from openhands.events.action import (
     FileWriteAction,
     IPythonRunCellAction,
 )
-from openhands.events.action.action import Action
-from openhands.events.action.files import FileEditSource
-from openhands.events.observation import (
+from hanzo.events.action.action import Action
+from hanzo.events.action.files import FileEditSource
+from hanzo.events.observation import (
     AgentThinkObservation,
     ErrorObservation,
     NullObservation,
     Observation,
     UserRejectObservation,
 )
-from openhands.events.serialization import event_to_dict, observation_from_dict
-from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
-from openhands.runtime.base import Runtime
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils.request import send_request
-from openhands.utils.http_session import HttpSession
+from hanzo.events.serialization import event_to_dict, observation_from_dict
+from hanzo.events.serialization.action import ACTION_TYPE_TO_CLASS
+from hanzo.runtime.base import Runtime
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils.request import send_request
+from hanzo.utils.http_session import HttpSession
 
 
 class ActionExecutionClient(Runtime):

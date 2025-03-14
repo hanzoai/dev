@@ -1,9 +1,9 @@
 # Configuration Options
 
-This guide details all configuration options available for OpenHands, helping you customize its behavior and integrate it with other services.
+This guide details all configuration options available for Hanzo, helping you customize its behavior and integrate it with other services.
 
 :::note
-If you are running in [GUI Mode](https://docs.all-hands.dev/modules/usage/how-to/gui-mode), the settings available in the Settings UI will always
+If you are running in [GUI Mode](https://docs.hanzo.ai/modules/usage/how-to/gui-mode), the settings available in the Settings UI will always
 take precedence.
 :::
 
@@ -119,10 +119,10 @@ The core configuration options are defined in the `[core]` section of the `confi
   - Description: Path to rewrite the workspace mount path to. You can usually ignore this, it refers to special cases of running inside another container.
 
 ### Miscellaneous
-- `run_as_openhands`
+- `run_as_hanzo`
   - Type: `bool`
   - Default: `true`
-  - Description: Run as OpenHands
+  - Description: Run as Hanzo
 
 - `runtime`
   - Type: `str`
@@ -407,4 +407,4 @@ To use these with the docker command, pass in `-e SECURITY_<option>`. Example: `
 ---
 
 > **Note**: Adjust configurations carefully, especially for memory, security, and network-related settings to ensure optimal performance and security.
-Please note that the configuration options may be subject to change in future versions of OpenHands. It's recommended to refer to the official documentation for the most up-to-date information.
+Please note that the configuration options may be subject to change in future versions of Hanzo. It's recommended to refer to the official documentation for the most up-to-date information.

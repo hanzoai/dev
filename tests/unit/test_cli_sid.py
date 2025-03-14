@@ -5,16 +5,16 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openhands.core.cli import main
-from openhands.core.config import AppConfig
-from openhands.core.schema import AgentState
-from openhands.events.event import EventSource
-from openhands.events.observation import AgentStateChangedObservation
+from hanzo.core.cli import main
+from hanzo.core.config import AppConfig
+from hanzo.core.schema import AgentState
+from hanzo.events.event import EventSource
+from hanzo.events.observation import AgentStateChangedObservation
 
 
 @pytest.fixture
 def mock_runtime():
-    with patch('openhands.core.cli.create_runtime') as mock_create_runtime:
+    with patch('hanzo.core.cli.create_runtime') as mock_create_runtime:
         mock_runtime_instance = AsyncMock()
         # Mock the event stream with proper async methods
         mock_runtime_instance.event_stream = AsyncMock()
@@ -30,7 +30,7 @@ def mock_runtime():
 
 @pytest.fixture
 def mock_agent():
-    with patch('openhands.core.cli.create_agent') as mock_create_agent:
+    with patch('hanzo.core.cli.create_agent') as mock_create_agent:
         mock_agent_instance = AsyncMock()
         mock_create_agent.return_value = mock_agent_instance
         yield mock_agent_instance
@@ -38,7 +38,7 @@ def mock_agent():
 
 @pytest.fixture
 def mock_controller():
-    with patch('openhands.core.cli.create_controller') as mock_create_controller:
+    with patch('hanzo.core.cli.create_controller') as mock_create_controller:
         mock_controller_instance = AsyncMock()
         # Mock run_until_done to finish immediately
         mock_controller_instance.run_until_done = AsyncMock(return_value=None)
@@ -56,11 +56,11 @@ def task_file(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def mock_config(task_file: Path):
-    with patch('openhands.core.cli.parse_arguments') as mock_parse_args:
+    with patch('hanzo.core.cli.parse_arguments') as mock_parse_args:
         # Create a proper Namespace with our temporary task file
         args = Namespace(file=str(task_file), task=None, directory=None)
         mock_parse_args.return_value = args
-        with patch('openhands.core.cli.setup_config_from_args') as mock_setup_config:
+        with patch('hanzo.core.cli.setup_config_from_args') as mock_setup_config:
             mock_config = AppConfig()
             mock_setup_config.return_value = mock_config
             yield mock_config

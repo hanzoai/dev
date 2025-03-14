@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openhands.controller.state.state import State
-from openhands.core.config.condenser_config import (
+from hanzo.controller.state.state import State
+from hanzo.core.config.condenser_config import (
     AmortizedForgettingCondenserConfig,
     BrowserOutputCondenserConfig,
     LLMAttentionCondenserConfig,
@@ -14,16 +14,16 @@ from openhands.core.config.condenser_config import (
     ObservationMaskingCondenserConfig,
     RecentEventsCondenserConfig,
 )
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.message import Message, TextContent
-from openhands.events.event import Event, EventSource
-from openhands.events.observation import BrowserOutputObservation
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.events.observation.observation import Observation
-from openhands.llm import LLM
-from openhands.memory.condenser import Condenser
-from openhands.memory.condenser.condenser import RollingCondenser
-from openhands.memory.condenser.impl import (
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.message import Message, TextContent
+from hanzo.events.event import Event, EventSource
+from hanzo.events.observation import BrowserOutputObservation
+from hanzo.events.observation.agent import AgentCondensationObservation
+from hanzo.events.observation.observation import Observation
+from hanzo.llm import LLM
+from hanzo.memory.condenser import Condenser
+from hanzo.memory.condenser.condenser import RollingCondenser
+from hanzo.memory.condenser.impl import (
     AmortizedForgettingCondenser,
     BrowserOutputCondenser,
     ImportantEventSelection,

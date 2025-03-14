@@ -33,7 +33,7 @@ interface LocalUserMessageAction {
   };
 }
 
-export type OpenHandsVariance =
+export type HanzoVariance =
   | TokenConfig
   | InitConfig
   | LocalUserMessageAction;

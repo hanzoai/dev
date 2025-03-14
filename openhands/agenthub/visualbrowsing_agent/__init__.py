@@ -1,6 +1,6 @@
-from openhands.agenthub.visualbrowsing_agent.visualbrowsing_agent import (
+from hanzo.agenthub.visualbrowsing_agent.visualbrowsing_agent import (
     VisualBrowsingAgent,
 )
-from openhands.controller.agent import Agent
+from hanzo.controller.agent import Agent
 
 Agent.register('VisualBrowsingAgent', VisualBrowsingAgent)

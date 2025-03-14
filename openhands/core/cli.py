@@ -5,23 +5,23 @@ from uuid import uuid4
 
 from termcolor import colored
 
-import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
-from openhands.core.config import (
+import hanzo.agenthub  # noqa F401 (we import this to get the agents registered)
+from hanzo.core.config import (
     AppConfig,
     parse_arguments,
     setup_config_from_args,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.loop import run_agent_until_done
-from openhands.core.schema import AgentState
-from openhands.core.setup import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.loop import run_agent_until_done
+from hanzo.core.schema import AgentState
+from hanzo.core.setup import (
     create_agent,
     create_controller,
     create_runtime,
     initialize_repository_for_runtime,
 )
-from openhands.events import EventSource, EventStreamSubscriber
-from openhands.events.action import (
+from hanzo.events import EventSource, EventStreamSubscriber
+from hanzo.events.action import (
     Action,
     ActionConfirmationStatus,
     ChangeAgentStateAction,
@@ -29,13 +29,13 @@ from openhands.events.action import (
     FileEditAction,
     MessageAction,
 )
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     AgentStateChangedObservation,
     CmdOutputObservation,
     FileEditObservation,
 )
-from openhands.io import read_input, read_task
+from hanzo.io import read_input, read_task
 
 
 def display_message(message: str):
@@ -58,7 +58,7 @@ def display_confirmation(confirmation_state: ActionConfirmationStatus):
 def display_command_output(output: str):
     lines = output.split('\n')
     for line in lines:
-        if line.startswith('[Python Interpreter') or line.startswith('openhands@'):
+        if line.startswith('[Python Interpreter') or line.startswith('hanzo@'):
             # TODO: clean this up once we clean up terminal output
             continue
         print(colored(line, 'blue'))

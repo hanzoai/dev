@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openhands.integrations.github.github_service import GitHubService
-from openhands.integrations.service_types import TaskType, User
+from hanzo.integrations.github.github_service import GitHubService
+from hanzo.integrations.service_types import TaskType, User
 
 
 @pytest.mark.asyncio

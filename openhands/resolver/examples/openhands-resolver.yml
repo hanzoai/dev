@@ -1,4 +1,4 @@
-name: Resolve Issue with OpenHands
+name: Resolve Issue with Hanzo
 
 on:
   issues:
@@ -18,12 +18,12 @@ permissions:
   issues: write
 
 jobs:
-  call-openhands-resolver:
-    uses: All-Hands-AI/OpenHands/.github/workflows/openhands-resolver.yml@main
+  call-hanzo-resolver:
+    uses: hanzoai/Hanzo/.github/workflows/hanzo-resolver.yml@main
     with:
-      macro: ${{ vars.OPENHANDS_MACRO || '@openhands-agent' }}
-      max_iterations: ${{ fromJson(vars.OPENHANDS_MAX_ITER || 50) }}
-      base_container_image: ${{ vars.OPENHANDS_BASE_CONTAINER_IMAGE || '' }}
+      macro: ${{ vars.HANZO_MACRO || '@hanzo-agent' }}
+      max_iterations: ${{ fromJson(vars.HANZO_MAX_ITER || 50) }}
+      base_container_image: ${{ vars.HANZO_BASE_CONTAINER_IMAGE || '' }}
       LLM_MODEL: ${{ vars.LLM_MODEL || 'anthropic/claude-3-5-sonnet-20241022' }}
       target_branch: ${{ vars.TARGET_BRANCH || 'main' }}
     secrets:

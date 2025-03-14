@@ -1,4 +1,4 @@
-export type OpenHandsEventType =
+export type HanzoEventType =
   | "message"
   | "agent_state_changed"
   | "run"
@@ -14,21 +14,21 @@ export type OpenHandsEventType =
   | "finish"
   | "error";
 
-interface OpenHandsBaseEvent {
+interface HanzoBaseEvent {
   id: number;
   source: "agent" | "user";
   message: string;
   timestamp: string; // ISO 8601
 }
 
-export interface OpenHandsActionEvent<T extends OpenHandsEventType>
-  extends OpenHandsBaseEvent {
+export interface HanzoActionEvent<T extends HanzoEventType>
+  extends HanzoBaseEvent {
   action: T;
   args: Record<string, unknown>;
 }
 
-export interface OpenHandsObservationEvent<T extends OpenHandsEventType>
-  extends OpenHandsBaseEvent {
+export interface HanzoObservationEvent<T extends HanzoEventType>
+  extends HanzoBaseEvent {
   cause: number;
   observation: T;
   content: string;

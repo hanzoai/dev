@@ -2,12 +2,12 @@
 
 from conftest import _close_test_runtime, _load_runtime
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     BrowseURLAction,
     CmdRunAction,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     BrowserOutputObservation,
     CmdOutputObservation,
 )
@@ -18,8 +18,8 @@ from openhands.events.observation import (
 # ============================================================================================================================
 
 
-def test_simple_browse(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_simple_browse(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
 
     # Test browse
     action_cmd = CmdRunAction(command='python3 -m http.server 8000 > server.log 2>&1 &')

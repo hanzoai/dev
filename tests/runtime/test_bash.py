@@ -10,10 +10,10 @@ from conftest import (
     _load_runtime,
 )
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import CmdRunAction
-from openhands.events.observation import CmdOutputObservation, ErrorObservation
-from openhands.runtime.impl.local.local_runtime import LocalRuntime
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import CmdRunAction
+from hanzo.events.observation import CmdOutputObservation, ErrorObservation
+from hanzo.runtime.impl.local.local_runtime import LocalRuntime
 
 # ============================================================================================================================
 # Bash-specific tests
@@ -29,8 +29,8 @@ def _run_cmd_action(runtime, custom_command: str):
     return obs
 
 
-def test_bash_command_env(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_bash_command_env(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         obs = runtime.run_action(CmdRunAction(command='env'))
         assert isinstance(
@@ -41,8 +41,8 @@ def test_bash_command_env(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_bash_server(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_bash_server(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         action = CmdRunAction(command='python3 -m http.server 8080')
         action.set_hard_timeout(1)
@@ -108,7 +108,7 @@ def test_multiline_commands(temp_dir, runtime_cls):
         _close_test_runtime(runtime)
 
 
-def test_multiple_multiline_commands(temp_dir, runtime_cls, run_as_openhands):
+def test_multiple_multiline_commands(temp_dir, runtime_cls, run_as_hanzo):
     cmds = [
         'ls -l',
         'echo -e "hello\nworld"',
@@ -122,7 +122,7 @@ def test_multiple_multiline_commands(temp_dir, runtime_cls, run_as_openhands):
     ]
     joined_cmds = '\n'.join(cmds)
 
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # First test that running multiple commands at once fails
         obs = _run_cmd_action(runtime, joined_cmds)
@@ -167,9 +167,9 @@ def test_complex_commands(temp_dir, runtime_cls):
         _close_test_runtime(runtime)
 
 
-def test_no_ps2_in_output(temp_dir, runtime_cls, run_as_openhands):
+def test_no_ps2_in_output(temp_dir, runtime_cls, run_as_hanzo):
     """Test that the PS2 sign is not added to the output of a multiline command."""
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         obs = _run_cmd_action(runtime, 'echo -e "hello\nworld"')
         assert obs.exit_code == 0, 'The exit code should be 0.'
@@ -181,7 +181,7 @@ def test_no_ps2_in_output(temp_dir, runtime_cls, run_as_openhands):
 
 
 def test_multiline_command_loop(temp_dir, runtime_cls):
-    # https://github.com/All-Hands-AI/OpenHands/issues/3143
+    # https://github.com/hanzoai/Hanzo/issues/3143
     init_cmd = """mkdir -p _modules && \
 for month in {01..04}; do
     for day in {01..05}; do
@@ -207,8 +207,8 @@ done && echo "success"
         _close_test_runtime(runtime)
 
 
-def test_cmd_run(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_cmd_run(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         obs = _run_cmd_action(
             runtime, f'ls -l {config.workspace_mount_path_in_sandbox}'
@@ -224,10 +224,10 @@ def test_cmd_run(temp_dir, runtime_cls, run_as_openhands):
 
         obs = _run_cmd_action(runtime, 'ls -l')
         assert obs.exit_code == 0
-        if run_as_openhands:
-            assert 'openhands' in obs.content
+        if run_as_hanzo:
+            assert 'hanzo' in obs.content
         elif runtime_cls == LocalRuntime:
-            assert 'root' not in obs.content and 'openhands' not in obs.content
+            assert 'root' not in obs.content and 'hanzo' not in obs.content
         else:
             assert 'root' in obs.content
         assert 'test' in obs.content
@@ -248,15 +248,15 @@ def test_cmd_run(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_run_as_user_correct_home_dir(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_run_as_user_correct_home_dir(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         obs = _run_cmd_action(runtime, 'cd ~ && pwd')
         assert obs.exit_code == 0
         if runtime_cls == LocalRuntime:
             assert os.getenv('HOME') in obs.content
-        elif run_as_openhands:
-            assert '/home/openhands' in obs.content
+        elif run_as_hanzo:
+            assert '/home/hanzo' in obs.content
         else:
             assert '/root' in obs.content
     finally:
@@ -455,19 +455,19 @@ def test_git_operation(temp_dir, runtime_cls):
         use_workspace=False,
         runtime_cls=runtime_cls,
         # Need to use non-root user to expose issues
-        run_as_openhands=True,
+        run_as_hanzo=True,
     )
     # this will happen if permission of runtime is not properly configured
     # fatal: detected dubious ownership in repository at config.workspace_mount_path_in_sandbox
     try:
         if runtime_cls != LocalRuntime:
-            obs = _run_cmd_action(runtime, 'sudo chown -R openhands:root .')
+            obs = _run_cmd_action(runtime, 'sudo chown -R hanzo:root .')
             assert obs.exit_code == 0
 
         # check the ownership of the current directory
         obs = _run_cmd_action(runtime, 'ls -alh .')
         assert obs.exit_code == 0
-        # drwx--S--- 2 openhands root   64 Aug  7 23:32 .
+        # drwx--S--- 2 hanzo root   64 Aug  7 23:32 .
         # drwxr-xr-x 1 root      root 4.0K Aug  7 23:33 ..
         for line in obs.content.split('\n'):
             if runtime_cls == LocalRuntime:
@@ -476,11 +476,11 @@ def test_git_operation(temp_dir, runtime_cls):
             if ' ..' in line:
                 # parent directory should be owned by root
                 assert 'root' in line
-                assert 'openhands' not in line
+                assert 'hanzo' not in line
             elif ' .' in line:
-                # current directory should be owned by openhands
+                # current directory should be owned by hanzo
                 # and its group should be root
-                assert 'openhands' in line
+                assert 'hanzo' in line
                 assert 'root' in line
 
         # make sure all git operations are allowed
@@ -496,7 +496,7 @@ def test_git_operation(temp_dir, runtime_cls):
             logger.info('Setting git config author')
             obs = _run_cmd_action(
                 runtime,
-                'git config --file ./.git_config user.name "openhands" && git config --file ./.git_config user.email "openhands@all-hands.dev"',
+                'git config --file ./.git_config user.name "hanzo" && git config --file ./.git_config user.email "hanzo@hanzo.ai"',
             )
             assert obs.exit_code == 0
 
@@ -521,8 +521,8 @@ def test_git_operation(temp_dir, runtime_cls):
         _close_test_runtime(runtime)
 
 
-def test_python_version(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_python_version(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         obs = runtime.run_action(CmdRunAction(command='python --version'))
 
@@ -535,8 +535,8 @@ def test_python_version(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_pwd_property(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_pwd_property(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Create a subdirectory and verify pwd updates
         obs = _run_cmd_action(runtime, 'mkdir -p random_dir')
@@ -549,8 +549,8 @@ def test_pwd_property(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_basic_command(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_basic_command(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Test simple command
         obs = _run_cmd_action(runtime, "echo 'hello world'")
@@ -577,11 +577,11 @@ def test_basic_command(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_interactive_command(temp_dir, runtime_cls, run_as_openhands):
+def test_interactive_command(temp_dir, runtime_cls, run_as_hanzo):
     runtime, config = _load_runtime(
         temp_dir,
         runtime_cls,
-        run_as_openhands,
+        run_as_hanzo,
         runtime_startup_env_vars={'NO_CHANGE_TIMEOUT_SECONDS': '1'},
     )
     try:
@@ -613,8 +613,8 @@ EOF""")
         _close_test_runtime(runtime)
 
 
-def test_long_output(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_long_output(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Generate a long output
         action = CmdRunAction('for i in $(seq 1 5000); do echo "Line $i"; done')
@@ -627,8 +627,8 @@ def test_long_output(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_long_output_exceed_history_limit(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_long_output_exceed_history_limit(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Generate a long output
         action = CmdRunAction('for i in $(seq 1 50000); do echo "Line $i"; done')
@@ -643,8 +643,8 @@ def test_long_output_exceed_history_limit(temp_dir, runtime_cls, run_as_openhand
         _close_test_runtime(runtime)
 
 
-def test_long_output_from_nested_directories(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_long_output_from_nested_directories(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Create nested directories with many files
         setup_cmd = 'mkdir -p /tmp/test_dir && cd /tmp/test_dir && for i in $(seq 1 100); do mkdir -p "folder_$i"; for j in $(seq 1 100); do touch "folder_$i/file_$j.txt"; done; done'
@@ -668,8 +668,8 @@ def test_long_output_from_nested_directories(temp_dir, runtime_cls, run_as_openh
         _close_test_runtime(runtime)
 
 
-def test_command_backslash(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_command_backslash(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Create a file with the content "implemented_function"
         action = CmdRunAction(
@@ -695,8 +695,8 @@ def test_command_backslash(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_command_output_continuation(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_command_output_continuation(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Start a command that produces output slowly
         action = CmdRunAction('for i in {1..5}; do echo $i; sleep 3; done')
@@ -734,9 +734,9 @@ def test_command_output_continuation(temp_dir, runtime_cls, run_as_openhands):
 
 
 def test_long_running_command_follow_by_execute(
-    temp_dir, runtime_cls, run_as_openhands
+    temp_dir, runtime_cls, run_as_hanzo
 ):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Test command that produces output slowly
         action = CmdRunAction('for i in {1..3}; do echo $i; sleep 3; done')
@@ -776,8 +776,8 @@ def test_long_running_command_follow_by_execute(
         _close_test_runtime(runtime)
 
 
-def test_empty_command_errors(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_empty_command_errors(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Test empty command without previous command
         obs = runtime.run_action(CmdRunAction(''))
@@ -789,8 +789,8 @@ def test_empty_command_errors(temp_dir, runtime_cls, run_as_openhands):
         _close_test_runtime(runtime)
 
 
-def test_python_interactive_input(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_python_interactive_input(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Test Python program that asks for input - properly escaped for bash
         python_script = """name = input('Enter your name: '); age = input('Enter your age: '); print(f'Hello {name}, you are {age} years old')"""
@@ -818,9 +818,9 @@ def test_python_interactive_input(temp_dir, runtime_cls, run_as_openhands):
 
 
 def test_python_interactive_input_without_set_input(
-    temp_dir, runtime_cls, run_as_openhands
+    temp_dir, runtime_cls, run_as_hanzo
 ):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # Test Python program that asks for input - properly escaped for bash
         python_script = """name = input('Enter your name: '); age = input('Enter your age: '); print(f'Hello {name}, you are {age} years old')"""
@@ -857,12 +857,12 @@ def test_python_interactive_input_without_set_input(
 
 
 def test_stress_long_output_with_soft_and_hard_timeout(
-    temp_dir, runtime_cls, run_as_openhands
+    temp_dir, runtime_cls, run_as_hanzo
 ):
     runtime, config = _load_runtime(
         temp_dir,
         runtime_cls,
-        run_as_openhands,
+        run_as_hanzo,
         runtime_startup_env_vars={'NO_CHANGE_TIMEOUT_SECONDS': '1'},
         docker_runtime_kwargs={
             'cpu_period': 100000,  # 100ms
@@ -887,7 +887,7 @@ def test_stress_long_output_with_soft_and_hard_timeout(
 
             # Check action_execution_server mem
             mem_action = CmdRunAction(
-                'ps aux | awk \'{printf "%8.1f KB  %s\\n", $6, $0}\' | sort -nr | grep "action_execution_server" | grep "/openhands/poetry" | grep -v grep | awk \'{print $1}\''
+                'ps aux | awk \'{printf "%8.1f KB  %s\\n", $6, $0}\' | sort -nr | grep "action_execution_server" | grep "/hanzo/poetry" | grep -v grep | awk \'{print $1}\''
             )
             mem_obs = runtime.run_action(mem_action)
             assert mem_obs.exit_code == 0
@@ -946,12 +946,12 @@ def test_stress_long_output_with_soft_and_hard_timeout(
         _close_test_runtime(runtime)
 
 
-def test_bash_remove_prefix(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_bash_remove_prefix(temp_dir, runtime_cls, run_as_hanzo):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     try:
         # create a git repo
         action = CmdRunAction(
-            'git init && git remote add origin https://github.com/All-Hands-AI/OpenHands'
+            'git init && git remote add origin https://github.com/hanzoai/Hanzo'
         )
         obs = runtime.run_action(action)
         # logger.info(obs, extra={'msg_type': 'OBSERVATION'})
@@ -961,7 +961,7 @@ def test_bash_remove_prefix(temp_dir, runtime_cls, run_as_openhands):
         obs = runtime.run_action(CmdRunAction('git remote -v'))
         # logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         assert obs.metadata.exit_code == 0
-        assert 'https://github.com/All-Hands-AI/OpenHands' in obs.content
+        assert 'https://github.com/hanzoai/Hanzo' in obs.content
         assert 'git remote -v' not in obs.content
 
     finally:

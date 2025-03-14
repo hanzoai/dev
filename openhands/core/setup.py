@@ -5,22 +5,22 @@ from typing import Tuple, Type
 
 from pydantic import SecretStr
 
-import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
-from openhands.controller import AgentController
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import (
+import hanzo.agenthub  # noqa F401 (we import this to get the agents registered)
+from hanzo.controller import AgentController
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AppConfig,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventStream
-from openhands.events.event import Event
-from openhands.llm.llm import LLM
-from openhands.microagent.microagent import BaseMicroAgent
-from openhands.runtime import get_runtime_cls
-from openhands.runtime.base import Runtime
-from openhands.security import SecurityAnalyzer, options
-from openhands.storage import get_file_store
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventStream
+from hanzo.events.event import Event
+from hanzo.llm.llm import LLM
+from hanzo.microagent.microagent import BaseMicroAgent
+from hanzo.runtime import get_runtime_cls
+from hanzo.runtime.base import Runtime
+from hanzo.security import SecurityAnalyzer, options
+from hanzo.storage import get_file_store
 
 
 def create_runtime(

@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "test-utils";
 import { GitHubRepositorySelector } from "#/components/features/github/github-repo-selector";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 
 describe("GitHubRepositorySelector", () => {
   const onInputChangeMock = vi.fn();
@@ -24,10 +24,10 @@ describe("GitHubRepositorySelector", () => {
   });
 
   it("should show the GitHub login button in OSS mode", () => {
-    const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+    const getConfigSpy = vi.spyOn(Hanzo, "getConfig");
     getConfigSpy.mockResolvedValue({
       APP_MODE: "oss",
-      APP_SLUG: "openhands",
+      APP_SLUG: "hanzo",
       GITHUB_CLIENT_ID: "test-client-id",
       POSTHOG_CLIENT_KEY: "test-posthog-key",
     });
@@ -59,7 +59,7 @@ describe("GitHubRepositorySelector", () => {
     ];
 
     const searchPublicRepositoriesSpy = vi.spyOn(
-      OpenHands,
+      Hanzo,
       "searchGitHubRepositories",
     );
     searchPublicRepositoriesSpy.mockResolvedValue(mockSearchedRepos);

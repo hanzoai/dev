@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from openhands.core.config import LLMConfig
-from openhands.resolver.interfaces.github import GithubIssueHandler
-from openhands.resolver.interfaces.issue import ReviewThread
-from openhands.resolver.resolver_output import Issue, ResolverOutput
-from openhands.resolver.send_pull_request import (
+from hanzo.core.config import LLMConfig
+from hanzo.resolver.interfaces.github import GithubIssueHandler
+from hanzo.resolver.interfaces.issue import ReviewThread
+from hanzo.resolver.resolver_output import Issue, ResolverOutput
+from hanzo.resolver.send_pull_request import (
     apply_patch,
     initialize_repo,
     load_single_resolver_output,
@@ -18,7 +18,7 @@ from openhands.resolver.send_pull_request import (
     send_pull_request,
     update_existing_pull_request,
 )
-from openhands.resolver.utils import Platform
+from hanzo.resolver.utils import Platform
 
 
 @pytest.fixture
@@ -242,10 +242,10 @@ def test_initialize_repo(mock_output_dir):
         assert f.read() == 'hello world'
 
 
-@patch('openhands.resolver.interfaces.github.GithubIssueHandler.reply_to_comment')
+@patch('hanzo.resolver.interfaces.github.GithubIssueHandler.reply_to_comment')
 @patch('requests.post')
 @patch('subprocess.run')
-@patch('openhands.resolver.send_pull_request.LLM')
+@patch('hanzo.resolver.send_pull_request.LLM')
 def test_update_existing_pull_request(
     mock_llm_class,
     mock_subprocess_run,
@@ -404,7 +404,7 @@ def test_send_pull_request(
     checkout_call, push_call = mock_run.call_args_list
 
     assert checkout_call == call(
-        ['git', '-C', repo_path, 'checkout', '-b', 'openhands-fix-issue-42'],
+        ['git', '-C', repo_path, 'checkout', '-b', 'hanzo-fix-issue-42'],
         capture_output=True,
         text=True,
     )
@@ -415,7 +415,7 @@ def test_send_pull_request(
             repo_path,
             'push',
             'https://test-user:test-token@github.com/test-owner/test-repo.git',
-            'openhands-fix-issue-42',
+            'hanzo-fix-issue-42',
         ],
         capture_output=True,
         text=True,
@@ -425,7 +425,7 @@ def test_send_pull_request(
     if pr_type == 'branch':
         assert (
             result
-            == 'https://github.com/test-owner/test-repo/compare/openhands-fix-issue-42?expand=1'
+            == 'https://github.com/test-owner/test-repo/compare/hanzo-fix-issue-42?expand=1'
         )
         mock_post.assert_not_called()
     else:
@@ -435,7 +435,7 @@ def test_send_pull_request(
         expected_title = pr_title if pr_title else 'Fix issue #42: Test Issue'
         assert post_data['title'] == expected_title
         assert post_data['body'].startswith('This pull request fixes #42.')
-        assert post_data['head'] == 'openhands-fix-issue-42'
+        assert post_data['head'] == 'hanzo-fix-issue-42'
         assert post_data['base'] == (target_branch if target_branch else 'main')
         assert post_data['draft'] == (pr_type == 'draft')
 
@@ -558,7 +558,7 @@ def test_send_pull_request_target_branch_with_fork(
     post_data = mock_post.call_args[1]['json']
     assert post_data['base'] == target_branch  # PR should target the specified branch
     assert (
-        post_data['head'] == 'openhands-fix-issue-42'
+        post_data['head'] == 'hanzo-fix-issue-42'
     )  # Branch name should be standard
 
     # Check that push was to fork
@@ -690,7 +690,7 @@ def test_send_pull_request_git_push_failure(
         repo_path,
         'checkout',
         '-b',
-        'openhands-fix-issue-42',
+        'hanzo-fix-issue-42',
     ]
 
     # Check the git push command
@@ -701,7 +701,7 @@ def test_send_pull_request_git_push_failure(
         repo_path,
         'push',
         'https://test-user:test-token@github.com/test-owner/test-repo.git',
-        'openhands-fix-issue-42',
+        'hanzo-fix-issue-42',
     ]
 
     # Assert that no pull request was created
@@ -764,7 +764,7 @@ def test_reply_to_comment(mock_post, mock_issue):
             'addPullRequestReviewThreadReply': {
                 'comment': {
                     'id': 'test_reply_id',
-                    'body': 'Openhands fix success summary\n\n\nThis is a test reply.',
+                    'body': 'Hanzo fix success summary\n\n\nThis is a test reply.',
                     'createdAt': '2024-10-01T12:34:56Z',
                 }
             }
@@ -790,7 +790,7 @@ def test_reply_to_comment(mock_post, mock_issue):
             """
 
     expected_variables = {
-        'body': 'Openhands fix success summary\n\n\nThis is a test reply.',
+        'body': 'Hanzo fix success summary\n\n\nThis is a test reply.',
         'pullRequestReviewThreadId': comment_id,
     }
 
@@ -808,10 +808,10 @@ def test_reply_to_comment(mock_post, mock_issue):
     mock_response.raise_for_status.assert_called_once()
 
 
-@patch('openhands.resolver.send_pull_request.initialize_repo')
-@patch('openhands.resolver.send_pull_request.apply_patch')
-@patch('openhands.resolver.send_pull_request.update_existing_pull_request')
-@patch('openhands.resolver.send_pull_request.make_commit')
+@patch('hanzo.resolver.send_pull_request.initialize_repo')
+@patch('hanzo.resolver.send_pull_request.apply_patch')
+@patch('hanzo.resolver.send_pull_request.update_existing_pull_request')
+@patch('hanzo.resolver.send_pull_request.make_commit')
 def test_process_single_pr_update(
     mock_make_commit,
     mock_update_existing_pull_request,
@@ -887,10 +887,10 @@ def test_process_single_pr_update(
     )
 
 
-@patch('openhands.resolver.send_pull_request.initialize_repo')
-@patch('openhands.resolver.send_pull_request.apply_patch')
-@patch('openhands.resolver.send_pull_request.send_pull_request')
-@patch('openhands.resolver.send_pull_request.make_commit')
+@patch('hanzo.resolver.send_pull_request.initialize_repo')
+@patch('hanzo.resolver.send_pull_request.apply_patch')
+@patch('hanzo.resolver.send_pull_request.send_pull_request')
+@patch('hanzo.resolver.send_pull_request.make_commit')
 def test_process_single_issue(
     mock_make_commit,
     mock_send_pull_request,
@@ -968,10 +968,10 @@ def test_process_single_issue(
     )
 
 
-@patch('openhands.resolver.send_pull_request.initialize_repo')
-@patch('openhands.resolver.send_pull_request.apply_patch')
-@patch('openhands.resolver.send_pull_request.send_pull_request')
-@patch('openhands.resolver.send_pull_request.make_commit')
+@patch('hanzo.resolver.send_pull_request.initialize_repo')
+@patch('hanzo.resolver.send_pull_request.apply_patch')
+@patch('hanzo.resolver.send_pull_request.send_pull_request')
+@patch('hanzo.resolver.send_pull_request.make_commit')
 def test_process_single_issue_unsuccessful(
     mock_make_commit,
     mock_send_pull_request,
@@ -1026,8 +1026,8 @@ def test_process_single_issue_unsuccessful(
     mock_send_pull_request.assert_not_called()
 
 
-@patch('openhands.resolver.send_pull_request.load_all_resolver_outputs')
-@patch('openhands.resolver.send_pull_request.process_single_issue')
+@patch('hanzo.resolver.send_pull_request.load_all_resolver_outputs')
+@patch('hanzo.resolver.send_pull_request.process_single_issue')
 def test_process_all_successful_issues(
     mock_process_single_issue, mock_load_all_resolver_outputs, mock_llm_config
 ):
@@ -1184,7 +1184,7 @@ def test_send_pull_request_branch_naming(
     checkout_call, push_call = mock_run.call_args_list
 
     assert checkout_call == call(
-        ['git', '-C', repo_path, 'checkout', '-b', 'openhands-fix-issue-42-try3'],
+        ['git', '-C', repo_path, 'checkout', '-b', 'hanzo-fix-issue-42-try3'],
         capture_output=True,
         text=True,
     )
@@ -1195,7 +1195,7 @@ def test_send_pull_request_branch_naming(
             repo_path,
             'push',
             'https://test-user:test-token@github.com/test-owner/test-repo.git',
-            'openhands-fix-issue-42-try3',
+            'hanzo-fix-issue-42-try3',
         ],
         capture_output=True,
         text=True,
@@ -1204,15 +1204,15 @@ def test_send_pull_request_branch_naming(
     # Check the result
     assert (
         result
-        == 'https://github.com/test-owner/test-repo/compare/openhands-fix-issue-42-try3?expand=1'
+        == 'https://github.com/test-owner/test-repo/compare/hanzo-fix-issue-42-try3?expand=1'
     )
 
 
-@patch('openhands.resolver.send_pull_request.argparse.ArgumentParser')
-@patch('openhands.resolver.send_pull_request.process_all_successful_issues')
-@patch('openhands.resolver.send_pull_request.process_single_issue')
-@patch('openhands.resolver.send_pull_request.load_single_resolver_output')
-@patch('openhands.resolver.send_pull_request.identify_token')
+@patch('hanzo.resolver.send_pull_request.argparse.ArgumentParser')
+@patch('hanzo.resolver.send_pull_request.process_all_successful_issues')
+@patch('hanzo.resolver.send_pull_request.process_single_issue')
+@patch('hanzo.resolver.send_pull_request.load_single_resolver_output')
+@patch('hanzo.resolver.send_pull_request.identify_token')
 @patch('os.path.exists')
 @patch('os.getenv')
 def test_main(
@@ -1224,7 +1224,7 @@ def test_main(
     mock_process_all_successful_issues,
     mock_parser,
 ):
-    from openhands.resolver.send_pull_request import main
+    from hanzo.resolver.send_pull_request import main
 
     # Setup mock parser
     mock_args = MagicMock()
@@ -1374,7 +1374,7 @@ def test_make_commit_no_changes(mock_subprocess_run):
     ]
 
     with pytest.raises(
-        RuntimeError, match='ERROR: Openhands failed to make code changes.'
+        RuntimeError, match='ERROR: Hanzo failed to make code changes.'
     ):
         make_commit(repo_dir, issue, 'issue')
 

@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from openhands.resolver.io_utils import load_single_resolver_output
+from hanzo.resolver.io_utils import load_single_resolver_output
 
 
 def visualize_resolver_output(

@@ -1,8 +1,8 @@
-from openhands.storage.files import FileStore
-from openhands.storage.google_cloud import GoogleCloudFileStore
-from openhands.storage.local import LocalFileStore
-from openhands.storage.memory import InMemoryFileStore
-from openhands.storage.s3 import S3FileStore
+from hanzo.storage.files import FileStore
+from hanzo.storage.google_cloud import GoogleCloudFileStore
+from hanzo.storage.local import LocalFileStore
+from hanzo.storage.memory import InMemoryFileStore
+from hanzo.storage.s3 import S3FileStore
 
 
 def get_file_store(file_store: str, file_store_path: str | None = None) -> FileStore:

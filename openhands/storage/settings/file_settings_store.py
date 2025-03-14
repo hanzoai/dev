@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from openhands.core.config.app_config import AppConfig
-from openhands.server.settings import Settings
-from openhands.storage import get_file_store
-from openhands.storage.files import FileStore
-from openhands.storage.settings.settings_store import SettingsStore
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.core.config.app_config import AppConfig
+from hanzo.server.settings import Settings
+from hanzo.storage import get_file_store
+from hanzo.storage.files import FileStore
+from hanzo.storage.settings.settings_store import SettingsStore
+from hanzo.utils.async_utils import call_sync_from_async
 
 
 @dataclass

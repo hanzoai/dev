@@ -1,11 +1,11 @@
 # Requirements
-from openhands.runtime.plugins.agent_skills import (
+from hanzo.runtime.plugins.agent_skills import (
     AgentSkillsPlugin,
     AgentSkillsRequirement,
 )
-from openhands.runtime.plugins.jupyter import JupyterPlugin, JupyterRequirement
-from openhands.runtime.plugins.requirement import Plugin, PluginRequirement
-from openhands.runtime.plugins.vscode import VSCodePlugin, VSCodeRequirement
+from hanzo.runtime.plugins.jupyter import JupyterPlugin, JupyterRequirement
+from hanzo.runtime.plugins.requirement import Plugin, PluginRequirement
+from hanzo.runtime.plugins.vscode import VSCodePlugin, VSCodeRequirement
 
 __all__ = [
     'Plugin',

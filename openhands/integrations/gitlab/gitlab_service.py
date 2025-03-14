@@ -4,14 +4,14 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from openhands.integrations.service_types import (
+from hanzo.integrations.service_types import (
     AuthenticationError,
     GitService,
     Repository,
     UnknownException,
     User,
 )
-from openhands.utils.import_utils import get_impl
+from hanzo.utils.import_utils import get_impl
 
 
 class GitLabService(GitService):
@@ -113,7 +113,7 @@ class GitLabService(GitService):
 
 
 gitlab_service_cls = os.environ.get(
-    'OPENHANDS_GITLAB_SERVICE_CLS',
-    'openhands.integrations.gitlab.gitlab_service.GitLabService',
+    'HANZO_GITLAB_SERVICE_CLS',
+    'hanzo.integrations.gitlab.gitlab_service.GitLabService',
 )
 GitLabServiceImpl = get_impl(GitLabService, gitlab_service_cls)

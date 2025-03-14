@@ -1,6 +1,6 @@
 import boto3
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 def list_foundation_models(

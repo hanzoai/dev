@@ -1,4 +1,4 @@
-from openhands.storage.files import FileStore
+from hanzo.storage.files import FileStore
 
 
 class E2BFileStore(FileStore):

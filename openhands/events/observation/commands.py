@@ -6,9 +6,9 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.schema import ObservationType
-from openhands.events.observation.observation import Observation
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.schema import ObservationType
+from hanzo.events.observation.observation import Observation
 
 CMD_OUTPUT_PS1_BEGIN = '\n###PS1JSON###\n'
 CMD_OUTPUT_PS1_END = '\n###PS1END###'

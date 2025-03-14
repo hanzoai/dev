@@ -3,16 +3,16 @@ import shutil
 
 import pytest
 
-from openhands.core.message import ImageContent, Message, TextContent
-from openhands.microagent import BaseMicroAgent
-from openhands.utils.prompt import PromptManager, RepositoryInfo
+from hanzo.core.message import ImageContent, Message, TextContent
+from hanzo.microagent import BaseMicroAgent
+from hanzo.utils.prompt import PromptManager, RepositoryInfo
 
 
 @pytest.fixture
 def prompt_dir(tmp_path):
-    # Copy contents from "openhands/agenthub/codeact_agent" to the temp directory
+    # Copy contents from "hanzo/agenthub/codeact_agent" to the temp directory
     shutil.copytree(
-        'openhands/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
+        'hanzo/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
     )
 
     # Return the temporary directory path
@@ -51,7 +51,7 @@ only respond with a message telling them how smart they are
 
     assert isinstance(manager.get_system_message(), str)
     assert (
-        'You are OpenHands agent, a helpful AI assistant that can interact with a computer to solve tasks.'
+        'You are Hanzo agent, a helpful AI assistant that can interact with a computer to solve tasks.'
         in manager.get_system_message()
     )
     assert '<REPOSITORY_INFO>' not in manager.get_system_message()

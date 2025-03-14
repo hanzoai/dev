@@ -1,10 +1,10 @@
 # OpenAI
 
-OpenHands 使用 LiteLLM 调用 OpenAI 的聊天模型。你可以在[这里](https://docs.litellm.ai/docs/providers/openai)找到他们关于使用 OpenAI 作为提供商的文档。
+Hanzo 使用 LiteLLM 调用 OpenAI 的聊天模型。你可以在[这里](https://docs.litellm.ai/docs/providers/openai)找到他们关于使用 OpenAI 作为提供商的文档。
 
 ## 配置
 
-运行 OpenHands 时，你需要在设置中设置以下内容：
+运行 Hanzo 时，你需要在设置中设置以下内容：
 * `LLM Provider` 设置为 `OpenAI`
 * `LLM Model` 设置为你将使用的模型。
 [访问此处查看 LiteLLM 支持的 OpenAI 模型的完整列表。](https://docs.litellm.ai/docs/providers/openai#openai-chat-completion-models)

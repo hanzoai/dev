@@ -1,9 +1,9 @@
 {
-    "name": "openhands-memory-monitor",
-    "displayName": "OpenHands Memory Monitor",
+    "name": "hanzo-memory-monitor",
+    "displayName": "Hanzo Memory Monitor",
     "description": "A VSCode extension for monitoring system and process memory usage",
     "version": "0.1.0",
-    "publisher": "openhands",
+    "publisher": "hanzo",
     "engines": {
         "vscode": "^1.94.0"
     },
@@ -18,31 +18,31 @@
     "contributes": {
         "commands": [
             {
-                "command": "openhands-memory-monitor.startMemoryMonitor",
+                "command": "hanzo-memory-monitor.startMemoryMonitor",
                 "title": "Start Memory Monitor"
             },
             {
-                "command": "openhands-memory-monitor.stopMemoryMonitor",
+                "command": "hanzo-memory-monitor.stopMemoryMonitor",
                 "title": "Stop Memory Monitor"
             },
             {
-                "command": "openhands-memory-monitor.showMemoryDetails",
+                "command": "hanzo-memory-monitor.showMemoryDetails",
                 "title": "Show Memory Details"
             }
         ],
         "menus": {
             "commandPalette": [
                 {
-                    "command": "openhands-memory-monitor.startMemoryMonitor",
-                    "group": "OpenHands"
+                    "command": "hanzo-memory-monitor.startMemoryMonitor",
+                    "group": "Hanzo"
                 },
                 {
-                    "command": "openhands-memory-monitor.stopMemoryMonitor",
-                    "group": "OpenHands"
+                    "command": "hanzo-memory-monitor.stopMemoryMonitor",
+                    "group": "Hanzo"
                 },
                 {
-                    "command": "openhands-memory-monitor.showMemoryDetails",
-                    "group": "OpenHands"
+                    "command": "hanzo-memory-monitor.showMemoryDetails",
+                    "group": "Hanzo"
                 }
             ]
         }

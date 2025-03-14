@@ -1,6 +1,6 @@
 # Configurations LLM personnalisées
 
-OpenHands permet de définir plusieurs configurations LLM nommées dans votre fichier `config.toml`. Cette fonctionnalité vous permet d'utiliser différentes configurations LLM pour différents usages, comme utiliser un modèle moins coûteux pour les tâches qui ne nécessitent pas de réponses de haute qualité, ou utiliser différents modèles avec différents paramètres pour des agents spécifiques.
+Hanzo permet de définir plusieurs configurations LLM nommées dans votre fichier `config.toml`. Cette fonctionnalité vous permet d'utiliser différentes configurations LLM pour différents usages, comme utiliser un modèle moins coûteux pour les tâches qui ne nécessitent pas de réponses de haute qualité, ou utiliser différents modèles avec différents paramètres pour des agents spécifiques.
 
 ## Comment ça fonctionne
 
@@ -102,5 +102,5 @@ Dans cet exemple :
 - La configuration par défaut reste disponible pour les autres tâches
 
 :::note
-Les configurations LLM personnalisées ne sont disponibles que lors de l'utilisation d'OpenHands en mode développement, via `main.py` ou `cli.py`. Lors de l'exécution via `docker run`, veuillez utiliser les options de configuration standard.
+Les configurations LLM personnalisées ne sont disponibles que lors de l'utilisation d'Hanzo en mode développement, via `main.py` ou `cli.py`. Lors de l'exécution via `docker run`, veuillez utiliser les options de configuration standard.
 :::

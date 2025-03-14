@@ -1,8 +1,8 @@
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.action import Action
-from openhands.events.action.empty import NullAction
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action.action import Action
+from hanzo.events.action.empty import NullAction
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     CmdOutputObservation,
     NullObservation,
     Observation,

@@ -14,8 +14,8 @@
     ```
     Full CLI API is [here](https://e2b.dev/docs/cli/installation).
 
-## OpenHands sandbox
-You can use the E2B CLI to create a custom sandbox with a Dockerfile. Read the full guide [here](https://e2b.dev/docs/guide/custom-sandbox). The premade OpenHands sandbox for E2B is set up in the [`containers` directory](/containers/e2b-sandbox). and it's called `openhands`.
+## Hanzo sandbox
+You can use the E2B CLI to create a custom sandbox with a Dockerfile. Read the full guide [here](https://e2b.dev/docs/guide/custom-sandbox). The premade Hanzo sandbox for E2B is set up in the [`containers` directory](/containers/e2b-sandbox). and it's called `hanzo`.
 
 ## Debugging
 You can connect to a running E2B sandbox with E2B CLI in your terminal.

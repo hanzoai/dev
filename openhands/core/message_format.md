@@ -1,12 +1,12 @@
-# OpenHands Message Format and litellm Integration
+# Hanzo Message Format and litellm Integration
 
 ## Overview
 
-OpenHands uses its own `Message` class (`openhands/core/message.py`) which provides rich content support while maintaining compatibility with litellm's message handling system.
+Hanzo uses its own `Message` class (`hanzo/core/message.py`) which provides rich content support while maintaining compatibility with litellm's message handling system.
 
 ## Class Structure
 
-Our `Message` class (`openhands/core/message.py`):
+Our `Message` class (`hanzo/core/message.py`):
 
 ```python
 class Message(BaseModel):

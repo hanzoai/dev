@@ -1,8 +1,8 @@
 import uvicorn
 from fastapi import FastAPI, WebSocket
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.utils.shutdown_listener import should_continue
 
 app = FastAPI()
 

@@ -2,26 +2,26 @@ import json
 import os
 from collections import deque
 
-import openhands
-import openhands.agenthub.codeact_agent.function_calling as codeact_function_calling
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.message import Message, TextContent
-from openhands.events.action import (
+import hanzo
+import hanzo.agenthub.codeact_agent.function_calling as codeact_function_calling
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.message import Message, TextContent
+from hanzo.events.action import (
     Action,
     AgentFinishAction,
 )
-from openhands.llm.llm import LLM
-from openhands.memory.condenser import Condenser
-from openhands.memory.conversation_memory import ConversationMemory
-from openhands.runtime.plugins import (
+from hanzo.llm.llm import LLM
+from hanzo.memory.condenser import Condenser
+from hanzo.memory.conversation_memory import ConversationMemory
+from hanzo.runtime.plugins import (
     AgentSkillsRequirement,
     JupyterRequirement,
     PluginRequirement,
 )
-from openhands.utils.prompt import PromptManager
+from hanzo.utils.prompt import PromptManager
 
 
 class CodeActAgent(Agent):
@@ -41,7 +41,7 @@ class CodeActAgent(Agent):
     - Execute any valid Linux `bash` command
     - Execute any valid `Python` code with [an interactive Python interpreter](https://ipython.org/). This is simulated through `bash` command, see plugin system below for more details.
 
-    ![image](https://github.com/All-Hands-AI/OpenHands/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
+    ![image](https://github.com/hanzoai/Hanzo/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
 
     """
 
@@ -78,7 +78,7 @@ class CodeActAgent(Agent):
         )
         self.prompt_manager = PromptManager(
             microagent_dir=os.path.join(
-                os.path.dirname(os.path.dirname(openhands.__file__)),
+                os.path.dirname(os.path.dirname(hanzo.__file__)),
                 'microagents',
             )
             if self.config.enable_prompt_extensions

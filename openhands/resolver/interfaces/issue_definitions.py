@@ -5,15 +5,15 @@ from typing import Any, ClassVar
 
 import jinja2
 
-from openhands.core.config import LLMConfig
-from openhands.events.event import Event
-from openhands.llm.llm import LLM
-from openhands.resolver.interfaces.issue import (
+from hanzo.core.config import LLMConfig
+from hanzo.events.event import Event
+from hanzo.llm.llm import LLM
+from hanzo.resolver.interfaces.issue import (
     Issue,
     IssueHandlerInterface,
     ReviewThread,
 )
-from openhands.resolver.utils import extract_image_urls
+from hanzo.resolver.utils import extract_image_urls
 
 
 class ServiceContext:

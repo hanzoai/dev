@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar
 
-from openhands.events.event import Event
+from hanzo.events.event import Event
 
 
 class ActionConfirmationStatus(str, Enum):

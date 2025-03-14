@@ -1,11 +1,11 @@
 # GUI Mode
 
-OpenHands provides a Graphical User Interface (GUI) mode for interacting with the AI assistant.
+Hanzo provides a Graphical User Interface (GUI) mode for interacting with the AI assistant.
 
 ## Installation and Setup
 
-1. Follow the instructions in the [Installation](../installation) guide to install OpenHands.
-2. After running the command, access OpenHands at [http://localhost:3000](http://localhost:3000).
+1. Follow the instructions in the [Installation](../installation) guide to install Hanzo.
+2. After running the command, access Hanzo at [http://localhost:3000](http://localhost:3000).
 
 ## Interacting with the GUI
 
@@ -19,7 +19,7 @@ OpenHands provides a Graphical User Interface (GUI) mode for interacting with th
 
 ### GitHub Token Setup
 
-OpenHands automatically exports a `GITHUB_TOKEN` to the shell environment if it is available. This can happen in two ways:
+Hanzo automatically exports a `GITHUB_TOKEN` to the shell environment if it is available. This can happen in two ways:
 
 - **Local Installation**: The user directly inputs their GitHub token.
 <details>
@@ -29,7 +29,7 @@ OpenHands automatically exports a `GITHUB_TOKEN` to the shell environment if it 
    - Click `Generate new token (classic)`.
    - Required scopes:
      - `repo` (Full control of private repositories)
-  2. **Enter Token in OpenHands**:
+  2. **Enter Token in Hanzo**:
    - Click the Settings button (gear icon).
    - Navigate to the `GitHub Settings` section.
    - Paste your token in the `GitHub Token` field.
@@ -74,20 +74,20 @@ OpenHands automatically exports a `GITHUB_TOKEN` to the shell environment if it 
      - Check the browser console for any error messages.
 </details>
 
-- **OpenHands Cloud**: The token is obtained through GitHub OAuth authentication.
+- **Hanzo Cloud**: The token is obtained through GitHub OAuth authentication.
 
 <details>
   <summary>OAuth Authentication</summary>
 
-  When using OpenHands Cloud, the GitHub OAuth flow requests the following permissions:
+  When using Hanzo Cloud, the GitHub OAuth flow requests the following permissions:
    - Repository access (read/write)
    - Workflow management
    - Organization read access
 
-  To authenticate OpenHands:
+  To authenticate Hanzo:
    - Click `Sign in with GitHub` when prompted.
    - Review the requested permissions.
-   - Authorize OpenHands to access your GitHub account.
+   - Authorize Hanzo to access your GitHub account.
    - If using an organization, authorize organization access if prompted.
 </details>
 
@@ -110,5 +110,5 @@ OpenHands automatically exports a `GITHUB_TOKEN` to the shell environment if it 
 - Use the workspace panel to explore your project structure.
 - Use one of the recommended models, as described in the [LLMs section](usage/llms/llms.md).
 
-Remember, the GUI mode of OpenHands is designed to make your interaction with the AI assistant as smooth and intuitive
+Remember, the GUI mode of Hanzo is designed to make your interaction with the AI assistant as smooth and intuitive
 as possible. Don't hesitate to explore its features to maximize your productivity.

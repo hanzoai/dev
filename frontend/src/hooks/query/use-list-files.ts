@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSelector } from "react-redux";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { useConversation } from "#/context/conversation-context";
 import { RootState } from "#/store";
 import { RUNTIME_INACTIVE_STATES } from "#/types/agent-state";
@@ -21,7 +21,7 @@ export const useListFiles = (config: UseListFilesConfig = DEFAULT_CONFIG) => {
 
   return useQuery({
     queryKey: ["files", conversationId, config?.path],
-    queryFn: () => OpenHands.getFiles(conversationId, config?.path),
+    queryFn: () => Hanzo.getFiles(conversationId, config?.path),
     enabled: !!(isActive && config?.enabled),
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 15, // 15 minutes

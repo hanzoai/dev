@@ -2,11 +2,11 @@
 
 # Micro-Agents
 
-OpenHands utilise des micro-agents spécialisés pour gérer efficacement des tâches et des contextes spécifiques. Ces micro-agents sont de petits composants ciblés qui fournissent un comportement et des connaissances spécialisés pour des scénarios particuliers.
+Hanzo utilise des micro-agents spécialisés pour gérer efficacement des tâches et des contextes spécifiques. Ces micro-agents sont de petits composants ciblés qui fournissent un comportement et des connaissances spécialisés pour des scénarios particuliers.
 
 ## Aperçu
 
-Les micro-agents sont définis dans des fichiers markdown sous le répertoire `openhands/agenthub/codeact_agent/micro/`. Chaque micro-agent est configuré avec :
+Les micro-agents sont définis dans des fichiers markdown sous le répertoire `hanzo/agenthub/codeact_agent/micro/`. Chaque micro-agent est configuré avec :
 
 - Un nom unique
 - Le type d'agent (généralement CodeActAgent)
@@ -67,7 +67,7 @@ Lorsque vous travaillez avec des micro-agents :
 
 ## Intégration
 
-Les micro-agents sont automatiquement intégrés dans le workflow d'OpenHands. Ils :
+Les micro-agents sont automatiquement intégrés dans le workflow d'Hanzo. Ils :
 - Surveillent les commandes entrantes pour détecter leurs mots-clés déclencheurs
 - S'activent lorsque des déclencheurs pertinents sont détectés
 - Appliquent leurs connaissances et capacités spécialisées
@@ -89,7 +89,7 @@ Pour plus d'informations sur des agents spécifiques, reportez-vous à leurs fic
 
 ## Contribuer un Micro-Agent
 
-Pour contribuer un nouveau micro-agent à OpenHands, suivez ces directives :
+Pour contribuer un nouveau micro-agent à Hanzo, suivez ces directives :
 
 ### 1. Planification de votre Micro-Agent
 
@@ -101,7 +101,7 @@ Avant de créer un micro-agent, considérez :
 
 ### 2. Structure du fichier
 
-Créez un nouveau fichier markdown dans `openhands/agenthub/codeact_agent/micro/` avec un nom descriptif (par ex., `docker.md` pour un agent axé sur Docker).
+Créez un nouveau fichier markdown dans `hanzo/agenthub/codeact_agent/micro/` avec un nom descriptif (par ex., `docker.md` pour un agent axé sur Docker).
 
 ### 3. Composants requis
 
@@ -212,4 +212,4 @@ N'oubliez pas de :
    - La documentation mise à jour si nécessaire
    - La description du but et des capacités de l'agent
 
-N'oubliez pas que les micro-agents sont un moyen puissant d'étendre les capacités d'OpenHands dans des domaines spécifiques. Des agents bien conçus peuvent améliorer significativement la capacité du système à gérer des tâches spécialisées.
+N'oubliez pas que les micro-agents sont un moyen puissant d'étendre les capacités d'Hanzo dans des domaines spécifiques. Des agents bien conçus peuvent améliorer significativement la capacité du système à gérer des tâches spécialisées.

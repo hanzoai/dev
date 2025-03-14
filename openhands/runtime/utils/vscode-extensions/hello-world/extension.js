@@ -1,8 +1,8 @@
 const vscode = require('vscode');
 
 function activate(context) {
-    let disposable = vscode.commands.registerCommand('openhands-hello-world.helloWorld', function () {
-        vscode.window.showInformationMessage('Hello from OpenHands!');
+    let disposable = vscode.commands.registerCommand('hanzo-hello-world.helloWorld', function () {
+        vscode.window.showInformationMessage('Hello from Hanzo!');
     });
 
     context.subscriptions.push(disposable);

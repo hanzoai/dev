@@ -5,8 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
-from openhands.core.logger import LOG_DIR
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import LOG_DIR
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class LLMConfig(BaseModel):
@@ -28,7 +28,7 @@ class LLMConfig(BaseModel):
         max_message_chars: The approximate max number of characters in the content of an event included in the prompt to the LLM. Larger observations are truncated.
         temperature: The temperature for the API.
         top_p: The top p for the API.
-        custom_llm_provider: The custom LLM provider to use. This is undocumented in openhands, and normally not used. It is documented on the litellm side.
+        custom_llm_provider: The custom LLM provider to use. This is undocumented in hanzo, and normally not used. It is documented on the litellm side.
         max_input_tokens: The maximum number of input tokens. Note that this is currently unused, and the value at runtime is actually the total tokens in OpenAI (e.g. 128,000 tokens for GPT-4).
         max_output_tokens: The maximum number of output tokens. This is sent to the LLM.
         input_cost_per_token: The cost per input token. This will available in logs for the user to check.
@@ -52,8 +52,8 @@ class LLMConfig(BaseModel):
     aws_access_key_id: SecretStr | None = Field(default=None)
     aws_secret_access_key: SecretStr | None = Field(default=None)
     aws_region_name: str | None = Field(default=None)
-    openrouter_site_url: str = Field(default='https://docs.all-hands.dev/')
-    openrouter_app_name: str = Field(default='OpenHands')
+    openrouter_site_url: str = Field(default='https://docs.hanzo.ai/')
+    openrouter_app_name: str = Field(default='Hanzo')
     # total wait time: 5 + 10 + 20 + 30 = 65 seconds
     num_retries: int = Field(default=4)
     retry_multiplier: float = Field(default=2)
@@ -164,6 +164,6 @@ class LLMConfig(BaseModel):
 
         # Assign an API version for Azure models
         # While it doesn't seem required, the format supported by the API without version seems old and will likely break.
-        # Azure issue: https://github.com/All-Hands-AI/OpenHands/issues/6777
+        # Azure issue: https://github.com/hanzoai/Hanzo/issues/6777
         if self.model.startswith('azure') and self.api_version is None:
             self.api_version = '2024-08-01-preview'

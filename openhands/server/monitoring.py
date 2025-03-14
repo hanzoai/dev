@@ -1,5 +1,5 @@
-from openhands.core.config.app_config import AppConfig
-from openhands.events.event import Event
+from hanzo.core.config.app_config import AppConfig
+from hanzo.events.event import Event
 
 
 class MonitoringListener:

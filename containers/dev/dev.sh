@@ -2,7 +2,7 @@
 set -o pipefail
 
 function get_docker() {
-    echo "Docker is required to build and run OpenHands."
+    echo "Docker is required to build and run Hanzo."
     echo "https://docs.docker.com/get-started/get-docker/"
     exit 1
 }
@@ -24,15 +24,15 @@ exit_if_indocker
 check_tools
 
 ##
-OPENHANDS_WORKSPACE=$(git rev-parse --show-toplevel)
+HANZO_WORKSPACE=$(git rev-parse --show-toplevel)
 
-cd "$OPENHANDS_WORKSPACE/containers/dev/" || exit 1
+cd "$HANZO_WORKSPACE/containers/dev/" || exit 1
 
 ##
 export BACKEND_HOST="0.0.0.0"
 #
 export SANDBOX_USER_ID=$(id -u)
-export WORKSPACE_BASE=${WORKSPACE_BASE:-$OPENHANDS_WORKSPACE/workspace}
+export WORKSPACE_BASE=${WORKSPACE_BASE:-$HANZO_WORKSPACE/workspace}
 
 docker compose run --rm --service-ports "$@" dev
 

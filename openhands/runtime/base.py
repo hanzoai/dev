@@ -15,11 +15,11 @@ from zipfile import ZipFile
 from pydantic import SecretStr
 from requests.exceptions import ConnectionError
 
-from openhands.core.config import AppConfig, SandboxConfig
-from openhands.core.exceptions import AgentRuntimeDisconnectedError
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventSource, EventStream, EventStreamSubscriber
-from openhands.events.action import (
+from hanzo.core.config import AppConfig, SandboxConfig
+from hanzo.core.exceptions import AgentRuntimeDisconnectedError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventSource, EventStream, EventStreamSubscriber
+from hanzo.events.action import (
     Action,
     ActionConfirmationStatus,
     AgentThinkAction,
@@ -30,8 +30,8 @@ from openhands.events.action import (
     FileWriteAction,
     IPythonRunCellAction,
 )
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     AgentThinkObservation,
     CmdOutputObservation,
     ErrorObservation,
@@ -40,19 +40,19 @@ from openhands.events.observation import (
     Observation,
     UserRejectObservation,
 )
-from openhands.events.serialization.action import ACTION_TYPE_TO_CLASS
-from openhands.integrations.github.github_service import GithubServiceImpl
-from openhands.microagent import (
+from hanzo.events.serialization.action import ACTION_TYPE_TO_CLASS
+from hanzo.integrations.github.github_service import GithubServiceImpl
+from hanzo.microagent import (
     BaseMicroAgent,
     load_microagents_from_dir,
 )
-from openhands.runtime.plugins import (
+from hanzo.runtime.plugins import (
     JupyterRequirement,
     PluginRequirement,
     VSCodeRequirement,
 )
-from openhands.runtime.utils.edit import FileEditRuntimeMixin
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.runtime.utils.edit import FileEditRuntimeMixin
+from hanzo.utils.async_utils import call_sync_from_async
 
 STATUS_MESSAGES = {
     'STATUS$STARTING_RUNTIME': 'Starting runtime...',
@@ -280,7 +280,7 @@ class Runtime(FileEditRuntimeMixin):
         random_str = ''.join(
             random.choices(string.ascii_lowercase + string.digits, k=8)
         )
-        openhands_workspace_branch = f'openhands-workspace-{random_str}'
+        hanzo_workspace_branch = f'hanzo-workspace-{random_str}'
 
         # Clone repository command
         clone_command = f'git clone {url} {dir_name}'
@@ -289,7 +289,7 @@ class Runtime(FileEditRuntimeMixin):
         checkout_command = (
             f'git checkout {selected_branch}'
             if selected_branch
-            else f'git checkout -b {openhands_workspace_branch}'
+            else f'git checkout -b {hanzo_workspace_branch}'
         )
 
         action = CmdRunAction(
@@ -310,36 +310,36 @@ class Runtime(FileEditRuntimeMixin):
 
         loaded_microagents: list[BaseMicroAgent] = []
         workspace_root = Path(self.config.workspace_mount_path_in_sandbox)
-        microagents_dir = workspace_root / '.openhands' / 'microagents'
+        microagents_dir = workspace_root / '.hanzo' / 'microagents'
         repo_root = None
         if selected_repository:
             repo_root = workspace_root / selected_repository.split('/')[-1]
-            microagents_dir = repo_root / '.openhands' / 'microagents'
+            microagents_dir = repo_root / '.hanzo' / 'microagents'
         self.log(
             'info',
             f'Selected repo: {selected_repository}, loading microagents from {microagents_dir} (inside runtime)',
         )
 
         # Legacy Repo Instructions
-        # Check for legacy .openhands_instructions file
+        # Check for legacy .hanzo_instructions file
         obs = self.read(
-            FileReadAction(path=str(workspace_root / '.openhands_instructions'))
+            FileReadAction(path=str(workspace_root / '.hanzo_instructions'))
         )
         if isinstance(obs, ErrorObservation) and repo_root is not None:
             # If the instructions file is not found in the workspace root, try to load it from the repo root
             self.log(
                 'debug',
-                f'.openhands_instructions not present, trying to load from repository {microagents_dir=}',
+                f'.hanzo_instructions not present, trying to load from repository {microagents_dir=}',
             )
             obs = self.read(
-                FileReadAction(path=str(repo_root / '.openhands_instructions'))
+                FileReadAction(path=str(repo_root / '.hanzo_instructions'))
             )
 
         if isinstance(obs, FileReadObservation):
-            self.log('info', 'openhands_instructions microagent loaded.')
+            self.log('info', 'hanzo_instructions microagent loaded.')
             loaded_microagents.append(
                 BaseMicroAgent.load(
-                    path='.openhands_instructions', file_content=obs.content
+                    path='.hanzo_instructions', file_content=obs.content
                 )
             )
 

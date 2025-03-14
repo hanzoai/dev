@@ -1,4 +1,4 @@
-# OpenHands mock server
+# Hanzo mock server
 This is a simple mock server to facilitate development in the frontend.
 
 ## Start the Server

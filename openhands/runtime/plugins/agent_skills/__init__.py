@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from openhands.runtime.plugins.agent_skills import agentskills
-from openhands.runtime.plugins.requirement import Plugin, PluginRequirement
+from hanzo.runtime.plugins.agent_skills import agentskills
+from hanzo.runtime.plugins.requirement import Plugin, PluginRequirement
 
 
 @dataclass

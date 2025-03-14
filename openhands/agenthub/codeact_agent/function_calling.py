@@ -10,7 +10,7 @@ from litellm import (
     ModelResponse,
 )
 
-from openhands.agenthub.codeact_agent.tools import (
+from hanzo.agenthub.codeact_agent.tools import (
     BrowserTool,
     CmdRunTool,
     FinishTool,
@@ -20,11 +20,11 @@ from openhands.agenthub.codeact_agent.tools import (
     ThinkTool,
     WebReadTool,
 )
-from openhands.core.exceptions import (
+from hanzo.core.exceptions import (
     FunctionCallNotExistsError,
     FunctionCallValidationError,
 )
-from openhands.events.action import (
+from hanzo.events.action import (
     Action,
     AgentDelegateAction,
     AgentFinishAction,
@@ -37,8 +37,8 @@ from openhands.events.action import (
     IPythonRunCellAction,
     MessageAction,
 )
-from openhands.events.event import FileEditSource, FileReadSource
-from openhands.events.tool import ToolCallMetadata
+from hanzo.events.event import FileEditSource, FileReadSource
+from hanzo.events.tool import ToolCallMetadata
 
 
 def combine_thought(action: Action, thought: str) -> Action:
@@ -66,7 +66,7 @@ def response_to_actions(response: ModelResponse) -> list[Action]:
                 if msg['type'] == 'text':
                     thought += msg['text']
 
-        # Process each tool call to OpenHands action
+        # Process each tool call to Hanzo action
         for i, tool_call in enumerate(assistant_msg.tool_calls):
             action: Action
             try:

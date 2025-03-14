@@ -1,8 +1,8 @@
-# Configuration Management in OpenHands
+# Configuration Management in Hanzo
 
 ## Overview
 
-OpenHands uses a flexible configuration system that allows settings to be defined through environment variables, TOML files, and command-line arguments. The configuration is managed through a package structure in `openhands/core/config/`.
+Hanzo uses a flexible configuration system that allows settings to be defined through environment variables, TOML files, and command-line arguments. The configuration is managed through a package structure in `hanzo/core/config/`.
 
 ## Configuration Classes
 
@@ -68,7 +68,7 @@ There are also command line args, which may work to override other sources.
 Here's an example of how to use `load_app_config()`:
 
 ````python
-from openhands.core.config import load_app_config
+from hanzo.core.config import load_app_config
 
 # Load all configuration settings
 config = load_app_config()
@@ -88,7 +88,7 @@ By using `load_app_config()`, you ensure that all configuration sources are prop
 
 ## Additional Configuration Methods
 
-While this document focuses on environment variable configuration, OpenHands also supports:
+While this document focuses on environment variable configuration, Hanzo also supports:
 
 - Loading from TOML files
 - Parsing command-line arguments
@@ -97,4 +97,4 @@ These methods are handled by separate functions in the config package.
 
 ## Conclusion
 
-The OpenHands configuration system provides a flexible and type-safe way to manage application settings. By following the naming conventions and utilizing the provided functions, developers can easily customize the behavior of OpenHands components through environment variables and other configuration sources.
+The Hanzo configuration system provides a flexible and type-safe way to manage application settings. By following the naming conventions and utilizing the provided functions, developers can easily customize the behavior of Hanzo components through environment variables and other configuration sources.

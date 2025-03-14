@@ -2,11 +2,11 @@
 
 # Azure
 
-OpenHands utilise LiteLLM pour faire des appels aux modèles de chat d'Azure. Vous pouvez trouver leur documentation sur l'utilisation d'Azure comme fournisseur [ici](https://docs.litellm.ai/docs/providers/azure).
+Hanzo utilise LiteLLM pour faire des appels aux modèles de chat d'Azure. Vous pouvez trouver leur documentation sur l'utilisation d'Azure comme fournisseur [ici](https://docs.litellm.ai/docs/providers/azure).
 
 ## Configuration d'Azure OpenAI
 
-Lorsque vous exécutez OpenHands, vous devrez définir la variable d'environnement suivante en utilisant `-e` dans la
+Lorsque vous exécutez Hanzo, vous devrez définir la variable d'environnement suivante en utilisant `-e` dans la
 [commande docker run](/modules/usage/installation#start-the-app) :
 
 ```
@@ -20,7 +20,7 @@ docker run -it --pull=always \
     ...
 ```
 
-Ensuite, définissez les éléments suivants dans l'interface utilisateur d'OpenHands via les paramètres :
+Ensuite, définissez les éléments suivants dans l'interface utilisateur d'Hanzo via les paramètres :
 
 :::note
 Vous aurez besoin du nom de votre déploiement ChatGPT qui peut être trouvé sur la page des déploiements dans Azure. Il est référencé comme
@@ -34,11 +34,11 @@ Vous aurez besoin du nom de votre déploiement ChatGPT qui peut être trouvé su
 
 ## Embeddings
 
-OpenHands utilise llama-index pour les embeddings. Vous pouvez trouver leur documentation sur Azure [ici](https://docs.llamaindex.ai/en/stable/api_reference/embeddings/azure_openai/).
+Hanzo utilise llama-index pour les embeddings. Vous pouvez trouver leur documentation sur Azure [ici](https://docs.llamaindex.ai/en/stable/api_reference/embeddings/azure_openai/).
 
 ### Configuration d'Azure OpenAI
 
-Lorsque vous exécutez OpenHands, définissez les variables d'environnement suivantes en utilisant `-e` dans la
+Lorsque vous exécutez Hanzo, définissez les variables d'environnement suivantes en utilisant `-e` dans la
 [commande docker run](/modules/usage/installation#start-the-app) :
 
 ```

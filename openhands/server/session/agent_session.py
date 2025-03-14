@@ -5,24 +5,24 @@ from typing import Callable
 
 from pydantic import SecretStr
 
-from openhands.controller import AgentController
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig, AppConfig, LLMConfig
-from openhands.core.exceptions import AgentRuntimeUnavailableError
-from openhands.core.logger import OpenHandsLoggerAdapter
-from openhands.core.schema.agent import AgentState
-from openhands.events.action import ChangeAgentStateAction, MessageAction
-from openhands.events.event import EventSource
-from openhands.events.stream import EventStream
-from openhands.microagent import BaseMicroAgent
-from openhands.runtime import get_runtime_cls
-from openhands.runtime.base import Runtime
-from openhands.runtime.impl.remote.remote_runtime import RemoteRuntime
-from openhands.security import SecurityAnalyzer, options
-from openhands.storage.files import FileStore
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.controller import AgentController
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig, AppConfig, LLMConfig
+from hanzo.core.exceptions import AgentRuntimeUnavailableError
+from hanzo.core.logger import HanzoLoggerAdapter
+from hanzo.core.schema.agent import AgentState
+from hanzo.events.action import ChangeAgentStateAction, MessageAction
+from hanzo.events.event import EventSource
+from hanzo.events.stream import EventStream
+from hanzo.microagent import BaseMicroAgent
+from hanzo.runtime import get_runtime_cls
+from hanzo.runtime.base import Runtime
+from hanzo.runtime.impl.remote.remote_runtime import RemoteRuntime
+from hanzo.security import SecurityAnalyzer, options
+from hanzo.storage.files import FileStore
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.shutdown_listener import should_continue
 
 WAIT_TIME_BEFORE_CLOSE = 90
 WAIT_TIME_BEFORE_CLOSE_INTERVAL = 5
@@ -66,7 +66,7 @@ class AgentSession:
         self.file_store = file_store
         self._status_callback = status_callback
         self.github_user_id = github_user_id
-        self.logger = OpenHandsLoggerAdapter(
+        self.logger = HanzoLoggerAdapter(
             extra={'session_id': sid, 'user_id': github_user_id}
         )
 
@@ -313,7 +313,7 @@ class AgentSession:
             )
 
         msg = (
-            '\n--------------------------------- OpenHands Configuration ---------------------------------\n'
+            '\n--------------------------------- Hanzo Configuration ---------------------------------\n'
             f'LLM: {agent.llm.config.model}\n'
             f'Base URL: {agent.llm.config.base_url}\n'
         )

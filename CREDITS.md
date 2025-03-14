@@ -2,19 +2,19 @@
 
 ## Contributors
 
-We would like to thank all the [contributors](https://github.com/All-Hands-AI/OpenHands/graphs/contributors) who have helped make OpenHands possible. We greatly appreciate your dedication and hard work.
+We would like to thank all the [contributors](https://github.com/hanzoai/Hanzo/graphs/contributors) who have helped make Hanzo possible. We greatly appreciate your dedication and hard work.
 
 ## Open Source Projects
 
-OpenHands includes and adapts the following open source projects. We are grateful for their contributions to the open source community:
+Hanzo includes and adapts the following open source projects. We are grateful for their contributions to the open source community:
 
 #### [SWE Agent](https://github.com/princeton-nlp/swe-agent)
    - License: MIT License
-   - Description: Adapted for use in OpenHands's agent hub
+   - Description: Adapted for use in Hanzo's agent hub
 
 #### [Aider](https://github.com/paul-gauthier/aider)
    - License: Apache License 2.0
-   - Description: AI pair programming tool. OpenHands has adapted and integrated its linter module for code-related tasks in [`agentskills utilities`](https://github.com/All-Hands-AI/OpenHands/tree/main/openhands/runtime/plugins/agent_skills/utils/aider)
+   - Description: AI pair programming tool. Hanzo has adapted and integrated its linter module for code-related tasks in [`agentskills utilities`](https://github.com/hanzoai/Hanzo/tree/main/hanzo/runtime/plugins/agent_skills/utils/aider)
 
 #### [BrowserGym](https://github.com/ServiceNow/BrowserGym)
    - License: Apache License 2.0
@@ -22,7 +22,7 @@ OpenHands includes and adapts the following open source projects. We are gratefu
 
 
 ### Reference Implementations for Evaluation Benchmarks
-OpenHands integrates code of the reference implementations for the following agent evaluation benchmarks:
+Hanzo integrates code of the reference implementations for the following agent evaluation benchmarks:
 
 #### [HumanEval](https://github.com/openai/human-eval)
    - License: MIT License

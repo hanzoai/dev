@@ -1,9 +1,9 @@
 import asyncio
 
-from openhands.controller import AgentController
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.schema import AgentState
-from openhands.runtime.base import Runtime
+from hanzo.controller import AgentController
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.schema import AgentState
+from hanzo.runtime.base import Runtime
 
 
 async def run_agent_until_done(

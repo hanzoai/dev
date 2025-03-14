@@ -1,4 +1,4 @@
-# OpenHands Server
+# Hanzo Server
 
 This is a WebSocket server that executes tasks using an agent.
 
@@ -25,7 +25,7 @@ Next run `poetry shell` (So you don't have to repeat `poetry run`)
 ## Start the Server
 
 ```sh
-uvicorn openhands.server.listen:app --reload --port 3000
+uvicorn hanzo.server.listen:app --reload --port 3000
 ```
 
 ## Test the Server
@@ -105,7 +105,7 @@ This list may grow over time.
 
 ## Server Components
 
-The following section describes the server-side components of the OpenHands project.
+The following section describes the server-side components of the Hanzo project.
 
 ### 1. session/session.py
 

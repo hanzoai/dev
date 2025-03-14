@@ -2,7 +2,7 @@ import argparse
 
 import pandas as pd
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 def verify_instance_costs(row: pd.Series) -> float:
@@ -10,7 +10,7 @@ def verify_instance_costs(row: pd.Series) -> float:
     Verifies that the accumulated_cost matches the sum of individual costs in metrics.
     Also checks for duplicate consecutive costs which might indicate buggy counting.
     If the consecutive costs are identical, the file is affected by this bug:
-    https://github.com/All-Hands-AI/OpenHands/issues/5383
+    https://github.com/hanzoai/Hanzo/issues/5383
 
     Args:
         row: DataFrame row containing instance data with metrics

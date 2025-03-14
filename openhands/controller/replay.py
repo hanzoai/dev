@@ -1,8 +1,8 @@
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.action import Action
-from openhands.events.action.message import MessageAction
-from openhands.events.event import Event, EventSource
-from openhands.events.observation.empty import NullObservation
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action.action import Action
+from hanzo.events.action.message import MessageAction
+from hanzo.events.event import Event, EventSource
+from hanzo.events.observation.empty import NullObservation
 
 
 class ReplayManager:

@@ -1,6 +1,6 @@
-"""File operations module for OpenHands agent.
+"""File operations module for Hanzo agent.
 
-This module provides a collection of file manipulation skills that enable the OpenHands
+This module provides a collection of file manipulation skills that enable the Hanzo
 agent to perform various file operations such as opening, searching, and navigating
 through files and directories.
 
@@ -19,7 +19,7 @@ Note:
 
 import os
 
-from openhands.linter import DefaultLinter, LintResult
+from hanzo.linter import DefaultLinter, LintResult
 
 CURRENT_FILE: str | None = None
 CURRENT_LINE = 1

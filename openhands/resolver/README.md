@@ -1,8 +1,8 @@
-# OpenHands Github & Gitlab Issue Resolver 🙌
+# Hanzo Github & Gitlab Issue Resolver 🙌
 
 Need help resolving a GitHub issue but don't have the time to do it yourself? Let an AI agent help you out!
 
-This tool allows you to use open-source AI agents based on [OpenHands](https://github.com/all-hands-ai/openhands)
+This tool allows you to use open-source AI agents based on [Hanzo](https://github.com/hanzoai/hanzo)
 to attempt to resolve GitHub issues automatically. While it can handle multiple issues, it's primarily designed
 to help you resolve one issue at a time with high quality.
 
@@ -19,7 +19,7 @@ Follow these steps to use this workflow in your own repository:
 
 2. Create an API key for the [Claude API](https://www.anthropic.com/api) (recommended) or another supported LLM service
 
-3. Copy `examples/openhands-resolver.yml` to your repository's `.github/workflows/` directory
+3. Copy `examples/hanzo-resolver.yml` to your repository's `.github/workflows/` directory
 
 4. Configure repository permissions:
     - Go to `Settings -> Actions -> General -> Workflow permissions`
@@ -40,29 +40,29 @@ Follow these steps to use this workflow in your own repository:
 
    Note: You can set these secrets at the organization level to use across multiple repositories.
 
-6. Set up any [custom configurations required](https://docs.all-hands.dev/modules/usage/how-to/github-action#custom-configurations)
+6. Set up any [custom configurations required](https://docs.hanzo.ai/modules/usage/how-to/github-action#custom-configurations)
 
 7. Usage:
-   There are two ways to trigger the OpenHands agent:
+   There are two ways to trigger the Hanzo agent:
 
    a. Using the 'fix-me' label:
       - Add the 'fix-me' label to any issue you want the AI to resolve
       - The agent will consider all comments in the issue thread when resolving
       - The workflow will:
-        1. Attempt to resolve the issue using OpenHands
+        1. Attempt to resolve the issue using Hanzo
         2. Create a draft PR if successful, or push a branch if unsuccessful
         3. Comment on the issue with the results
         4. Remove the 'fix-me' label once processed
 
-   b. Using `@openhands-agent` mention:
-      - Create a new comment containing `@openhands-agent` in any issue
+   b. Using `@hanzo-agent` mention:
+      - Create a new comment containing `@hanzo-agent` in any issue
       - The agent will only consider the comment where it's mentioned
       - The workflow will:
         1. Attempt to resolve the issue based on the specific comment
         2. Create a draft PR if successful, or push a branch if unsuccessful
         3. Comment on the issue with the results
 
-Need help? Feel free to [open an issue](https://github.com/all-hands-ai/openhands/issues) or email us at [contact@all-hands.dev](mailto:contact@all-hands.dev).
+Need help? Feel free to [open an issue](https://github.com/hanzoai/hanzo/issues) or email us at [contact@hanzo.ai](mailto:contact@hanzo.ai).
 
 ## Manual Installation
 
@@ -71,7 +71,7 @@ If you prefer to run the resolver programmatically instead of using GitHub Actio
 1. Install the package:
 
 ```bash
-pip install openhands-ai
+pip install hanzo-ai
 ```
 
 2. Create a GitHub or GitLab access token:
@@ -114,20 +114,20 @@ export LLM_API_KEY="your-llm-api-key"
 export LLM_BASE_URL="your-api-url"  # Optional, for API proxies
 ```
 
-Note: OpenHands works best with powerful models like Anthropic's Claude or OpenAI's GPT-4. While other models are supported, they may not perform as well for complex issue resolution.
+Note: Hanzo works best with powerful models like Anthropic's Claude or OpenAI's GPT-4. While other models are supported, they may not perform as well for complex issue resolution.
 
 ## Resolving Issues
 
 The resolver can automatically attempt to fix a single issue in your repository using the following command:
 
 ```bash
-python -m openhands.resolver.resolve_issue --repo [OWNER]/[REPO] --issue-number [NUMBER]
+python -m hanzo.resolver.resolve_issue --repo [OWNER]/[REPO] --issue-number [NUMBER]
 ```
 
 For instance, if you want to resolve issue #100 in this repo, you would run:
 
 ```bash
-python -m openhands.resolver.resolve_issue --repo all-hands-ai/openhands --issue-number 100
+python -m hanzo.resolver.resolve_issue --repo hanzoai/hanzo --issue-number 100
 ```
 
 The output will be written to the `output/` directory.
@@ -135,19 +135,19 @@ The output will be written to the `output/` directory.
 If you've installed the package from source using poetry, you can use:
 
 ```bash
-poetry run python openhands/resolver/resolve_issue.py --repo all-hands-ai/openhands --issue-number 100
+poetry run python hanzo/resolver/resolve_issue.py --repo hanzoai/hanzo --issue-number 100
 ```
 
 For resolving multiple issues at once (e.g., in a batch process), you can use the `resolve_all_issues` command:
 
 ```bash
-python -m openhands.resolver.resolve_all_issues --repo [OWNER]/[REPO] --issue-numbers [NUMBERS]
+python -m hanzo.resolver.resolve_all_issues --repo [OWNER]/[REPO] --issue-numbers [NUMBERS]
 ```
 
 For example:
 
 ```bash
-python -m openhands.resolver.resolve_all_issues --repo all-hands-ai/openhands --issue-numbers 100,101,102
+python -m hanzo.resolver.resolve_all_issues --repo hanzoai/hanzo --issue-numbers 100,101,102
 ```
 
 ## Responding to PR Comments
@@ -155,7 +155,7 @@ python -m openhands.resolver.resolve_all_issues --repo all-hands-ai/openhands --
 The resolver can also respond to comments on pull requests using:
 
 ```bash
-python -m openhands.resolver.send_pull_request --issue-number PR_NUMBER --issue-type pr
+python -m hanzo.resolver.send_pull_request --issue-number PR_NUMBER --issue-type pr
 ```
 
 This functionality is available both through the GitHub Actions workflow and when running the resolver locally.
@@ -171,7 +171,7 @@ grep '"success":true' output/output.jsonl | sed 's/.*\("number":[0-9]*\).*/\1/g'
 Then you can go through and visualize the ones you'd like.
 
 ```bash
-python -m openhands.resolver.visualize_resolver_output --issue-number ISSUE_NUMBER --vis-method json
+python -m hanzo.resolver.visualize_resolver_output --issue-number ISSUE_NUMBER --vis-method json
 ```
 
 ## Uploading PRs
@@ -184,20 +184,20 @@ There are three ways you can upload:
 3. `ready` - create a non-draft PR that's ready for review
 
 ```bash
-python -m openhands.resolver.send_pull_request --issue-number ISSUE_NUMBER --username YOUR_GITHUB_OR_GITLAB_USERNAME --pr-type draft
+python -m hanzo.resolver.send_pull_request --issue-number ISSUE_NUMBER --username YOUR_GITHUB_OR_GITLAB_USERNAME --pr-type draft
 ```
 
 If you want to upload to a fork, you can do so by specifying the `fork-owner`:
 
 ```bash
-python -m openhands.resolver.send_pull_request --issue-number ISSUE_NUMBER --username YOUR_GITHUB_OR_GITLAB_USERNAME --pr-type draft --fork-owner YOUR_GITHUB_OR_GITLAB_USERNAME
+python -m hanzo.resolver.send_pull_request --issue-number ISSUE_NUMBER --username YOUR_GITHUB_OR_GITLAB_USERNAME --pr-type draft --fork-owner YOUR_GITHUB_OR_GITLAB_USERNAME
 ```
 
 ## Providing Custom Instructions
 
-You can customize how the AI agent approaches issue resolution by adding a `.openhands_instructions` file to the root of your repository. If present, this file's contents will be injected into the prompt for openhands edits.
+You can customize how the AI agent approaches issue resolution by adding a `.hanzo_instructions` file to the root of your repository. If present, this file's contents will be injected into the prompt for hanzo edits.
 
 ## Troubleshooting
 
 If you have any issues, please open an issue on this github or gitlab repo, we're happy to help!
-Alternatively, you can [email us](mailto:contact@all-hands.dev) or join the OpenHands Slack workspace (see [the README](/README.md) for an invite link).
+Alternatively, you can [email us](mailto:contact@hanzo.ai) or join the Hanzo Slack workspace (see [the README](/README.md) for an invite link).

@@ -1,8 +1,8 @@
 from pydantic import SecretStr
 
-from openhands.integrations.github.github_service import GitHubService
-from openhands.integrations.gitlab.gitlab_service import GitLabService
-from openhands.integrations.provider import ProviderType
+from hanzo.integrations.github.github_service import GitHubService
+from hanzo.integrations.gitlab.gitlab_service import GitLabService
+from hanzo.integrations.provider import ProviderType
 
 
 async def validate_provider_token(token: SecretStr) -> ProviderType | None:

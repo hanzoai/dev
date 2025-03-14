@@ -1,22 +1,22 @@
 from typing import Callable
 
-from openhands.core.config import AppConfig
-from openhands.events.action import (
+from hanzo.core.config import AppConfig
+from hanzo.events.action import (
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     ErrorObservation,
     FileReadObservation,
     FileWriteObservation,
     Observation,
 )
-from openhands.events.stream import EventStream
-from openhands.runtime.base import Runtime
-from openhands.runtime.impl.e2b.filestore import E2BFileStore
-from openhands.runtime.impl.e2b.sandbox import E2BSandbox
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils.files import insert_lines, read_lines
+from hanzo.events.stream import EventStream
+from hanzo.runtime.base import Runtime
+from hanzo.runtime.impl.e2b.filestore import E2BFileStore
+from hanzo.runtime.impl.e2b.sandbox import E2BSandbox
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils.files import insert_lines, read_lines
 
 
 class E2BRuntime(Runtime):

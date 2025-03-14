@@ -1,4 +1,4 @@
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { downloadWorkspace } from "./download-workspace";
 
 interface DownloadProgress {
@@ -51,7 +51,7 @@ async function getAllFiles(
   progress: DownloadProgress,
   options?: DownloadOptions,
 ): Promise<string[]> {
-  const entries = await OpenHands.getFiles(conversationID, path);
+  const entries = await Hanzo.getFiles(conversationID, path);
 
   const processEntry = async (entry: string): Promise<string[]> => {
     if (options?.signal?.aborted) {
@@ -60,7 +60,7 @@ async function getAllFiles(
 
     const fullPath = path + entry;
     if (entry.endsWith("/")) {
-      const subEntries = await OpenHands.getFiles(conversationID, fullPath);
+      const subEntries = await Hanzo.getFiles(conversationID, fullPath);
       const subFilesPromises = subEntries.map((subEntry) =>
         processEntry(subEntry),
       );
@@ -120,7 +120,7 @@ async function processBatch(
         };
         options?.onProgress?.(newProgress);
 
-        const content = await OpenHands.getFile(conversationID, path);
+        const content = await Hanzo.getFile(conversationID, path);
 
         // Save to the selected directory preserving structure
         const pathParts = path.split("/").filter(Boolean);
@@ -266,7 +266,7 @@ export async function downloadFiles(
     try {
       // Try to create and write to a test file to verify permissions
       const testHandle = await directoryHandle.getFileHandle(
-        ".openhands-test",
+        ".hanzo-test",
         { create: true },
       );
       const writable = await testHandle.createWritable();

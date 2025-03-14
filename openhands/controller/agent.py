@@ -2,18 +2,18 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Type
 
 if TYPE_CHECKING:
-    from openhands.controller.state.state import State
-    from openhands.core.config import AgentConfig
-    from openhands.events.action import Action
-from openhands.core.exceptions import (
+    from hanzo.controller.state.state import State
+    from hanzo.core.config import AgentConfig
+    from hanzo.events.action import Action
+from hanzo.core.exceptions import (
     AgentAlreadyRegisteredError,
     AgentNotRegisteredError,
 )
-from openhands.llm.llm import LLM
-from openhands.runtime.plugins import PluginRequirement
+from hanzo.llm.llm import LLM
+from hanzo.runtime.plugins import PluginRequirement
 
 if TYPE_CHECKING:
-    from openhands.utils.prompt import PromptManager
+    from hanzo.utils.prompt import PromptManager
 
 
 class Agent(ABC):

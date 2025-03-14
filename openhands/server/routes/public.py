@@ -4,17 +4,17 @@ from typing import Any
 import requests
 from fastapi import APIRouter
 
-from openhands.security.options import SecurityAnalyzers
+from hanzo.security.options import SecurityAnalyzers
 
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
     import litellm
 
-from openhands.controller.agent import Agent
-from openhands.core.config import LLMConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.llm import bedrock
-from openhands.server.shared import config, server_config
+from hanzo.controller.agent import Agent
+from hanzo.core.config import LLMConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.llm import bedrock
+from hanzo.server.shared import config, server_config
 
 app = APIRouter(prefix='/api/options')
 

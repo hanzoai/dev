@@ -2,8 +2,8 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
-from openhands.core import logger
-from openhands.core.config.llm_config import LLMConfig
+from hanzo.core import logger
+from hanzo.core.config.llm_config import LLMConfig
 
 
 class NoOpCondenserConfig(BaseModel):
@@ -182,7 +182,7 @@ def condenser_config_from_toml_section(
                 data_copy['llm_config'] = llm_configs[llm_config_name]
                 config = create_condenser_config(condenser_type, data_copy)
             else:
-                logger.openhands_logger.warning(
+                logger.hanzo_logger.warning(
                     f"LLM config '{llm_config_name}' not found for condenser. Using default LLMConfig."
                 )
                 # Create a default LLMConfig if the referenced one doesn't exist
@@ -196,7 +196,7 @@ def condenser_config_from_toml_section(
 
         condenser_mapping['condenser'] = config
     except (ValidationError, ValueError) as e:
-        logger.openhands_logger.warning(
+        logger.hanzo_logger.warning(
             f'Invalid condenser configuration: {e}. Using NoOpCondenserConfig.'
         )
         # Default to NoOpCondenserConfig if config fails

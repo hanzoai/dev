@@ -3,10 +3,10 @@ from uuid import uuid4
 
 from fastapi import Request
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.action import Action, ActionSecurityRisk
-from openhands.events.event import Event
-from openhands.events.stream import EventStream, EventStreamSubscriber
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action.action import Action, ActionSecurityRisk
+from hanzo.events.event import Event
+from hanzo.events.stream import EventStream, EventStreamSubscriber
 
 
 class SecurityAnalyzer:

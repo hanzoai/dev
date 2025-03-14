@@ -1,8 +1,8 @@
 ---
-name: add_openhands_repo_instruction
+name: add_hanzo_repo_instruction
 type: task
 version: 1.0.0
-author: openhands
+author: hanzo
 agent: CodeActAgent
 inputs:
   - name: REPO_FOLDER_NAME
@@ -12,7 +12,7 @@ inputs:
 
 Please browse the current repository under /workspace/{{ REPO_FOLDER_NAME }}, look at the documentation and relevant code, and understand the purpose of this repository.
 
-Specifically, I want you to create a `.openhands/microagents/repo.md`  file. This file should contain succinct information that summarizes (1) the purpose of this repository, (2) the general setup of this repo, and (3) a brief description of the structure of this repo.
+Specifically, I want you to create a `.hanzo/microagents/repo.md`  file. This file should contain succinct information that summarizes (1) the purpose of this repository, (2) the general setup of this repo, and (3) a brief description of the structure of this repo.
 
 Here's an example:
 ```markdown
@@ -22,8 +22,8 @@ type: repo
 agent: CodeActAgent
 ---
 
-This repository contains the code for OpenHands, an automated AI software engineer. It has a Python backend
-(in the `openhands` directory) and React frontend (in the `frontend` directory).
+This repository contains the code for Hanzo, an automated AI software engineer. It has a Python backend
+(in the `hanzo` directory) and React frontend (in the `frontend` directory).
 
 ## General Setup:
 To set up the entire repo, including frontend and backend, run `make build`.
@@ -39,7 +39,7 @@ then re-run the command to ensure it passes.
 
 ## Repository Structure
 Backend:
-- Located in the `openhands` directory
+- Located in the `hanzo` directory
 - Testing:
   - All tests are in `tests/unit/test_*.py`
   - To test new code, run `poetry run pytest tests/unit/test_xxx.py` where `xxx` is the appropriate file for the current functionality

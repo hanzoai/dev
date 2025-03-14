@@ -7,10 +7,10 @@
 ### Changements de configuration importants
 
 Dans cette version, nous avons introduit quelques changements importants dans les configurations backend.
-Si vous avez uniquement utilisé OpenHands via l'interface frontend (interface web), aucune action n'est nécessaire.
+Si vous avez uniquement utilisé Hanzo via l'interface frontend (interface web), aucune action n'est nécessaire.
 
 Voici une liste des changements importants dans les configurations. Ils ne s'appliquent qu'aux utilisateurs qui
-utilisent OpenHands CLI via `main.py`. Pour plus de détails, voir [#2756](https://github.com/All-Hands-AI/OpenHands/pull/2756).
+utilisent Hanzo CLI via `main.py`. Pour plus de détails, voir [#2756](https://github.com/hanzoai/Hanzo/pull/2756).
 
 #### Suppression de l'option --model-name de main.py
 

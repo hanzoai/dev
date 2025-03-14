@@ -2,47 +2,47 @@
 sidebar_position: 1
 ---
 
-# 💻 OpenHands
+# 💻 Hanzo
 
-OpenHands est un **ingénieur logiciel IA autonome** capable d'exécuter des tâches d'ingénierie complexes et de collaborer activement avec les utilisateurs sur des projets de développement logiciel.
+Hanzo est un **ingénieur logiciel IA autonome** capable d'exécuter des tâches d'ingénierie complexes et de collaborer activement avec les utilisateurs sur des projets de développement logiciel.
 Ce projet est entièrement open-source, vous pouvez donc l'utiliser et le modifier comme bon vous semble.
 
 :::tip
-Explorez le code source d'OpenHands sur [GitHub](https://github.com/All-Hands-AI/OpenHands) ou rejoignez l'une de nos communautés !
+Explorez le code source d'Hanzo sur [GitHub](https://github.com/hanzoai/Hanzo) ou rejoignez l'une de nos communautés !
 
-<a href="https://github.com/All-Hands-AI/OpenHands/graphs/contributors">
+<a href="https://github.com/hanzoai/Hanzo/graphs/contributors">
   <img
-    src="https://img.shields.io/github/contributors/All-Hands-AI/OpenHands?style=for-the-badge"
+    src="https://img.shields.io/github/contributors/hanzoai/Hanzo?style=for-the-badge"
     alt="Contributors"
   />
 </a>
-<a href="https://github.com/All-Hands-AI/OpenHands/network/members">
+<a href="https://github.com/hanzoai/Hanzo/network/members">
   <img
-    src="https://img.shields.io/github/forks/All-Hands-AI/OpenHands?style=for-the-badge"
+    src="https://img.shields.io/github/forks/hanzoai/Hanzo?style=for-the-badge"
     alt="Forks"
   />
 </a>
-<a href="https://github.com/All-Hands-AI/OpenHands/stargazers">
+<a href="https://github.com/hanzoai/Hanzo/stargazers">
   <img
-    src="https://img.shields.io/github/stars/All-Hands-AI/OpenHands?style=for-the-badge"
+    src="https://img.shields.io/github/stars/hanzoai/Hanzo?style=for-the-badge"
     alt="Stargazers"
   />
 </a>
-<a href="https://github.com/All-Hands-AI/OpenHands/issues">
+<a href="https://github.com/hanzoai/Hanzo/issues">
   <img
-    src="https://img.shields.io/github/issues/All-Hands-AI/OpenHands?style=for-the-badge"
+    src="https://img.shields.io/github/issues/hanzoai/Hanzo?style=for-the-badge"
     alt="Issues"
   />
 </a>
 <br></br>
-<a href="https://github.com/All-Hands-AI/OpenHands/blob/main/LICENSE">
+<a href="https://github.com/hanzoai/Hanzo/blob/main/LICENSE">
   <img
-    src="https://img.shields.io/github/license/All-Hands-AI/OpenHands?style=for-the-badge"
+    src="https://img.shields.io/github/license/hanzoai/Hanzo?style=for-the-badge"
     alt="MIT License"
   />
 </a>
 <br></br>
-<a href="https://join.slack.com/t/openhands-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg">
+<a href="https://join.slack.com/t/hanzo-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg">
   <img
     src="https://img.shields.io/badge/Slack-Join%20Us-red?logo=slack&logoColor=white&style=for-the-badge"
     alt="Join our Slack community"
@@ -58,10 +58,10 @@ Explorez le code source d'OpenHands sur [GitHub](https://github.com/All-Hands-AI
 
 ## 🛠️ Pour commencer
 
-La manière la plus simple d'exécuter OpenHands est à l'intérieur d'un conteneur Docker. Il fonctionne mieux avec la version la plus récente de Docker, `26.0.0`.
+La manière la plus simple d'exécuter Hanzo est à l'intérieur d'un conteneur Docker. Il fonctionne mieux avec la version la plus récente de Docker, `26.0.0`.
 Vous devez utiliser Linux, Mac OS ou WSL sur Windows.
 
-Pour démarrer OpenHands dans un conteneur docker, exécutez les commandes suivantes dans votre terminal :
+Pour démarrer Hanzo dans un conteneur docker, exécutez les commandes suivantes dans votre terminal :
 
 :::warning
 Lorsque vous exécutez la commande suivante, les fichiers dans `./workspace` peuvent être modifiés ou supprimés.
@@ -77,33 +77,33 @@ docker run -it \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
-    --name openhands-app-$(date +%Y%m%d%H%M%S) \
-    ghcr.io/all-hands-ai/openhands:main
+    --name hanzo-app-$(date +%Y%m%d%H%M%S) \
+    ghcr.io/hanzoai/hanzo:main
 ```
 
-Vous trouverez OpenHands fonctionnant à l'adresse [http://localhost:3000](http://localhost:3000) avec accès à `./workspace`. Pour qu'OpenHands fonctionne sur votre code, placez-le dans `./workspace`.
+Vous trouverez Hanzo fonctionnant à l'adresse [http://localhost:3000](http://localhost:3000) avec accès à `./workspace`. Pour qu'Hanzo fonctionne sur votre code, placez-le dans `./workspace`.
 
-OpenHands n'aura accès qu'à ce dossier de workspace. Le reste de votre système ne sera pas affecté car il s'exécute dans un bac à sable sécurisé de docker.
+Hanzo n'aura accès qu'à ce dossier de workspace. Le reste de votre système ne sera pas affecté car il s'exécute dans un bac à sable sécurisé de docker.
 
 :::tip
-Si vous souhaitez utiliser la version **(instable !)** la plus récente, vous pouvez utiliser `ghcr.io/all-hands-ai/openhands:main` comme image (dernière ligne).
+Si vous souhaitez utiliser la version **(instable !)** la plus récente, vous pouvez utiliser `ghcr.io/hanzoai/hanzo:main` comme image (dernière ligne).
 :::
 
-Pour le workflow de développement, consultez [Development.md](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+Pour le workflow de développement, consultez [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
 
-Avez-vous des problèmes ? Consultez notre [Guide de dépannage](https://docs.all-hands.dev/modules/usage/troubleshooting).
+Avez-vous des problèmes ? Consultez notre [Guide de dépannage](https://docs.hanzo.ai/modules/usage/troubleshooting).
 
 :::warning
-OpenHands est actuellement en cours de développement, mais vous pouvez déjà exécuter la version alpha pour voir le système de bout en bout en action.
+Hanzo est actuellement en cours de développement, mais vous pouvez déjà exécuter la version alpha pour voir le système de bout en bout en action.
 :::
 
-[contributors-shield]: https://img.shields.io/github/contributors/All-Hands-AI/OpenHands?style=for-the-badge
-[contributors-url]: https://github.com/All-Hands-AI/OpenHands/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/All-Hands-AI/OpenHands?style=for-the-badge
-[forks-url]: https://github.com/All-Hands-AI/OpenHands/network/members
-[stars-shield]: https://img.shields.io/github/stars/All-Hands-AI/OpenHands?style=for-the-badge
-[stars-url]: https://github.com/All-Hands-AI/OpenHands/stargazers
-[issues-shield]: https://img.shields.io/github/issues/All-Hands-AI/OpenHands?style=for-the-badge
-[issues-url]: https://github.com/All-Hands-AI/OpenHands/issues
-[license-shield]: https://img.shields.io/github/license/All-Hands-AI/OpenHands?style=for-the-badge
-[license-url]: https://github.com/All-Hands-AI/OpenHands/blob/main/LICENSE
+[contributors-shield]: https://img.shields.io/github/contributors/hanzoai/Hanzo?style=for-the-badge
+[contributors-url]: https://github.com/hanzoai/Hanzo/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/hanzoai/Hanzo?style=for-the-badge
+[forks-url]: https://github.com/hanzoai/Hanzo/network/members
+[stars-shield]: https://img.shields.io/github/stars/hanzoai/Hanzo?style=for-the-badge
+[stars-url]: https://github.com/hanzoai/Hanzo/stargazers
+[issues-shield]: https://img.shields.io/github/issues/hanzoai/Hanzo?style=for-the-badge
+[issues-url]: https://github.com/hanzoai/Hanzo/issues
+[license-shield]: https://img.shields.io/github/license/hanzoai/Hanzo?style=for-the-badge
+[license-url]: https://github.com/hanzoai/Hanzo/blob/main/LICENSE

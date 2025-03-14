@@ -1,10 +1,10 @@
 # OpenAI
 
-OpenHands uses LiteLLM to make calls to OpenAI's chat models. You can find their documentation on using OpenAI as a provider [here](https://docs.litellm.ai/docs/providers/openai).
+Hanzo uses LiteLLM to make calls to OpenAI's chat models. You can find their documentation on using OpenAI as a provider [here](https://docs.litellm.ai/docs/providers/openai).
 
 ## Configuration
 
-When running OpenHands, you'll need to set the following in the OpenHands UI through the Settings:
+When running Hanzo, you'll need to set the following in the Hanzo UI through the Settings:
 * `LLM Provider` to `OpenAI`
 * `LLM Model` to the model you will be using.
 [Visit here to see a full list of OpenAI models that LiteLLM supports.](https://docs.litellm.ai/docs/providers/openai#openai-chat-completion-models)
@@ -17,7 +17,7 @@ Just as for OpenAI Chat completions, we use LiteLLM for OpenAI-compatible endpoi
 
 ## Using an OpenAI Proxy
 
-If you're using an OpenAI proxy, in the OpenHands UI through the Settings:
+If you're using an OpenAI proxy, in the Hanzo UI through the Settings:
 1. Enable `Advanced` options
 2. Set the following:
    - `Custom Model` to openai/&lt;model-name&gt; (e.g. `openai/gpt-4o` or openai/&lt;proxy-prefix&gt;/&lt;model-name&gt;)

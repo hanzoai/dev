@@ -1,29 +1,29 @@
-# Openhands Cloud
+# Hanzo Cloud
 
-OpenHands Cloud is the cloud hosted version of OpenHands by All Hands AI.
+Hanzo Cloud is the cloud hosted version of Hanzo by All Hands AI.
 
-## Accessing OpenHands Cloud
+## Accessing Hanzo Cloud
 
-Currently, users are being admitted to access OpenHands Cloud in waves. To sign up,
-[join the waitlist](https://www.all-hands.dev/join-waitlist). Once you are approved, you will get an email with
+Currently, users are being admitted to access Hanzo Cloud in waves. To sign up,
+[join the waitlist](https://www.hanzo.ai/join-waitlist). Once you are approved, you will get an email with
 instructions on how to access it.
 
 ## Getting Started
 
-After visiting OpenHands Cloud, you will be asked to connect with your GitHub account:
+After visiting Hanzo Cloud, you will be asked to connect with your GitHub account:
 1. After reading and accepting the terms of service, click `Connect to GitHub`.
-2. Review the permissions requested by OpenHands and then click `Authorize OpenHands AI`.
-   - OpenHands will require some permissions from your GitHub account. To read more about these permissions,
+2. Review the permissions requested by Hanzo and then click `Authorize Hanzo AI`.
+   - Hanzo will require some permissions from your GitHub account. To read more about these permissions,
      you can click the `Learn more` link on the GitHub authorize page.
 
 ## Repository Access
 
 ### Adding Repository Access
 
-You can grant OpenHands specific repository access:
+You can grant Hanzo specific repository access:
 1. Click the `Select a GitHub project` dropdown, select `Add more repositories...`.
-2. Select the organization, then choose the specific repositories to grant OpenHands access to.
-   - Openhands requests short-lived tokens (8-hour expiry) with these permissions:
+2. Select the organization, then choose the specific repositories to grant Hanzo access to.
+   - Hanzo requests short-lived tokens (8-hour expiry) with these permissions:
      - Actions: Read and write
      - Administration: Read-only
      - Commit statuses: Read and write

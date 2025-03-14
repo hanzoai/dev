@@ -3,7 +3,7 @@
 The sandbox is where the agent performs its tasks. Instead of running commands directly on your computer
 (which could be risky), the agent runs them inside a Docker container.
 
-The default OpenHands sandbox (`python-nodejs:python3.12-nodejs22`
+The default Hanzo sandbox (`python-nodejs:python3.12-nodejs22`
 from [nikolaik/python-nodejs](https://hub.docker.com/r/nikolaik/python-nodejs)) comes with some packages installed such
 as python and Node.js but may need other software installed by default.
 
@@ -18,7 +18,7 @@ If you choose the first option, you can skip the `Create Your Docker Image` sect
 
 To create a custom Docker image, it must be Debian based.
 
-For example, if you want OpenHands to have `ruby` installed, you could create a `Dockerfile` with the following content:
+For example, if you want Hanzo to have `ruby` installed, you could create a `Dockerfile` with the following content:
 
 ```dockerfile
 FROM nikolaik/python-nodejs:python3.12-nodejs22
@@ -43,7 +43,7 @@ This will produce a new image called `custom-image`, which will be available in 
 
 ## Using the Docker Command
 
-When running OpenHands using [the docker command](/modules/usage/installation#start-the-app), replace
+When running Hanzo using [the docker command](/modules/usage/installation#start-the-app), replace
 `-e SANDBOX_RUNTIME_CONTAINER_IMAGE=...` with `-e SANDBOX_BASE_CONTAINER_IMAGE=<custom image name>`:
 
 ```commandline
@@ -56,11 +56,11 @@ docker run -it --rm --pull=always \
 
 ### Setup
 
-First, ensure you can run OpenHands by following the instructions in [Development.md](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+First, ensure you can run Hanzo by following the instructions in [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md).
 
 ### Specify the Base Sandbox Image
 
-In the `config.toml` file within the OpenHands directory, set the `base_container_image` to the image you want to use.
+In the `config.toml` file within the Hanzo directory, set the `base_container_image` to the image you want to use.
 This can be an image you’ve already pulled or one you’ve built:
 
 ```bash
@@ -94,4 +94,4 @@ platform = "linux/amd64"
 
 ### Run
 
-Run OpenHands by running ```make run``` in the top level directory.
+Run Hanzo by running ```make run``` in the top level directory.

@@ -6,26 +6,26 @@ import psutil
 import pytest
 from pytest import TempPathFactory
 
-from openhands.core.schema import ActionType, ObservationType
-from openhands.events import EventSource, EventStream
-from openhands.events.action import (
+from hanzo.core.schema import ActionType, ObservationType
+from hanzo.events import EventSource, EventStream
+from hanzo.events.action import (
     NullAction,
 )
-from openhands.events.action.files import (
+from hanzo.events.action.files import (
     FileEditAction,
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.action.message import MessageAction
-from openhands.events.event import FileEditSource, FileReadSource
-from openhands.events.observation import NullObservation
-from openhands.events.observation.files import (
+from hanzo.events.action.message import MessageAction
+from hanzo.events.event import FileEditSource, FileReadSource
+from hanzo.events.observation import NullObservation
+from hanzo.events.observation.files import (
     FileEditObservation,
     FileReadObservation,
     FileWriteObservation,
 )
-from openhands.storage import get_file_store
-from openhands.storage.locations import get_conversation_event_filename
+from hanzo.storage import get_file_store
+from hanzo.storage.locations import get_conversation_event_filename
 
 
 @pytest.fixture

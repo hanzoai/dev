@@ -4,7 +4,7 @@ import threading
 
 from memory_profiler import memory_usage
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class LogStream:

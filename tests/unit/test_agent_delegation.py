@@ -5,21 +5,21 @@ from uuid import uuid4
 
 import pytest
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State
-from openhands.core.config import LLMConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.schema import AgentState
-from openhands.events import EventSource, EventStream
-from openhands.events.action import (
+from hanzo.controller.agent import Agent
+from hanzo.controller.agent_controller import AgentController
+from hanzo.controller.state.state import State
+from hanzo.core.config import LLMConfig
+from hanzo.core.config.agent_config import AgentConfig
+from hanzo.core.schema import AgentState
+from hanzo.events import EventSource, EventStream
+from hanzo.events.action import (
     AgentDelegateAction,
     AgentFinishAction,
     MessageAction,
 )
-from openhands.llm.llm import LLM
-from openhands.llm.metrics import Metrics
-from openhands.storage.memory import InMemoryFileStore
+from hanzo.llm.llm import LLM
+from hanzo.llm.metrics import Metrics
+from hanzo.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture

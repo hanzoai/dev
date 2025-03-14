@@ -1,4 +1,4 @@
-# SWE-Bench Evaluation with OpenHands SWE-Bench Docker Image
+# SWE-Bench Evaluation with Hanzo SWE-Bench Docker Image
 
 This folder contains the evaluation harness that we built on top of the original [SWE-Bench benchmark](https://www.swebench.com/) ([paper](https://arxiv.org/abs/2310.06770)).
 
@@ -8,7 +8,7 @@ This folder contains the evaluation harness that we built on top of the original
 
 The evaluation consists of three steps:
 
-1. Environment setup: [install python environment](../../README.md#development-environment) and [configure LLM config](../../README.md#configure-openhands-and-your-llm).
+1. Environment setup: [install python environment](../../README.md#development-environment) and [configure LLM config](../../README.md#configure-hanzo-and-your-llm).
 2. [Run inference](#run-inference-on-swe-bench-instances): Generate a edit patch for each Github issue
 3. [Evaluate patches using SWE-Bench docker](#evaluate-generated-patches)
 
@@ -24,7 +24,7 @@ Make sure your Docker daemon is running, and you have ample disk space (at least
 
 When the `run_infer.sh` script is started, it will automatically pull the relevant SWE-Bench images.
 For example, for instance ID `django_django-11011`, it will try to pull our pre-build docker image `sweb.eval.x86_64.django_s_django-11011` from DockerHub.
-This image will be used create an OpenHands runtime image where the agent will operate on.
+This image will be used create an Hanzo runtime image where the agent will operate on.
 
 ```bash
 ./evaluation/benchmarks/swe_bench/scripts/run_infer.sh [model_config] [git-version] [agent] [eval_limit] [max_iter] [num_workers] [dataset] [dataset_split]
@@ -37,7 +37,7 @@ where `model_config` is mandatory, and the rest are optional.
 
 - `model_config`, e.g. `eval_gpt4_1106_preview`, is the config group name for your
 LLM settings, as defined in your `config.toml`.
-- `git-version`, e.g. `HEAD`, is the git commit hash of the OpenHands version you would
+- `git-version`, e.g. `HEAD`, is the git commit hash of the Hanzo version you would
 like to evaluate. It could also be a release tag like `0.6.2`.
 - `agent`, e.g. `CodeActAgent`, is the name of the agent for benchmarks, defaulting
 to `CodeActAgent`.
@@ -70,7 +70,7 @@ then your command would be:
 
 ### Running in parallel with RemoteRuntime
 
-OpenHands Remote Runtime is currently in beta (read [here](https://runtime.all-hands.dev/) for more details), it allows you to run rollout in parallel in the cloud, so you don't need a powerful machine to run evaluation.
+Hanzo Remote Runtime is currently in beta (read [here](https://runtime.hanzo.ai/) for more details), it allows you to run rollout in parallel in the cloud, so you don't need a powerful machine to run evaluation.
 
 Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZjCtr7aoBFI2Mwdan3f75J_TrdMS1JV2g/viewform) to apply if you want to try this out!
 
@@ -78,14 +78,14 @@ Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZj
 ./evaluation/benchmarks/swe_bench/scripts/run_infer.sh [model_config] [git-version] [agent] [eval_limit] [max_iter] [num_workers] [dataset] [dataset_split]
 
 # Example - This runs evaluation on CodeActAgent for 300 instances on "princeton-nlp/SWE-bench_Lite"'s test set, with max 30 iteration per instances, with 16 number of workers running in parallel
-ALLHANDS_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev" EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images" \
+HANZO_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai" EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images" \
 ./evaluation/benchmarks/swe_bench/scripts/run_infer.sh llm.eval HEAD CodeActAgent 300 30 16 "princeton-nlp/SWE-bench_Lite" test
 ```
 
 To clean-up all existing runtime you've already started, run:
 
 ```bash
-ALLHANDS_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
+HANZO_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
 ```
 
 ### Specify a subset of tasks to run infer
@@ -143,19 +143,19 @@ The final results will be saved to `evaluation/evaluation_outputs/outputs/swe_be
 
 ### Run evaluation with `RemoteRuntime`
 
-OpenHands Remote Runtime is currently in beta (read [here](https://runtime.all-hands.dev/) for more details), it allows you to run rollout in parallel in the cloud, so you don't need a powerful machine to run evaluation.
+Hanzo Remote Runtime is currently in beta (read [here](https://runtime.hanzo.ai/) for more details), it allows you to run rollout in parallel in the cloud, so you don't need a powerful machine to run evaluation.
 Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZjCtr7aoBFI2Mwdan3f75J_TrdMS1JV2g/viewform) to apply if you want to try this out!
 
 ```bash
 ./evaluation/benchmarks/swe_bench/scripts/eval_infer_remote.sh [output.jsonl filepath] [num_workers]
 
 # Example - This evaluates patches generated by CodeActAgent on Llama-3.1-70B-Instruct-Turbo on "princeton-nlp/SWE-bench_Lite"'s test set, with 16 number of workers running in parallel
-ALLHANDS_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev" EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images" \
+HANZO_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai" EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images" \
 evaluation/benchmarks/swe_bench/scripts/eval_infer_remote.sh evaluation/evaluation_outputs/outputs/swe-bench-lite/CodeActAgent/Llama-3.1-70B-Instruct-Turbo_maxiter_30_N_v1.9-no-hint/output.jsonl 16 "princeton-nlp/SWE-bench_Lite" "test"
 ```
 
 To clean-up all existing runtimes that you've already started, run:
 
 ```bash
-ALLHANDS_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
+HANZO_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
 ```

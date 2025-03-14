@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from openhands.integrations.service_types import (
+from hanzo.integrations.service_types import (
     AuthenticationError,
     GitService,
     Repository,
@@ -14,8 +14,8 @@ from openhands.integrations.service_types import (
     UnknownException,
     User,
 )
-from openhands.utils.import_utils import get_impl
-from openhands.core.logger import openhands_logger as logger
+from hanzo.utils.import_utils import get_impl
+from hanzo.core.logger import hanzo_logger as logger
 
 class GitHubService(GitService):
     BASE_URL = 'https://api.github.com'
@@ -290,7 +290,7 @@ class GitHubService(GitService):
 
 
 github_service_cls = os.environ.get(
-    'OPENHANDS_GITHUB_SERVICE_CLS',
-    'openhands.integrations.github.github_service.GitHubService',
+    'HANZO_GITHUB_SERVICE_CLS',
+    'hanzo.integrations.github.github_service.GitHubService',
 )
 GithubServiceImpl = get_impl(GitHubService, github_service_cls)

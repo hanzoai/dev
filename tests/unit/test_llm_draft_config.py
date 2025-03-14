@@ -2,8 +2,8 @@ import pathlib
 
 import pytest
 
-from openhands.core.config import AppConfig
-from openhands.core.config.utils import load_from_toml
+from hanzo.core.config import AppConfig
+from hanzo.core.config.utils import load_from_toml
 
 
 @pytest.fixture

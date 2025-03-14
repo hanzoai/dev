@@ -9,11 +9,11 @@ from typing import Callable
 import pandas as pd
 import requests
 
-from openhands.controller.state.state import State
-from openhands.core.logger import get_console_handler
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import Action
-from openhands.events.action.message import MessageAction
+from hanzo.controller.state.state import State
+from hanzo.core.logger import get_console_handler
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import Action
+from hanzo.events.action.message import MessageAction
 
 
 class Platform(Enum):

@@ -6,10 +6,10 @@ from typing import Set, Tuple
 
 
 def find_version_references(directory: str) -> Tuple[Set[str], Set[str]]:
-    openhands_versions = set()
+    hanzo_versions = set()
     runtime_versions = set()
 
-    version_pattern_openhands = re.compile(r'openhands:(\d{1})\.(\d{2})')
+    version_pattern_hanzo = re.compile(r'hanzo:(\d{1})\.(\d{2})')
     version_pattern_runtime = re.compile(r'runtime:(\d{1})\.(\d{2})')
 
     for root, _, files in os.walk(directory):
@@ -26,9 +26,9 @@ def find_version_references(directory: str) -> Tuple[Set[str], Set[str]]:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
 
-                        # Find all openhands version references
-                        matches = version_pattern_openhands.findall(content)
-                        openhands_versions.update(matches)
+                        # Find all hanzo version references
+                        matches = version_pattern_hanzo.findall(content)
+                        hanzo_versions.update(matches)
 
                         # Find all runtime version references
                         matches = version_pattern_runtime.findall(content)
@@ -36,21 +36,21 @@ def find_version_references(directory: str) -> Tuple[Set[str], Set[str]]:
                 except Exception as e:
                     print(f'Error reading {file_path}: {e}', file=sys.stderr)
 
-    return openhands_versions, runtime_versions
+    return hanzo_versions, runtime_versions
 
 
 def main():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    openhands_versions, runtime_versions = find_version_references(repo_root)
+    hanzo_versions, runtime_versions = find_version_references(repo_root)
 
     exit_code = 0
 
-    if len(openhands_versions) > 1:
-        print('Error: Multiple openhands versions found:', file=sys.stderr)
-        print('Found versions:', sorted(openhands_versions), file=sys.stderr)
+    if len(hanzo_versions) > 1:
+        print('Error: Multiple hanzo versions found:', file=sys.stderr)
+        print('Found versions:', sorted(hanzo_versions), file=sys.stderr)
         exit_code = 1
-    elif len(openhands_versions) == 0:
-        print('Warning: No openhands version references found', file=sys.stderr)
+    elif len(hanzo_versions) == 0:
+        print('Warning: No hanzo version references found', file=sys.stderr)
 
     if len(runtime_versions) > 1:
         print('Error: Multiple runtime versions found:', file=sys.stderr)

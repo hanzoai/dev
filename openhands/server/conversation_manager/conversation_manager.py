@@ -4,19 +4,19 @@ from abc import ABC, abstractmethod
 
 import socketio
 
-from openhands.core.config import AppConfig
-from openhands.events.action import MessageAction
-from openhands.events.stream import EventStream
-from openhands.server.config.server_config import ServerConfig
-from openhands.server.monitoring import MonitoringListener
-from openhands.server.session.conversation import Conversation
-from openhands.server.settings import Settings
-from openhands.storage.conversation.conversation_store import ConversationStore
-from openhands.storage.files import FileStore
+from hanzo.core.config import AppConfig
+from hanzo.events.action import MessageAction
+from hanzo.events.stream import EventStream
+from hanzo.server.config.server_config import ServerConfig
+from hanzo.server.monitoring import MonitoringListener
+from hanzo.server.session.conversation import Conversation
+from hanzo.server.settings import Settings
+from hanzo.storage.conversation.conversation_store import ConversationStore
+from hanzo.storage.files import FileStore
 
 
 class ConversationManager(ABC):
-    """Abstract base class for managing conversations in OpenHands.
+    """Abstract base class for managing conversations in Hanzo.
 
     This class defines the interface for managing conversations, whether in standalone
     or clustered mode. It handles the lifecycle of conversations, including creation,

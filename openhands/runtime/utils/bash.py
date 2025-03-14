@@ -8,15 +8,15 @@ from enum import Enum
 import bashlex
 import libtmux
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import CmdRunAction
-from openhands.events.observation import ErrorObservation
-from openhands.events.observation.commands import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import CmdRunAction
+from hanzo.events.observation import ErrorObservation
+from hanzo.events.observation.commands import (
     CMD_OUTPUT_PS1_END,
     CmdOutputMetadata,
     CmdOutputObservation,
 )
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.utils.shutdown_listener import should_continue
 
 
 def split_bash_commands(commands):
@@ -186,7 +186,7 @@ class BashSession:
     def initialize(self):
         self.server = libtmux.Server()
         _shell_command = '/bin/bash'
-        if self.username in ['root', 'openhands']:
+        if self.username in ['root', 'hanzo']:
             # This starts a non-login (new) shell for the given user
             _shell_command = f'su {self.username} -'
 
@@ -200,7 +200,7 @@ class BashSession:
         window_command = _shell_command
 
         logger.debug(f'Initializing bash session with command: {window_command}')
-        session_name = f'openhands-{self.username}-{uuid.uuid4()}'
+        session_name = f'hanzo-{self.username}-{uuid.uuid4()}'
         self.session = self.server.new_session(
             session_name=session_name,
             start_directory=self.work_dir,

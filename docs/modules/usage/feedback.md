@@ -1,12 +1,12 @@
 # ✅ Providing Feedback
 
-When using OpenHands, you will encounter cases where things work well, and others where they don't. We encourage you to
-provide feedback when you use OpenHands to help give feedback to the development team, and perhaps more importantly,
-create an open corpus of coding agent training examples -- Share-OpenHands!
+When using Hanzo, you will encounter cases where things work well, and others where they don't. We encourage you to
+provide feedback when you use Hanzo to help give feedback to the development team, and perhaps more importantly,
+create an open corpus of coding agent training examples -- Share-Hanzo!
 
 ## 📝 How to Provide Feedback
 
-Providing feedback is easy! When you are using OpenHands, you can press the thumbs-up or thumbs-down button at any point
+Providing feedback is easy! When you are using Hanzo, you can press the thumbs-up or thumbs-down button at any point
 during your interaction. You will be prompted to provide your email address
 (e.g. so we can contact you if we want to ask any follow-up questions), and you can choose whether you want to provide feedback publicly or privately.
 
@@ -18,15 +18,15 @@ during your interaction. You will be prompted to provide your email address
 
 When you submit data, you can submit it either publicly or privately.
 
-- **Public** data will be distributed under the MIT License, like OpenHands itself, and can be used by the community to
+- **Public** data will be distributed under the MIT License, like Hanzo itself, and can be used by the community to
 train and test models. Obviously, feedback that you can make public will be more valuable for the community as a whole,
 so when you are not dealing with sensitive information, we would encourage you to choose this option!
-- **Private** data will be made available to the OpenHands team for the purpose of improving OpenHands.
+- **Private** data will be made available to the Hanzo team for the purpose of improving Hanzo.
 However, a link with a unique ID will still be created that you can share publicly with others.
 
 ### Who collects and stores the data?
 
-The data is collected and stored by [All Hands AI](https://all-hands.dev), a company founded by OpenHands maintainers to support and improve OpenHands.
+The data is collected and stored by [All Hands AI](https://hanzo.ai), a company founded by Hanzo maintainers to support and improve Hanzo.
 
 ### How will public data be released?
 
@@ -46,5 +46,5 @@ For data on the All Hands AI servers, we are happy to delete it at request:
 data using the link and password that is displayed on the interface when you submit data.
 
 **All Data:** If you would like all pieces of your data deleted, or you do not have the ID and password that you
-received when submitting the data, please contact `contact@all-hands.dev` from the email address that you registered
+received when submitting the data, please contact `contact@hanzo.ai` from the email address that you registered
 when you originally submitted the data.

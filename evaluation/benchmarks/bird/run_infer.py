@@ -23,18 +23,18 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AppConfig,
     get_llm_config_arg,
     parse_arguments,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.main import create_runtime, run_controller
+from hanzo.events.action import CmdRunAction, MessageAction
+from hanzo.events.observation import CmdOutputObservation
+from hanzo.runtime.base import Runtime
+from hanzo.utils.async_utils import call_async_from_sync
 
 
 def codeact_user_response(state: State) -> str:
@@ -76,7 +76,7 @@ def get_config(
 
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_hanzo=False,
         runtime='docker',
         max_iterations=metadata.max_iterations,
         sandbox=sandbox_config,

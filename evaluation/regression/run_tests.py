@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from openhands.config import load_app_config
+from hanzo.config import load_app_config
 
 config = load_app_config()
 

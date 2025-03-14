@@ -3,10 +3,10 @@ from __future__ import annotations
 from litellm import supports_response_schema
 from pydantic import BaseModel
 
-from openhands.core.config.condenser_config import LLMAttentionCondenserConfig
-from openhands.events.event import Event
-from openhands.llm.llm import LLM
-from openhands.memory.condenser.condenser import RollingCondenser
+from hanzo.core.config.condenser_config import LLMAttentionCondenserConfig
+from hanzo.events.event import Event
+from hanzo.llm.llm import LLM
+from hanzo.memory.condenser.condenser import RollingCondenser
 
 
 class ImportantEventSelection(BaseModel):

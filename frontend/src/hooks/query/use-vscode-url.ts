@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { useConversation } from "#/context/conversation-context";
 
 export const useVSCodeUrl = (config: { enabled: boolean }) => {
@@ -9,7 +9,7 @@ export const useVSCodeUrl = (config: { enabled: boolean }) => {
     queryKey: ["vscode_url", conversationId],
     queryFn: () => {
       if (!conversationId) throw new Error("No conversation ID");
-      return OpenHands.getVSCodeUrl(conversationId);
+      return Hanzo.getVSCodeUrl(conversationId);
     },
     enabled: !!conversationId && config.enabled,
     refetchOnMount: false,

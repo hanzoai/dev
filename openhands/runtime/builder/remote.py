@@ -5,12 +5,12 @@ import time
 
 import requests
 
-from openhands.core.exceptions import AgentRuntimeBuildError
-from openhands.core.logger import openhands_logger as logger
-from openhands.runtime.builder import RuntimeBuilder
-from openhands.runtime.utils.request import send_request
-from openhands.utils.http_session import HttpSession
-from openhands.utils.shutdown_listener import (
+from hanzo.core.exceptions import AgentRuntimeBuildError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.runtime.builder import RuntimeBuilder
+from hanzo.runtime.utils.request import send_request
+from hanzo.utils.http_session import HttpSession
+from hanzo.utils.shutdown_listener import (
     should_continue,
     sleep_if_should_continue,
 )

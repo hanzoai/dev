@@ -13,7 +13,7 @@ from typing import Iterable
 
 from litellm import ChatCompletionToolParam
 
-from openhands.core.exceptions import (
+from hanzo.core.exceptions import (
     FunctionCallConversionError,
     FunctionCallValidationError,
 )
@@ -47,7 +47,7 @@ Reminder:
 
 STOP_WORDS = ['</function']
 
-# NOTE: we need to make sure this example is always in-sync with the tool interface designed in openhands/agenthub/codeact_agent/function_calling.py
+# NOTE: we need to make sure this example is always in-sync with the tool interface designed in hanzo/agenthub/codeact_agent/function_calling.py
 IN_CONTEXT_LEARNING_EXAMPLE_PREFIX = """
 Here's a running example of how to perform a task with the provided tools.
 
@@ -64,7 +64,7 @@ pwd && ls
 
 USER: EXECUTION RESULT of [execute_bash]:
 /workspace
-openhands@runtime:~/workspace$
+hanzo@runtime:~/workspace$
 
 ASSISTANT: There is no `app.py` file in the current directory. Let me create a Python file `app.py`:
 <function=str_replace_editor>
@@ -130,8 +130,8 @@ Collecting click>=8.1.3
   Using cached click-8.1.7-py3-none-any.whl (97 kB)
 Collecting itsdangerous>=2.1.2
   Using cached itsdangerous-2.2.0-py3-none-any.whl (16 kB)
-Requirement already satisfied: Jinja2>=3.1.2 in /home/openhands/.local/lib/python3.10/site-packages (from flask) (3.1.3)
-Requirement already satisfied: MarkupSafe>=2.0 in /home/openhands/.local/lib/python3.10/site-packages (from Jinja2>=3.1.2->flask) (2.1.5)
+Requirement already satisfied: Jinja2>=3.1.2 in /home/hanzo/.local/lib/python3.10/site-packages (from flask) (3.1.3)
+Requirement already satisfied: MarkupSafe>=2.0 in /home/hanzo/.local/lib/python3.10/site-packages (from Jinja2>=3.1.2->flask) (2.1.5)
 Installing collected packages: Werkzeug, itsdangerous, click, blinker, flask
 Successfully installed Werkzeug-3.0.2 blinker-1.7.0 click-8.1.7 flask-3.0.3 itsdangerous-2.2.0
 
@@ -374,7 +374,7 @@ def convert_fncall_messages_to_non_fncall_messages(
                 ):
                     raise FunctionCallConversionError(
                         'The currently provided tool set are NOT compatible with the in-context learning example for FnCall to Non-FnCall conversion. '
-                        'Please update your tool set OR the in-context learning example in openhands/llm/fn_call_converter.py'
+                        'Please update your tool set OR the in-context learning example in hanzo/llm/fn_call_converter.py'
                     )
 
                 # add in-context learning example

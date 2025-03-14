@@ -3,13 +3,13 @@ from urllib.parse import quote
 
 import requests
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.resolver.interfaces.issue import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.resolver.interfaces.issue import (
     Issue,
     IssueHandlerInterface,
     ReviewThread,
 )
-from openhands.resolver.utils import extract_issue_references
+from hanzo.resolver.utils import extract_issue_references
 
 
 class GitlabIssueHandler(IssueHandlerInterface):
@@ -206,7 +206,7 @@ class GitlabIssueHandler(IssueHandlerInterface):
         discussions = response.json()
         if len(discussions.get('notes', [])) > 0:
             data = {
-                'body': f'Openhands fix success summary\n\n\n{reply}',
+                'body': f'Hanzo fix success summary\n\n\n{reply}',
                 'note_id': discussions.get('notes', [])[-1]['id'],
             }
             response = requests.post(

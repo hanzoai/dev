@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Dict, List, Union
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import BrowseInteractiveAction
-from openhands.events.observation import BrowserOutputObservation
-from openhands.runtime.base import Runtime
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import BrowseInteractiveAction
+from hanzo.events.observation import BrowserOutputObservation
+from hanzo.runtime.base import Runtime
 
 
 class ActionType(Enum):
@@ -176,7 +176,7 @@ def pre_login(
 ):
     """
     Logs in to all the websites that are needed for the evaluation.
-    Once logged in, the sessions would be cached in the browser, so OpenHands
+    Once logged in, the sessions would be cached in the browser, so Hanzo
     agent doesn't need to log in to these websites again.
     """
     owncloud_login_actions = [

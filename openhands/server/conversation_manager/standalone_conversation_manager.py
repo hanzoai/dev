@@ -6,25 +6,25 @@ from typing import Callable, Iterable, Type
 
 import socketio
 
-from openhands.core.config.app_config import AppConfig
-from openhands.core.exceptions import AgentRuntimeUnavailableError
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.schema.agent import AgentState
-from openhands.events.action import MessageAction
-from openhands.events.observation.agent import AgentStateChangedObservation
-from openhands.events.stream import EventStream, EventStreamSubscriber, session_exists
-from openhands.server.config.server_config import ServerConfig
-from openhands.server.monitoring import MonitoringListener
-from openhands.server.session.agent_session import WAIT_TIME_BEFORE_CLOSE
-from openhands.server.session.conversation import Conversation
-from openhands.server.session.session import ROOM_KEY, Session
-from openhands.server.settings import Settings
-from openhands.storage.conversation.conversation_store import ConversationStore
-from openhands.storage.data_models.conversation_metadata import ConversationMetadata
-from openhands.storage.files import FileStore
-from openhands.utils.async_utils import GENERAL_TIMEOUT, call_async_from_sync, wait_all
-from openhands.utils.import_utils import get_impl
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.exceptions import AgentRuntimeUnavailableError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.schema.agent import AgentState
+from hanzo.events.action import MessageAction
+from hanzo.events.observation.agent import AgentStateChangedObservation
+from hanzo.events.stream import EventStream, EventStreamSubscriber, session_exists
+from hanzo.server.config.server_config import ServerConfig
+from hanzo.server.monitoring import MonitoringListener
+from hanzo.server.session.agent_session import WAIT_TIME_BEFORE_CLOSE
+from hanzo.server.session.conversation import Conversation
+from hanzo.server.session.session import ROOM_KEY, Session
+from hanzo.server.settings import Settings
+from hanzo.storage.conversation.conversation_store import ConversationStore
+from hanzo.storage.data_models.conversation_metadata import ConversationMetadata
+from hanzo.storage.files import FileStore
+from hanzo.utils.async_utils import GENERAL_TIMEOUT, call_async_from_sync, wait_all
+from hanzo.utils.import_utils import get_impl
+from hanzo.utils.shutdown_listener import should_continue
 
 from .conversation_manager import ConversationManager
 

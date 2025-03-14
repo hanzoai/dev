@@ -3,12 +3,12 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from openhands.core.exceptions import (
+from hanzo.core.exceptions import (
     AgentRuntimeDisconnectedError,
     AgentRuntimeTimeoutError,
 )
-from openhands.events.action import CmdRunAction
-from openhands.runtime.base import Runtime
+from hanzo.events.action import CmdRunAction
+from hanzo.runtime.base import Runtime
 
 
 @pytest.fixture

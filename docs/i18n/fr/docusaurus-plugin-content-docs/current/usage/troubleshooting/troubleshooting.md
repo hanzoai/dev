@@ -3,14 +3,14 @@
 # 🚧 Dépannage
 
 :::tip
-OpenHands ne prend en charge Windows que via WSL. Veuillez vous assurer d'exécuter toutes les commandes dans votre terminal WSL.
+Hanzo ne prend en charge Windows que via WSL. Veuillez vous assurer d'exécuter toutes les commandes dans votre terminal WSL.
 :::
 
 ### Échec du lancement du client docker
 
 **Description**
 
-Lors de l'exécution d'OpenHands, l'erreur suivante est observée :
+Lors de l'exécution d'Hanzo, l'erreur suivante est observée :
 ```
 Launch docker client failed. Please make sure you have installed docker and started docker desktop/daemon.
 ```
@@ -38,9 +38,9 @@ InRelease At least one invalid signature was encountered.
 Cela semble se produire lorsque le hash d'une bibliothèque externe existante change et que votre instance docker locale a
 mis en cache une version précédente. Pour contourner ce problème, veuillez essayer ce qui suit :
 
-* Arrêtez tous les conteneurs dont le nom a le préfixe `openhands-runtime-` :
-  `docker ps --filter name=openhands-runtime- --filter status=running -aq | xargs docker stop`
-* Supprimez tous les conteneurs dont le nom a le préfixe `openhands-runtime-` :
-  `docker rmi $(docker images --filter name=openhands-runtime- -q --no-trunc)`
-* Arrêtez et supprimez tous les conteneurs / images dont le nom a le préfixe `openhands-runtime-`
+* Arrêtez tous les conteneurs dont le nom a le préfixe `hanzo-runtime-` :
+  `docker ps --filter name=hanzo-runtime- --filter status=running -aq | xargs docker stop`
+* Supprimez tous les conteneurs dont le nom a le préfixe `hanzo-runtime-` :
+  `docker rmi $(docker images --filter name=hanzo-runtime- -q --no-trunc)`
+* Arrêtez et supprimez tous les conteneurs / images dont le nom a le préfixe `hanzo-runtime-`
 * Nettoyez les conteneurs / images : `docker container prune -f && docker image prune -f`

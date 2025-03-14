@@ -7,7 +7,7 @@ import { AxiosError } from "axios";
 import MainApp from "#/routes/_oh/route";
 import SettingsScreen from "#/routes/settings";
 import Home from "#/routes/_oh._index/route";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import * as FeatureFlags from "#/utils/feature-flags";
 
 const createAxiosNotFoundErrorObject = () =>
@@ -26,7 +26,7 @@ const createAxiosNotFoundErrorObject = () =>
     },
   );
 
-const getSettingsSpy = vi.spyOn(OpenHands, "getSettings");
+const getSettingsSpy = vi.spyOn(Hanzo, "getSettings");
 
 const RouterStub = createRoutesStub([
   {
@@ -81,7 +81,7 @@ describe("Home Screen", () => {
 });
 
 describe("Settings 404", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Hanzo, "getConfig");
 
   it("should open the settings modal if GET /settings fails with a 404", async () => {
     const error = createAxiosNotFoundErrorObject();
@@ -136,7 +136,7 @@ describe("Settings 404", () => {
 });
 
 describe("Setup Payment modal", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Hanzo, "getConfig");
 
   afterEach(() => {
     vi.resetAllMocks();

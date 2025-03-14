@@ -294,7 +294,7 @@ def get_file_handler(
     """Returns a file handler for logging."""
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y-%m-%d')
-    file_name = f'openhands_{timestamp}.log'
+    file_name = f'hanzo_{timestamp}.log'
     file_handler = logging.FileHandler(os.path.join(log_dir, file_name))
     file_handler.setLevel(log_level)
     if LOG_JSON:
@@ -350,40 +350,40 @@ def log_uncaught_exceptions(
 
 
 sys.excepthook = log_uncaught_exceptions
-openhands_logger = logging.getLogger('openhands')
+hanzo_logger = logging.getLogger('hanzo')
 current_log_level = logging.INFO
 
 if LOG_LEVEL in logging.getLevelNamesMapping():
     current_log_level = logging.getLevelNamesMapping()[LOG_LEVEL]
-openhands_logger.setLevel(current_log_level)
+hanzo_logger.setLevel(current_log_level)
 
 if DEBUG:
-    openhands_logger.addFilter(StackInfoFilter())
+    hanzo_logger.addFilter(StackInfoFilter())
 
 if current_log_level == logging.DEBUG:
     LOG_TO_FILE = True
-    openhands_logger.debug('DEBUG mode enabled.')
+    hanzo_logger.debug('DEBUG mode enabled.')
 
 if LOG_JSON:
-    openhands_logger.addHandler(json_log_handler(current_log_level))
+    hanzo_logger.addHandler(json_log_handler(current_log_level))
 else:
-    openhands_logger.addHandler(get_console_handler(current_log_level))
+    hanzo_logger.addHandler(get_console_handler(current_log_level))
 
-openhands_logger.addFilter(SensitiveDataFilter(openhands_logger.name))
-openhands_logger.propagate = False
-openhands_logger.debug('Logging initialized')
+hanzo_logger.addFilter(SensitiveDataFilter(hanzo_logger.name))
+hanzo_logger.propagate = False
+hanzo_logger.debug('Logging initialized')
 
 LOG_DIR = os.path.join(
-    # parent dir of openhands/core (i.e., root of the repo)
+    # parent dir of hanzo/core (i.e., root of the repo)
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     'logs',
 )
 
 if LOG_TO_FILE:
-    openhands_logger.addHandler(
+    hanzo_logger.addHandler(
         get_file_handler(LOG_DIR, current_log_level)
     )  # default log to project root
-    openhands_logger.debug(f'Logging to file in: {LOG_DIR}')
+    hanzo_logger.debug(f'Logging to file in: {LOG_DIR}')
 
 # Exclude LiteLLM from logging output
 logging.getLogger('LiteLLM').disabled = True
@@ -424,7 +424,7 @@ class LlmFileHandler(logging.FileHandler):
                 try:
                     os.unlink(file_path)
                 except Exception as e:
-                    openhands_logger.error(
+                    hanzo_logger.error(
                         'Failed to delete %s. Reason: %s', file_path, e
                     )
         filename = f'{self.filename}_{self.message_counter:03}.log'
@@ -442,7 +442,7 @@ class LlmFileHandler(logging.FileHandler):
         self.stream = self._open()
         super().emit(record)
         self.stream.close()
-        openhands_logger.debug('Logging to %s', self.baseFilename)
+        hanzo_logger.debug('Logging to %s', self.baseFilename)
         self.message_counter += 1
 
 
@@ -468,10 +468,10 @@ llm_prompt_logger = _setup_llm_logger('prompt', current_log_level)
 llm_response_logger = _setup_llm_logger('response', current_log_level)
 
 
-class OpenHandsLoggerAdapter(logging.LoggerAdapter):
+class HanzoLoggerAdapter(logging.LoggerAdapter):
     extra: dict
 
-    def __init__(self, logger=openhands_logger, extra=None):
+    def __init__(self, logger=hanzo_logger, extra=None):
         self.logger = logger
         self.extra = extra or {}
 

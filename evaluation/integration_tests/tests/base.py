@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
-from openhands.events.event import Event
-from openhands.runtime.base import Runtime
+from hanzo.events.event import Event
+from hanzo.runtime.base import Runtime
 
 
 class TestResult(BaseModel):

@@ -1,88 +1,88 @@
-@startuml openhands
+@startuml hanzo
 !pragma useIntermediatePackages false
 
-class openhands.action.agent.AgentEchoAction {
+class hanzo.action.agent.AgentEchoAction {
   content: str
   runnable: bool
   action: str
 }
-class openhands.action.agent.AgentFinishAction {
+class hanzo.action.agent.AgentFinishAction {
   runnable: bool
   action: str
 }
-class openhands.observation.AgentMessageObservation {
+class hanzo.observation.AgentMessageObservation {
   role: str
   observation: str
 }
-class openhands.action.agent.AgentSummarizeAction {
+class hanzo.action.agent.AgentSummarizeAction {
   summary: str
   action: str
 }
-class openhands.action.agent.AgentThinkAction {
+class hanzo.action.agent.AgentThinkAction {
   thought: str
   runnable: bool
   action: str
 }
-class openhands.action.base.ExecutableAction {
+class hanzo.action.base.ExecutableAction {
 }
-class openhands.action.base.NotExecutableAction {
+class hanzo.action.base.NotExecutableAction {
 }
-class openhands.observation.Observation {
+class hanzo.observation.Observation {
   content: str
 }
-class openhands.action.base.Action {
+class hanzo.action.base.Action {
 }
-class openhands.action.base.NullAction {
+class hanzo.action.base.NullAction {
   action: str
 }
-class openhands.action.bash.CmdRunAction {
+class hanzo.action.bash.CmdRunAction {
   command: str
   action: str
 }
-class openhands.action.browse.BrowseURLAction {
+class hanzo.action.browse.BrowseURLAction {
   url: str
   action: str
 }
-class openhands.observation.BrowserOutputObservation {
+class hanzo.observation.BrowserOutputObservation {
   url: str
   status_code: int
   error: bool
   observation: str
 }
-class openhands.action.fileop.FileReadAction {
+class hanzo.action.fileop.FileReadAction {
   path: str
   action: str
 }
-class openhands.observation.FileReadObservation {
+class hanzo.observation.FileReadObservation {
   path: str
   observation: str
 }
-class openhands.action.fileop.FileWriteAction {
+class hanzo.action.fileop.FileWriteAction {
   path: str
   contents: str
   action: str
 }
-class openhands.observation.FileWriteObservation {
+class hanzo.observation.FileWriteObservation {
   path: str
   observation: str
 }
-class openhands.action.tasks.AddTaskAction {
+class hanzo.action.tasks.AddTaskAction {
   parent: str
   goal: str
   subtasks: list
   action: str
 }
-class openhands.action.tasks.ModifyTaskAction {
+class hanzo.action.tasks.ModifyTaskAction {
   id: str
   state: str
   action: str
 }
-abstract class openhands.agent.Agent {
+abstract class hanzo.agent.Agent {
   _registry: Dict[str, Type[Agent]] {static}
   llm: LLM
   _complete: None
 }
-class openhands.llm.llm.LLM {
+class hanzo.llm.llm.LLM {
   model: None
   api_key: None
   base_url: None
@@ -91,7 +91,7 @@ class openhands.llm.llm.LLM {
   _debug_id: None
   _completion: None
 }
-class openhands.controller.agent_controller.AgentController {
+class hanzo.controller.agent_controller.AgentController {
   agent: Agent
   max_iterations: int
   workdir: str
@@ -100,34 +100,34 @@ class openhands.controller.agent_controller.AgentController {
   plan: Plan
   callbacks: List[Callable]
 }
-class openhands.observation.AgentErrorObservation {
+class hanzo.observation.AgentErrorObservation {
   observation: str
 }
-class openhands.controller.command_manager.CommandManager {
+class hanzo.controller.command_manager.CommandManager {
   directory: None
   shell: None
 }
-class openhands.observation.NullObservation {
+class hanzo.observation.NullObservation {
   observation: str
 }
-class openhands.plan.Plan {
+class hanzo.plan.Plan {
   main_goal: str {static}
   task: Task {static}
   main_goal: str
   task: None
 }
-class openhands.state.State {
+class hanzo.state.State {
   plan: Plan
   iteration: int
   history: List[Tuple[Action, Observation]]
   updated_info: List[Tuple[Action, Observation]]
 }
-class openhands.observation.CmdOutputObservation {
+class hanzo.observation.CmdOutputObservation {
   command: str
   exit_code: int
   observation: str
 }
-class openhands.sandbox.sandbox.DockerInteractive {
+class hanzo.sandbox.sandbox.DockerInteractive {
   instance_id: None
   instance_id: None
   workspace_dir: None
@@ -137,11 +137,11 @@ class openhands.sandbox.sandbox.DockerInteractive {
   base_container_image: None
   container_name: None
 }
-class openhands.observation.UserMessageObservation {
+class hanzo.observation.UserMessageObservation {
   role: str
   observation: str
 }
-class openhands.plan.Task {
+class hanzo.plan.Task {
   id: str {static}
   goal: str {static}
   parent: Task | None {static}
@@ -153,49 +153,49 @@ class openhands.plan.Task {
   subtasks: None
 }
 
-class openhands.server.session.Session {
+class hanzo.server.session.Session {
   websocket: None
   controller: Optional[AgentController]
   agent: Optional[Agent]
   agent_task: None
 }
 
-openhands.action.base.ExecutableAction <|-- openhands.action.agent.AgentEchoAction
-openhands.action.base.NotExecutableAction <|-- openhands.action.agent.AgentFinishAction
-openhands.observation.Observation <|-- openhands.observation.AgentMessageObservation
-openhands.action.base.NotExecutableAction <|-- openhands.action.agent.AgentSummarizeAction
-openhands.action.base.NotExecutableAction <|-- openhands.action.agent.AgentThinkAction
-openhands.action.base.Action <|-- openhands.action.base.ExecutableAction
-openhands.action.base.Action <|-- openhands.action.base.NotExecutableAction
-openhands.action.base.NotExecutableAction <|-- openhands.action.base.NullAction
-openhands.action.base.ExecutableAction <|-- openhands.action.bash.CmdRunAction
-openhands.action.base.ExecutableAction <|-- openhands.action.browse.BrowseURLAction
-openhands.observation.Observation <|-- openhands.observation.BrowserOutputObservation
-openhands.action.base.ExecutableAction <|-- openhands.action.fileop.FileReadAction
-openhands.observation.Observation <|-- openhands.observation.FileReadObservation
-openhands.action.base.ExecutableAction <|-- openhands.action.fileop.FileWriteAction
-openhands.observation.Observation <|-- openhands.observation.FileWriteObservation
-openhands.action.base.NotExecutableAction <|-- openhands.action.tasks.AddTaskAction
-openhands.action.base.NotExecutableAction <|-- openhands.action.tasks.ModifyTaskAction
-openhands.agent.Agent *-- openhands.agent.Agent
-openhands.agent.Agent *-- openhands.llm.llm.LLM
-openhands.controller.agent_controller.AgentController *-- openhands.agent.Agent
-openhands.observation.Observation <|-- openhands.observation.AgentErrorObservation
-openhands.observation.Observation <|-- openhands.observation.NullObservation
-openhands.plan.Plan *-- openhands.plan.Task
-openhands.state.State *-- openhands.plan.Plan
-openhands.state.State *-- openhands.observation.CmdOutputObservation
-openhands.state.State *-- openhands.action.base.Action
-openhands.state.State *-- openhands.observation.Observation
-openhands.observation.Observation <|-- openhands.observation.CmdOutputObservation
-openhands.observation.Observation <|-- openhands.observation.UserMessageObservation
-openhands.plan.Task *-- openhands.plan.Task
-openhands.server.session.Session *-- openhands.controller.agent_controller.AgentController
-openhands.server.session.Session *-- openhands.agent.Agent
-openhands.controller.agent_controller.AgentController -> openhands.state.State
-openhands.controller.agent_controller.AgentController -> openhands.plan.Plan
-openhands.controller.agent_controller.AgentController -> openhands.controller.command_manager.CommandManager
-openhands.controller.command_manager.CommandManager -> openhands.sandbox.sandbox.DockerInteractive
+hanzo.action.base.ExecutableAction <|-- hanzo.action.agent.AgentEchoAction
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.agent.AgentFinishAction
+hanzo.observation.Observation <|-- hanzo.observation.AgentMessageObservation
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.agent.AgentSummarizeAction
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.agent.AgentThinkAction
+hanzo.action.base.Action <|-- hanzo.action.base.ExecutableAction
+hanzo.action.base.Action <|-- hanzo.action.base.NotExecutableAction
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.base.NullAction
+hanzo.action.base.ExecutableAction <|-- hanzo.action.bash.CmdRunAction
+hanzo.action.base.ExecutableAction <|-- hanzo.action.browse.BrowseURLAction
+hanzo.observation.Observation <|-- hanzo.observation.BrowserOutputObservation
+hanzo.action.base.ExecutableAction <|-- hanzo.action.fileop.FileReadAction
+hanzo.observation.Observation <|-- hanzo.observation.FileReadObservation
+hanzo.action.base.ExecutableAction <|-- hanzo.action.fileop.FileWriteAction
+hanzo.observation.Observation <|-- hanzo.observation.FileWriteObservation
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.tasks.AddTaskAction
+hanzo.action.base.NotExecutableAction <|-- hanzo.action.tasks.ModifyTaskAction
+hanzo.agent.Agent *-- hanzo.agent.Agent
+hanzo.agent.Agent *-- hanzo.llm.llm.LLM
+hanzo.controller.agent_controller.AgentController *-- hanzo.agent.Agent
+hanzo.observation.Observation <|-- hanzo.observation.AgentErrorObservation
+hanzo.observation.Observation <|-- hanzo.observation.NullObservation
+hanzo.plan.Plan *-- hanzo.plan.Task
+hanzo.state.State *-- hanzo.plan.Plan
+hanzo.state.State *-- hanzo.observation.CmdOutputObservation
+hanzo.state.State *-- hanzo.action.base.Action
+hanzo.state.State *-- hanzo.observation.Observation
+hanzo.observation.Observation <|-- hanzo.observation.CmdOutputObservation
+hanzo.observation.Observation <|-- hanzo.observation.UserMessageObservation
+hanzo.plan.Task *-- hanzo.plan.Task
+hanzo.server.session.Session *-- hanzo.controller.agent_controller.AgentController
+hanzo.server.session.Session *-- hanzo.agent.Agent
+hanzo.controller.agent_controller.AgentController -> hanzo.state.State
+hanzo.controller.agent_controller.AgentController -> hanzo.plan.Plan
+hanzo.controller.agent_controller.AgentController -> hanzo.controller.command_manager.CommandManager
+hanzo.controller.command_manager.CommandManager -> hanzo.sandbox.sandbox.DockerInteractive
 
 footer Based on f3fda42; Generated by //py2puml//
 @enduml

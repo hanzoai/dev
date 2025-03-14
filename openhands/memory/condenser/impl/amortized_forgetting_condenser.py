@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from openhands.core.config.condenser_config import AmortizedForgettingCondenserConfig
-from openhands.events.event import Event
-from openhands.memory.condenser.condenser import RollingCondenser
+from hanzo.core.config.condenser_config import AmortizedForgettingCondenserConfig
+from hanzo.events.event import Event
+from hanzo.memory.condenser.condenser import RollingCondenser
 
 
 class AmortizedForgettingCondenser(RollingCondenser):

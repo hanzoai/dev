@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.runtime.base import Runtime
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.runtime.base import Runtime
 
 app = APIRouter(prefix='/api/conversations/{conversation_id}')
 

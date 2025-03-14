@@ -4,7 +4,7 @@ from io import StringIO
 
 import pytest
 
-from openhands.core.config import (
+from hanzo.core.config import (
     AgentConfig,
     AppConfig,
     LLMConfig,
@@ -15,12 +15,12 @@ from openhands.core.config import (
     load_from_env,
     load_from_toml,
 )
-from openhands.core.config.condenser_config import (
+from hanzo.core.config.condenser_config import (
     LLMSummarizingCondenserConfig,
     NoOpCondenserConfig,
     RecentEventsCondenserConfig,
 )
-from openhands.core.logger import openhands_logger
+from hanzo.core.logger import hanzo_logger
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def default_config(monkeypatch):
 
 def test_compat_env_to_config(monkeypatch, setup_env):
     # Use `monkeypatch` to set environment variables for this specific test
-    monkeypatch.setenv('WORKSPACE_BASE', '/repos/openhands/workspace')
+    monkeypatch.setenv('WORKSPACE_BASE', '/repos/hanzo/workspace')
     monkeypatch.setenv('LLM_API_KEY', 'sk-proj-rgMV0...')
     monkeypatch.setenv('LLM_MODEL', 'gpt-4o')
     monkeypatch.setenv('DEFAULT_AGENT', 'CodeActAgent')
@@ -63,7 +63,7 @@ def test_compat_env_to_config(monkeypatch, setup_env):
     config = AppConfig()
     load_from_env(config, os.environ)
 
-    assert config.workspace_base == '/repos/openhands/workspace'
+    assert config.workspace_base == '/repos/hanzo/workspace'
     assert isinstance(config.get_llm_config(), LLMConfig)
     assert config.get_llm_config().api_key.get_secret_value() == 'sk-proj-rgMV0...'
     assert config.get_llm_config().model == 'gpt-4o'
@@ -351,7 +351,7 @@ security_analyzer = "semgrep"
 
 def test_security_config_from_dict():
     """Test creating SecurityConfig instance from dictionary."""
-    from openhands.core.config.security_config import SecurityConfig
+    from hanzo.core.config.security_config import SecurityConfig
 
     # Test with all fields
     config_dict = {'confirmation_mode': True, 'security_analyzer': 'some_analyzer'}
@@ -469,7 +469,7 @@ def test_load_from_toml_partial_invalid(default_config, temp_toml_file, caplog):
 debug = true
 
 [llm]
-# Not set in `openhands/core/schema/config.py`
+# Not set in `hanzo/core/schema/config.py`
 invalid_field = "test"
 model = "gpt-4"
 
@@ -486,7 +486,7 @@ invalid_field_in_sandbox = "test"
     handler.setLevel(logging.WARNING)
     formatter = logging.Formatter('%(message)s')
     handler.setFormatter(formatter)
-    openhands_logger.addHandler(handler)
+    hanzo_logger.addHandler(handler)
 
     try:
         # Since sandbox_config.from_toml_section now raises ValueError for invalid fields,
@@ -505,7 +505,7 @@ invalid_field_in_sandbox = "test"
         # Verify valid configurations are loaded before the error was raised
         assert default_config.debug is True
     finally:
-        openhands_logger.removeHandler(handler)
+        hanzo_logger.removeHandler(handler)
 
 
 def test_load_from_toml_security_invalid(default_config, temp_toml_file):
@@ -583,7 +583,7 @@ max_events = 15
     assert agent_config.condenser.max_events == 15
 
     # We can also verify the function works directly
-    from openhands.core.config.condenser_config import (
+    from hanzo.core.config.condenser_config import (
         condenser_config_from_toml_section,
     )
 
@@ -625,7 +625,7 @@ max_size = 50
     assert agent_config.condenser.llm_config.model == 'gpt-4'
 
     # Test the condenser config with the LLM reference
-    from openhands.core.config.condenser_config import (
+    from hanzo.core.config.condenser_config import (
         condenser_config_from_toml_section,
     )
 
@@ -662,7 +662,7 @@ max_size = 50
     load_from_toml(default_config, temp_toml_file)
 
     # Test the condenser config with a missing LLM reference
-    from openhands.core.config.condenser_config import (
+    from hanzo.core.config.condenser_config import (
         condenser_config_from_toml_section,
     )
 
@@ -693,7 +693,7 @@ type = "invalid_type"
     load_from_toml(default_config, temp_toml_file)
 
     # Test the condenser config with an invalid type
-    from openhands.core.config.condenser_config import (
+    from hanzo.core.config.condenser_config import (
         condenser_config_from_toml_section,
     )
 
@@ -720,7 +720,7 @@ max_events = 0   # Invalid: must be >= 1
     load_from_toml(default_config, temp_toml_file)
 
     # Test the condenser config with validation errors
-    from openhands.core.config.condenser_config import (
+    from hanzo.core.config.condenser_config import (
         condenser_config_from_toml_section,
     )
 
@@ -1010,7 +1010,7 @@ enable_prompt_extensions = false
 
 def test_agent_config_from_toml_section():
     """Test that AgentConfig.from_toml_section correctly parses agent configurations from TOML."""
-    from openhands.core.config.agent_config import AgentConfig
+    from hanzo.core.config.agent_config import AgentConfig
 
     # Test with base config and custom configs
     agent_section = {
@@ -1046,7 +1046,7 @@ def test_agent_config_from_toml_section():
 
 def test_agent_config_from_toml_section_with_invalid_base():
     """Test that AgentConfig.from_toml_section handles invalid base configurations gracefully."""
-    from openhands.core.config.agent_config import AgentConfig
+    from hanzo.core.config.agent_config import AgentConfig
 
     # Test with invalid base config but valid custom configs
     agent_section = {

@@ -7,29 +7,29 @@ import requests
 import tenacity
 from docker.models.containers import Container
 
-from openhands.core.config import AppConfig
-from openhands.core.exceptions import (
+from hanzo.core.config import AppConfig
+from hanzo.core.exceptions import (
     AgentRuntimeDisconnectedError,
     AgentRuntimeNotFoundError,
 )
-from openhands.core.logger import DEBUG, DEBUG_RUNTIME
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventStream
-from openhands.runtime.builder import DockerRuntimeBuilder
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.core.logger import DEBUG, DEBUG_RUNTIME
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventStream
+from hanzo.runtime.builder import DockerRuntimeBuilder
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.impl.docker.containers import stop_all_containers
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils import find_available_tcp_port
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.runtime.utils.log_streamer import LogStreamer
-from openhands.runtime.utils.runtime_build import build_runtime_image
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.shutdown_listener import add_shutdown_listener
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.runtime.impl.docker.containers import stop_all_containers
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils import find_available_tcp_port
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.runtime.utils.log_streamer import LogStreamer
+from hanzo.runtime.utils.runtime_build import build_runtime_image
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.shutdown_listener import add_shutdown_listener
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
-CONTAINER_NAME_PREFIX = 'openhands-runtime-'
+CONTAINER_NAME_PREFIX = 'hanzo-runtime-'
 
 EXECUTION_SERVER_PORT_RANGE = (30000, 39999)
 VSCODE_PORT_RANGE = (40000, 49999)
@@ -246,7 +246,7 @@ class DockerRuntime(ActionExecutionClient):
             self.config.workspace_mount_path is not None
             and self.config.workspace_mount_path_in_sandbox is not None
         ):
-            # e.g. result would be: {"/home/user/openhands/workspace": {'bind': "/workspace", 'mode': 'rw'}}
+            # e.g. result would be: {"/home/user/hanzo/workspace": {'bind': "/workspace", 'mode': 'rw'}}
             volumes = {
                 self.config.workspace_mount_path: {
                     'bind': self.config.workspace_mount_path_in_sandbox,
@@ -276,7 +276,7 @@ class DockerRuntime(ActionExecutionClient):
                 command=command,
                 network_mode=network_mode,
                 ports=port_mapping,
-                working_dir='/openhands/code/',  # do not change this!
+                working_dir='/hanzo/code/',  # do not change this!
                 name=self.container_name,
                 detach=True,
                 environment=environment,
@@ -371,7 +371,7 @@ class DockerRuntime(ActionExecutionClient):
         """Closes the DockerRuntime and associated objects
 
         Parameters:
-        - rm_all_containers (bool): Whether to remove all containers with the 'openhands-sandbox-' prefix
+        - rm_all_containers (bool): Whether to remove all containers with the 'hanzo-sandbox-' prefix
         """
         super().close()
         if self.log_streamer:

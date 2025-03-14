@@ -2,7 +2,7 @@
 name: update_pr_description
 type: task
 version: 1.0.0
-author: openhands
+author: hanzo
 agent: CodeActAgent
 inputs:
   - name: PR_URL

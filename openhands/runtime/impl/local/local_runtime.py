@@ -12,36 +12,36 @@ from typing import Callable
 import requests
 import tenacity
 
-import openhands
-from openhands.core.config import AppConfig
-from openhands.core.exceptions import AgentRuntimeDisconnectedError
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventStream
-from openhands.events.action import (
+import hanzo
+from hanzo.core.config import AppConfig
+from hanzo.core.exceptions import AgentRuntimeDisconnectedError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventStream
+from hanzo.events.action import (
     Action,
 )
-from openhands.events.observation import (
+from hanzo.events.observation import (
     Observation,
 )
-from openhands.events.serialization import event_to_dict, observation_from_dict
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.events.serialization import event_to_dict, observation_from_dict
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.impl.docker.docker_runtime import (
+from hanzo.runtime.impl.docker.docker_runtime import (
     APP_PORT_RANGE_1,
     APP_PORT_RANGE_2,
     EXECUTION_SERVER_PORT_RANGE,
     VSCODE_PORT_RANGE,
 )
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils import find_available_tcp_port
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils import find_available_tcp_port
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
 
 def check_dependencies(code_repo_path: str, poetry_venvs_path: str):
-    ERROR_MESSAGE = 'Please follow the instructions in https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md to install OpenHands.'
+    ERROR_MESSAGE = 'Please follow the instructions in https://github.com/hanzoai/Hanzo/blob/main/Development.md to install Hanzo.'
     if not os.path.exists(code_repo_path):
         raise ValueError(
             f'Code repo path {code_repo_path} does not exist. ' + ERROR_MESSAGE
@@ -77,7 +77,7 @@ def check_dependencies(code_repo_path: str, poetry_venvs_path: str):
 
     # Check browser works
     logger.debug('Checking dependencies: browser')
-    from openhands.runtime.browser.browser_env import BrowserEnv
+    from hanzo.runtime.browser.browser_env import BrowserEnv
 
     browser = BrowserEnv()
     browser.close()
@@ -122,14 +122,14 @@ class LocalRuntime(ActionExecutionClient):
             # A temporary directory is created for the agent to run in
             # This is used for the local runtime only
             self._temp_workspace = tempfile.mkdtemp(
-                prefix=f'openhands_workspace_{sid}',
+                prefix=f'hanzo_workspace_{sid}',
             )
             self.config.workspace_mount_path_in_sandbox = self._temp_workspace
 
         logger.warning(
             'Initializing LocalRuntime. WARNING: NO SANDBOX IS USED. '
-            'This is an experimental feature, please report issues to https://github.com/All-Hands-AI/OpenHands/issues. '
-            '`run_as_openhands` will be ignored since the current user will be used to launch the server. '
+            'This is an experimental feature, please report issues to https://github.com/hanzoai/Hanzo/issues. '
+            '`run_as_hanzo` will be ignored since the current user will be used to launch the server. '
             'We highly recommend using a sandbox (eg. DockerRuntime) unless you '
             'are running in a controlled environment.\n'
             f'Temp workspace: {self._temp_workspace}. '
@@ -202,9 +202,9 @@ class LocalRuntime(ActionExecutionClient):
         self.log('debug', f'Starting server with command: {cmd}')
         env = os.environ.copy()
         # Get the code repo path
-        code_repo_path = os.path.dirname(os.path.dirname(openhands.__file__))
+        code_repo_path = os.path.dirname(os.path.dirname(hanzo.__file__))
         env['PYTHONPATH'] = f'{code_repo_path}:$PYTHONPATH'
-        env['OPENHANDS_REPO_PATH'] = code_repo_path
+        env['HANZO_REPO_PATH'] = code_repo_path
         env['LOCAL_RUNTIME_MODE'] = '1'
         # run poetry show -v | head -n 1 | awk '{print $2}'
         poetry_venvs_path = (

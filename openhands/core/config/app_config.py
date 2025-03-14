@@ -2,17 +2,17 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field, SecretStr
 
-from openhands.core import logger
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.config.config_utils import (
+from hanzo.core import logger
+from hanzo.core.config.agent_config import AgentConfig
+from hanzo.core.config.config_utils import (
     OH_DEFAULT_AGENT,
     OH_MAX_ITERATIONS,
     model_defaults_to_dict,
 )
-from openhands.core.config.extended_config import ExtendedConfig
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.config.sandbox_config import SandboxConfig
-from openhands.core.config.security_config import SecurityConfig
+from hanzo.core.config.extended_config import ExtendedConfig
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.config.sandbox_config import SandboxConfig
+from hanzo.core.config.security_config import SecurityConfig
 
 
 class AppConfig(BaseModel):
@@ -35,7 +35,7 @@ class AppConfig(BaseModel):
         workspace_mount_path_in_sandbox: Path to mount the workspace in sandbox. Defaults to `/workspace`.
         workspace_mount_rewrite: Path to rewrite the workspace mount path.
         cache_dir: Path to cache directory. Defaults to `/tmp/cache`.
-        run_as_openhands: Whether to run as openhands.
+        run_as_hanzo: Whether to run as hanzo.
         max_iterations: Maximum number of iterations allowed.
         max_budget_per_task: Maximum budget per task, agent stops if exceeded.
         e2b_api_key: E2B API key.
@@ -56,7 +56,7 @@ class AppConfig(BaseModel):
     extended: ExtendedConfig = Field(default_factory=lambda: ExtendedConfig({}))
     runtime: str = Field(default='docker')
     file_store: str = Field(default='local')
-    file_store_path: str = Field(default='/tmp/openhands_file_store')
+    file_store_path: str = Field(default='/tmp/hanzo_file_store')
     save_trajectory_path: str | None = Field(default=None)
     replay_trajectory_path: str | None = Field(default=None)
     workspace_base: str | None = Field(default=None)
@@ -64,7 +64,7 @@ class AppConfig(BaseModel):
     workspace_mount_path_in_sandbox: str = Field(default='/workspace')
     workspace_mount_rewrite: str | None = Field(default=None)
     cache_dir: str = Field(default='/tmp/cache')
-    run_as_openhands: bool = Field(default=True)
+    run_as_hanzo: bool = Field(default=True)
     max_iterations: int = Field(default=OH_MAX_ITERATIONS)
     max_budget_per_task: float | None = Field(default=None)
     e2b_api_key: SecretStr | None = Field(default=None)
@@ -96,7 +96,7 @@ class AppConfig(BaseModel):
         if name in self.llms:
             return self.llms[name]
         if name is not None and name != 'llm':
-            logger.openhands_logger.warning(
+            logger.hanzo_logger.warning(
                 f'llm config group {name} not found, using default config'
             )
         if 'llm' not in self.llms:

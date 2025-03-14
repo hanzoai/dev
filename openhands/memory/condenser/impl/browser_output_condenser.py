@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from openhands.core.config.condenser_config import BrowserOutputCondenserConfig
-from openhands.events.event import Event
-from openhands.events.observation import BrowserOutputObservation
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.memory.condenser.condenser import Condenser
+from hanzo.core.config.condenser_config import BrowserOutputCondenserConfig
+from hanzo.events.event import Event
+from hanzo.events.observation import BrowserOutputObservation
+from hanzo.events.observation.agent import AgentCondensationObservation
+from hanzo.memory.condenser.condenser import Condenser
 
 
 class BrowserOutputCondenser(Condenser):

@@ -1,5 +1,5 @@
 name: Bug
-description: Report a problem with OpenHands
+description: Report a problem with Hanzo
 title: '[Bug]: '
 labels: ['bug']
 body:
@@ -26,21 +26,21 @@ body:
   - type: dropdown
     id: installation
     attributes:
-      label: OpenHands Installation
-      description: How are you running OpenHands?
+      label: Hanzo Installation
+      description: How are you running Hanzo?
       options:
         - Docker command in README
         - GitHub resolver
         - Development workflow
-        - app.all-hands.dev
+        - app.hanzo.ai
         - Other
       default: 0
 
   - type: input
-    id: openhands-version
+    id: hanzo-version
     attributes:
-      label: OpenHands Version
-      description: What version of OpenHands are you using?
+      label: Hanzo Version
+      description: What version of Hanzo are you using?
       placeholder: ex. 0.9.8, main, etc.
 
   - type: dropdown

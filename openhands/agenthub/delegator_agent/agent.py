@@ -1,9 +1,9 @@
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig
-from openhands.events.action import Action, AgentDelegateAction, AgentFinishAction
-from openhands.events.observation import AgentDelegateObservation, Observation
-from openhands.llm.llm import LLM
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig
+from hanzo.events.action import Action, AgentDelegateAction, AgentFinishAction
+from hanzo.events.observation import AgentDelegateObservation, Observation
+from hanzo.llm.llm import LLM
 
 
 class DelegatorAgent(Agent):

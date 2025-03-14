@@ -1,10 +1,10 @@
 import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
-import { openHands } from "./open-hands-axios";
+import { hanzo } from "./open-hands-axios";
 
 /**
- * Retrieves repositories where OpenHands Github App has been installed
+ * Retrieves repositories where Hanzo Github App has been installed
  * @param installationIndex Pagination cursor position for app installation IDs
- * @param installations Collection of all App installation IDs for OpenHands Github App
+ * @param installations Collection of all App installation IDs for Hanzo Github App
  * @returns A list of repositories
  */
 export const retrieveGitHubAppRepositories = async (
@@ -14,7 +14,7 @@ export const retrieveGitHubAppRepositories = async (
   per_page = 30,
 ) => {
   const installationId = installations[installationIndex];
-  const response = await openHands.get<GitHubRepository[]>(
+  const response = await hanzo.get<GitHubRepository[]>(
     "/api/github/repositories",
     {
       params: {
@@ -57,7 +57,7 @@ export const retrieveGitHubUserRepositories = async (
   page = 1,
   per_page = 30,
 ) => {
-  const response = await openHands.get<GitHubRepository[]>(
+  const response = await hanzo.get<GitHubRepository[]>(
     "/api/github/repositories",
     {
       params: {

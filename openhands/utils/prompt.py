@@ -4,16 +4,16 @@ from itertools import islice
 
 from jinja2 import Template
 
-from openhands.controller.state.state import State
-from openhands.core.logger import openhands_logger
-from openhands.core.message import Message, TextContent
-from openhands.microagent import (
+from hanzo.controller.state.state import State
+from hanzo.core.logger import hanzo_logger
+from hanzo.core.message import Message, TextContent
+from hanzo.microagent import (
     BaseMicroAgent,
     KnowledgeMicroAgent,
     RepoMicroAgent,
     load_microagents_from_dir,
 )
-from openhands.runtime.base import Runtime
+from hanzo.runtime.base import Runtime
 
 
 @dataclass
@@ -66,7 +66,7 @@ class PromptManager:
 
         if microagent_dir:
             # This loads micro-agents from the microagent_dir
-            # which is typically the OpenHands/microagents (i.e., the PUBLIC microagents)
+            # which is typically the Hanzo/microagents (i.e., the PUBLIC microagents)
 
             # Only load KnowledgeMicroAgents
             repo_microagents, knowledge_microagents, _ = load_microagents_from_dir(
@@ -92,7 +92,7 @@ class PromptManager:
 
         This is typically used when loading microagents from inside a repo.
         """
-        openhands_logger.info('Loading microagents: %s', [m.name for m in microagents])
+        hanzo_logger.info('Loading microagents: %s', [m.name for m in microagents])
         # Only keep KnowledgeMicroAgents and RepoMicroAgents
         for microagent in microagents:
             if microagent.name in self.disabled_microagents:
@@ -174,7 +174,7 @@ class PromptManager:
         for name, microagent in self.knowledge_microagents.items():
             trigger = microagent.match_trigger(message_content)
             if trigger:
-                openhands_logger.info(
+                hanzo_logger.info(
                     "Microagent '%s' triggered by keyword '%s'",
                     name,
                     trigger,

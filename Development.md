@@ -1,7 +1,7 @@
 # Development Guide
-This guide is for people working on OpenHands and editing the source code.
-If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/All-Hands-AI/OpenHands/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
-Otherwise, you can clone the OpenHands project directly.
+This guide is for people working on Hanzo and editing the source code.
+If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/hanzoai/Hanzo/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
+Otherwise, you can clone the Hanzo project directly.
 
 ## Start the Server for Development
 ### 1. Requirements
@@ -31,14 +31,14 @@ mamba install conda-forge::poetry
 ```
 
 ### 2. Build and Setup The Environment
-Begin by building the project which includes setting up the environment and installing dependencies. This step ensures that OpenHands is ready to run on your system:
+Begin by building the project which includes setting up the environment and installing dependencies. This step ensures that Hanzo is ready to run on your system:
 
 ```bash
 make build
 ```
 
 ### 3. Configuring the Language Model
-OpenHands supports a diverse array of Language Models (LMs) through the powerful [litellm](https://docs.litellm.ai) library.
+Hanzo supports a diverse array of Language Models (LMs) through the powerful [litellm](https://docs.litellm.ai) library.
 By default, we've chosen Claude Sonnet 3.5 as our go-to model, but the world is your oyster! You can unleash the
 potential of any other LM that piques your interest.
 
@@ -48,17 +48,17 @@ To configure the LM of your choice, run:
    make setup-config
    ```
 
-   This command will prompt you to enter the LLM API key, model name, and other variables ensuring that OpenHands is tailored to your specific needs. Note that the model name will apply only when you run headless. If you use the UI, please set the model in the UI.
+   This command will prompt you to enter the LLM API key, model name, and other variables ensuring that Hanzo is tailored to your specific needs. Note that the model name will apply only when you run headless. If you use the UI, please set the model in the UI.
 
-   Note: If you have previously run OpenHands using the docker command, you may have already set some environmental variables in your terminal. The final configurations are set from highest to lowest priority:
+   Note: If you have previously run Hanzo using the docker command, you may have already set some environmental variables in your terminal. The final configurations are set from highest to lowest priority:
    Environment variables > config.toml variables > default variables
 
 **Note on Alternative Models:**
-See [our documentation](https://docs.all-hands.dev/modules/usage/llms) for recommended models.
+See [our documentation](https://docs.hanzo.ai/modules/usage/llms) for recommended models.
 
 ### 4. Running the application
 #### Option A: Run the Full Application
-Once the setup is complete, this command starts both the backend and frontend servers, allowing you to interact with OpenHands:
+Once the setup is complete, this command starts both the backend and frontend servers, allowing you to interact with Hanzo:
 ```bash
 make run
 ```
@@ -76,10 +76,10 @@ make run
 
 ### 6. LLM Debugging
 If you encounter any issues with the Language Model (LM) or you're simply curious, export DEBUG=1 in the environment and restart the backend.
-OpenHands will log the prompts and responses in the logs/llm/CURRENT_DATE directory, allowing you to identify the causes.
+Hanzo will log the prompts and responses in the logs/llm/CURRENT_DATE directory, allowing you to identify the causes.
 
 ### 7. Help
-Need help or info on available targets and commands? Use the help command for all the guidance you need with OpenHands.
+Need help or info on available targets and commands? Use the help command for all the guidance you need with Hanzo.
 ```bash
 make help
  ```
@@ -100,7 +100,7 @@ poetry run pytest ./tests/unit/test_*.py
 To reduce build time (e.g., if no changes were made to the client-runtime component), you can use an existing Docker container image by
 setting the SANDBOX_RUNTIME_CONTAINER_IMAGE environment variable to the desired Docker image.
 
-Example: `export SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/all-hands-ai/runtime:0.28-nikolaik`
+Example: `export SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/hanzoai/runtime:0.28`
 
 ## Develop inside Docker container
 
@@ -112,7 +112,7 @@ make docker-dev
 
 See more details [here](./containers/dev/README.md).
 
-If you are just interested in running `OpenHands` without installing all the required tools on your host.
+If you are just interested in running `Hanzo` without installing all the required tools on your host.
 
 ```bash
 make docker-run

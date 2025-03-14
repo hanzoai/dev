@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from openhands.core.schema import ObservationType
-from openhands.events.observation.observation import Observation
+from hanzo.core.schema import ObservationType
+from hanzo.events.observation.observation import Observation
 
 
 @dataclass

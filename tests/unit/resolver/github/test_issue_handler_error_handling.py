@@ -4,12 +4,12 @@ import pytest
 import requests
 from litellm.exceptions import RateLimitError
 
-from openhands.core.config import LLMConfig
-from openhands.events.action.message import MessageAction
-from openhands.llm.llm import LLM
-from openhands.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
-from openhands.resolver.interfaces.issue import Issue
-from openhands.resolver.interfaces.issue_definitions import (
+from hanzo.core.config import LLMConfig
+from hanzo.events.action.message import MessageAction
+from hanzo.llm.llm import LLM
+from hanzo.resolver.interfaces.github import GithubIssueHandler, GithubPRHandler
+from hanzo.resolver.interfaces.issue import Issue
+from hanzo.resolver.interfaces.issue_definitions import (
     ServiceContextIssue,
     ServiceContextPR,
 )
@@ -19,8 +19,8 @@ from openhands.resolver.interfaces.issue_definitions import (
 def mock_logger(monkeypatch):
     # suppress logging of completion data to file
     mock_logger = MagicMock()
-    monkeypatch.setattr('openhands.llm.debug_mixin.llm_prompt_logger', mock_logger)
-    monkeypatch.setattr('openhands.llm.debug_mixin.llm_response_logger', mock_logger)
+    monkeypatch.setattr('hanzo.llm.debug_mixin.llm_prompt_logger', mock_logger)
+    monkeypatch.setattr('hanzo.llm.debug_mixin.llm_response_logger', mock_logger)
     return mock_logger
 
 
@@ -189,7 +189,7 @@ class DotDict(dict):
             )
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('hanzo.llm.llm.litellm_completion')
 def test_guess_success_rate_limit_wait_time(mock_litellm_completion, default_config):
     """Test that the retry mechanism in guess_success respects wait time between retries."""
 
@@ -245,7 +245,7 @@ def test_guess_success_rate_limit_wait_time(mock_litellm_completion, default_con
         ), f'Expected wait time between {default_config.retry_min_wait} and {default_config.retry_max_wait} seconds, but got {wait_time}'
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('hanzo.llm.llm.litellm_completion')
 def test_guess_success_exhausts_retries(mock_completion, default_config):
     """Test the retry mechanism in guess_success exhausts retries and raises an error."""
     # Simulate persistent rate limit errors by always raising RateLimitError

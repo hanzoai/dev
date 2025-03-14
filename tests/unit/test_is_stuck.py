@@ -4,21 +4,21 @@ from unittest.mock import Mock, patch
 import pytest
 from pytest import TempPathFactory
 
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State
-from openhands.controller.stuck import StuckDetector
-from openhands.events.action import CmdRunAction, FileReadAction, MessageAction
-from openhands.events.action.commands import IPythonRunCellAction
-from openhands.events.observation import (
+from hanzo.controller.agent_controller import AgentController
+from hanzo.controller.state.state import State
+from hanzo.controller.stuck import StuckDetector
+from hanzo.events.action import CmdRunAction, FileReadAction, MessageAction
+from hanzo.events.action.commands import IPythonRunCellAction
+from hanzo.events.observation import (
     CmdOutputObservation,
     FileReadObservation,
 )
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.events.observation.commands import IPythonRunCellObservation
-from openhands.events.observation.empty import NullObservation
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.stream import EventSource, EventStream
-from openhands.storage import get_file_store
+from hanzo.events.observation.agent import AgentCondensationObservation
+from hanzo.events.observation.commands import IPythonRunCellObservation
+from hanzo.events.observation.empty import NullObservation
+from hanzo.events.observation.error import ErrorObservation
+from hanzo.events.stream import EventSource, EventStream
+from hanzo.storage import get_file_store
 
 
 def collect_events(stream):

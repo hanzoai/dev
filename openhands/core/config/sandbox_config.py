@@ -59,7 +59,7 @@ class SandboxConfig(BaseModel):
     )  # can be "None" (default to gvisor) or "sysbox" (support docker inside runtime + more stable)
     enable_auto_lint: bool = Field(
         default=False
-    )  # once enabled, OpenHands would lint files after editing
+    )  # once enabled, Hanzo would lint files after editing
     use_host_network: bool = Field(default=False)
     runtime_binding_address: str = Field(default='0.0.0.0')
     runtime_extra_build_args: list[str] | None = Field(default=None)

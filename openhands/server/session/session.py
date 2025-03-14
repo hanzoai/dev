@@ -5,29 +5,29 @@ from logging import LoggerAdapter
 
 import socketio
 
-from openhands.controller.agent import Agent
-from openhands.core.config import AppConfig
-from openhands.core.config.condenser_config import (
+from hanzo.controller.agent import Agent
+from hanzo.core.config import AppConfig
+from hanzo.core.config.condenser_config import (
     LLMSummarizingCondenserConfig,
 )
-from openhands.core.const.guide_url import TROUBLESHOOTING_URL
-from openhands.core.logger import OpenHandsLoggerAdapter
-from openhands.core.schema import AgentState
-from openhands.events.action import MessageAction, NullAction
-from openhands.events.event import Event, EventSource
-from openhands.events.observation import (
+from hanzo.core.const.guide_url import TROUBLESHOOTING_URL
+from hanzo.core.logger import HanzoLoggerAdapter
+from hanzo.core.schema import AgentState
+from hanzo.events.action import MessageAction, NullAction
+from hanzo.events.event import Event, EventSource
+from hanzo.events.observation import (
     AgentStateChangedObservation,
     CmdOutputObservation,
     NullObservation,
 )
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.serialization import event_from_dict, event_to_dict
-from openhands.events.stream import EventStreamSubscriber
-from openhands.llm.llm import LLM
-from openhands.server.session.agent_session import AgentSession
-from openhands.server.session.conversation_init_data import ConversationInitData
-from openhands.server.settings import Settings
-from openhands.storage.files import FileStore
+from hanzo.events.observation.error import ErrorObservation
+from hanzo.events.serialization import event_from_dict, event_to_dict
+from hanzo.events.stream import EventStreamSubscriber
+from hanzo.llm.llm import LLM
+from hanzo.server.session.agent_session import AgentSession
+from hanzo.server.session.conversation_init_data import ConversationInitData
+from hanzo.server.settings import Settings
+from hanzo.storage.files import FileStore
 
 ROOM_KEY = 'room:{sid}'
 
@@ -56,7 +56,7 @@ class Session:
         self.sio = sio
         self.last_active_ts = int(time.time())
         self.file_store = file_store
-        self.logger = OpenHandsLoggerAdapter(extra={'session_id': sid})
+        self.logger = HanzoLoggerAdapter(extra={'session_id': sid})
         self.agent_session = AgentSession(
             sid,
             file_store,

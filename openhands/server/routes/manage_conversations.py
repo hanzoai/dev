@@ -5,27 +5,27 @@ from fastapi import APIRouter, Body, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, SecretStr
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.message import MessageAction
-from openhands.integrations.github.github_service import GithubServiceImpl
-from openhands.integrations.provider import ProviderType
-from openhands.runtime import get_runtime_cls
-from openhands.server.auth import get_provider_tokens, get_access_token, get_github_user_id
-from openhands.server.data_models.conversation_info import ConversationInfo
-from openhands.server.data_models.conversation_info_result_set import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action.message import MessageAction
+from hanzo.integrations.github.github_service import GithubServiceImpl
+from hanzo.integrations.provider import ProviderType
+from hanzo.runtime import get_runtime_cls
+from hanzo.server.auth import get_provider_tokens, get_access_token, get_github_user_id
+from hanzo.server.data_models.conversation_info import ConversationInfo
+from hanzo.server.data_models.conversation_info_result_set import (
     ConversationInfoResultSet,
 )
-from openhands.server.session.conversation_init_data import ConversationInitData
-from openhands.server.shared import (
+from hanzo.server.session.conversation_init_data import ConversationInitData
+from hanzo.server.shared import (
     ConversationStoreImpl,
     SettingsStoreImpl,
     config,
     conversation_manager,
 )
-from openhands.server.types import LLMAuthenticationError, MissingSettingsError
-from openhands.storage.data_models.conversation_metadata import ConversationMetadata
-from openhands.storage.data_models.conversation_status import ConversationStatus
-from openhands.utils.async_utils import wait_all
+from hanzo.server.types import LLMAuthenticationError, MissingSettingsError
+from hanzo.storage.data_models.conversation_metadata import ConversationMetadata
+from hanzo.storage.data_models.conversation_status import ConversationStatus
+from hanzo.utils.async_utils import wait_all
 
 app = APIRouter(prefix='/api')
 

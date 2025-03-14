@@ -29,18 +29,18 @@ We use it to train strong LM agents that achieve state-of-the-art open results o
 </p>
 
 ---
-# Run SWE-Gym with OpenHands
+# Run SWE-Gym with Hanzo
 
 The process of running SWE-Gym is very similar to how you'd run SWE-Bench evaluation.
 
 
-1. First, clone OpenHands repo `git clone https://github.com/All-Hands-AI/OpenHands.git`
-2. Then setup the repo following [Development.md](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md)
+1. First, clone Hanzo repo `git clone https://github.com/hanzoai/Hanzo.git`
+2. Then setup the repo following [Development.md](https://github.com/hanzoai/Hanzo/blob/main/Development.md)
 3. Then you can simply serve your own model as an OpenAI compatible endpoint, put those info in config.toml. You can do this by following instruction [here](../../README.md#setup).
 4. And then simply do the following to sample for 16x parallelism:
 
 ```bash
-export ALLHANDS_API_KEY=ah-yourkey  # You don't need to set this when running these in local docker container
+export HANZO_API_KEY=ah-yourkey  # You don't need to set this when running these in local docker container
 ./evaluation/benchmarks/swe_bench/scripts/rollout_swegym.sh llm.mymodel-temp05 'train-t05' 16
 ```
 
@@ -69,9 +69,9 @@ We create SWE-Gym, the first environment for training SWE agents, with **2.4K re
 
 ## SWE-Gym trains LMs as agents
 
-When fine-tuned on less than 500 agent-environment interaction trajectories sampled from it from GPT-4o and Claude 3.5 Sonnet, we achieve **+14%** absolute gains on SWE-Bench Verified with an 32B LM-powered OpenHands agent.
+When fine-tuned on less than 500 agent-environment interaction trajectories sampled from it from GPT-4o and Claude 3.5 Sonnet, we achieve **+14%** absolute gains on SWE-Bench Verified with an 32B LM-powered Hanzo agent.
 
-![OpenHands Performance diff before and after training](https://github.com/SWE-Gym/SWE-Gym/blob/main/assets/images/oh-agent.jpg?raw=true)
+![Hanzo Performance diff before and after training](https://github.com/SWE-Gym/SWE-Gym/blob/main/assets/images/oh-agent.jpg?raw=true)
 
 
 ## SWE-Gym enables self-improvement
@@ -93,8 +93,8 @@ These verifiers identify most promising solutions via best-of-n selection, toget
 ![Inference Time Scaling for Moatless Agent](https://github.com/SWE-Gym/SWE-Gym/blob/main/assets/images/inference-ml.jpg?raw=true)
 *Inference Time Scaling for Moatless Agent*
 
-![Inference Time Scaling for OpenHands Agent](https://github.com/SWE-Gym/SWE-Gym/blob/main/assets/images/inference-oh.jpg?raw=true)
-*Inference Time Scaling for OpenHands Agent*
+![Inference Time Scaling for Hanzo Agent](https://github.com/SWE-Gym/SWE-Gym/blob/main/assets/images/inference-oh.jpg?raw=true)
+*Inference Time Scaling for Hanzo Agent*
 
 
 ## Our baselines on SWE-Gym shows strong scaling trends

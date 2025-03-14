@@ -2,12 +2,12 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import SecretStr
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.integrations.provider import ProviderToken, ProviderType
-from openhands.integrations.utils import validate_provider_token
-from openhands.server.auth import get_provider_tokens, get_user_id
-from openhands.server.settings import GETSettingsModel, POSTSettingsModel, Settings
-from openhands.server.shared import SettingsStoreImpl, config
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.integrations.provider import ProviderToken, ProviderType
+from hanzo.integrations.utils import validate_provider_token
+from hanzo.server.auth import get_provider_tokens, get_user_id
+from hanzo.server.settings import GETSettingsModel, POSTSettingsModel, Settings
+from hanzo.server.shared import SettingsStoreImpl, config
 
 app = APIRouter(prefix='/api')
 

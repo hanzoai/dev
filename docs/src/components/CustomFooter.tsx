@@ -8,13 +8,13 @@ function CustomFooter() {
     <footer className="custom-footer">
       <div className="footer-content">
         <div className="footer-icons">
-          <a href="https://join.slack.com/t/openhands-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg" target="_blank" rel="noopener noreferrer">
+          <a href="https://join.slack.com/t/hanzo-ai/shared_invite/zt-2ypg5jweb-d~6hObZDbXi_HEL8PDrbHg" target="_blank" rel="noopener noreferrer">
             <FaSlack />
           </a>
           <a href="https://discord.gg/ESHStjSjD4" target="_blank" rel="noopener noreferrer">
             <FaDiscord />
           </a>
-          <a href="https://github.com/All-Hands-AI/OpenHands" target="_blank" rel="noopener noreferrer">
+          <a href="https://github.com/hanzoai/Hanzo" target="_blank" rel="noopener noreferrer">
             <FaGithub />
           </a>
         </div>

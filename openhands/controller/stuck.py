@@ -1,18 +1,18 @@
-from openhands.controller.state.state import State
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action.action import Action
-from openhands.events.action.commands import IPythonRunCellAction
-from openhands.events.action.empty import NullAction
-from openhands.events.action.message import MessageAction
-from openhands.events.event import Event, EventSource
-from openhands.events.observation import (
+from hanzo.controller.state.state import State
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action.action import Action
+from hanzo.events.action.commands import IPythonRunCellAction
+from hanzo.events.action.empty import NullAction
+from hanzo.events.action.message import MessageAction
+from hanzo.events.event import Event, EventSource
+from hanzo.events.observation import (
     CmdOutputObservation,
     IPythonRunCellObservation,
 )
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.events.observation.empty import NullObservation
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.observation.observation import Observation
+from hanzo.events.observation.agent import AgentCondensationObservation
+from hanzo.events.observation.empty import NullObservation
+from hanzo.events.observation.error import ErrorObservation
+from hanzo.events.observation.observation import Observation
 
 
 class StuckDetector:

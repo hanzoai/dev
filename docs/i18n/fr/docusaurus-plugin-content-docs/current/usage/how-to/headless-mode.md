@@ -2,27 +2,27 @@
 
 # Mode sans interface
 
-Vous pouvez exécuter OpenHands avec une seule commande, sans démarrer l'application web.
-Cela facilite l'écriture de scripts et l'automatisation des tâches avec OpenHands.
+Vous pouvez exécuter Hanzo avec une seule commande, sans démarrer l'application web.
+Cela facilite l'écriture de scripts et l'automatisation des tâches avec Hanzo.
 
 Ceci est différent du [Mode CLI](cli-mode), qui est interactif et mieux adapté au développement actif.
 
 ## Avec Python
 
-Pour exécuter OpenHands en mode sans interface avec Python,
-[suivez les instructions de configuration de développement](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md),
+Pour exécuter Hanzo en mode sans interface avec Python,
+[suivez les instructions de configuration de développement](https://github.com/hanzoai/Hanzo/blob/main/Development.md),
 puis exécutez :
 
 ```bash
-poetry run python -m openhands.core.main -t "write a bash script that prints hi"
+poetry run python -m hanzo.core.main -t "write a bash script that prints hi"
 ```
 
 Vous devrez vous assurer de définir votre modèle, votre clé API et d'autres paramètres via des variables d'environnement
-[ou le fichier `config.toml`](https://github.com/All-Hands-AI/OpenHands/blob/main/config.template.toml).
+[ou le fichier `config.toml`](https://github.com/hanzoai/Hanzo/blob/main/config.template.toml).
 
 ## Avec Docker
 
-1. Définissez `WORKSPACE_BASE` sur le répertoire que vous voulez qu'OpenHands modifie :
+1. Définissez `WORKSPACE_BASE` sur le répertoire que vous voulez qu'Hanzo modifie :
 
 ```bash
 WORKSPACE_BASE=$(pwd)/workspace
@@ -46,7 +46,7 @@ LLM_API_KEY="sk_test_12345"
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.28-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.28 \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -55,7 +55,7 @@ docker run -it \
     -v $WORKSPACE_BASE:/opt/workspace_base \
     -v /var/run/docker.sock:/var/run/docker.sock \
     --add-host host.docker.internal:host-gateway \
-    --name openhands-app-$(date +%Y%m%d%H%M%S) \
-    docker.all-hands.dev/all-hands-ai/openhands:0.28 \
-    python -m openhands.core.main -t "write a bash script that prints hi" --no-auto-continue
+    --name hanzo-app-$(date +%Y%m%d%H%M%S) \
+    docker.hanzo.ai/hanzoai/hanzo:0.28 \
+    python -m hanzo.core.main -t "write a bash script that prints hi" --no-auto-continue
 ```

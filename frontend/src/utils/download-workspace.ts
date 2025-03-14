@@ -1,10 +1,10 @@
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 
 /**
  * Downloads the current workspace as a .zip file.
  */
 export const downloadWorkspace = async (conversationId: string) => {
-  const blob = await OpenHands.getWorkspaceZip(conversationId);
+  const blob = await Hanzo.getWorkspaceZip(conversationId);
 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

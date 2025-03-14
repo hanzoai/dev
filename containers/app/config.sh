@@ -1,4 +1,4 @@
 DOCKER_REGISTRY=ghcr.io
-DOCKER_ORG=all-hands-ai
-DOCKER_IMAGE=openhands
+DOCKER_ORG=hanzoai
+DOCKER_IMAGE=hanzo
 DOCKER_BASE_DIR="."

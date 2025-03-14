@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import requests
 
-from openhands.core.config import LLMConfig
+from hanzo.core.config import LLMConfig
 
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
@@ -23,16 +23,16 @@ from litellm.exceptions import (
 from litellm.types.utils import CostPerToken, ModelResponse, Usage
 from litellm.utils import create_pretrained_tokenizer
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.message import Message
-from openhands.llm.debug_mixin import DebugMixin
-from openhands.llm.fn_call_converter import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.message import Message
+from hanzo.llm.debug_mixin import DebugMixin
+from hanzo.llm.fn_call_converter import (
     STOP_WORDS,
     convert_fncall_messages_to_non_fncall_messages,
     convert_non_fncall_messages_to_fncall_messages,
 )
-from openhands.llm.metrics import Metrics
-from openhands.llm.retry_mixin import RetryMixin
+from hanzo.llm.metrics import Metrics
+from hanzo.llm.retry_mixin import RetryMixin
 
 __all__ = ['LLM']
 
@@ -148,7 +148,7 @@ class LLM(RetryMixin, DebugMixin):
             kwargs.pop(
                 'temperature'
             )  # temperature is not supported for reasoning models
-        # Azure issue: https://github.com/All-Hands-AI/OpenHands/issues/6777
+        # Azure issue: https://github.com/hanzoai/Hanzo/issues/6777
         if self.config.model.startswith('azure'):
             kwargs['max_tokens'] = self.config.max_output_tokens
             kwargs.pop('max_completion_tokens')
@@ -180,7 +180,7 @@ class LLM(RetryMixin, DebugMixin):
         )
         def wrapper(*args, **kwargs):
             """Wrapper for the litellm completion function. Logs the input and output of the completion function."""
-            from openhands.io import json
+            from hanzo.io import json
 
             messages: list[dict[str, Any]] | dict[str, Any] = []
             mock_function_calling = not self.is_function_calling_active()
@@ -379,7 +379,7 @@ class LLM(RetryMixin, DebugMixin):
             # noinspection PyBroadException
             except Exception:
                 pass
-        from openhands.io import json
+        from hanzo.io import json
 
         logger.debug(f'Model info: {json.dumps(self.model_info, indent=2)}')
 

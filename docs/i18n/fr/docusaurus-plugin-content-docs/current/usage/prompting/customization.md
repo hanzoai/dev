@@ -2,11 +2,11 @@
 
 # Personnalisation du comportement de l'agent
 
-OpenHands peut être personnalisé pour fonctionner plus efficacement avec des dépôts spécifiques en fournissant un contexte et des directives propres à chaque dépôt. Cette section explique comment optimiser OpenHands pour votre projet.
+Hanzo peut être personnalisé pour fonctionner plus efficacement avec des dépôts spécifiques en fournissant un contexte et des directives propres à chaque dépôt. Cette section explique comment optimiser Hanzo pour votre projet.
 
 ## Configuration du dépôt
 
-Vous pouvez personnaliser le comportement d'OpenHands pour votre dépôt en créant un répertoire `.openhands` à la racine de votre dépôt. Au minimum, il doit contenir le fichier `.openhands/microagents/repo.md`, qui comprend les instructions qui seront données à l'agent chaque fois qu'il travaillera avec ce dépôt.
+Vous pouvez personnaliser le comportement d'Hanzo pour votre dépôt en créant un répertoire `.hanzo` à la racine de votre dépôt. Au minimum, il doit contenir le fichier `.hanzo/microagents/repo.md`, qui comprend les instructions qui seront données à l'agent chaque fois qu'il travaillera avec ce dépôt.
 
 Nous vous suggérons d'inclure les informations suivantes :
 1. **Aperçu du dépôt** : Une brève description de l'objectif et de l'architecture de votre projet
@@ -16,7 +16,7 @@ Nous vous suggérons d'inclure les informations suivantes :
 5. **Instructions de configuration** : Les étapes nécessaires pour construire et exécuter le projet
 
 ### Exemple de configuration de dépôt
-Exemple de fichier `.openhands/microagents/repo.md` :
+Exemple de fichier `.hanzo/microagents/repo.md` :
 ```
 Repository: MonProjet
 Description: Une application web pour la gestion des tâches
@@ -54,13 +54,13 @@ Le composant doit utiliser notre style partagé de src/styles/components.
 
 ### Meilleures pratiques pour la personnalisation du dépôt
 
-1. **Gardez les instructions à jour** : Mettez régulièrement à jour votre répertoire `.openhands` au fur et à mesure de l'évolution de votre projet
+1. **Gardez les instructions à jour** : Mettez régulièrement à jour votre répertoire `.hanzo` au fur et à mesure de l'évolution de votre projet
 2. **Soyez spécifique** : Incluez des chemins, des modèles et des exigences spécifiques à votre projet
 3. **Documentez les dépendances** : Énumérez tous les outils et dépendances nécessaires au développement
 4. **Incluez des exemples** : Fournissez des exemples de bons modèles de code de votre projet
 5. **Spécifiez les conventions** : Documentez les conventions de nommage, l'organisation des fichiers et les préférences de style de code
 
-En personnalisant OpenHands pour votre dépôt, vous obtiendrez des résultats plus précis et cohérents qui s'alignent sur les normes et les exigences de votre projet.
+En personnalisant Hanzo pour votre dépôt, vous obtiendrez des résultats plus précis et cohérents qui s'alignent sur les normes et les exigences de votre projet.
 
 ## Autres microagents
-Vous pouvez créer d'autres instructions dans le répertoire `.openhands/microagents/` qui seront envoyées à l'agent si un mot-clé particulier est trouvé, comme `test`, `frontend` ou `migration`. Voir [Microagents](microagents.md) pour plus d'informations.
+Vous pouvez créer d'autres instructions dans le répertoire `.hanzo/microagents/` qui seront envoyées à l'agent si un mot-clé particulier est trouvé, comme `test`, `frontend` ou `migration`. Voir [Microagents](microagents.md) pour plus d'informations.

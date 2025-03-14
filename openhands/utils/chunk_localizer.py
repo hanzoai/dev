@@ -8,7 +8,7 @@ import pylcs
 from pydantic import BaseModel
 from tree_sitter_languages import get_parser
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 class Chunk(BaseModel):

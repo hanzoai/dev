@@ -1,11 +1,11 @@
-from openhands.core.config import AppConfig
-from openhands.runtime.plugins import PluginRequirement
+from hanzo.core.config import AppConfig
+from hanzo.runtime.plugins import PluginRequirement
 
 DEFAULT_PYTHON_PREFIX = [
-    '/openhands/micromamba/bin/micromamba',
+    '/hanzo/micromamba/bin/micromamba',
     'run',
     '-n',
-    'openhands',
+    'hanzo',
     'poetry',
     'run',
 ]
@@ -34,10 +34,10 @@ def get_action_execution_server_startup_command(
         ] + sandbox_config.browsergym_eval_env.split(' ')
 
     username = override_username or (
-        'openhands' if app_config.run_as_openhands else 'root'
+        'hanzo' if app_config.run_as_hanzo else 'root'
     )
     user_id = override_user_id or (
-        sandbox_config.user_id if app_config.run_as_openhands else 0
+        sandbox_config.user_id if app_config.run_as_hanzo else 0
     )
 
     base_cmd = [
@@ -45,7 +45,7 @@ def get_action_execution_server_startup_command(
         'python',
         '-u',
         '-m',
-        'openhands.runtime.action_execution_server',
+        'hanzo.runtime.action_execution_server',
         str(server_port),
         '--working-dir',
         app_config.workspace_mount_path_in_sandbox,

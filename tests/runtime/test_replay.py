@@ -4,21 +4,21 @@ import asyncio
 
 from conftest import _close_test_runtime, _load_runtime
 
-from openhands.controller.state.state import State
-from openhands.core.config.app_config import AppConfig
-from openhands.core.config.config_utils import OH_DEFAULT_AGENT
-from openhands.core.main import run_controller
-from openhands.core.schema.agent import AgentState
-from openhands.events.action.empty import NullAction
-from openhands.events.action.message import MessageAction
-from openhands.events.event import EventSource
-from openhands.events.observation.commands import CmdOutputObservation
+from hanzo.controller.state.state import State
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.config.config_utils import OH_DEFAULT_AGENT
+from hanzo.core.main import run_controller
+from hanzo.core.schema.agent import AgentState
+from hanzo.events.action.empty import NullAction
+from hanzo.events.action.message import MessageAction
+from hanzo.events.event import EventSource
+from hanzo.events.observation.commands import CmdOutputObservation
 
 
 def _get_config(trajectory_name: str, agent: str = OH_DEFAULT_AGENT):
     return AppConfig(
         default_agent=agent,
-        run_as_openhands=False,
+        run_as_hanzo=False,
         # do not mount workspace
         workspace_base=None,
         workspace_mount_path=None,
@@ -26,12 +26,12 @@ def _get_config(trajectory_name: str, agent: str = OH_DEFAULT_AGENT):
     )
 
 
-def test_simple_replay(temp_dir, runtime_cls, run_as_openhands):
+def test_simple_replay(temp_dir, runtime_cls, run_as_hanzo):
     """
     A simple replay test that involves simple terminal operations and edits
     (creating a simple 2048 game), using the default agent
     """
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     config.replay_trajectory_path = './tests/runtime/trajs/basic.json'
 
     state: State | None = asyncio.run(
@@ -47,7 +47,7 @@ def test_simple_replay(temp_dir, runtime_cls, run_as_openhands):
     _close_test_runtime(runtime)
 
 
-def test_simple_gui_replay(temp_dir, runtime_cls, run_as_openhands):
+def test_simple_gui_replay(temp_dir, runtime_cls, run_as_hanzo):
     """
     A simple replay test that involves simple terminal operations and edits
     (writing a Vue.js App), using the default agent
@@ -58,7 +58,7 @@ def test_simple_gui_replay(temp_dir, runtime_cls, run_as_openhands):
     2. In GUI mode, agents typically don't finish; rather, they wait for the next
     task from the user, so this exported trajectory ends with awaiting_user_input
     """
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
 
     config = _get_config('basic_gui_mode')
 
@@ -77,7 +77,7 @@ def test_simple_gui_replay(temp_dir, runtime_cls, run_as_openhands):
     _close_test_runtime(runtime)
 
 
-def test_replay_wrong_initial_state(temp_dir, runtime_cls, run_as_openhands):
+def test_replay_wrong_initial_state(temp_dir, runtime_cls, run_as_hanzo):
     """
     Replay requires a consistent initial state to start with, otherwise it might
     be producing garbage. The trajectory used in this test assumes existence of
@@ -86,7 +86,7 @@ def test_replay_wrong_initial_state(temp_dir, runtime_cls, run_as_openhands):
     look like: the following events would still be replayed even though they are
     meaningless.
     """
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
     config.replay_trajectory_path = './tests/runtime/trajs/wrong_initial_state.json'
 
     state: State | None = asyncio.run(
@@ -110,7 +110,7 @@ def test_replay_wrong_initial_state(temp_dir, runtime_cls, run_as_openhands):
     _close_test_runtime(runtime)
 
 
-def test_replay_basic_interactions(temp_dir, runtime_cls, run_as_openhands):
+def test_replay_basic_interactions(temp_dir, runtime_cls, run_as_hanzo):
     """
     Replay a trajectory that involves interactions, i.e. with user messages
     in the middle. This tests two things:
@@ -118,7 +118,7 @@ def test_replay_basic_interactions(temp_dir, runtime_cls, run_as_openhands):
     interference (no asking for user input).
     2) The user messages in the trajectory should appear in the history.
     """
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_hanzo)
 
     config = _get_config('basic_interactions')
 

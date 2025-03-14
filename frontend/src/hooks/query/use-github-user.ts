@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import posthog from "posthog-js";
 import { useConfig } from "./use-config";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { useAuth } from "#/context/auth-context";
 import { useLogout } from "../mutation/use-logout";
 import { useCurrentSettings } from "#/context/settings-context";
@@ -16,7 +16,7 @@ export const useGitHubUser = () => {
 
   const user = useQuery({
     queryKey: ["user", githubTokenIsSet],
-    queryFn: OpenHands.getGitHubUser,
+    queryFn: Hanzo.getGitHubUser,
     enabled: githubTokenIsSet && !!config?.APP_MODE,
     retry: false,
     staleTime: 1000 * 60 * 5, // 5 minutes

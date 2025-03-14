@@ -1,9 +1,9 @@
 import os
 import re
 
-from openhands.core.config import AppConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.server.shared import config as shared_config
+from hanzo.core.config import AppConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.server.shared import config as shared_config
 
 FILES_TO_IGNORE = ['.git/', '.DS_Store', 'node_modules/', '__pycache__/', 'lost+found/']
 

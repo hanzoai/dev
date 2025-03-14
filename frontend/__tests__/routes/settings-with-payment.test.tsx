@@ -3,13 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoutesStub } from "react-router";
 import { renderWithProviders } from "test-utils";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import SettingsScreen from "#/routes/settings";
 import { PaymentForm } from "#/components/features/payment/payment-form";
 import * as FeatureFlags from "#/utils/feature-flags";
 
 describe("Settings Billing", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Hanzo, "getConfig");
   vi.spyOn(FeatureFlags, "BILLING_SETTINGS").mockReturnValue(true);
 
   const RoutesStub = createRoutesStub([

@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openhands.controller.agent_controller import AgentController
-from openhands.events import EventSource
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation
+from hanzo.controller.agent_controller import AgentController
+from hanzo.events import EventSource
+from hanzo.events.action import CmdRunAction, MessageAction
+from hanzo.events.observation import CmdOutputObservation
 
 
 @pytest.fixture

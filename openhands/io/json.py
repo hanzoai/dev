@@ -4,14 +4,14 @@ from datetime import datetime
 from json_repair import repair_json
 from litellm.types.utils import ModelResponse
 
-from openhands.core.exceptions import LLMResponseError
-from openhands.events.event import Event
-from openhands.events.observation import CmdOutputMetadata
-from openhands.events.serialization import event_to_dict
-from openhands.llm.metrics import Metrics
+from hanzo.core.exceptions import LLMResponseError
+from hanzo.events.event import Event
+from hanzo.events.observation import CmdOutputMetadata
+from hanzo.events.serialization import event_to_dict
+from hanzo.llm.metrics import Metrics
 
 
-class OpenHandsJSONEncoder(json.JSONEncoder):
+class HanzoJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles datetime and event objects"""
 
     def default(self, obj):
@@ -29,14 +29,14 @@ class OpenHandsJSONEncoder(json.JSONEncoder):
 
 
 # Create a single reusable encoder instance
-_json_encoder = OpenHandsJSONEncoder()
+_json_encoder = HanzoJSONEncoder()
 
 
 def dumps(obj, **kwargs):
     """Serialize an object to str format"""
     if not kwargs:
         return _json_encoder.encode(obj)
-    return json.dumps(obj, cls=OpenHandsJSONEncoder, **kwargs)
+    return json.dumps(obj, cls=HanzoJSONEncoder, **kwargs)
 
 
 def loads(json_str, **kwargs):

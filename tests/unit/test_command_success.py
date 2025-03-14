@@ -1,4 +1,4 @@
-from openhands.events.observation.commands import (
+from hanzo.events.observation.commands import (
     CmdOutputMetadata,
     CmdOutputObservation,
     IPythonRunCellObservation,

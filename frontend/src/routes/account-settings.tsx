@@ -297,7 +297,7 @@ function AccountSettings() {
                   testId="llm-api-key-help-anchor"
                   text="Don't know your API key?"
                   linkText="Click here for instructions"
-                  href="https://docs.all-hands.dev/modules/usage/llms"
+                  href="https://docs.hanzo.ai/modules/usage/llms"
                 />
               )}
 
@@ -324,7 +324,7 @@ function AccountSettings() {
                   label={
                     <>
                       Runtime Settings (
-                      <a href="mailto:contact@all-hands.dev">
+                      <a href="mailto:contact@hanzo.ai">
                         get in touch for access
                       </a>
                       )
@@ -414,7 +414,7 @@ function AccountSettings() {
                   testId="github-token-help-anchor"
                   text="Get your token"
                   linkText="here"
-                  href="https://github.com/settings/tokens/new?description=openhands-app&scopes=repo,user,workflow"
+                  href="https://github.com/settings/tokens/new?description=hanzo-app&scopes=repo,user,workflow"
                 />
               </>
             )}

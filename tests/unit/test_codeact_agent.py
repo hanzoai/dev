@@ -3,8 +3,8 @@ from unittest.mock import Mock
 import pytest
 from litellm import ChatCompletionMessageToolCall
 
-from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
-from openhands.agenthub.codeact_agent.function_calling import (
+from hanzo.agenthub.codeact_agent.codeact_agent import CodeActAgent
+from hanzo.agenthub.codeact_agent.function_calling import (
     BrowserTool,
     CmdRunTool,
     IPythonTool,
@@ -14,24 +14,24 @@ from openhands.agenthub.codeact_agent.function_calling import (
     get_tools,
     response_to_actions,
 )
-from openhands.agenthub.codeact_agent.tools.browser import (
+from hanzo.agenthub.codeact_agent.tools.browser import (
     _BROWSER_DESCRIPTION,
     _BROWSER_TOOL_DESCRIPTION,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig, LLMConfig
-from openhands.core.exceptions import FunctionCallNotExistsError
-from openhands.core.message import ImageContent, Message, TextContent
-from openhands.events.action import (
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig, LLMConfig
+from hanzo.core.exceptions import FunctionCallNotExistsError
+from hanzo.core.message import ImageContent, Message, TextContent
+from hanzo.events.action import (
     CmdRunAction,
     MessageAction,
 )
-from openhands.events.event import EventSource
-from openhands.events.observation.commands import (
+from hanzo.events.event import EventSource
+from hanzo.events.observation.commands import (
     CmdOutputObservation,
 )
-from openhands.events.tool import ToolCallMetadata
-from openhands.llm.llm import LLM
+from hanzo.events.tool import ToolCallMetadata
+from hanzo.llm.llm import LLM
 
 
 @pytest.fixture

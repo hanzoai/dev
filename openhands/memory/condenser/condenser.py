@@ -6,9 +6,9 @@ from typing import Any
 
 from typing_extensions import override
 
-from openhands.controller.state.state import State
-from openhands.core.config.condenser_config import CondenserConfig
-from openhands.events.event import Event
+from hanzo.controller.state.state import State
+from hanzo.core.config.condenser_config import CondenserConfig
+from hanzo.events.event import Event
 
 CONDENSER_METADATA_KEY = 'condenser_meta'
 """Key identifying where metadata is stored in a `State` object's `extra_data` field."""

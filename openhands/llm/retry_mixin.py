@@ -5,8 +5,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
 
 class RetryMixin:

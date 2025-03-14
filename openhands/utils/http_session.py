@@ -4,7 +4,7 @@ from typing import Any, cast
 import requests
 from requests.structures import CaseInsensitiveDict
 
-from openhands.core.logger import openhands_logger as logger
+from hanzo.core.logger import hanzo_logger as logger
 
 
 @dataclass

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from openhands.events.action import Action
+from hanzo.events.action import Action
 
 
 class ActionParseError(Exception):

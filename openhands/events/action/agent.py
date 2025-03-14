@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from openhands.core.schema import ActionType
-from openhands.events.action.action import Action
+from hanzo.core.schema import ActionType
+from hanzo.events.action.action import Action
 
 
 @dataclass

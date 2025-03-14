@@ -6,17 +6,17 @@ from runloop_api_client import Runloop
 from runloop_api_client.types import DevboxView
 from runloop_api_client.types.shared_params import LaunchParameters
 
-from openhands.core.config import AppConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.events import EventStream
-from openhands.runtime.impl.action_execution.action_execution_client import (
+from hanzo.core.config import AppConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events import EventStream
+from hanzo.runtime.impl.action_execution.action_execution_client import (
     ActionExecutionClient,
 )
-from openhands.runtime.plugins import PluginRequirement
-from openhands.runtime.utils.command import get_action_execution_server_startup_command
-from openhands.utils.tenacity_stop import stop_if_should_exit
+from hanzo.runtime.plugins import PluginRequirement
+from hanzo.runtime.utils.command import get_action_execution_server_startup_command
+from hanzo.utils.tenacity_stop import stop_if_should_exit
 
-CONTAINER_NAME_PREFIX = 'openhands-runtime-'
+CONTAINER_NAME_PREFIX = 'hanzo-runtime-'
 
 
 class RunloopRuntime(ActionExecutionClient):
@@ -88,9 +88,9 @@ class RunloopRuntime(ActionExecutionClient):
         # NB: start off as root, action_execution_server will ultimately choose user but expects all context
         # (ie browser) to be installed as root
         start_command = (
-            'export MAMBA_ROOT_PREFIX=/openhands/micromamba && '
-            'cd /openhands/code && '
-            + '/openhands/micromamba/bin/micromamba run -n openhands poetry config virtualenvs.path /openhands/poetry && '
+            'export MAMBA_ROOT_PREFIX=/hanzo/micromamba && '
+            'cd /hanzo/code && '
+            + '/hanzo/micromamba/bin/micromamba run -n hanzo poetry config virtualenvs.path /hanzo/poetry && '
             + ' '.join(start_command)
         )
         entrypoint = f"sudo bash -c '{start_command}'"
@@ -99,7 +99,7 @@ class RunloopRuntime(ActionExecutionClient):
             entrypoint=entrypoint,
             name=self.sid,
             environment_variables={'DEBUG': 'true'} if self.config.debug else {},
-            prebuilt='openhands',
+            prebuilt='hanzo',
             launch_parameters=LaunchParameters(
                 available_ports=[self._sandbox_port, self._vscode_port],
                 resource_size_request='LARGE',

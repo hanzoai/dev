@@ -28,18 +28,18 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from hanzo.controller.state.state import State
+from hanzo.core.config import (
     AppConfig,
     get_llm_config_arg,
     parse_arguments,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.main import create_runtime, run_controller
+from hanzo.events.action import CmdRunAction, MessageAction
+from hanzo.events.observation import CmdOutputObservation
+from hanzo.runtime.base import Runtime
+from hanzo.utils.async_utils import call_async_from_sync
 
 IMPORT_HELPER = {
     'python': [
@@ -86,7 +86,7 @@ def get_config(
     sandbox_config.base_container_image = 'python:3.12-bookworm'
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_hanzo=False,
         runtime='docker',
         max_iterations=metadata.max_iterations,
         sandbox=sandbox_config,
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     args = parse_arguments()
 
     # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
-    # so we don't need to manage file uploading to OpenHands's repo
+    # so we don't need to manage file uploading to Hanzo's repo
     dataset = load_dataset(
         'bigcode/humanevalpack', 'python'
     )  # TODO: Support other languages

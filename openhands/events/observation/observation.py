@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from openhands.events.event import Event
+from hanzo.events.event import Event
 
 
 @dataclass

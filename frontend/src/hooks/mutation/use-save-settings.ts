@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { DEFAULT_SETTINGS } from "#/services/settings";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { PostSettings, PostApiSettings } from "#/types/settings";
 
 const saveSettingsMutationFn = async (settings: Partial<PostSettings>) => {
@@ -24,7 +24,7 @@ const saveSettingsMutationFn = async (settings: Partial<PostSettings>) => {
     user_consents_to_analytics: settings.user_consents_to_analytics,
   };
 
-  await OpenHands.saveSettings(apiSettings);
+  await Hanzo.saveSettings(apiSettings);
 };
 
 export const useSaveSettings = () => {

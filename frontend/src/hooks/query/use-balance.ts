@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConfig } from "./use-config";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 import { BILLING_SETTINGS } from "#/utils/feature-flags";
 
 export const useBalance = () => {
@@ -8,7 +8,7 @@ export const useBalance = () => {
 
   return useQuery({
     queryKey: ["user", "balance"],
-    queryFn: OpenHands.getBalance,
+    queryFn: Hanzo.getBalance,
     enabled: config?.APP_MODE === "saas" && BILLING_SETTINGS(),
   });
 };

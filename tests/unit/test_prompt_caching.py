@@ -3,10 +3,10 @@ from unittest.mock import Mock
 import pytest
 from litellm import ModelResponse
 
-from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
-from openhands.core.config import AgentConfig, LLMConfig
-from openhands.events.action import MessageAction
-from openhands.llm.llm import LLM
+from hanzo.agenthub.codeact_agent.codeact_agent import CodeActAgent
+from hanzo.core.config import AgentConfig, LLMConfig
+from hanzo.events.action import MessageAction
+from hanzo.llm.llm import LLM
 
 
 @pytest.fixture
@@ -125,5 +125,5 @@ def test_get_messages_prompt_caching(codeact_agent: CodeActAgent):
     )  # Including the initial system+user + last user message
 
     # Verify that these are indeed the last user message (from start)
-    assert cached_user_messages[0].content[0].text.startswith('You are OpenHands agent')
+    assert cached_user_messages[0].content[0].text.startswith('You are Hanzo agent')
     assert cached_user_messages[1].content[0].text.startswith('User message 14')

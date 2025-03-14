@@ -1,12 +1,12 @@
 from evaluation.integration_tests.tests.base import BaseIntegrationTest, TestResult
-from openhands.events.action import AgentFinishAction, MessageAction
-from openhands.events.event import Event
-from openhands.events.observation import AgentDelegateObservation
-from openhands.runtime.base import Runtime
+from hanzo.events.action import AgentFinishAction, MessageAction
+from hanzo.events.event import Event
+from hanzo.events.observation import AgentDelegateObservation
+from hanzo.runtime.base import Runtime
 
 
 class Test(BaseIntegrationTest):
-    INSTRUCTION = 'Look at https://github.com/All-Hands-AI/OpenHands/pull/8, and tell me what is happening there and what did @asadm suggest.'
+    INSTRUCTION = 'Look at https://github.com/hanzoai/Hanzo/pull/8, and tell me what is happening there and what did @asadm suggest.'
 
     @classmethod
     def initialize_runtime(cls, runtime: Runtime) -> None:
@@ -14,7 +14,7 @@ class Test(BaseIntegrationTest):
 
     @classmethod
     def verify_result(cls, runtime: Runtime, histories: list[Event]) -> TestResult:
-        from openhands.core.logger import openhands_logger as logger
+        from hanzo.core.logger import hanzo_logger as logger
 
         # check if the license information is in any message
         message_actions = [

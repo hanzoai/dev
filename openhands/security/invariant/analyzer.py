@@ -7,25 +7,25 @@ import docker
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.message import Message, TextContent
-from openhands.core.schema import AgentState
-from openhands.events.action.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.message import Message, TextContent
+from hanzo.core.schema import AgentState
+from hanzo.events.action.action import (
     Action,
     ActionConfirmationStatus,
     ActionSecurityRisk,
 )
-from openhands.events.action.agent import ChangeAgentStateAction
-from openhands.events.event import Event, EventSource
-from openhands.events.observation import Observation
-from openhands.events.serialization.action import action_from_dict
-from openhands.events.stream import EventStream
-from openhands.llm.llm import LLM
-from openhands.runtime.utils import find_available_tcp_port
-from openhands.security.analyzer import SecurityAnalyzer
-from openhands.security.invariant.client import InvariantClient
-from openhands.security.invariant.parser import TraceElement, parse_element
-from openhands.utils.async_utils import call_sync_from_async
+from hanzo.events.action.agent import ChangeAgentStateAction
+from hanzo.events.event import Event, EventSource
+from hanzo.events.observation import Observation
+from hanzo.events.serialization.action import action_from_dict
+from hanzo.events.stream import EventStream
+from hanzo.llm.llm import LLM
+from hanzo.runtime.utils import find_available_tcp_port
+from hanzo.security.analyzer import SecurityAnalyzer
+from hanzo.security.invariant.client import InvariantClient
+from hanzo.security.invariant.parser import TraceElement, parse_element
+from hanzo.utils.async_utils import call_sync_from_async
 
 
 class InvariantAnalyzer(SecurityAnalyzer):
@@ -33,8 +33,8 @@ class InvariantAnalyzer(SecurityAnalyzer):
 
     trace: list[TraceElement]
     input: list[dict]
-    container_name: str = 'openhands-invariant-server'
-    image_name: str = 'ghcr.io/invariantlabs-ai/server:openhands'
+    container_name: str = 'hanzo-invariant-server'
+    image_name: str = 'ghcr.io/invariantlabs-ai/server:hanzo'
     api_host: str = 'http://localhost'
     timeout: int = 180
     settings: dict = {}

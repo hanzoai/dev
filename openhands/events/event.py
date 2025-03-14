@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from openhands.events.tool import ToolCallMetadata
-from openhands.llm.metrics import Metrics
+from hanzo.events.tool import ToolCallMetadata
+from hanzo.llm.metrics import Metrics
 
 
 class EventSource(str, Enum):
@@ -14,11 +14,11 @@ class EventSource(str, Enum):
 
 class FileEditSource(str, Enum):
     LLM_BASED_EDIT = 'llm_based_edit'
-    OH_ACI = 'oh_aci'  # openhands-aci
+    OH_ACI = 'oh_aci'  # hanzo-aci
 
 
 class FileReadSource(str, Enum):
-    OH_ACI = 'oh_aci'  # openhands-aci
+    OH_ACI = 'oh_aci'  # hanzo-aci
     DEFAULT = 'default'
 
 
@@ -74,7 +74,7 @@ class Event:
         """
         self._timeout = value
         if value is not None and value > 600:
-            from openhands.core.logger import openhands_logger as logger
+            from hanzo.core.logger import hanzo_logger as logger
 
             logger.warning(
                 'Timeout greater than 600 seconds may not be supported by '

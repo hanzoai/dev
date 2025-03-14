@@ -4,15 +4,15 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from openhands.core.config.sandbox_config import SandboxConfig
-from openhands.integrations.provider import ProviderType, SecretStore
-from openhands.server.app import app
-from openhands.server.settings import Settings
+from hanzo.core.config.sandbox_config import SandboxConfig
+from hanzo.integrations.provider import ProviderType, SecretStore
+from hanzo.server.app import app
+from hanzo.server.settings import Settings
 
 
 @pytest.fixture
 def mock_settings_store():
-    with patch('openhands.server.routes.settings.SettingsStoreImpl') as mock:
+    with patch('hanzo.server.routes.settings.SettingsStoreImpl') as mock:
         store_instance = MagicMock()
         mock.get_instance = AsyncMock(return_value=store_instance)
         store_instance.load = AsyncMock()
@@ -22,14 +22,14 @@ def mock_settings_store():
 
 @pytest.fixture
 def mock_get_user_id():
-    with patch('openhands.server.routes.settings.get_user_id') as mock:
+    with patch('hanzo.server.routes.settings.get_user_id') as mock:
         mock.return_value = 'test-user'
         yield mock
 
 
 @pytest.fixture
 def mock_validate_provider_token():
-    with patch('openhands.server.routes.settings.validate_provider_token') as mock:
+    with patch('hanzo.server.routes.settings.validate_provider_token') as mock:
 
         async def mock_determine(*args, **kwargs):
             return ProviderType.GITHUB
@@ -67,7 +67,7 @@ def test_client(mock_settings_store):
 
 @pytest.fixture
 def mock_github_service():
-    with patch('openhands.server.routes.settings.GitHubService') as mock:
+    with patch('hanzo.server.routes.settings.GitHubService') as mock:
         yield mock
 
 
@@ -111,7 +111,7 @@ async def test_settings_api_runtime_factor(
     assert response.json()['remote_runtime_resource_factor'] == 2
 
     # Verify that the sandbox config gets updated when settings are loaded
-    with patch('openhands.server.shared.config') as mock_config:
+    with patch('hanzo.server.shared.config') as mock_config:
         mock_config.sandbox = SandboxConfig()
         response = test_client.get('/api/settings')
         assert response.status_code == 200

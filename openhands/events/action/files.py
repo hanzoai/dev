@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from openhands.core.schema import ActionType
-from openhands.events.action.action import Action, ActionSecurityRisk
-from openhands.events.event import FileEditSource, FileReadSource
+from hanzo.core.schema import ActionType
+from hanzo.events.action.action import Action, ActionSecurityRisk
+from hanzo.events.event import FileEditSource, FileReadSource
 
 
 @dataclass

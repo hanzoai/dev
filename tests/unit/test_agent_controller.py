@@ -5,23 +5,23 @@ from uuid import uuid4
 import pytest
 from litellm import ContextWindowExceededError
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State, TrafficControlState
-from openhands.core.config import AppConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.main import run_controller
-from openhands.core.schema import AgentState
-from openhands.events import Event, EventSource, EventStream, EventStreamSubscriber
-from openhands.events.action import ChangeAgentStateAction, CmdRunAction, MessageAction
-from openhands.events.observation import (
+from hanzo.controller.agent import Agent
+from hanzo.controller.agent_controller import AgentController
+from hanzo.controller.state.state import State, TrafficControlState
+from hanzo.core.config import AppConfig
+from hanzo.core.config.agent_config import AgentConfig
+from hanzo.core.main import run_controller
+from hanzo.core.schema import AgentState
+from hanzo.events import Event, EventSource, EventStream, EventStreamSubscriber
+from hanzo.events.action import ChangeAgentStateAction, CmdRunAction, MessageAction
+from hanzo.events.observation import (
     ErrorObservation,
 )
-from openhands.events.serialization import event_to_dict
-from openhands.llm import LLM
-from openhands.llm.metrics import Metrics, TokenUsage
-from openhands.runtime.base import Runtime
-from openhands.storage.memory import InMemoryFileStore
+from hanzo.events.serialization import event_to_dict
+from hanzo.llm import LLM
+from hanzo.llm.metrics import Metrics, TokenUsage
+from hanzo.runtime.base import Runtime
+from hanzo.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture

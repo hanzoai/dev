@@ -11,9 +11,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.types import ASGIApp
 
-from openhands.server import shared
-from openhands.server.auth import get_user_id
-from openhands.server.types import SessionMiddlewareInterface
+from hanzo.server import shared
+from hanzo.server.auth import get_user_id
+from hanzo.server.types import SessionMiddlewareInterface
 
 
 class LocalhostCORSMiddleware(CORSMiddleware):

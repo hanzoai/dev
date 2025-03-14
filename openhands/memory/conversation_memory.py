@@ -1,9 +1,9 @@
 from litellm import ModelResponse
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.message import ImageContent, Message, TextContent
-from openhands.core.schema import ActionType
-from openhands.events.action import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.message import ImageContent, Message, TextContent
+from hanzo.core.schema import ActionType
+from hanzo.events.action import (
     Action,
     AgentDelegateAction,
     AgentFinishAction,
@@ -16,8 +16,8 @@ from openhands.events.action import (
     IPythonRunCellAction,
     MessageAction,
 )
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     AgentCondensationObservation,
     AgentDelegateObservation,
     AgentThinkObservation,
@@ -28,10 +28,10 @@ from openhands.events.observation import (
     IPythonRunCellObservation,
     UserRejectObservation,
 )
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.observation.observation import Observation
-from openhands.events.serialization.event import truncate_content
-from openhands.utils.prompt import PromptManager
+from hanzo.events.observation.error import ErrorObservation
+from hanzo.events.observation.observation import Observation
+from hanzo.events.serialization.event import truncate_content
+from hanzo.utils.prompt import PromptManager
 
 
 class ConversationMemory:
@@ -152,7 +152,7 @@ class ConversationMemory:
                 - CmdRunAction: For executing bash commands
                 - IPythonRunCellAction: For running IPython code
                 - FileEditAction: For editing files
-                - FileReadAction: For reading files using openhands-aci commands
+                - FileReadAction: For reading files using hanzo-aci commands
                 - BrowseInteractiveAction: For browsing the web
                 - AgentFinishAction: For ending the interaction
                 - MessageAction: For sending messages
@@ -277,7 +277,7 @@ class ConversationMemory:
         - CmdOutputObservation: Formats command execution results with exit codes
         - IPythonRunCellObservation: Formats IPython cell execution results, replacing base64 images
         - FileEditObservation: Formats file editing results
-        - FileReadObservation: Formats file reading results from openhands-aci
+        - FileReadObservation: Formats file reading results from hanzo-aci
         - AgentDelegateObservation: Formats results from delegated agent tasks
         - ErrorObservation: Formats error messages from failed actions
         - UserRejectObservation: Formats user rejection messages
@@ -329,7 +329,7 @@ class ConversationMemory:
         elif isinstance(obs, FileReadObservation):
             message = Message(
                 role='user', content=[TextContent(text=obs.content)]
-            )  # Content is already truncated by openhands-aci
+            )  # Content is already truncated by hanzo-aci
         elif isinstance(obs, BrowserOutputObservation):
             text = obs.get_agent_obs_text()
             if (

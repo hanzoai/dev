@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from openhands.core.schema import ActionType
-from openhands.events.action.action import (
+from hanzo.core.schema import ActionType
+from hanzo.events.action.action import (
     Action,
     ActionConfirmationStatus,
     ActionSecurityRisk,

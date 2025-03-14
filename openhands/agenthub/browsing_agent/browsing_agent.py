@@ -3,23 +3,23 @@ import os
 from browsergym.core.action.highlevel import HighLevelActionSet
 from browsergym.utils.obs import flatten_axtree_to_str
 
-from openhands.agenthub.browsing_agent.response_parser import BrowsingResponseParser
-from openhands.controller.agent import Agent
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.message import Message, TextContent
-from openhands.events.action import (
+from hanzo.agenthub.browsing_agent.response_parser import BrowsingResponseParser
+from hanzo.controller.agent import Agent
+from hanzo.controller.state.state import State
+from hanzo.core.config import AgentConfig
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.message import Message, TextContent
+from hanzo.events.action import (
     Action,
     AgentFinishAction,
     BrowseInteractiveAction,
     MessageAction,
 )
-from openhands.events.event import EventSource
-from openhands.events.observation import BrowserOutputObservation
-from openhands.events.observation.observation import Observation
-from openhands.llm.llm import LLM
-from openhands.runtime.plugins import (
+from hanzo.events.event import EventSource
+from hanzo.events.observation import BrowserOutputObservation
+from hanzo.events.observation.observation import Observation
+from hanzo.llm.llm import LLM
+from hanzo.runtime.plugins import (
     PluginRequirement,
 )
 
@@ -171,7 +171,7 @@ class BrowsingAgent(Agent):
 
         prev_action_str = '\n'.join(prev_actions)
         # if the final BrowserInteractiveAction exec BrowserGym's send_msg_to_user,
-        # we should also send a message back to the user in OpenHands and call it a day
+        # we should also send a message back to the user in Hanzo and call it a day
         if (
             isinstance(last_action, BrowseInteractiveAction)
             and last_action.browsergym_send_msg_to_user

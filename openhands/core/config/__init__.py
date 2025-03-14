@@ -1,15 +1,15 @@
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.config.app_config import AppConfig
-from openhands.core.config.config_utils import (
+from hanzo.core.config.agent_config import AgentConfig
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.config.config_utils import (
     OH_DEFAULT_AGENT,
     OH_MAX_ITERATIONS,
     get_field_info,
 )
-from openhands.core.config.extended_config import ExtendedConfig
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.config.sandbox_config import SandboxConfig
-from openhands.core.config.security_config import SecurityConfig
-from openhands.core.config.utils import (
+from hanzo.core.config.extended_config import ExtendedConfig
+from hanzo.core.config.llm_config import LLMConfig
+from hanzo.core.config.sandbox_config import SandboxConfig
+from hanzo.core.config.security_config import SecurityConfig
+from hanzo.core.config.utils import (
     finalize_config,
     get_agent_config_arg,
     get_llm_config_arg,

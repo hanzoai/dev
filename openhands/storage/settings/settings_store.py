@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from openhands.core.config.app_config import AppConfig
-from openhands.server.settings import Settings
+from hanzo.core.config.app_config import AppConfig
+from hanzo.server.settings import Settings
 
 
 class SettingsStore(ABC):

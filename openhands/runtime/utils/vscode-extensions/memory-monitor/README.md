@@ -1,4 +1,4 @@
-# OpenHands Memory Monitor
+# Hanzo Memory Monitor
 
 A VSCode extension for monitoring system and process memory usage in real-time.
 
@@ -37,7 +37,7 @@ The detailed memory view provides comprehensive information about:
 
 ## Development
 
-This extension is part of the OpenHands project. To modify or extend it:
+This extension is part of the Hanzo project. To modify or extend it:
 
 1. Make changes to the source files
 2. Test the extension in a development VSCode instance

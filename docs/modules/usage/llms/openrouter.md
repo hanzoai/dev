@@ -1,10 +1,10 @@
 # OpenRouter
 
-OpenHands uses LiteLLM to make calls to chat models on OpenRouter. You can find their documentation on using OpenRouter as a provider [here](https://docs.litellm.ai/docs/providers/openrouter).
+Hanzo uses LiteLLM to make calls to chat models on OpenRouter. You can find their documentation on using OpenRouter as a provider [here](https://docs.litellm.ai/docs/providers/openrouter).
 
 ## Configuration
 
-When running OpenHands, you'll need to set the following in the OpenHands UI through the Settings:
+When running Hanzo, you'll need to set the following in the Hanzo UI through the Settings:
 * `LLM Provider` to `OpenRouter`
 * `LLM Model` to the model you will be using.
 [Visit here to see a full list of OpenRouter models](https://openrouter.ai/models).

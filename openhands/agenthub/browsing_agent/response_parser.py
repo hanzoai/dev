@@ -1,9 +1,9 @@
 import ast
 import re
 
-from openhands.controller.action_parser import ActionParser, ResponseParser
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from hanzo.controller.action_parser import ActionParser, ResponseParser
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.action import (
     Action,
     BrowseInteractiveAction,
 )

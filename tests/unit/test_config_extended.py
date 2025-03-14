@@ -2,9 +2,9 @@ import os
 
 import pytest
 
-from openhands.core.config.app_config import AppConfig
-from openhands.core.config.extended_config import ExtendedConfig
-from openhands.core.config.utils import load_from_toml
+from hanzo.core.config.app_config import AppConfig
+from hanzo.core.config.extended_config import ExtendedConfig
+from hanzo.core.config.utils import load_from_toml
 
 
 def test_extended_config_from_dict():

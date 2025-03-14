@@ -1,14 +1,14 @@
 FROM {{ base_image }}
 
 # Shared environment variables
-ENV POETRY_VIRTUALENVS_PATH=/openhands/poetry \
-    MAMBA_ROOT_PREFIX=/openhands/micromamba \
+ENV POETRY_VIRTUALENVS_PATH=/hanzo/poetry \
+    MAMBA_ROOT_PREFIX=/hanzo/micromamba \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     EDITOR=code \
     VISUAL=code \
     GIT_EDITOR="code --wait" \
-    OPENVSCODE_SERVER_ROOT=/openhands/.openvscode-server
+    OPENVSCODE_SERVER_ROOT=/hanzo/.openvscode-server
 
 {% macro setup_base_system() %}
 
@@ -29,9 +29,9 @@ RUN apt-get update && \
 RUN if getent passwd 1000 | grep -q pn; then userdel pn; fi
 
 # Create necessary directories
-RUN mkdir -p /openhands && \
-    mkdir -p /openhands/logs && \
-    mkdir -p /openhands/poetry
+RUN mkdir -p /hanzo && \
+    mkdir -p /hanzo/logs && \
+    mkdir -p /hanzo/poetry
 
 {% endmacro %}
 
@@ -70,37 +70,37 @@ RUN if [ -z "${RELEASE_TAG}" ]; then \
 
 {% macro install_vscode_extensions() %}
 # Install our custom extension
-RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/openhands-hello-world && \
-    cp -r /openhands/code/openhands/runtime/utils/vscode-extensions/hello-world/* ${OPENVSCODE_SERVER_ROOT}/extensions/openhands-hello-world/
+RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/hanzo-hello-world && \
+    cp -r /hanzo/code/hanzo/runtime/utils/vscode-extensions/hello-world/* ${OPENVSCODE_SERVER_ROOT}/extensions/hanzo-hello-world/
 
-RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/openhands-memory-monitor && \
-    cp -r /openhands/code/openhands/runtime/utils/vscode-extensions/memory-monitor/* ${OPENVSCODE_SERVER_ROOT}/extensions/openhands-memory-monitor/
+RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/hanzo-memory-monitor && \
+    cp -r /hanzo/code/hanzo/runtime/utils/vscode-extensions/memory-monitor/* ${OPENVSCODE_SERVER_ROOT}/extensions/hanzo-memory-monitor/
 {% endmacro %}
 
 {% macro install_dependencies() %}
 # Install all dependencies
-WORKDIR /openhands/code
+WORKDIR /hanzo/code
 RUN \
-    /openhands/micromamba/bin/micromamba config set changeps1 False && \
+    /hanzo/micromamba/bin/micromamba config set changeps1 False && \
     # Configure Poetry and create virtual environment
-    /openhands/micromamba/bin/micromamba run -n openhands poetry config virtualenvs.path /openhands/poetry && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry env use python3.12 && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry config virtualenvs.path /hanzo/poetry && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry env use python3.12 && \
     # Install project dependencies
-    /openhands/micromamba/bin/micromamba run -n openhands poetry install --only main,runtime --no-interaction --no-root && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry install --only main,runtime --no-interaction --no-root && \
     # Update and install additional tools
     apt-get update && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry run pip install playwright && \
-    /openhands/micromamba/bin/micromamba run -n openhands poetry run playwright install --with-deps chromium && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry run pip install playwright && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry run playwright install --with-deps chromium && \
     # Set environment variables
-    echo "OH_INTERPRETER_PATH=$(/openhands/micromamba/bin/micromamba run -n openhands poetry run python -c "import sys; print(sys.executable)")" >> /etc/environment && \
+    echo "OH_INTERPRETER_PATH=$(/hanzo/micromamba/bin/micromamba run -n hanzo poetry run python -c "import sys; print(sys.executable)")" >> /etc/environment && \
     # Clear caches
-    /openhands/micromamba/bin/micromamba run -n openhands poetry cache clear --all . -n && \
+    /hanzo/micromamba/bin/micromamba run -n hanzo poetry cache clear --all . -n && \
     # Set permissions
-    chmod -R g+rws /openhands/poetry && \
-    mkdir -p /openhands/workspace && chmod -R g+rws,o+rw /openhands/workspace && \
+    chmod -R g+rws /hanzo/poetry && \
+    mkdir -p /hanzo/workspace && chmod -R g+rws,o+rw /hanzo/workspace && \
     # Clean up
     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
-    /openhands/micromamba/bin/micromamba clean --all
+    /hanzo/micromamba/bin/micromamba clean --all
 
 {% endmacro %}
 
@@ -109,27 +109,27 @@ RUN \
 # START: Build Runtime Image from Scratch
 # ================================================================
 # This is used in cases where the base image is something more generic like nikolaik/python-nodejs
-# rather than the current OpenHands release
+# rather than the current Hanzo release
 
 {{ setup_base_system() }}
 
 # Install micromamba
-RUN mkdir -p /openhands/micromamba/bin && \
-    /bin/bash -c "PREFIX_LOCATION=/openhands/micromamba BIN_FOLDER=/openhands/micromamba/bin INIT_YES=no CONDA_FORGE_YES=yes $(curl -L https://micro.mamba.pm/install.sh)" && \
-    /openhands/micromamba/bin/micromamba config remove channels defaults && \
-    /openhands/micromamba/bin/micromamba config list
+RUN mkdir -p /hanzo/micromamba/bin && \
+    /bin/bash -c "PREFIX_LOCATION=/hanzo/micromamba BIN_FOLDER=/hanzo/micromamba/bin INIT_YES=no CONDA_FORGE_YES=yes $(curl -L https://micro.mamba.pm/install.sh)" && \
+    /hanzo/micromamba/bin/micromamba config remove channels defaults && \
+    /hanzo/micromamba/bin/micromamba config list
 
-# Create the openhands virtual environment and install poetry and python
-RUN /openhands/micromamba/bin/micromamba create -n openhands -y && \
-    /openhands/micromamba/bin/micromamba install -n openhands -c conda-forge poetry python=3.12 -y
+# Create the hanzo virtual environment and install poetry and python
+RUN /hanzo/micromamba/bin/micromamba create -n hanzo -y && \
+    /hanzo/micromamba/bin/micromamba install -n hanzo -c conda-forge poetry python=3.12 -y
 
-# Create a clean openhands directory including only the pyproject.toml, poetry.lock and openhands/__init__.py
+# Create a clean hanzo directory including only the pyproject.toml, poetry.lock and hanzo/__init__.py
 RUN \
-    if [ -d /openhands/code ]; then rm -rf /openhands/code; fi && \
-    mkdir -p /openhands/code/openhands && \
-    touch /openhands/code/openhands/__init__.py
+    if [ -d /hanzo/code ]; then rm -rf /hanzo/code; fi && \
+    mkdir -p /hanzo/code/hanzo && \
+    touch /hanzo/code/hanzo/__init__.py
 
-COPY ./code/pyproject.toml ./code/poetry.lock /openhands/code/
+COPY ./code/pyproject.toml ./code/poetry.lock /hanzo/code/
 
 {{ install_dependencies() }}
 
@@ -141,10 +141,10 @@ COPY ./code/pyproject.toml ./code/poetry.lock /openhands/code/
 # ================================================================
 # Copy Project source files
 # ================================================================
-RUN if [ -d /openhands/code/openhands ]; then rm -rf /openhands/code/openhands; fi
-COPY ./code/pyproject.toml ./code/poetry.lock /openhands/code/
-COPY ./code/openhands /openhands/code/openhands
-RUN chmod a+rwx /openhands/code/openhands/__init__.py
+RUN if [ -d /hanzo/code/hanzo ]; then rm -rf /hanzo/code/hanzo; fi
+COPY ./code/pyproject.toml ./code/poetry.lock /hanzo/code/
+COPY ./code/hanzo /hanzo/code/hanzo
+RUN chmod a+rwx /hanzo/code/hanzo/__init__.py
 
 {{ setup_vscode_server() }}
 

@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.core.config import LLMConfig
-from openhands.core.schema.action import ActionType
-from openhands.core.schema.agent import AgentState
-from openhands.events.action import (
+from hanzo.core.config import LLMConfig
+from hanzo.core.schema.action import ActionType
+from hanzo.core.schema.agent import AgentState
+from hanzo.events.action import (
     AgentDelegateAction,
     AgentFinishAction,
     BrowseInteractiveAction,
@@ -18,9 +18,9 @@ from openhands.events.action import (
     MessageAction,
     NullAction,
 )
-from openhands.events.action.action import ActionConfirmationStatus, ActionSecurityRisk
-from openhands.events.event import Event
-from openhands.events.observation import (
+from hanzo.events.action.action import ActionConfirmationStatus, ActionSecurityRisk
+from hanzo.events.event import Event
+from hanzo.events.observation import (
     AgentDelegateObservation,
     AgentStateChangedObservation,
     BrowserOutputObservation,
@@ -28,13 +28,13 @@ from openhands.events.observation import (
     IPythonRunCellObservation,
     NullObservation,
 )
-from openhands.events.stream import EventSource, EventStream
-from openhands.llm.llm import LLM
-from openhands.security.invariant import InvariantAnalyzer
-from openhands.security.invariant.client import InvariantClient
-from openhands.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
-from openhands.security.invariant.parser import parse_action, parse_observation
-from openhands.storage import get_file_store
+from hanzo.events.stream import EventSource, EventStream
+from hanzo.llm.llm import LLM
+from hanzo.security.invariant import InvariantAnalyzer
+from hanzo.security.invariant.client import InvariantClient
+from hanzo.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
+from hanzo.security.invariant.parser import parse_action, parse_observation
+from hanzo.storage import get_file_store
 
 
 @pytest.fixture
@@ -555,7 +555,7 @@ def default_config():
         ),
     ],
 )
-@patch('openhands.llm.llm.litellm_completion', autospec=True)
+@patch('hanzo.llm.llm.litellm_completion', autospec=True)
 @pytest.mark.asyncio
 async def test_check_usertask(
     mock_litellm_completion, usertask, is_appropriate, default_config, temp_dir: str
@@ -617,7 +617,7 @@ async def test_check_usertask(
         ("fill(2, '<Good Content>')", 'No'),
     ],
 )
-@patch('openhands.llm.llm.litellm_completion', autospec=True)
+@patch('hanzo.llm.llm.litellm_completion', autospec=True)
 @pytest.mark.asyncio
 async def test_check_fillaction(
     mock_litellm_completion, fillaction, is_harmful, default_config, temp_dir: str

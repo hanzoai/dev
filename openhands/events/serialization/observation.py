@@ -1,29 +1,29 @@
 import copy
 
-from openhands.events.observation.agent import (
+from hanzo.events.observation.agent import (
     AgentCondensationObservation,
     AgentStateChangedObservation,
     AgentThinkObservation,
 )
-from openhands.events.observation.browse import BrowserOutputObservation
-from openhands.events.observation.commands import (
+from hanzo.events.observation.browse import BrowserOutputObservation
+from hanzo.events.observation.commands import (
     CmdOutputMetadata,
     CmdOutputObservation,
     IPythonRunCellObservation,
 )
-from openhands.events.observation.delegate import AgentDelegateObservation
-from openhands.events.observation.empty import (
+from hanzo.events.observation.delegate import AgentDelegateObservation
+from hanzo.events.observation.empty import (
     NullObservation,
 )
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.observation.files import (
+from hanzo.events.observation.error import ErrorObservation
+from hanzo.events.observation.files import (
     FileEditObservation,
     FileReadObservation,
     FileWriteObservation,
 )
-from openhands.events.observation.observation import Observation
-from openhands.events.observation.reject import UserRejectObservation
-from openhands.events.observation.success import SuccessObservation
+from hanzo.events.observation.observation import Observation
+from hanzo.events.observation.reject import UserRejectObservation
+from hanzo.events.observation.success import SuccessObservation
 
 observations = (
     NullObservation,
@@ -69,7 +69,7 @@ def _update_cmd_output_metadata(
 
 
 def handle_observation_deprecated_extras(extras: dict) -> dict:
-    # These are deprecated in https://github.com/All-Hands-AI/OpenHands/pull/4881
+    # These are deprecated in https://github.com/hanzoai/Hanzo/pull/4881
     if 'exit_code' in extras:
         extras['metadata'] = _update_cmd_output_metadata(
             extras.get('metadata', None), exit_code=extras.pop('exit_code')
@@ -79,7 +79,7 @@ def handle_observation_deprecated_extras(extras: dict) -> dict:
             extras.get('metadata', None), pid=extras.pop('command_id')
         )
 
-    # formatted_output_and_error has been deprecated in https://github.com/All-Hands-AI/OpenHands/pull/6671
+    # formatted_output_and_error has been deprecated in https://github.com/hanzoai/Hanzo/pull/6671
     if 'formatted_output_and_error' in extras:
         extras.pop('formatted_output_and_error')
     return extras

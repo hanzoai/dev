@@ -1,8 +1,8 @@
 import socketio
 
-from openhands.server.app import app as base_app
-from openhands.server.listen_socket import sio
-from openhands.server.middleware import (
+from hanzo.server.app import app as base_app
+from hanzo.server.listen_socket import sio
+from hanzo.server.middleware import (
     AttachConversationMiddleware,
     CacheControlMiddleware,
     GitHubTokenMiddleware,
@@ -10,7 +10,7 @@ from openhands.server.middleware import (
     LocalhostCORSMiddleware,
     RateLimitMiddleware,
 )
-from openhands.server.static import SPAStaticFiles
+from hanzo.server.static import SPAStaticFiles
 
 base_app.mount(
     '/', SPAStaticFiles(directory='./frontend/build', html=True), name='dist'

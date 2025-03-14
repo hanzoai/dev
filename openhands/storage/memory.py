@@ -1,7 +1,7 @@
 import os
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.storage.files import FileStore
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.storage.files import FileStore
 
 IN_MEMORY_FILES: dict = {}
 

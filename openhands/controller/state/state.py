@@ -4,17 +4,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from openhands.controller.state.task import RootTask
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.schema import AgentState
-from openhands.events.action import (
+from hanzo.controller.state.task import RootTask
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.core.schema import AgentState
+from hanzo.events.action import (
     MessageAction,
 )
-from openhands.events.action.agent import AgentFinishAction
-from openhands.events.event import Event, EventSource
-from openhands.llm.metrics import Metrics
-from openhands.storage.files import FileStore
-from openhands.storage.locations import get_conversation_agent_state_filename
+from hanzo.events.action.agent import AgentFinishAction
+from hanzo.events.event import Event, EventSource
+from hanzo.llm.metrics import Metrics
+from hanzo.storage.files import FileStore
+from hanzo.storage.locations import get_conversation_agent_state_filename
 
 
 class TrafficControlState(str, Enum):
@@ -39,7 +39,7 @@ RESUMABLE_STATES = [
 @dataclass
 class State:
     """
-    Represents the running state of an agent in the OpenHands system, saving data of its operation and memory.
+    Represents the running state of an agent in the Hanzo system, saving data of its operation and memory.
 
     - Multi-agent/delegate state:
       - store the task (conversation between the agent and the user)

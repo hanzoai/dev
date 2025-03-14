@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from openhands.core.schema import ActionType
-from openhands.events.action.action import Action
+from hanzo.core.schema import ActionType
+from hanzo.events.action.action import Action
 
 
 @dataclass

@@ -2,13 +2,13 @@ from typing import Any
 
 import requests
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.resolver.interfaces.issue import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.resolver.interfaces.issue import (
     Issue,
     IssueHandlerInterface,
     ReviewThread,
 )
-from openhands.resolver.utils import extract_issue_references
+from hanzo.resolver.utils import extract_issue_references
 
 
 class GithubIssueHandler(IssueHandlerInterface):
@@ -208,7 +208,7 @@ class GithubIssueHandler(IssueHandlerInterface):
             }
             """
 
-        comment_reply = f'Openhands fix success summary\n\n\n{reply}'
+        comment_reply = f'Hanzo fix success summary\n\n\n{reply}'
         variables = {'body': comment_reply, 'pullRequestReviewThreadId': comment_id}
         url = self.get_graphql_url()
         headers = {

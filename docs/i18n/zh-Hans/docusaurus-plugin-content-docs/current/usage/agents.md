@@ -14,10 +14,10 @@
 - 执行任何有效的 Linux `bash` 命令
 - 使用 [交互式 Python 解释器](https://ipython.org/) 执行任何有效的 `Python` 代码。这是通过 `bash` 命令模拟的，有关更多详细信息，请参阅下面的插件系统。
 
-![image](https://github.com/All-Hands-AI/OpenHands/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
+![image](https://github.com/hanzoai/Hanzo/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
 
 ### 演示
 
-https://github.com/All-Hands-AI/OpenHands/assets/38853559/f592a192-e86c-4f48-ad31-d69282d5f6ac
+https://github.com/hanzoai/Hanzo/assets/38853559/f592a192-e86c-4f48-ad31-d69282d5f6ac
 
 _使用 `gpt-4-turbo-2024-04-09` 的 CodeActAgent 执行数据科学任务（线性回归）的示例_。

@@ -1,13 +1,13 @@
-# OpenHands Architecture
+# Hanzo Architecture
 
-This directory contains the core components of OpenHands.
+This directory contains the core components of Hanzo.
 
 This diagram provides an overview of the roles of each component and how they communicate and collaborate.
-![OpenHands System Architecture Diagram (July 4, 2024)](../docs/static/img/system_architecture_overview.png)
+![Hanzo System Architecture Diagram (July 4, 2024)](../docs/static/img/system_architecture_overview.png)
 
 ## Classes
 
-The key classes in OpenHands are:
+The key classes in Hanzo are:
 
 * LLM: brokers all interactions with large language models. Works with any underlying completion model, thanks to LiteLLM.
 * Agent: responsible for looking at the current State, and producing an Action that moves one step closer toward the end-goal.
@@ -19,7 +19,7 @@ The key classes in OpenHands are:
       * Observation: represents information collected from the environment, e.g. file contents or command output
 * Runtime: responsible for performing Actions, and sending back Observations
     * Sandbox: the part of the runtime responsible for running commands, e.g. inside of Docker
-* Server: brokers OpenHands sessions over HTTP, e.g. to drive the frontend
+* Server: brokers Hanzo sessions over HTTP, e.g. to drive the frontend
     * Session: holds a single EventStream, a single AgentController, and a single Runtime. Generally represents a single task (but potentially including several user prompts)
     * ConversationManager: keeps a list of active sessions, and ensures requests are routed to the correct Session
 
@@ -37,7 +37,7 @@ while True:
 ```
 
 In reality, most of this is achieved through message passing, via the EventStream.
-The EventStream serves as the backbone for all communication in OpenHands.
+The EventStream serves as the backbone for all communication in Hanzo.
 
 ```mermaid
 flowchart LR
@@ -52,4 +52,4 @@ flowchart LR
 
 ## Runtime
 
-Please refer to the [documentation](https://docs.all-hands.dev/modules/usage/architecture/runtime) to learn more about `Runtime`.
+Please refer to the [documentation](https://docs.hanzo.ai/modules/usage/architecture/runtime) to learn more about `Runtime`.

@@ -1,26 +1,26 @@
 import re
 
-from openhands.core.exceptions import LLMMalformedActionError
-from openhands.events.action.action import Action
-from openhands.events.action.agent import (
+from hanzo.core.exceptions import LLMMalformedActionError
+from hanzo.events.action.action import Action
+from hanzo.events.action.agent import (
     AgentDelegateAction,
     AgentFinishAction,
     AgentRejectAction,
     AgentThinkAction,
     ChangeAgentStateAction,
 )
-from openhands.events.action.browse import BrowseInteractiveAction, BrowseURLAction
-from openhands.events.action.commands import (
+from hanzo.events.action.browse import BrowseInteractiveAction, BrowseURLAction
+from hanzo.events.action.commands import (
     CmdRunAction,
     IPythonRunCellAction,
 )
-from openhands.events.action.empty import NullAction
-from openhands.events.action.files import (
+from hanzo.events.action.empty import NullAction
+from hanzo.events.action.files import (
     FileEditAction,
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.action.message import MessageAction
+from hanzo.events.action.message import MessageAction
 
 actions = (
     NullAction,
@@ -43,7 +43,7 @@ ACTION_TYPE_TO_CLASS = {action_class.action: action_class for action_class in ac
 
 
 def handle_action_deprecated_args(args: dict) -> dict:
-    # keep_prompt has been deprecated in https://github.com/All-Hands-AI/OpenHands/pull/4881
+    # keep_prompt has been deprecated in https://github.com/hanzoai/Hanzo/pull/4881
     if 'keep_prompt' in args:
         args.pop('keep_prompt')
 

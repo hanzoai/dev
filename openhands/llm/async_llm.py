@@ -4,14 +4,14 @@ from typing import Any
 
 from litellm import acompletion as litellm_acompletion
 
-from openhands.core.exceptions import UserCancelledError
-from openhands.core.logger import openhands_logger as logger
-from openhands.llm.llm import (
+from hanzo.core.exceptions import UserCancelledError
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.llm.llm import (
     LLM,
     LLM_RETRY_EXCEPTIONS,
     REASONING_EFFORT_SUPPORTED_MODELS,
 )
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.utils.shutdown_listener import should_continue
 
 
 class AsyncLLM(LLM):

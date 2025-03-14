@@ -7,24 +7,24 @@ from enum import Enum
 from functools import partial
 from typing import Callable, Iterable
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.event import Event, EventSource
-from openhands.events.serialization.event import event_from_dict, event_to_dict
-from openhands.io import json
-from openhands.storage import FileStore
-from openhands.storage.locations import (
+from hanzo.core.logger import hanzo_logger as logger
+from hanzo.events.event import Event, EventSource
+from hanzo.events.serialization.event import event_from_dict, event_to_dict
+from hanzo.io import json
+from hanzo.storage import FileStore
+from hanzo.storage.locations import (
     get_conversation_dir,
     get_conversation_event_filename,
     get_conversation_events_dir,
 )
-from openhands.utils.async_utils import call_sync_from_async
-from openhands.utils.shutdown_listener import should_continue
+from hanzo.utils.async_utils import call_sync_from_async
+from hanzo.utils.shutdown_listener import should_continue
 
 
 class EventStreamSubscriber(str, Enum):
     AGENT_CONTROLLER = 'agent_controller'
     SECURITY_ANALYZER = 'security_analyzer'
-    RESOLVER = 'openhands_resolver'
+    RESOLVER = 'hanzo_resolver'
     SERVER = 'server'
     RUNTIME = 'runtime'
     MAIN = 'main'

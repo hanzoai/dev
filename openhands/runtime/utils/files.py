@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from openhands.events.observation import (
+from hanzo.events.observation import (
     ErrorObservation,
     FileReadObservation,
     FileWriteObservation,

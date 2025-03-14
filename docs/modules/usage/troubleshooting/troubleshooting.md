@@ -1,14 +1,14 @@
 # 🚧 Troubleshooting
 
 :::tip
-OpenHands only supports Windows via WSL. Please be sure to run all commands inside your WSL terminal.
+Hanzo only supports Windows via WSL. Please be sure to run all commands inside your WSL terminal.
 :::
 
 ### Launch docker client failed
 
 **Description**
 
-When running OpenHands, the following error is seen:
+When running Hanzo, the following error is seen:
 ```
 Launch docker client failed. Please make sure you have installed docker and started docker desktop/daemon.
 ```
@@ -36,9 +36,9 @@ InRelease At least one invalid signature was encountered.
 This seems to happen when the hash of an existing external library changes and your local docker instance has
 cached a previous version. To work around this, please try the following:
 
-* Stop any containers where the name has the prefix `openhands-runtime-` :
-  `docker ps --filter name=openhands-runtime- --filter status=running -aq | xargs docker stop`
-* Remove any containers where the name has the prefix `openhands-runtime-` :
-  `docker rmi $(docker images --filter name=openhands-runtime- -q --no-trunc)`
-* Stop and Remove any containers / images where the name has the prefix `openhands-runtime-`
+* Stop any containers where the name has the prefix `hanzo-runtime-` :
+  `docker ps --filter name=hanzo-runtime- --filter status=running -aq | xargs docker stop`
+* Remove any containers where the name has the prefix `hanzo-runtime-` :
+  `docker rmi $(docker images --filter name=hanzo-runtime- -q --no-trunc)`
+* Stop and Remove any containers / images where the name has the prefix `hanzo-runtime-`
 * Prune containers / images : `docker container prune -f && docker image prune -f`

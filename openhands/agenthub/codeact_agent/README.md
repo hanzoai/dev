@@ -1,6 +1,6 @@
 # CodeAct Agent Framework
 
-This folder is an implementation of OpenHands's main agent, the CodeAct Agent. It is based on ([CodeAct](https://arxiv.org/abs/2402.01030), [tweet](https://twitter.com/xingyaow_/status/1754556835703751087)), an idea of consolidating LLM agents' **act**ions into a unified **code** action space for both *simplicity* and *performance*.
+This folder is an implementation of Hanzo's main agent, the CodeAct Agent. It is based on ([CodeAct](https://arxiv.org/abs/2402.01030), [tweet](https://twitter.com/xingyaow_/status/1754556835703751087)), an idea of consolidating LLM agents' **act**ions into a unified **code** action space for both *simplicity* and *performance*.
 
 ## Overview
 
@@ -13,7 +13,7 @@ The CodeAct agent operates through a function calling interface. At each turn, t
    - Interact with web browsers using `browser` and `web_read`
    - Edit files using `str_replace_editor` or `edit_file`
 
-![image](https://github.com/All-Hands-AI/OpenHands/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
+![image](https://github.com/hanzoai/Hanzo/assets/38853559/92b622e3-72ad-4a61-8f41-8c040b6d5fb3)
 
 ## Built-in Tools
 

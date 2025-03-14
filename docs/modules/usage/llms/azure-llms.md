@@ -1,10 +1,10 @@
 # Azure
 
-OpenHands uses LiteLLM to make calls to Azure's chat models. You can find their documentation on using Azure as a provider [here](https://docs.litellm.ai/docs/providers/azure).
+Hanzo uses LiteLLM to make calls to Azure's chat models. You can find their documentation on using Azure as a provider [here](https://docs.litellm.ai/docs/providers/azure).
 
 ## Azure OpenAI Configuration
 
-When running OpenHands, you'll need to set the following environment variable using `-e` in the
+When running Hanzo, you'll need to set the following environment variable using `-e` in the
 [docker run command](/modules/usage/installation#start-the-app):
 
 ```
@@ -18,7 +18,7 @@ docker run -it --pull=always \
     ...
 ```
 
-Then in the OpenHands UI Settings:
+Then in the Hanzo UI Settings:
 
 :::note
 You will need your ChatGPT deployment name which can be found on the deployments page in Azure. This is referenced as
@@ -33,7 +33,7 @@ You will need your ChatGPT deployment name which can be found on the deployments
 
 ### Azure OpenAI Configuration
 
-When running OpenHands, set the following environment variable using `-e` in the
+When running Hanzo, set the following environment variable using `-e` in the
 [docker run command](/modules/usage/installation#start-the-app):
 
 ```

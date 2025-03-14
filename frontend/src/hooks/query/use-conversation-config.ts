@@ -5,7 +5,7 @@ import {
   WsClientProviderStatus,
 } from "#/context/ws-client-provider";
 import { useConversation } from "#/context/conversation-context";
-import OpenHands from "#/api/open-hands";
+import Hanzo from "#/api/open-hands";
 
 export const useConversationConfig = () => {
   const { status } = useWsClient();
@@ -15,7 +15,7 @@ export const useConversationConfig = () => {
     queryKey: ["conversation_config", conversationId],
     queryFn: () => {
       if (!conversationId) throw new Error("No conversation ID");
-      return OpenHands.getRuntimeId(conversationId);
+      return Hanzo.getRuntimeId(conversationId);
     },
     enabled: status !== WsClientProviderStatus.DISCONNECTED && !!conversationId,
     staleTime: 1000 * 60 * 5, // 5 minutes

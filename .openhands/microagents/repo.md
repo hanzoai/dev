@@ -3,8 +3,8 @@ name: repo
 type: repo
 agent: CodeActAgent
 ---
-This repository contains the code for OpenHands, an automated AI software engineer. It has a Python backend
-(in the `openhands` directory) and React frontend (in the `frontend` directory).
+This repository contains the code for Hanzo, an automated AI software engineer. It has a Python backend
+(in the `hanzo` directory) and React frontend (in the `frontend` directory).
 
 ## General Setup:
 To set up the entire repo, including frontend and backend, run `make build`.
@@ -20,7 +20,7 @@ then re-run the command to ensure it passes.
 
 ## Repository Structure
 Backend:
-- Located in the `openhands` directory
+- Located in the `hanzo` directory
 - Testing:
   - All tests are in `tests/unit/test_*.py`
   - To test new code, run `poetry run pytest tests/unit/test_xxx.py` where `xxx` is the appropriate file for the current functionality

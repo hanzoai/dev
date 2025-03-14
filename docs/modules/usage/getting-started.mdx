@@ -1,9 +1,9 @@
-# Getting Started with OpenHands
+# Getting Started with Hanzo
 
-So you've [run OpenHands](./installation) and have
+So you've [run Hanzo](./installation) and have
 [set up your LLM](./installation#setup). Now what?
 
-OpenHands can help you tackle a wide variety of engineering tasks. But the technology
+Hanzo can help you tackle a wide variety of engineering tasks. But the technology
 is still new, and we're a long way off from having agents that can take on large, complicated
 engineering tasks without any guidance. So it's important to get a feel for what the agent
 does well, and where it might need some help.
@@ -55,15 +55,15 @@ You can ask the agent to commit and push for you:
 
 ## Adding New Code
 
-OpenHands can also do a great job adding new code to an existing code base.
+Hanzo can also do a great job adding new code to an existing code base.
 
-For example, you can ask OpenHands to add a new GitHub action to your project
-which lints your code. OpenHands may take a peek at your codebase to see what language
+For example, you can ask Hanzo to add a new GitHub action to your project
+which lints your code. Hanzo may take a peek at your codebase to see what language
 it should use and then drop a new file into `./github/workflows/lint.yml`.
 
 > Please add a GitHub action that lints the code in this repository.
 
-Some tasks might require a bit more context. While OpenHands can use `ls` and `grep`
+Some tasks might require a bit more context. While Hanzo can use `ls` and `grep`
 to search through your codebase, providing context up front allows it to move faster,
 and more accurately. And it'll cost you fewer tokens!
 
@@ -74,7 +74,7 @@ and more accurately. And it'll cost you fewer tokens!
 
 ## Refactoring
 
-OpenHands does great at refactoring existing code, especially in small chunks.
+Hanzo does great at refactoring existing code, especially in small chunks.
 You probably don't want to try rearchitecting your whole codebase, but breaking up
 long files and functions, renaming variables, etc. tend to work very well.
 
@@ -86,9 +86,9 @@ long files and functions, renaming variables, etc. tend to work very well.
 
 ## Bug Fixes
 
-OpenHands can also help you track down and fix bugs in your code. But as any
-developer knows, bug fixing can be extremely tricky, and often OpenHands will need more context.
-It helps if you've diagnosed the bug, but want OpenHands to figure out the logic.
+Hanzo can also help you track down and fix bugs in your code. But as any
+developer knows, bug fixing can be extremely tricky, and often Hanzo will need more context.
+It helps if you've diagnosed the bug, but want Hanzo to figure out the logic.
 
 > Currently the email field in the `/subscribe` endpoint is rejecting .io domains. Please fix this.
 
@@ -101,11 +101,11 @@ You can ask the agent to write a new test, and then iterate until it fixes the b
 
 ## More
 
-OpenHands is capable of helping out on just about any coding task but it takes some practice
+Hanzo is capable of helping out on just about any coding task but it takes some practice
 to get the most out of it. Remember to:
 * Keep your tasks small.
 * Be as specific as possible.
 * Provide as much context as possible.
 * Commit and push frequently.
 
-See [Prompting Best Practices](./prompting/prompting-best-practices) for more tips on how to get the most out of OpenHands.
+See [Prompting Best Practices](./prompting/prompting-best-practices) for more tips on how to get the most out of Hanzo.

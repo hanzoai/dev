@@ -1,11 +1,11 @@
-from openhands.events.action.files import FileEditSource
-from openhands.events.observation import (
+from hanzo.events.action.files import FileEditSource
+from hanzo.events.observation import (
     CmdOutputMetadata,
     CmdOutputObservation,
     FileEditObservation,
     Observation,
 )
-from openhands.events.serialization import (
+from hanzo.events.serialization import (
     event_from_dict,
     event_to_dict,
     event_to_memory,
