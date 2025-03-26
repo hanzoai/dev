@@ -16,7 +16,7 @@ packages = [
 python = "^3.12"
 datasets = "*"
 pandas = "*"
-litellm = "^1.60.0"
+litellm = "^1.63.14"
 google-generativeai = "*" # To use litellm with Gemini Pro API
 google-api-python-client = "*" # For Google Sheets API
 google-auth-httplib2 = "*" # For Google Sheets authentication
@@ -32,7 +32,7 @@ numpy = "*"
 json-repair = "*"
 browsergym-core = "0.10.2" # integrate browsergym-core as the browsing interface
 html2text = "*"
-e2b = ">=1.0.5,<1.2.0"
+e2b = ">=1.0.5,<1.4.0"
 pexpect = "*"
 jinja2 = "^3.1.3"
 python-multipart = "*"
@@ -63,8 +63,8 @@ protobuf = "^4.21.6,<5.0.0" # chromadb currently fails on 5.0+
 opentelemetry-api = "1.25.0"
 opentelemetry-exporter-otlp-proto-grpc = "1.25.0"
 modal = ">=0.66.26,<0.74.0"
-runloop-api-client = "0.26.0"
-libtmux = ">=0.37,<0.40"
+runloop-api-client = "0.29.0"
+libtmux = ">=0.37,<0.47"
 pygithub = "^2.5.0"
 joblib = "*"
 hanzo-aci = "^0.2.6"
@@ -76,13 +76,13 @@ stripe = "^11.5.0"
 ipywidgets = "^8.1.5"
 qtconsole = "^5.6.1"
 memory-profiler = "^0.61.0"
-daytona-sdk = "0.10.2"
+daytona-sdk = "0.11.1"
 python-json-logger = "^3.2.1"
 
 [tool.poetry.group.dev.dependencies]
-ruff = "0.9.10"
+ruff = "0.11.2"
 mypy = "1.15.0"
-pre-commit = "4.1.0"
+pre-commit = "4.2.0"
 build = "*"
 
 [tool.poetry.group.test.dependencies]
