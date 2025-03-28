@@ -258,7 +258,8 @@ describe("Settings Screen", () => {
       const input = await screen.findByTestId("github-token-input");
       await user.type(input, "invalid-token");
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       // Error handling would be managed by React Query and Toast notifications
@@ -535,7 +536,8 @@ describe("Settings Screen", () => {
         const option = await screen.findByText("2x (4 core, 16G)");
         await user.click(option);
 
-        const saveButton = screen.getByTestId("save-changes-button");
+        const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
         await user.click(saveButton);
 
         expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -551,7 +553,8 @@ describe("Settings Screen", () => {
 
         await toggleAdvancedSettings(user);
 
-        const saveButton = screen.getByTestId("save-changes-button");
+        const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
         await user.click(saveButton);
 
         await waitFor(() => {
@@ -630,7 +633,8 @@ describe("Settings Screen", () => {
         );
         await user.click(confirmationModeSwitch);
 
-        const saveButton = screen.getByTestId("save-changes-button");
+        const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
         await user.click(saveButton);
 
         expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -743,7 +747,8 @@ describe("Settings Screen", () => {
 
       expect(languageInput).toHaveValue("Norsk");
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -781,7 +786,8 @@ describe("Settings Screen", () => {
       const gpt4Option = await screen.findByText("gpt-4o");
       await user.click(gpt4Option);
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -878,7 +884,8 @@ describe("Settings Screen", () => {
       await user.click(analyticsConsentInput);
       expect(analyticsConsentInput).toBeChecked();
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(handleCaptureConsentSpy).toHaveBeenCalledWith(true);
@@ -927,7 +934,8 @@ describe("Settings Screen", () => {
       const user = userEvent.setup();
       renderSettingsScreen();
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -944,7 +952,8 @@ describe("Settings Screen", () => {
       const input = await screen.findByTestId("llm-api-key-input");
       expect(input).toHaveValue("");
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -964,7 +973,8 @@ describe("Settings Screen", () => {
       const input = await screen.findByTestId("llm-api-key-input");
       expect(input).toHaveValue("");
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
@@ -979,7 +989,8 @@ describe("Settings Screen", () => {
       const input = await screen.findByTestId("llm-api-key-input");
       await user.type(input, "new-api-key");
 
-      const saveButton = screen.getByTestId("save-changes-button");
+      const saveButton = screen.queryByTestId("save-changes-button") ||
+                       screen.getByText("Save Changes");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(

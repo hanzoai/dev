@@ -331,6 +331,7 @@ function AccountSettings() {
                   name="enable-confirmation-mode-switch"
                   onToggle={setConfirmationModeIsEnabled}
                   defaultIsToggled={!!settings.CONFIRMATION_MODE}
+                  checked={confirmationModeIsEnabled}
                   isBeta
                 >
                   Enable confirmation mode

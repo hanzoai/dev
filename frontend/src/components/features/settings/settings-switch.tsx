@@ -6,6 +6,7 @@ interface SettingsSwitchProps {
   name?: string;
   onToggle?: (value: boolean) => void;
   defaultIsToggled?: boolean;
+  checked?: boolean;
   isBeta?: boolean;
 }
 
@@ -15,9 +16,16 @@ export function SettingsSwitch({
   name,
   onToggle,
   defaultIsToggled,
+  checked,
   isBeta,
 }: React.PropsWithChildren<SettingsSwitchProps>) {
   const [isToggled, setIsToggled] = React.useState(defaultIsToggled ?? false);
+
+  React.useEffect(() => {
+    if (checked !== undefined) {
+      setIsToggled(checked);
+    }
+  }, [checked]);
 
   const handleToggle = (value: boolean) => {
     setIsToggled(value);
@@ -33,6 +41,7 @@ export function SettingsSwitch({
         type="checkbox"
         onChange={(e) => handleToggle(e.target.checked)}
         defaultChecked={defaultIsToggled}
+        checked={checked !== undefined ? checked : isToggled}
       />
 
       <StyledSwitchComponent isToggled={isToggled} />
