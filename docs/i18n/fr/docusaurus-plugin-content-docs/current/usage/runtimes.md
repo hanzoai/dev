@@ -2,18 +2,18 @@
 
 # Configuration d'exécution
 
-Un Runtime est un environnement où l'agent OpenHands peut modifier des fichiers et exécuter des commandes.
+Un Runtime est un environnement où l'agent Dev peut modifier des fichiers et exécuter des commandes.
 
-Par défaut, OpenHands utilise un runtime basé sur Docker, s'exécutant sur votre ordinateur local. Cela signifie que vous n'avez à payer que pour le LLM que vous utilisez, et votre code n'est envoyé qu'au LLM.
+Par défaut, Dev utilise un runtime basé sur Docker, s'exécutant sur votre ordinateur local. Cela signifie que vous n'avez à payer que pour le LLM que vous utilisez, et votre code n'est envoyé qu'au LLM.
 
-Nous prenons également en charge les runtimes "distants", qui sont généralement gérés par des tiers. Ils peuvent simplifier la configuration et la rendre plus évolutive, en particulier si vous exécutez de nombreuses conversations OpenHands en parallèle (par exemple pour faire de l'évaluation).
+Nous prenons également en charge les runtimes "distants", qui sont généralement gérés par des tiers. Ils peuvent simplifier la configuration et la rendre plus évolutive, en particulier si vous exécutez de nombreuses conversations Dev en parallèle (par exemple pour faire de l'évaluation).
 
 ## Runtime Docker
-C'est le Runtime par défaut qui est utilisé lorsque vous démarrez OpenHands. Vous remarquerez peut-être que certains flags sont passés à `docker run` pour rendre cela possible :
+C'est le Runtime par défaut qui est utilisé lorsque vous démarrez Dev. Vous remarquerez peut-être que certains flags sont passés à `docker run` pour rendre cela possible :
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -28,12 +28,12 @@ Pour monter votre système de fichiers dans le runtime, définissez d'abord WORK
 export WORKSPACE_BASE=/chemin/vers/votre/code
 
 # Exemple Linux et Mac
-# export WORKSPACE_BASE=$HOME/OpenHands
-# Définira $WORKSPACE_BASE sur /home/<username>/OpenHands
+# export WORKSPACE_BASE=$HOME/Dev
+# Définira $WORKSPACE_BASE sur /home/<username>/Dev
 #
 # Exemple WSL sur Windows
-# export WORKSPACE_BASE=/mnt/c/dev/OpenHands
-# Définira $WORKSPACE_BASE sur C:\dev\OpenHands
+# export WORKSPACE_BASE=/mnt/c/dev/Dev
+# Définira $WORKSPACE_BASE sur C:\dev\Dev
 ```
 
 puis ajoutez les options suivantes à la commande `docker run` :
@@ -46,14 +46,14 @@ docker run # ...
     # ...
 ```
 
-Attention ! Rien n'empêche l'agent OpenHands de supprimer ou de modifier les fichiers montés dans son espace de travail.
+Attention ! Rien n'empêche l'agent Dev de supprimer ou de modifier les fichiers montés dans son espace de travail.
 
 Cette configuration peut causer des problèmes de permissions de fichiers (d'où la variable `SANDBOX_USER_ID`) mais semble bien fonctionner sur la plupart des systèmes.
 
-## Runtime All Hands
-Le Runtime All Hands est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/All-Hands-AI/OpenHands?tab=readme-ov-file#-join-our-community) pour une invitation).
+## Runtime Hanzo
+Le Runtime Hanzo est actuellement en version bêta. Vous pouvez demander l'accès en rejoignant le canal #remote-runtime-limited-beta sur Slack ([voir le README](https://github.com/hanzoai/dev?tab=readme-ov-file#-join-our-community) pour une invitation).
 
-Pour utiliser le Runtime All Hands, définissez les variables d'environnement suivantes lors du démarrage d'OpenHands :
+Pour utiliser le Runtime Hanzo, définissez les variables d'environnement suivantes lors du démarrage d'Dev :
 
 ```bash
 docker run # ...
@@ -65,11 +65,11 @@ docker run # ...
 ```
 
 ## Runtime Modal
-Nos partenaires de [Modal](https://modal.com/) ont également fourni un runtime pour OpenHands.
+Nos partenaires de [Modal](https://modal.com/) ont également fourni un runtime pour Dev.
 
 Pour utiliser le Runtime Modal, créez un compte, puis [créez une clé API.](https://modal.com/settings)
 
-Vous devrez ensuite définir les variables d'environnement suivantes lors du démarrage d'OpenHands :
+Vous devrez ensuite définir les variables d'environnement suivantes lors du démarrage d'Dev :
 ```bash
 docker run # ...
     -e RUNTIME=modal \

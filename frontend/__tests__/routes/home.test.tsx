@@ -7,7 +7,7 @@ import { AxiosError } from "axios";
 import MainApp from "#/routes/_oh/route";
 import SettingsScreen from "#/routes/settings";
 import Home from "#/routes/_oh._index/route";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 
 const createAxiosNotFoundErrorObject = () =>
   new AxiosError(
@@ -25,7 +25,7 @@ const createAxiosNotFoundErrorObject = () =>
     },
   );
 
-const getSettingsSpy = vi.spyOn(OpenHands, "getSettings");
+const getSettingsSpy = vi.spyOn(Dev, "getSettings");
 
 const RouterStub = createRoutesStub([
   {
@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("Home Screen", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Dev, "getConfig");
 
   it("should render the home screen", () => {
     renderWithProviders(<RouterStub initialEntries={["/"]} />);
@@ -90,7 +90,7 @@ describe("Home Screen", () => {
 });
 
 describe("Settings 404", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Dev, "getConfig");
 
   it("should open the settings modal if GET /settings fails with a 404", async () => {
     const error = createAxiosNotFoundErrorObject();
@@ -149,7 +149,7 @@ describe("Settings 404", () => {
 });
 
 describe("Setup Payment modal", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Dev, "getConfig");
 
   afterEach(() => {
     vi.resetAllMocks();

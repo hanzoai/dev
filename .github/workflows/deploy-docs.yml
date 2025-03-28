@@ -22,7 +22,7 @@ concurrency:
 jobs:
   # Build the documentation website
   build:
-    if: github.repository == 'All-Hands-AI/OpenHands'
+    if: github.repository == 'All-Hands-AI/Dev'
     name: Build Docusaurus
     runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
@@ -50,7 +50,7 @@ jobs:
 
   # Deploy the documentation website
   deploy:
-    if: github.ref == 'refs/heads/main' && github.repository == 'All-Hands-AI/OpenHands'
+    if: github.ref == 'refs/heads/main' && github.repository == 'All-Hands-AI/Dev'
     name: Deploy to GitHub Pages
     runs-on: blacksmith-4vcpu-ubuntu-2204
     # This job only runs on "main" so only run one of these jobs at a time

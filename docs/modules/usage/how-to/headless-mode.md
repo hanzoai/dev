@@ -1,29 +1,29 @@
 # Headless Mode
 
-You can run OpenHands with a single command, without starting the web application.
-This makes it easy to write scripts and automate tasks with OpenHands.
+You can run Dev with a single command, without starting the web application.
+This makes it easy to write scripts and automate tasks with Dev.
 
 This is different from [CLI Mode](cli-mode), which is interactive, and better for active development.
 
 ## With Python
 
-To run OpenHands in headless mode with Python:
-1. Ensure you have followed the [Development setup instructions](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+To run Dev in headless mode with Python:
+1. Ensure you have followed the [Development setup instructions](https://github.com/hanzoai/dev/blob/main/Development.md).
 2. Run the following command:
 ```bash
-poetry run python -m openhands.core.main -t "write a bash script that prints hi"
+poetry run python -m dev.core.main -t "write a bash script that prints hi"
 ```
 
 You'll need to be sure to set your model, API key, and other settings via environment variables
-[or the `config.toml` file](https://github.com/All-Hands-AI/OpenHands/blob/main/config.template.toml).
+[or the `config.toml` file](https://github.com/hanzoai/dev/blob/main/config.template.toml).
 
 ## With Docker
 
-To run OpenHands in Headless mode with Docker:
+To run Dev in Headless mode with Docker:
 
 1. Set the following environmental variables in your terminal:
 
-- `WORKSPACE_BASE` to the directory you want OpenHands to edit (Ex: `export WORKSPACE_BASE=$(pwd)/workspace`).
+- `WORKSPACE_BASE` to the directory you want Dev to edit (Ex: `export WORKSPACE_BASE=$(pwd)/workspace`).
 - `LLM_MODEL` to the model to use (Ex: `export LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"`).
 - `LLM_API_KEY` to the API key (Ex: `export LLM_API_KEY="sk_test_12345"`).
 
@@ -32,7 +32,7 @@ To run OpenHands in Headless mode with Docker:
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -40,11 +40,11 @@ docker run -it \
     -e LOG_ALL_EVENTS=true \
     -v $WORKSPACE_BASE:/opt/workspace_base \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v ~/.openhands-state:/.openhands-state \
+    -v ~/.dev-state:/.dev-state \
     --add-host host.docker.internal:host-gateway \
-    --name openhands-app-$(date +%Y%m%d%H%M%S) \
-    docker.all-hands.dev/all-hands-ai/openhands:0.30 \
-    python -m openhands.core.main -t "write a bash script that prints hi"
+    --name dev-app-$(date +%Y%m%d%H%M%S) \
+    docker.all-hands.dev/hanzoai/dev:0.30 \
+    python -m dev.core.main -t "write a bash script that prints hi"
 ```
 
 ## Advanced Headless Configurations

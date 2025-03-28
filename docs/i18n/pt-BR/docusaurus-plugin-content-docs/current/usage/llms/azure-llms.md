@@ -1,11 +1,11 @@
 # Azure
 
-O OpenHands usa o LiteLLM para fazer chamadas para os modelos de chat do Azure. Você pode encontrar a documentação sobre como usar o Azure como provedor [aqui](https://docs.litellm.ai/docs/providers/azure).
+O Dev usa o LiteLLM para fazer chamadas para os modelos de chat do Azure. Você pode encontrar a documentação sobre como usar o Azure como provedor [aqui](https://docs.litellm.ai/docs/providers/azure).
 
 ## Configuração do Azure OpenAI
 
-Ao executar o OpenHands, você precisará definir a seguinte variável de ambiente usando `-e` no
-[comando docker run](../installation#running-openhands):
+Ao executar o Dev, você precisará definir a seguinte variável de ambiente usando `-e` no
+[comando docker run](../installation#running-dev):
 
 ```
 LLM_API_VERSION="<api-version>"              # por exemplo, "2023-05-15"
@@ -18,7 +18,7 @@ docker run -it --pull=always \
     ...
 ```
 
-Então, nas configurações da interface do usuário do OpenHands:
+Então, nas configurações da interface do usuário do Dev:
 
 :::note
 Você precisará do nome da sua implantação do ChatGPT, que pode ser encontrado na página de implantações no Azure. Isso é referenciado como
@@ -33,8 +33,8 @@ Você precisará do nome da sua implantação do ChatGPT, que pode ser encontrad
 
 ### Configuração do Azure OpenAI
 
-Ao executar o OpenHands, defina a seguinte variável de ambiente usando `-e` no
-[comando docker run](../installation#running-openhands):
+Ao executar o Dev, defina a seguinte variável de ambiente usando `-e` no
+[comando docker run](../installation#running-dev):
 
 ```
 LLM_API_VERSION="<api-version>"                                    # por exemplo, "2024-02-15-preview"

@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
-from openhands.core.config import AppConfig
-from openhands.io import read_input
+from dev.core.config import AppConfig
+from dev.io import read_input
 
 
 def test_single_line_input():

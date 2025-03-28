@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     {
       type: 'doc',
-      label: 'Running OpenHands',
+      label: 'Running Dev',
       id: 'usage/installation',
     },
     {
@@ -96,8 +96,8 @@ const sidebars: SidebarsConfig = {
           items: [
             {
               type: 'doc',
-              label: 'Openhands Cloud',
-              id: 'usage/cloud/openhands-cloud',
+              label: 'Dev Cloud',
+              id: 'usage/cloud/dev-cloud',
             },
 
             {
@@ -220,7 +220,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'For OpenHands Developers',
+      label: 'For Dev Developers',
       items: [
         {
           type: 'doc',

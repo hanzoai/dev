@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from openhands.core.config import LLMConfig
-from openhands.resolver.interfaces.gitlab import GitlabIssueHandler, GitlabPRHandler
-from openhands.resolver.interfaces.issue import ReviewThread
-from openhands.resolver.interfaces.issue_definitions import (
+from dev.core.config import LLMConfig
+from dev.resolver.interfaces.gitlab import GitlabIssueHandler, GitlabPRHandler
+from dev.resolver.interfaces.issue import ReviewThread
+from dev.resolver.interfaces.issue_definitions import (
     ServiceContextIssue,
     ServiceContextPR,
 )

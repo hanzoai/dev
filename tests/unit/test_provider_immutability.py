@@ -3,15 +3,15 @@ from types import MappingProxyType
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from openhands.events.action.commands import CmdRunAction
-from openhands.integrations.provider import (
+from dev.events.action.commands import CmdRunAction
+from dev.integrations.provider import (
     ProviderHandler,
     ProviderToken,
     ProviderType,
     SecretStore,
 )
-from openhands.server.routes.settings import convert_to_settings
-from openhands.server.settings import POSTSettingsModel, Settings
+from dev.server.routes.settings import convert_to_settings
+from dev.server.settings import POSTSettingsModel, Settings
 
 
 def test_provider_token_immutability():
@@ -360,7 +360,7 @@ def test_check_cmd_action_for_provider_token_ref():
     assert len(providers) == 0
 
     # Test non-command action
-    from openhands.events.action import MessageAction
+    from dev.events.action import MessageAction
 
     msg = MessageAction(content='test')
     providers = ProviderHandler.check_cmd_action_for_provider_token_ref(msg)

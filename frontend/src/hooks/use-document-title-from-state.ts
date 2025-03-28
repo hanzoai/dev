@@ -6,9 +6,9 @@ import { useUserConversation } from "./query/use-user-conversation";
  * Hook that updates the document title based on the current conversation.
  * This ensures that any changes to the conversation title are reflected in the document title.
  *
- * @param suffix Optional suffix to append to the title (default: "OpenHands")
+ * @param suffix Optional suffix to append to the title (default: "Dev")
  */
-export function useDocumentTitleFromState(suffix = "OpenHands") {
+export function useDocumentTitleFromState(suffix = "Dev") {
   const params = useParams();
   const { data: conversation } = useUserConversation(
     params.conversationId ?? null,

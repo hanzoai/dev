@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eo pipefail
 
-echo "Starting OpenHands..."
+echo "Starting Dev..."
 if [[ $NO_SETUP == "true" ]]; then
   echo "Skipping setup, running as $(whoami)"
   "$@"
@@ -9,7 +9,7 @@ if [[ $NO_SETUP == "true" ]]; then
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "The OpenHands entrypoint.sh must run as root"
+  echo "The Dev entrypoint.sh must run as root"
   exit 1
 fi
 
@@ -19,16 +19,16 @@ if [ -z "$SANDBOX_USER_ID" ]; then
 fi
 
 if [ -z "$WORKSPACE_MOUNT_PATH" ]; then
-  # This is set to /opt/workspace in the Dockerfile. But if the user isn't mounting, we want to unset it so that OpenHands doesn't mount at all
+  # This is set to /opt/workspace in the Dockerfile. But if the user isn't mounting, we want to unset it so that Dev doesn't mount at all
   unset WORKSPACE_BASE
 fi
 
 if [[ "$SANDBOX_USER_ID" -eq 0 ]]; then
-  echo "Running OpenHands as root"
-  export RUN_AS_OPENHANDS=false
+  echo "Running Dev as root"
+  export RUN_AS_DEV=false
   mkdir -p /root/.cache/ms-playwright/
-  if [ -d "/home/openhands/.cache/ms-playwright/" ]; then
-    mv /home/openhands/.cache/ms-playwright/ /root/.cache/
+  if [ -d "/home/dev/.cache/ms-playwright/" ]; then
+    mv /home/dev/.cache/ms-playwright/ /root/.cache/
   fi
   "$@"
 else
@@ -37,9 +37,9 @@ else
     echo "User enduser already exists. Skipping creation."
   else
     if ! useradd -l -m -u $SANDBOX_USER_ID -s /bin/bash enduser; then
-      echo "Failed to create user enduser with id $SANDBOX_USER_ID. Moving openhands user."
+      echo "Failed to create user enduser with id $SANDBOX_USER_ID. Moving dev user."
       incremented_id=$(($SANDBOX_USER_ID + 1))
-      usermod -u $incremented_id openhands
+      usermod -u $incremented_id dev
       if ! useradd -l -m -u $SANDBOX_USER_ID -s /bin/bash enduser; then
         echo "Failed to create user enduser with id $SANDBOX_USER_ID for a second time. Exiting."
         exit 1
@@ -47,7 +47,7 @@ else
     fi
   fi
   usermod -aG app enduser
-  # get the user group of /var/run/docker.sock and set openhands to that group
+  # get the user group of /var/run/docker.sock and set dev to that group
   DOCKER_SOCKET_GID=$(stat -c '%g' /var/run/docker.sock)
   echo "Docker socket group id: $DOCKER_SOCKET_GID"
   if getent group $DOCKER_SOCKET_GID; then
@@ -59,8 +59,8 @@ else
 
   mkdir -p /home/enduser/.cache/huggingface/hub/
   mkdir -p /home/enduser/.cache/ms-playwright/
-  if [ -d "/home/openhands/.cache/ms-playwright/" ]; then
-    mv /home/openhands/.cache/ms-playwright/ /home/enduser/.cache/
+  if [ -d "/home/dev/.cache/ms-playwright/" ]; then
+    mv /home/dev/.cache/ms-playwright/ /home/enduser/.cache/
   fi
 
   usermod -aG $DOCKER_SOCKET_GID enduser

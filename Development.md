@@ -1,8 +1,8 @@
 # Development Guide
 
-This guide is for people working on OpenHands and editing the source code.
-If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/All-Hands-AI/OpenHands/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
-Otherwise, you can clone the OpenHands project directly.
+This guide is for people working on Dev and editing the source code.
+If you wish to contribute your changes, check out the [CONTRIBUTING.md](https://github.com/hanzoai/dev/blob/main/CONTRIBUTING.md) on how to clone and setup the project initially before moving on.
+Otherwise, you can clone the Dev project directly.
 
 ## Start the Server for Development
 
@@ -36,7 +36,7 @@ mamba install conda-forge::poetry
 
 ### 2. Build and Setup The Environment
 
-Begin by building the project which includes setting up the environment and installing dependencies. This step ensures that OpenHands is ready to run on your system:
+Begin by building the project which includes setting up the environment and installing dependencies. This step ensures that Dev is ready to run on your system:
 
 ```bash
 make build
@@ -44,7 +44,7 @@ make build
 
 ### 3. Configuring the Language Model
 
-OpenHands supports a diverse array of Language Models (LMs) through the powerful [litellm](https://docs.litellm.ai) library.
+Dev supports a diverse array of Language Models (LMs) through the powerful [litellm](https://docs.litellm.ai) library.
 By default, we've chosen Claude Sonnet 3.5 as our go-to model, but the world is your oyster! You can unleash the
 potential of any other LM that piques your interest.
 
@@ -54,9 +54,9 @@ To configure the LM of your choice, run:
 make setup-config
 ```
 
-This command will prompt you to enter the LLM API key, model name, and other variables ensuring that OpenHands is tailored to your specific needs. Note that the model name will apply only when you run headless. If you use the UI, please set the model in the UI.
+This command will prompt you to enter the LLM API key, model name, and other variables ensuring that Dev is tailored to your specific needs. Note that the model name will apply only when you run headless. If you use the UI, please set the model in the UI.
 
-Note: If you have previously run OpenHands using the docker command, you may have already set some environmental variables in your terminal. The final configurations are set from highest to lowest priority:
+Note: If you have previously run Dev using the docker command, you may have already set some environmental variables in your terminal. The final configurations are set from highest to lowest priority:
 Environment variables > config.toml variables > default variables
 
 **Note on Alternative Models:**
@@ -66,7 +66,7 @@ See [our documentation](https://docs.all-hands.dev/modules/usage/llms) for recom
 
 #### Option A: Run the Full Application
 
-Once the setup is complete, this command starts both the backend and frontend servers, allowing you to interact with OpenHands:
+Once the setup is complete, this command starts both the backend and frontend servers, allowing you to interact with Dev:
 
 ```bash
 make run
@@ -88,11 +88,11 @@ make run
 ### 6. LLM Debugging
 
 If you encounter any issues with the Language Model (LM) or you're simply curious, export DEBUG=1 in the environment and restart the backend.
-OpenHands will log the prompts and responses in the logs/llm/CURRENT_DATE directory, allowing you to identify the causes.
+Dev will log the prompts and responses in the logs/llm/CURRENT_DATE directory, allowing you to identify the causes.
 
 ### 7. Help
 
-Need help or info on available targets and commands? Use the help command for all the guidance you need with OpenHands.
+Need help or info on available targets and commands? Use the help command for all the guidance you need with Dev.
 
 ```bash
 make help
@@ -118,7 +118,7 @@ poetry run pytest ./tests/unit/test_*.py
 To reduce build time (e.g., if no changes were made to the client-runtime component), you can use an existing Docker container image by
 setting the SANDBOX_RUNTIME_CONTAINER_IMAGE environment variable to the desired Docker image.
 
-Example: `export SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/all-hands-ai/runtime:0.30-nikolaik`
+Example: `export SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/hanzoai/runtime:0.30-nikolaik`
 
 ## Develop inside Docker container
 
@@ -130,7 +130,7 @@ make docker-dev
 
 See more details [here](./containers/dev/README.md).
 
-If you are just interested in running `OpenHands` without installing all the required tools on your host.
+If you are just interested in running `Dev` without installing all the required tools on your host.
 
 ```bash
 make docker-run
@@ -150,14 +150,14 @@ You do need [Docker](https://docs.docker.com/engine/install/) installed on your 
 Here's a guide to the important documentation files in the repository:
 
 - [/README.md](./README.md): Main project overview, features, and basic setup instructions
-- [/Development.md](./Development.md) (this file): Comprehensive guide for developers working on OpenHands
+- [/Development.md](./Development.md) (this file): Comprehensive guide for developers working on Dev
 - [/CONTRIBUTING.md](./CONTRIBUTING.md): Guidelines for contributing to the project, including code style and PR process
 - [/docs/DOC_STYLE_GUIDE.md](./docs/DOC_STYLE_GUIDE.md): Standards for writing and maintaining project documentation
-- [/openhands/README.md](./openhands/README.md): Details about the backend Python implementation
+- [/dev/README.md](./dev/README.md): Details about the backend Python implementation
 - [/frontend/README.md](./frontend/README.md): Frontend React application setup and development guide
 - [/containers/README.md](./containers/README.md): Information about Docker containers and deployment
 - [/tests/unit/README.md](./tests/unit/README.md): Guide to writing and running unit tests
 - [/evaluation/README.md](./evaluation/README.md): Documentation for the evaluation framework and benchmarks
 - [/microagents/README.md](./microagents/README.md): Information about the microagents architecture and implementation
-- [/openhands/server/README.md](./openhands/server/README.md): Server implementation details and API documentation
-- [/openhands/runtime/README.md](./openhands/runtime/README.md): Documentation for the runtime environment and execution model
+- [/dev/server/README.md](./dev/server/README.md): Server implementation details and API documentation
+- [/dev/runtime/README.md](./dev/runtime/README.md): Documentation for the runtime environment and execution model

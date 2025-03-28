@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openhands.controller.state.state import State
-from openhands.core.config.condenser_config import (
+from dev.controller.state.state import State
+from dev.core.config.condenser_config import (
     AmortizedForgettingCondenserConfig,
     BrowserOutputCondenserConfig,
     LLMAttentionCondenserConfig,
@@ -14,16 +14,16 @@ from openhands.core.config.condenser_config import (
     ObservationMaskingCondenserConfig,
     RecentEventsCondenserConfig,
 )
-from openhands.core.config.llm_config import LLMConfig
-from openhands.core.message import Message, TextContent
-from openhands.events.event import Event, EventSource
-from openhands.events.observation import BrowserOutputObservation
-from openhands.events.observation.agent import AgentCondensationObservation
-from openhands.events.observation.observation import Observation
-from openhands.llm import LLM
-from openhands.memory.condenser import Condenser
-from openhands.memory.condenser.condenser import Condensation, RollingCondenser, View
-from openhands.memory.condenser.impl import (
+from dev.core.config.llm_config import LLMConfig
+from dev.core.message import Message, TextContent
+from dev.events.event import Event, EventSource
+from dev.events.observation import BrowserOutputObservation
+from dev.events.observation.agent import AgentCondensationObservation
+from dev.events.observation.observation import Observation
+from dev.llm import LLM
+from dev.memory.condenser import Condenser
+from dev.memory.condenser.condenser import Condensation, RollingCondenser, View
+from dev.memory.condenser.impl import (
     AmortizedForgettingCondenser,
     BrowserOutputCondenser,
     ImportantEventSelection,

@@ -5418,15 +5418,15 @@ realtime = ["websockets (>=13,<15)"]
 voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
 
 [[package]]
-name = "openhands-aci"
+name = "dev-aci"
 version = "0.2.7"
-description = "An Agent-Computer Interface (ACI) designed for software development agents OpenHands."
+description = "An Agent-Computer Interface (ACI) designed for software development agents Dev."
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["main"]
 files = [
-    {file = "openhands_aci-0.2.7-py3-none-any.whl", hash = "sha256:6b36fa465db6643d909efdf40ec303d27a03e6c9f568447df4bc1d9fdd7104b2"},
-    {file = "openhands_aci-0.2.7.tar.gz", hash = "sha256:892c33d741e94b78ec65df178afe018869e6039ea484f7f232ee8c1bb4e440ef"},
+    {file = "dev_aci-0.2.7-py3-none-any.whl", hash = "sha256:6b36fa465db6643d909efdf40ec303d27a03e6c9f568447df4bc1d9fdd7104b2"},
+    {file = "dev_aci-0.2.7.tar.gz", hash = "sha256:892c33d741e94b78ec65df178afe018869e6039ea484f7f232ee8c1bb4e440ef"},
 ]
 
 [package.dependencies]

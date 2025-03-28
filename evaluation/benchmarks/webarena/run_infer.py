@@ -17,26 +17,26 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AppConfig,
     get_llm_config_arg,
     parse_arguments,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import (
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.events.action import (
     BrowseInteractiveAction,
     CmdRunAction,
     MessageAction,
 )
-from openhands.events.observation import CmdOutputObservation
-from openhands.runtime.base import Runtime
-from openhands.runtime.browser.browser_env import (
+from dev.events.observation import CmdOutputObservation
+from dev.runtime.base import Runtime
+from dev.runtime.browser.browser_env import (
     BROWSER_EVAL_GET_GOAL_ACTION,
     BROWSER_EVAL_GET_REWARDS_ACTION,
 )
-from openhands.utils.async_utils import call_async_from_sync
+from dev.utils.async_utils import call_async_from_sync
 
 SUPPORTED_AGENT_CLS = {'BrowsingAgent'}
 
@@ -66,7 +66,7 @@ def get_config(
     }
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         runtime='docker',
         max_iterations=metadata.max_iterations,
         sandbox=sandbox_config,

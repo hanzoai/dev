@@ -6,23 +6,23 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.controller.agent import Agent
-from openhands.core.config import AppConfig
-from openhands.core.main import run_controller
-from openhands.core.schema.agent import AgentState
-from openhands.events.action.agent import RecallAction
-from openhands.events.action.message import MessageAction
-from openhands.events.event import EventSource
-from openhands.events.observation.agent import (
+from dev.controller.agent import Agent
+from dev.core.config import AppConfig
+from dev.core.main import run_controller
+from dev.core.schema.agent import AgentState
+from dev.events.action.agent import RecallAction
+from dev.events.action.message import MessageAction
+from dev.events.event import EventSource
+from dev.events.observation.agent import (
     RecallObservation,
     RecallType,
 )
-from openhands.events.stream import EventStream
-from openhands.llm import LLM
-from openhands.llm.metrics import Metrics
-from openhands.memory.memory import Memory
-from openhands.runtime.base import Runtime
-from openhands.storage.memory import InMemoryFileStore
+from dev.events.stream import EventStream
+from dev.llm import LLM
+from dev.llm.metrics import Metrics
+from dev.memory.memory import Memory
+from dev.runtime.base import Runtime
+from dev.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -49,9 +49,9 @@ def memory(event_stream):
 
 @pytest.fixture
 def prompt_dir(tmp_path):
-    # Copy contents from "openhands/agenthub/codeact_agent" to the temp directory
+    # Copy contents from "dev/agenthub/codeact_agent" to the temp directory
     shutil.copytree(
-        'openhands/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
+        'dev/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
     )
 
     # Return the temporary directory path
@@ -216,7 +216,7 @@ REPOSITORY INSTRUCTIONS: This is a test repository.
 
     # Patch the global microagents directory to use our test directory
     test_microagents_dir = os.path.join(prompt_dir, 'micro')
-    with patch('openhands.memory.memory.GLOBAL_MICROAGENTS_DIR', test_microagents_dir):
+    with patch('dev.memory.memory.GLOBAL_MICROAGENTS_DIR', test_microagents_dir):
         # Initialize Memory
         memory = Memory(
             event_stream=event_stream,

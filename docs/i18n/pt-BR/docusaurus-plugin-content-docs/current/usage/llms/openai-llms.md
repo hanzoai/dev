@@ -1,10 +1,10 @@
 # OpenAI
 
-O OpenHands usa o LiteLLM para fazer chamadas para os modelos de chat da OpenAI. Você pode encontrar a documentação deles sobre como usar a OpenAI como provedor [aqui](https://docs.litellm.ai/docs/providers/openai).
+O Dev usa o LiteLLM para fazer chamadas para os modelos de chat da OpenAI. Você pode encontrar a documentação deles sobre como usar a OpenAI como provedor [aqui](https://docs.litellm.ai/docs/providers/openai).
 
 ## Configuração
 
-Ao executar o OpenHands, você precisará definir o seguinte na interface do usuário do OpenHands através das Configurações:
+Ao executar o Dev, você precisará definir o seguinte na interface do usuário do Dev através das Configurações:
 * `LLM Provider` para `OpenAI`
 * `LLM Model` para o modelo que você usará.
 [Visite aqui para ver uma lista completa dos modelos da OpenAI que o LiteLLM suporta.](https://docs.litellm.ai/docs/providers/openai#openai-chat-completion-models)
@@ -17,7 +17,7 @@ Assim como para as conclusões de chat da OpenAI, usamos o LiteLLM para endpoint
 
 ## Usando um Proxy OpenAI
 
-Se você estiver usando um proxy OpenAI, na interface do usuário do OpenHands através das Configurações:
+Se você estiver usando um proxy OpenAI, na interface do usuário do Dev através das Configurações:
 1. Ative as opções `Advanced`
 2. Defina o seguinte:
    - `Custom Model` para openai/&lt;model-name&gt; (por exemplo, `openai/gpt-4o` ou openai/&lt;proxy-prefix&gt;/&lt;model-name&gt;)

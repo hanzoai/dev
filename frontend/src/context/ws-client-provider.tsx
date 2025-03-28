@@ -4,13 +4,13 @@ import EventLogger from "#/utils/event-logger";
 import { handleAssistantMessage } from "#/services/actions";
 import { showChatError } from "#/utils/error-handler";
 import { useRate } from "#/hooks/use-rate";
-import { OpenHandsParsedEvent } from "#/types/core";
+import { DevParsedEvent } from "#/types/core";
 import {
   AssistantMessageAction,
   UserMessageAction,
 } from "#/types/core/actions";
 
-const isOpenHandsEvent = (event: unknown): event is OpenHandsParsedEvent =>
+const isDevEvent = (event: unknown): event is DevParsedEvent =>
   typeof event === "object" &&
   event !== null &&
   "id" in event &&
@@ -19,7 +19,7 @@ const isOpenHandsEvent = (event: unknown): event is OpenHandsParsedEvent =>
   "timestamp" in event;
 
 const isUserMessage = (
-  event: OpenHandsParsedEvent,
+  event: DevParsedEvent,
 ): event is UserMessageAction =>
   "source" in event &&
   "type" in event &&
@@ -27,7 +27,7 @@ const isUserMessage = (
   event.type === "message";
 
 const isAssistantMessage = (
-  event: OpenHandsParsedEvent,
+  event: DevParsedEvent,
 ): event is AssistantMessageAction =>
   "source" in event &&
   "type" in event &&
@@ -35,7 +35,7 @@ const isAssistantMessage = (
   event.type === "message";
 
 const isMessageAction = (
-  event: OpenHandsParsedEvent,
+  event: DevParsedEvent,
 ): event is UserMessageAction | AssistantMessageAction =>
   isUserMessage(event) || isAssistantMessage(event);
 
@@ -126,7 +126,7 @@ export function WsClientProvider({
   }
 
   function handleMessage(event: Record<string, unknown>) {
-    if (isOpenHandsEvent(event) && isMessageAction(event)) {
+    if (isDevEvent(event) && isMessageAction(event)) {
       messageRateHandler.record(new Date().getTime());
     }
     setEvents((prevEvents) => [...prevEvents, event]);

@@ -1,41 +1,41 @@
-# Using the OpenHands GitHub Action
+# Using the Dev GitHub Action
 
-This guide explains how to use the OpenHands GitHub Action, both within the OpenHands repository and in your own projects.
+This guide explains how to use the Dev GitHub Action, both within the Dev repository and in your own projects.
 
-## Using the Action in the OpenHands Repository
+## Using the Action in the Dev Repository
 
-To use the OpenHands GitHub Action in a repository, you can:
+To use the Dev GitHub Action in a repository, you can:
 
 1. Create an issue in the repository.
-2. Add the `fix-me` label to the issue or leave a comment on the issue starting with `@openhands-agent`.
+2. Add the `fix-me` label to the issue or leave a comment on the issue starting with `@dev-agent`.
 
 The action will automatically trigger and attempt to resolve the issue.
 
 ## Installing the Action in a New Repository
 
-To install the OpenHands GitHub Action in your own repository, follow
-the [README for the OpenHands Resolver](https://github.com/All-Hands-AI/OpenHands/blob/main/openhands/resolver/README.md).
+To install the Dev GitHub Action in your own repository, follow
+the [README for the Dev Resolver](https://github.com/hanzoai/dev/blob/main/dev/resolver/README.md).
 
 ## Usage Tips
 
 ### Iterative resolution
 
 1. Create an issue in the repository.
-2. Add the `fix-me` label to the issue, or leave a comment starting with `@openhands-agent`.
+2. Add the `fix-me` label to the issue, or leave a comment starting with `@dev-agent`.
 3. Review the attempt to resolve the issue by checking the pull request.
 4. Follow up with feedback through general comments, review comments, or inline thread comments.
-5. Add the `fix-me` label to the pull request, or address a specific comment by starting with `@openhands-agent`.
+5. Add the `fix-me` label to the pull request, or address a specific comment by starting with `@dev-agent`.
 
 ### Label versus Macro
 
-- Label (`fix-me`): Requests OpenHands to address the **entire** issue or pull request.
-- Macro (`@openhands-agent`): Requests OpenHands to consider only the issue/pull request description and **the specific comment**.
+- Label (`fix-me`): Requests Dev to address the **entire** issue or pull request.
+- Macro (`@dev-agent`): Requests Dev to consider only the issue/pull request description and **the specific comment**.
 
 ## Advanced Settings
 
 ### Add custom repository settings
 
-You can provide custom directions for OpenHands by following the [README for the resolver](https://github.com/All-Hands-AI/OpenHands/blob/main/openhands/resolver/README.md#providing-custom-instructions).
+You can provide custom directions for Dev by following the [README for the resolver](https://github.com/hanzoai/dev/blob/main/dev/resolver/README.md#providing-custom-instructions).
 
 ### Custom configurations
 
@@ -44,8 +44,8 @@ The customization options you can set are:
 
 | **Attribute name**               | **Type** | **Purpose**                                                                                         | **Example**                                        |
 | -------------------------------- | -------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `LLM_MODEL`                      | Variable | Set the LLM to use with OpenHands                                                                   | `LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"` |
-| `OPENHANDS_MAX_ITER`             | Variable | Set max limit for agent iterations                                                                  | `OPENHANDS_MAX_ITER=10`                            |
-| `OPENHANDS_MACRO`                | Variable | Customize default macro for invoking the resolver                                                   | `OPENHANDS_MACRO=@resolveit`                       |
-| `OPENHANDS_BASE_CONTAINER_IMAGE` | Variable | Custom Sandbox ([learn more](https://docs.all-hands.dev/modules/usage/how-to/custom-sandbox-guide)) | `OPENHANDS_BASE_CONTAINER_IMAGE="custom_image"`    |
+| `LLM_MODEL`                      | Variable | Set the LLM to use with Dev                                                                   | `LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"` |
+| `DEV_MAX_ITER`             | Variable | Set max limit for agent iterations                                                                  | `DEV_MAX_ITER=10`                            |
+| `DEV_MACRO`                | Variable | Customize default macro for invoking the resolver                                                   | `DEV_MACRO=@resolveit`                       |
+| `DEV_BASE_CONTAINER_IMAGE` | Variable | Custom Sandbox ([learn more](https://docs.all-hands.dev/modules/usage/how-to/custom-sandbox-guide)) | `DEV_BASE_CONTAINER_IMAGE="custom_image"`    |
 | `TARGET_BRANCH`                  | Variable | Merge to branch other than `main`                                                                   | `TARGET_BRANCH="dev"`                              |

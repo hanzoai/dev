@@ -1,11 +1,11 @@
 
 
-# Démarrer avec OpenHands
+# Démarrer avec Dev
 
-Vous avez donc [installé OpenHands](./installation) et avez
+Vous avez donc [installé Dev](./installation) et avez
 [configuré votre LLM](./installation#setup). Et maintenant ?
 
-OpenHands peut vous aider à aborder une grande variété de tâches d'ingénierie. Mais la technologie
+Dev peut vous aider à aborder une grande variété de tâches d'ingénierie. Mais la technologie
 est encore nouvelle, et nous sommes loin d'avoir des agents capables de prendre en charge des tâches
 d'ingénierie vastes et compliquées sans aucune aide. Il est donc important de se faire une idée de ce que l'agent
 fait bien, et où il pourrait avoir besoin d'un coup de main.
@@ -57,15 +57,15 @@ Vous pouvez demander à l'agent de commiter et de pousser pour vous :
 
 ## Ajouter du nouveau code
 
-OpenHands peut également faire un excellent travail en ajoutant du nouveau code à une base de code existante.
+Dev peut également faire un excellent travail en ajoutant du nouveau code à une base de code existante.
 
-Par exemple, vous pouvez demander à OpenHands d'ajouter une nouvelle action GitHub à votre projet
-qui analyse votre code. OpenHands peut jeter un coup d'œil à votre base de code pour voir quel langage
+Par exemple, vous pouvez demander à Dev d'ajouter une nouvelle action GitHub à votre projet
+qui analyse votre code. Dev peut jeter un coup d'œil à votre base de code pour voir quel langage
 il doit utiliser, mais ensuite il peut simplement déposer un nouveau fichier dans `./github/workflows/lint.yml`
 
 > Veuillez ajouter une action GitHub qui analyse le code dans ce dépôt
 
-Certaines tâches peuvent nécessiter un peu plus de contexte. Bien qu'OpenHands puisse utiliser `ls` et `grep`
+Certaines tâches peuvent nécessiter un peu plus de contexte. Bien qu'Dev puisse utiliser `ls` et `grep`
 pour rechercher dans votre base de code, fournir le contexte à l'avance lui permet d'aller plus vite,
 et plus précisément. Et cela vous coûtera moins de tokens !
 
@@ -76,7 +76,7 @@ et plus précisément. Et cela vous coûtera moins de tokens !
 
 ## Refactoring
 
-OpenHands est excellent pour refactoriser du code existant, surtout par petits morceaux.
+Dev est excellent pour refactoriser du code existant, surtout par petits morceaux.
 Vous ne voulez probablement pas essayer de réarchitecturer toute votre base de code, mais diviser
 les longs fichiers et fonctions, renommer les variables, etc. ont tendance à très bien fonctionner.
 
@@ -88,9 +88,9 @@ les longs fichiers et fonctions, renommer les variables, etc. ont tendance à tr
 
 ## Corrections de bugs
 
-OpenHands peut également vous aider à traquer et corriger des bugs dans votre code. Mais, comme tout
-développeur le sait, la correction de bugs peut être extrêmement délicate, et souvent OpenHands aura besoin de plus de contexte.
-Cela aide si vous avez diagnostiqué le bug, mais que vous voulez qu'OpenHands comprenne la logique.
+Dev peut également vous aider à traquer et corriger des bugs dans votre code. Mais, comme tout
+développeur le sait, la correction de bugs peut être extrêmement délicate, et souvent Dev aura besoin de plus de contexte.
+Cela aide si vous avez diagnostiqué le bug, mais que vous voulez qu'Dev comprenne la logique.
 
 > Actuellement, le champ email dans le point de terminaison `/subscribe` rejette les domaines .io. Veuillez corriger cela.
 
@@ -103,11 +103,11 @@ Vous pouvez demander à l'agent d'écrire un nouveau test, puis d'itérer jusqu'
 
 ## Plus
 
-OpenHands est capable d'aider sur à peu près n'importe quelle tâche de codage. Mais il faut de la pratique
+Dev est capable d'aider sur à peu près n'importe quelle tâche de codage. Mais il faut de la pratique
 pour en tirer le meilleur parti. N'oubliez pas de :
 * Garder vos tâches petites
 * Être aussi précis que possible
 * Fournir autant de contexte que possible
 * Commiter et pousser fréquemment
 
-Voir [Bonnes pratiques de prompting](./prompting/prompting-best-practices) pour plus de conseils sur la façon de tirer le meilleur parti d'OpenHands.
+Voir [Bonnes pratiques de prompting](./prompting/prompting-best-practices) pour plus de conseils sur la façon de tirer le meilleur parti d'Dev.

@@ -2,7 +2,7 @@
 
 import psutil
 
-from openhands.runtime.utils.system_stats import get_system_stats
+from dev.runtime.utils.system_stats import get_system_stats
 
 
 def test_get_system_stats():

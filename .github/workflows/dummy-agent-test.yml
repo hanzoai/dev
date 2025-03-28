@@ -42,7 +42,7 @@ jobs:
       - name: Run tests
         run: |
           set -e
-          SANDBOX_FORCE_REBUILD_RUNTIME=True poetry run python3 openhands/core/main.py -t "do a flip" -d ./workspace/ -c DummyAgent
+          SANDBOX_FORCE_REBUILD_RUNTIME=True poetry run python3 dev/core/main.py -t "do a flip" -d ./workspace/ -c DummyAgent
       - name: Check exit code
         run: |
           if [ $? -ne 0 ]; then

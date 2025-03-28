@@ -3,12 +3,12 @@ from unittest.mock import MagicMock, Mock
 import httpx
 import pytest
 
-from openhands.core.exceptions import (
+from dev.core.exceptions import (
     AgentRuntimeDisconnectedError,
     AgentRuntimeTimeoutError,
 )
-from openhands.events.action import CmdRunAction
-from openhands.runtime.base import Runtime
+from dev.events.action import CmdRunAction
+from dev.runtime.base import Runtime
 
 
 @pytest.fixture

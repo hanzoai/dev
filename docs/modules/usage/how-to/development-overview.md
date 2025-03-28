@@ -4,16 +4,16 @@ sidebar_position: 9
 
 # Development Overview
 
-This guide provides an overview of the key documentation resources available in the OpenHands repository. Whether you're looking to contribute, understand the architecture, or work on specific components, these resources will help you navigate the codebase effectively.
+This guide provides an overview of the key documentation resources available in the Dev repository. Whether you're looking to contribute, understand the architecture, or work on specific components, these resources will help you navigate the codebase effectively.
 
 ## Core Documentation
 
 ### Project Fundamentals
 - **Main Project Overview** (`/README.md`)
-  The primary entry point for understanding OpenHands, including features and basic setup instructions.
+  The primary entry point for understanding Dev, including features and basic setup instructions.
 
 - **Development Guide** (`/Development.md`)
-  Comprehensive guide for developers working on OpenHands, including setup, requirements, and development workflows.
+  Comprehensive guide for developers working on Dev, including setup, requirements, and development workflows.
 
 - **Contributing Guidelines** (`/CONTRIBUTING.md`)
   Essential information for contributors, covering code style, PR process, and contribution workflows.
@@ -25,13 +25,13 @@ This guide provides an overview of the key documentation resources available in 
   Complete guide for setting up and developing the React-based frontend application.
 
 #### Backend
-- **Backend Implementation** (`/openhands/README.md`)
+- **Backend Implementation** (`/dev/README.md`)
   Detailed documentation of the Python backend implementation and architecture.
 
-- **Server Documentation** (`/openhands/server/README.md`)
+- **Server Documentation** (`/dev/server/README.md`)
   Server implementation details, API documentation, and service architecture.
 
-- **Runtime Environment** (`/openhands/runtime/README.md`)
+- **Runtime Environment** (`/dev/runtime/README.md`)
   Documentation covering the runtime environment, execution model, and runtime configurations.
 
 #### Infrastructure
@@ -55,14 +55,14 @@ This guide provides an overview of the key documentation resources available in 
 
 ## Getting Started with Development
 
-If you're new to developing with OpenHands, we recommend following this sequence:
+If you're new to developing with Dev, we recommend following this sequence:
 
 1. Start with the main `README.md` to understand the project's purpose and features
 2. Review the `CONTRIBUTING.md` guidelines if you plan to contribute
 3. Follow the setup instructions in `Development.md`
 4. Dive into specific component documentation based on your area of interest:
    - Frontend developers should focus on `/frontend/README.md`
-   - Backend developers should start with `/openhands/README.md`
+   - Backend developers should start with `/dev/README.md`
    - Infrastructure work should begin with `/containers/README.md`
 
 ## Documentation Updates

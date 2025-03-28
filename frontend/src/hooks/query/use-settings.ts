@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import posthog from "posthog-js";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 import { useAuth } from "#/context/auth-context";
 import { DEFAULT_SETTINGS } from "#/services/settings";
 
 const getSettingsQueryFn = async () => {
-  const apiSettings = await OpenHands.getSettings();
+  const apiSettings = await Dev.getSettings();
 
   return {
     LLM_MODEL: apiSettings.llm_model,

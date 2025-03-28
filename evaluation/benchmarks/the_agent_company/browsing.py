@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Dict, List, Union
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import BrowseInteractiveAction
-from openhands.events.observation import BrowserOutputObservation
-from openhands.runtime.base import Runtime
+from dev.core.logger import dev_logger as logger
+from dev.events.action import BrowseInteractiveAction
+from dev.events.observation import BrowserOutputObservation
+from dev.runtime.base import Runtime
 
 
 class ActionType(Enum):
@@ -176,7 +176,7 @@ def pre_login(
 ):
     """
     Logs in to all the websites that are needed for the evaluation.
-    Once logged in, the sessions would be cached in the browser, so OpenHands
+    Once logged in, the sessions would be cached in the browser, so Dev
     agent doesn't need to log in to these websites again.
     """
     owncloud_login_actions = [

@@ -2,9 +2,9 @@ import os
 import tempfile
 import time
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import CmdRunAction
-from openhands.runtime.utils.bash import BashCommandStatus, BashSession
+from dev.core.logger import dev_logger as logger
+from dev.events.action import CmdRunAction
+from dev.runtime.utils.bash import BashCommandStatus, BashSession
 
 
 def test_session_initialization():
@@ -21,7 +21,7 @@ def test_session_initialization():
     # Test with custom username
     session = BashSession(work_dir=os.getcwd(), username='nobody')
     session.initialize()
-    assert 'openhands-nobody' in session.session.name
+    assert 'dev-nobody' in session.session.name
     session.close()
 
 

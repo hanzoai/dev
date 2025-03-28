@@ -1,6 +1,6 @@
 # Configurações Personalizadas de LLM
 
-O OpenHands suporta a definição de múltiplas configurações nomeadas de LLM no seu arquivo `config.toml`. Este recurso permite que você use diferentes configurações de LLM para diferentes propósitos, como usar um modelo mais barato para tarefas que não exigem respostas de alta qualidade, ou usar diferentes modelos com diferentes parâmetros para agentes específicos.
+O Dev suporta a definição de múltiplas configurações nomeadas de LLM no seu arquivo `config.toml`. Este recurso permite que você use diferentes configurações de LLM para diferentes propósitos, como usar um modelo mais barato para tarefas que não exigem respostas de alta qualidade, ou usar diferentes modelos com diferentes parâmetros para agentes específicos.
 
 ## Como Funciona
 
@@ -103,7 +103,7 @@ Neste exemplo:
 
 # Configurações Personalizadas com Nomes Reservados
 
-O OpenHands pode usar configurações personalizadas de LLM nomeadas com nomes reservados, para casos de uso específicos. Se você especificar o modelo e outras configurações sob os nomes reservados, então o OpenHands irá carregá-los e usá-los para um propósito específico. Até agora, uma dessas configurações está implementada: editor de rascunho.
+O Dev pode usar configurações personalizadas de LLM nomeadas com nomes reservados, para casos de uso específicos. Se você especificar o modelo e outras configurações sob os nomes reservados, então o Dev irá carregá-los e usá-los para um propósito específico. Até agora, uma dessas configurações está implementada: editor de rascunho.
 
 ## Configuração do Editor de Rascunho
 
@@ -132,5 +132,5 @@ Use esta configuração quando quiser que um LLM faça um rascunho das edições
 - Fazer alterações precisas e focadas no código ou texto
 
 :::note
-As configurações personalizadas de LLM estão disponíveis apenas quando se usa o OpenHands no modo de desenvolvimento, via `main.py` ou `cli.py`. Ao executar via `docker run`, por favor, use as opções de configuração padrão.
+As configurações personalizadas de LLM estão disponíveis apenas quando se usa o Dev no modo de desenvolvimento, via `main.py` ou `cli.py`. Ao executar via `docker run`, por favor, use as opções de configuração padrão.
 :::

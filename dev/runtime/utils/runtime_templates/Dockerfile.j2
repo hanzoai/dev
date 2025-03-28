@@ -1,0 +1,171 @@
+FROM {{ base_image }}
+
+# Shared environment variables
+ENV POETRY_VIRTUALENVS_PATH=/dev/poetry \
+    MAMBA_ROOT_PREFIX=/dev/micromamba \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    EDITOR=code \
+    VISUAL=code \
+    GIT_EDITOR="code --wait" \
+    OPENVSCODE_SERVER_ROOT=/dev/.openvscode-server
+
+{% macro setup_base_system() %}
+
+# Install base system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget curl sudo apt-utils git jq tmux \
+        {%- if 'ubuntu' in base_image and (base_image.endswith(':latest') or base_image.endswith(':24.04')) -%}
+        libgl1 \
+        {%- else %}
+        libgl1-mesa-glx \
+        {% endif -%}
+        libasound2-plugins libatomic1 && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Remove UID 1000 if it's called pn--this fixes the nikolaik image for ubuntu users
+RUN if getent passwd 1000 | grep -q pn; then userdel pn; fi
+
+# Create necessary directories
+RUN mkdir -p /dev && \
+    mkdir -p /dev/logs && \
+    mkdir -p /dev/poetry
+
+{% endmacro %}
+
+{% macro setup_vscode_server() %}
+# Reference:
+# 1. https://github.com/gitpod-io/openvscode-server
+# 2. https://github.com/gitpod-io/openvscode-releases
+
+# Setup VSCode Server
+ARG RELEASE_TAG="openvscode-server-v1.94.2"
+ARG RELEASE_ORG="gitpod-io"
+# ARG USERNAME=openvscode-server
+# ARG USER_UID=1000
+# ARG USER_GID=1000
+
+RUN if [ -z "${RELEASE_TAG}" ]; then \
+        echo "The RELEASE_TAG build arg must be set." >&2 && \
+        exit 1; \
+    fi && \
+    arch=$(uname -m) && \
+    if [ "${arch}" = "x86_64" ]; then \
+        arch="x64"; \
+    elif [ "${arch}" = "aarch64" ]; then \
+        arch="arm64"; \
+    elif [ "${arch}" = "armv7l" ]; then \
+        arch="armhf"; \
+    fi && \
+    wget https://github.com/${RELEASE_ORG}/openvscode-server/releases/download/${RELEASE_TAG}/${RELEASE_TAG}-linux-${arch}.tar.gz && \
+    tar -xzf ${RELEASE_TAG}-linux-${arch}.tar.gz && \
+    if [ -d "${OPENVSCODE_SERVER_ROOT}" ]; then rm -rf "${OPENVSCODE_SERVER_ROOT}"; fi && \
+    mv ${RELEASE_TAG}-linux-${arch} ${OPENVSCODE_SERVER_ROOT} && \
+    cp ${OPENVSCODE_SERVER_ROOT}/bin/remote-cli/openvscode-server ${OPENVSCODE_SERVER_ROOT}/bin/remote-cli/code && \
+    rm -f ${RELEASE_TAG}-linux-${arch}.tar.gz
+
+{% endmacro %}
+
+{% macro install_vscode_extensions() %}
+# Install our custom extension
+RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/dev-hello-world && \
+    cp -r /dev/code/dev/runtime/utils/vscode-extensions/hello-world/* ${OPENVSCODE_SERVER_ROOT}/extensions/dev-hello-world/
+
+RUN mkdir -p ${OPENVSCODE_SERVER_ROOT}/extensions/dev-memory-monitor && \
+    cp -r /dev/code/dev/runtime/utils/vscode-extensions/memory-monitor/* ${OPENVSCODE_SERVER_ROOT}/extensions/dev-memory-monitor/
+{% endmacro %}
+
+{% macro install_dependencies() %}
+# Install all dependencies
+WORKDIR /dev/code
+
+# Configure micromamba and poetry
+RUN /dev/micromamba/bin/micromamba config set changeps1 False && \
+    /dev/micromamba/bin/micromamba run -n dev poetry config virtualenvs.path /dev/poetry && \
+    /dev/micromamba/bin/micromamba run -n dev poetry env use python3.12
+
+# Install project dependencies in smaller chunks
+RUN /dev/micromamba/bin/micromamba run -n dev poetry install --only main --no-interaction --no-root
+
+RUN /dev/micromamba/bin/micromamba run -n dev poetry install --only runtime --no-interaction --no-root
+
+# Install playwright and its dependencies
+RUN apt-get update && \
+    /dev/micromamba/bin/micromamba run -n dev poetry run pip install playwright && \
+    /dev/micromamba/bin/micromamba run -n dev poetry run playwright install --with-deps chromium
+
+# Set environment variables and permissions
+RUN /dev/micromamba/bin/micromamba run -n dev poetry run python -c "import sys; print('OH_INTERPRETER_PATH=' + sys.executable)" >> /etc/environment && \
+    chmod -R g+rws /dev/poetry && \
+    mkdir -p /dev/workspace && chmod -R g+rws,o+rw /dev/workspace
+
+# Clear caches
+RUN /dev/micromamba/bin/micromamba run -n dev poetry cache clear --all . -n && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    /dev/micromamba/bin/micromamba clean --all
+
+{% endmacro %}
+
+{% if build_from_scratch %}
+# ================================================================
+# START: Build Runtime Image from Scratch
+# ================================================================
+# This is used in cases where the base image is something more generic like nikolaik/python-nodejs
+# rather than the current Dev release
+
+{{ setup_base_system() }}
+
+# Install micromamba
+RUN mkdir -p /dev/micromamba/bin && \
+    /bin/bash -c "PREFIX_LOCATION=/dev/micromamba BIN_FOLDER=/dev/micromamba/bin INIT_YES=no CONDA_FORGE_YES=yes $(curl -L https://micro.mamba.pm/install.sh)" && \
+    /dev/micromamba/bin/micromamba config remove channels defaults && \
+    /dev/micromamba/bin/micromamba config list
+
+# Create the dev virtual environment and install poetry and python
+RUN /dev/micromamba/bin/micromamba create -n dev -y && \
+    /dev/micromamba/bin/micromamba install -n dev -c conda-forge poetry python=3.12 -y
+
+# Create a clean dev directory including only the pyproject.toml, poetry.lock and dev/__init__.py
+RUN \
+    if [ -d /dev/code ]; then rm -rf /dev/code; fi && \
+    mkdir -p /dev/code/dev && \
+    touch /dev/code/dev/__init__.py
+
+COPY ./code/pyproject.toml ./code/poetry.lock /dev/code/
+
+COPY ./code/dev/runtime/plugins/vscode/settings.json /workspace/.vscode/settings.json
+RUN chmod -R a+rwx /workspace/.vscode/settings.json
+
+{{ install_dependencies() }}
+
+# ================================================================
+# END: Build Runtime Image from Scratch
+# ================================================================
+{% endif %}
+
+# ================================================================
+# Copy Project source files
+# ================================================================
+RUN if [ -d /dev/code/dev ]; then rm -rf /dev/code/dev; fi
+COPY ./code/pyproject.toml ./code/poetry.lock /dev/code/
+
+COPY ./code/dev/runtime/plugins/vscode/settings.json /workspace/.vscode/settings.json
+RUN chmod -R a+rwx /workspace/.vscode/settings.json
+
+COPY ./code/dev /dev/code/dev
+RUN chmod a+rwx /dev/code/dev/__init__.py
+
+{{ setup_vscode_server() }}
+
+# ================================================================
+# END: Build from versioned image
+# ================================================================
+{% if build_from_versioned %}
+{{ install_dependencies() }}
+{{ install_vscode_extensions() }}
+{% endif %}
+
+# Install extra dependencies if specified
+{% if extra_deps %}RUN {{ extra_deps }} {% endif %}

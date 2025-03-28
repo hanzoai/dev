@@ -1,6 +1,6 @@
 # Debugging
 
-The following is intended as a primer on debugging OpenHands for Development purposes.
+The following is intended as a primer on debugging Dev for Development purposes.
 
 ## Server / VSCode
 
@@ -11,19 +11,19 @@ The following `launch.json` will allow debugging the agent, controller and serve
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "OpenHands CLI",
+            "name": "Dev CLI",
             "type": "debugpy",
             "request": "launch",
-            "module": "openhands.core.cli",
+            "module": "dev.core.cli",
             "justMyCode": false
         },
         {
-            "name": "OpenHands WebApp",
+            "name": "Dev WebApp",
             "type": "debugpy",
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "openhands.server.listen:app",
+                "dev.server.listen:app",
                 "--reload",
                 "--reload-exclude",
                 "${workspaceFolder}/workspace",
@@ -44,7 +44,7 @@ More specific debugging configurations which include more parameters may be spec
       "name": "Debug CodeAct",
       "type": "debugpy",
       "request": "launch",
-      "module": "openhands.core.main",
+      "module": "dev.core.main",
       "args": [
         "-t",
         "Ask me what your task is.",
@@ -65,7 +65,7 @@ More specific debugging configurations which include more parameters may be spec
 Values in the snippet above can be updated such that:
 
     * *t*: the task
-    * *d*: the openhands workspace directory
+    * *d*: the dev workspace directory
     * *c*: the agent
     * *l*: the LLM config (pre-defined in config.toml)
     * *n*: session name (e.g. eventstream name)

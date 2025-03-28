@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.core.config import LLMConfig
-from openhands.core.schema.action import ActionType
-from openhands.core.schema.agent import AgentState
-from openhands.events.action import (
+from dev.core.config import LLMConfig
+from dev.core.schema.action import ActionType
+from dev.core.schema.agent import AgentState
+from dev.events.action import (
     AgentDelegateAction,
     AgentFinishAction,
     BrowseInteractiveAction,
@@ -18,9 +18,9 @@ from openhands.events.action import (
     MessageAction,
     NullAction,
 )
-from openhands.events.action.action import ActionConfirmationStatus, ActionSecurityRisk
-from openhands.events.event import Event
-from openhands.events.observation import (
+from dev.events.action.action import ActionConfirmationStatus, ActionSecurityRisk
+from dev.events.event import Event
+from dev.events.observation import (
     AgentDelegateObservation,
     AgentStateChangedObservation,
     BrowserOutputObservation,
@@ -28,13 +28,13 @@ from openhands.events.observation import (
     IPythonRunCellObservation,
     NullObservation,
 )
-from openhands.events.stream import EventSource, EventStream
-from openhands.llm.llm import LLM
-from openhands.security.invariant import InvariantAnalyzer
-from openhands.security.invariant.client import InvariantClient
-from openhands.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
-from openhands.security.invariant.parser import parse_action, parse_observation
-from openhands.storage import get_file_store
+from dev.events.stream import EventSource, EventStream
+from dev.llm.llm import LLM
+from dev.security.invariant import InvariantAnalyzer
+from dev.security.invariant.client import InvariantClient
+from dev.security.invariant.nodes import Function, Message, ToolCall, ToolOutput
+from dev.security.invariant.parser import parse_action, parse_observation
+from dev.storage import get_file_store
 
 
 @pytest.fixture
@@ -555,7 +555,7 @@ def default_config():
         ),
     ],
 )
-@patch('openhands.llm.llm.litellm_completion', autospec=True)
+@patch('dev.llm.llm.litellm_completion', autospec=True)
 @pytest.mark.asyncio
 async def test_check_usertask(
     mock_litellm_completion, usertask, is_appropriate, default_config, temp_dir: str
@@ -617,7 +617,7 @@ async def test_check_usertask(
         ("fill(2, '<Good Content>')", 'No'),
     ],
 )
-@patch('openhands.llm.llm.litellm_completion', autospec=True)
+@patch('dev.llm.llm.litellm_completion', autospec=True)
 @pytest.mark.asyncio
 async def test_check_fillaction(
     mock_litellm_completion, fillaction, is_harmful, default_config, temp_dir: str

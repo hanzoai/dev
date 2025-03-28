@@ -108,14 +108,14 @@ describe.skip("Terminal", () => {
       {
         type: "output",
         content:
-          "Hello\r\n\r\n[Python Interpreter: /openhands/poetry/openhands-5O4_aCHf-py3.12/bin/python]\nopenhands@659478cb008c:/workspace $ ",
+          "Hello\r\n\r\n[Python Interpreter: /dev/poetry/dev-5O4_aCHf-py3.12/bin/python]\ndev@659478cb008c:/workspace $ ",
       },
     ]);
 
     expect(mockTerminal.writeln).toHaveBeenNthCalledWith(1, "echo Hello");
     expect(mockTerminal.writeln).toHaveBeenNthCalledWith(2, "Hello");
     expect(mockTerminal.write).toHaveBeenCalledWith(
-      "\nopenhands@659478cb008c:/workspace $ ",
+      "\ndev@659478cb008c:/workspace $ ",
     );
   });
 

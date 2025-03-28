@@ -2,7 +2,7 @@
 
 Microagents are defined using markdown files with YAML frontmatter that specify their behavior, triggers, and capabilities.
 
-Find below a comprehensive description of the frontmatter syntax and other details about how to use each type of microagent available at OpenHands.
+Find below a comprehensive description of the frontmatter syntax and other details about how to use each type of microagent available at Dev.
 
 ## Frontmatter Schema
 
@@ -25,7 +25,7 @@ Every microagent requires a YAML frontmatter section at the beginning of the fil
 **Purpose**: Specifies which agent implementation processes the microagent (typically `CodeActAgent`).
 
 - Defines a single agent responsible for processing the microagent
-- Must be available in the OpenHands system (see the [agent hub](https://github.com/All-Hands-AI/OpenHands/tree/main/openhands/agenthub))
+- Must be available in the Dev system (see the [agent hub](https://github.com/hanzoai/dev/tree/main/dev/agenthub))
 - If the specified agent is not active, the microagent will not be used
 
 ### `triggers`
@@ -84,27 +84,27 @@ inputs:
 
 Repository microagents provide context and guidelines for a specific repository.
 
-- Located at: `.openhands/microagents/repo.md`
+- Located at: `.dev/microagents/repo.md`
 - Automatically loaded when working with the repository
 - Only one per repository
 
-The `Repository` microagent is loaded specifically from `.openhands/microagents/repo.md` and serves as the main
-repository-specific instruction file. This single file is automatically loaded whenever OpenHands works with that repository
+The `Repository` microagent is loaded specifically from `.dev/microagents/repo.md` and serves as the main
+repository-specific instruction file. This single file is automatically loaded whenever Dev works with that repository
 without requiring any keyword matching or explicit call from the user.
 
-[See the example in the official OpenHands repository](https://github.com/All-Hands-AI/OpenHands/blob/main/.openhands/microagents/repo.md?plain=1)
+[See the example in the official Dev repository](https://github.com/hanzoai/dev/blob/main/.dev/microagents/repo.md?plain=1)
 
 ### Knowledge Microagent
 
 Provides specialized domain expertise triggered by keywords.
 
-You can find several real examples of `Knowledge` microagents in the [offical OpenHands repository](https://github.com/All-Hands-AI/OpenHands/tree/main/microagents/knowledge)
+You can find several real examples of `Knowledge` microagents in the [offical Dev repository](https://github.com/hanzoai/dev/tree/main/microagents/knowledge)
 
 ### Task Microagent
 
 When explicitly asked by the user, will guide through interactive workflows with specific inputs.
 
-You can find several real examples of `Tasks` microagents in the [offical OpenHands repository](https://github.com/All-Hands-AI/OpenHands/tree/main/microagents/tasks)
+You can find several real examples of `Tasks` microagents in the [offical Dev repository](https://github.com/hanzoai/dev/tree/main/microagents/tasks)
 
 ## Markdown Content Best Practices
 

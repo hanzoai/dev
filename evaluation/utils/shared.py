@@ -15,14 +15,14 @@ import pandas as pd
 from pydantic import BaseModel
 from tqdm import tqdm
 
-from openhands.controller.state.state import State
-from openhands.core.config import LLMConfig, SandboxConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.config.condenser_config import (
+from dev.controller.state.state import State
+from dev.core.config import LLMConfig, SandboxConfig
+from dev.core.config.agent_config import AgentConfig
+from dev.core.config.condenser_config import (
     CondenserConfig,
     NoOpCondenserConfig,
 )
-from openhands.core.exceptions import (
+from dev.core.exceptions import (
     AgentRuntimeBuildError,
     AgentRuntimeDisconnectedError,
     AgentRuntimeError,
@@ -31,14 +31,14 @@ from openhands.core.exceptions import (
     AgentRuntimeTimeoutError,
     AgentRuntimeUnavailableError,
 )
-from openhands.core.logger import get_console_handler
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import Action
-from openhands.events.action.message import MessageAction
-from openhands.events.event import Event
-from openhands.events.serialization.event import event_to_dict
-from openhands.events.utils import get_pairs_from_events
-from openhands.memory.condenser import get_condensation_metadata
+from dev.core.logger import get_console_handler
+from dev.core.logger import dev_logger as logger
+from dev.events.action import Action
+from dev.events.action.message import MessageAction
+from dev.events.event import Event
+from dev.events.serialization.event import event_to_dict
+from dev.events.utils import get_pairs_from_events
+from dev.memory.condenser import get_condensation_metadata
 
 
 class EvalMetadata(BaseModel):
@@ -572,7 +572,7 @@ def get_default_sandbox_config_for_eval() -> SandboxConfig:
         use_host_network=False,
         # large enough timeout, since some testcases take very long to run
         timeout=300,
-        api_key=os.environ.get('ALLHANDS_API_KEY', None),
+        api_key=os.environ.get('HANZO_API_KEY', None),
         runtime_startup_env_vars={'NO_CHANGE_TIMEOUT_SECONDS': '30'},
         remote_runtime_api_url=os.environ.get('SANDBOX_REMOTE_RUNTIME_API_URL'),
         keep_runtime_alive=False,

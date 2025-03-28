@@ -4,38 +4,38 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from openhands.controller.state.state import State
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.message import ImageContent, Message, TextContent
-from openhands.events.action import (
+from dev.controller.state.state import State
+from dev.core.config.agent_config import AgentConfig
+from dev.core.message import ImageContent, Message, TextContent
+from dev.events.action import (
     AgentFinishAction,
     CmdRunAction,
     MessageAction,
 )
-from openhands.events.event import (
+from dev.events.event import (
     Event,
     EventSource,
     FileEditSource,
     FileReadSource,
     RecallType,
 )
-from openhands.events.observation import CmdOutputObservation
-from openhands.events.observation.agent import (
+from dev.events.observation import CmdOutputObservation
+from dev.events.observation.agent import (
     MicroagentKnowledge,
     RecallObservation,
 )
-from openhands.events.observation.browse import BrowserOutputObservation
-from openhands.events.observation.commands import (
+from dev.events.observation.browse import BrowserOutputObservation
+from dev.events.observation.commands import (
     CmdOutputMetadata,
     IPythonRunCellObservation,
 )
-from openhands.events.observation.delegate import AgentDelegateObservation
-from openhands.events.observation.error import ErrorObservation
-from openhands.events.observation.files import FileEditObservation, FileReadObservation
-from openhands.events.observation.reject import UserRejectObservation
-from openhands.events.tool import ToolCallMetadata
-from openhands.memory.conversation_memory import ConversationMemory
-from openhands.utils.prompt import PromptManager, RepositoryInfo, RuntimeInfo
+from dev.events.observation.delegate import AgentDelegateObservation
+from dev.events.observation.error import ErrorObservation
+from dev.events.observation.files import FileEditObservation, FileReadObservation
+from dev.events.observation.reject import UserRejectObservation
+from dev.events.tool import ToolCallMetadata
+from dev.memory.conversation_memory import ConversationMemory
+from dev.utils.prompt import PromptManager, RepositoryInfo, RuntimeInfo
 
 
 @pytest.fixture
@@ -67,9 +67,9 @@ def conversation_memory(agent_config):
 
 @pytest.fixture
 def prompt_dir(tmp_path):
-    # Copy contents from "openhands/agenthub/codeact_agent" to the temp directory
+    # Copy contents from "dev/agenthub/codeact_agent" to the temp directory
     shutil.copytree(
-        'openhands/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
+        'dev/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
     )
 
     # Return the temporary directory path

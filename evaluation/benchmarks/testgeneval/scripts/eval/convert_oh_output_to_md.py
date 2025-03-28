@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert OpenHands output to a readable markdown format for visualization."""
+"""Convert Dev output to a readable markdown format for visualization."""
 
 import argparse
 import json
@@ -8,7 +8,7 @@ import os
 import pandas as pd
 from tqdm import tqdm
 
-from openhands.events.serialization import event_from_dict
+from dev.events.serialization import event_from_dict
 
 tqdm.pandas()
 

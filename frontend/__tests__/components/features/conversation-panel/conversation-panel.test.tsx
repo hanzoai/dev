@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
 import React from "react";
 import { ConversationPanel } from "#/components/features/conversation-panel/conversation-panel";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 import { AuthProvider } from "#/context/auth-context";
 import { clickOnEditButton } from "./utils";
 import { queryClientConfig } from "#/query-client-config";
@@ -84,7 +84,7 @@ describe("ConversationPanel", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     // Setup default mock for getUserConversations
-    vi.spyOn(OpenHands, "getUserConversations").mockResolvedValue([...mockConversations]);
+    vi.spyOn(Dev, "getUserConversations").mockResolvedValue([...mockConversations]);
   });
 
   it("should render the conversations", async () => {
@@ -97,7 +97,7 @@ describe("ConversationPanel", () => {
   });
 
   it("should display an empty state when there are no conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Dev, "getUserConversations");
     getUserConversationsSpy.mockResolvedValue([]);
 
     renderConversationPanel();
@@ -107,7 +107,7 @@ describe("ConversationPanel", () => {
   });
 
   it("should handle an error when fetching conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Dev, "getUserConversations");
     getUserConversationsSpy.mockRejectedValue(
       new Error("Failed to fetch conversations"),
     );
@@ -148,10 +148,10 @@ describe("ConversationPanel", () => {
   it("should call endSession after deleting a conversation that is the current session", async () => {
     const user = userEvent.setup();
     const mockData = [...mockConversations];
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Dev, "getUserConversations");
     getUserConversationsSpy.mockImplementation(async () => mockData);
 
-    const deleteUserConversationSpy = vi.spyOn(OpenHands, "deleteUserConversation");
+    const deleteUserConversationSpy = vi.spyOn(Dev, "deleteUserConversation");
     deleteUserConversationSpy.mockImplementation(async (id: string) => {
       const index = mockData.findIndex(conv => conv.conversation_id === id);
       if (index !== -1) {
@@ -215,10 +215,10 @@ describe("ConversationPanel", () => {
       },
     ];
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Dev, "getUserConversations");
     getUserConversationsSpy.mockImplementation(async () => mockData);
 
-    const deleteUserConversationSpy = vi.spyOn(OpenHands, "deleteUserConversation");
+    const deleteUserConversationSpy = vi.spyOn(Dev, "deleteUserConversation");
     deleteUserConversationSpy.mockImplementation(async (id: string) => {
       const index = mockData.findIndex(conv => conv.conversation_id === id);
       if (index !== -1) {
@@ -253,7 +253,7 @@ describe("ConversationPanel", () => {
 
   it("should rename a conversation", async () => {
     const updateUserConversationSpy = vi.spyOn(
-      OpenHands,
+      Dev,
       "updateUserConversation",
     );
 
@@ -277,7 +277,7 @@ describe("ConversationPanel", () => {
 
   it("should not rename a conversation when the name is unchanged", async () => {
     const updateUserConversationSpy = vi.spyOn(
-      OpenHands,
+      Dev,
       "updateUserConversation",
     );
 
@@ -322,7 +322,7 @@ describe("ConversationPanel", () => {
 
   it("should refetch data on rerenders", async () => {
     const user = userEvent.setup();
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(Dev, "getUserConversations");
     getUserConversationsSpy.mockResolvedValue([...mockConversations]);
 
     function PanelWithToggle() {

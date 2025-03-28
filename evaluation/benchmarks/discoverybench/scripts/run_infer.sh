@@ -23,10 +23,10 @@ if [ -z "$AGENT" ]; then
   AGENT="CodeActAgent"
 fi
 
-get_openhands_version
+get_dev_version
 
 echo "AGENT: $AGENT"
-echo "OPENHANDS_VERSION: $OPENHANDS_VERSION"
+echo "DEV_VERSION: $DEV_VERSION"
 echo "MODEL_CONFIG: $MODEL_CONFIG"
 
 COMMAND="poetry run python evaluation/benchmarks/discoverybench/run_infer.py \
@@ -35,7 +35,7 @@ COMMAND="poetry run python evaluation/benchmarks/discoverybench/run_infer.py \
   --max-iterations 10 \
   --max-chars 10000000 \
   --eval-num-workers $NUM_WORKERS \
-  --eval-note $OPENHANDS_VERSION"
+  --eval-note $DEV_VERSION"
 
 if [ -n "$EVAL_LIMIT" ]; then
   echo "EVAL_LIMIT: $EVAL_LIMIT"

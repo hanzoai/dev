@@ -3,7 +3,7 @@
 # LLM local avec Ollama
 
 :::warning
-Lors de l'utilisation d'un LLM local, OpenHands peut avoir des fonctionnalités limitées.
+Lors de l'utilisation d'un LLM local, Dev peut avoir des fonctionnalités limitées.
 :::
 
 Assurez-vous que le serveur Ollama est opérationnel.
@@ -29,10 +29,10 @@ mistral:7b-instruct-v0.2-q4_K_M eb14864c7427    4.4 GB  2 weeks ago
 starcoder2:latest               f67ae0f64584    1.7 GB  19 hours ago
 ```
 
-## Exécuter OpenHands avec Docker
+## Exécuter Dev avec Docker
 
-### Démarrer OpenHands
-Utilisez les instructions [ici](../getting-started) pour démarrer OpenHands en utilisant Docker.
+### Démarrer Dev
+Utilisez les instructions [ici](../getting-started) pour démarrer Dev en utilisant Docker.
 Mais lorsque vous exécutez `docker run`, vous devrez ajouter quelques arguments supplémentaires :
 
 ```bash
@@ -48,17 +48,17 @@ les modèles installés disponibles dans l'interface utilisateur.
 
 ### Configurer l'application Web
 
-Lors de l'exécution d'`openhands`, vous devrez définir les éléments suivants dans l'interface utilisateur d'OpenHands via les paramètres :
+Lors de l'exécution d'`dev`, vous devrez définir les éléments suivants dans l'interface utilisateur d'Dev via les paramètres :
 - le modèle à "ollama/&lt;nom-du-modèle&gt;"
 - l'URL de base à `http://host.docker.internal:11434`
 - la clé API est optionnelle, vous pouvez utiliser n'importe quelle chaîne, comme `ollama`.
 
 
-## Exécuter OpenHands en mode développement
+## Exécuter Dev en mode développement
 
 ### Compiler à partir du code source
 
-Utilisez les instructions dans [Development.md](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md) pour compiler OpenHands.
+Utilisez les instructions dans [Development.md](https://github.com/hanzoai/dev/blob/main/Development.md) pour compiler Dev.
 Assurez-vous que `config.toml` est présent en exécutant `make setup-config` qui en créera un pour vous. Dans `config.toml`, entrez ce qui suit :
 
 ```
@@ -71,11 +71,11 @@ ollama_base_url="http://localhost:11434"
 
 ```
 
-Terminé ! Vous pouvez maintenant démarrer OpenHands avec : `make run`. Vous devriez maintenant pouvoir vous connecter à `http://localhost:3000/`
+Terminé ! Vous pouvez maintenant démarrer Dev avec : `make run`. Vous devriez maintenant pouvoir vous connecter à `http://localhost:3000/`
 
 ### Configurer l'application Web
 
-Dans l'interface utilisateur d'OpenHands, cliquez sur la roue des paramètres dans le coin inférieur gauche.
+Dans l'interface utilisateur d'Dev, cliquez sur la roue des paramètres dans le coin inférieur gauche.
 Ensuite, dans le champ `Model`, entrez `ollama/codellama:7b`, ou le nom du modèle que vous avez récupéré précédemment.
 S'il n'apparaît pas dans la liste déroulante, activez `Advanced Settings` et tapez-le. Veuillez noter : vous avez besoin du nom du modèle tel qu'il est listé par `ollama list`, avec le préfixe `ollama/`.
 
@@ -87,7 +87,7 @@ Et maintenant vous êtes prêt à démarrer !
 
 ## Configurer le service ollama (WSL) {#configuring-ollama-service-wsl-fr}
 
-La configuration par défaut d'ollama dans WSL ne sert que localhost. Cela signifie que vous ne pouvez pas y accéder depuis un conteneur docker. Par ex. cela ne fonctionnera pas avec OpenHands. Testons d'abord qu'ollama fonctionne correctement.
+La configuration par défaut d'ollama dans WSL ne sert que localhost. Cela signifie que vous ne pouvez pas y accéder depuis un conteneur docker. Par ex. cela ne fonctionnera pas avec Dev. Testons d'abord qu'ollama fonctionne correctement.
 
 ```bash
 ollama list # obtenir la liste des modèles installés
@@ -99,7 +99,7 @@ curl http://localhost:11434/api/generate -d '{"model":"[NOM]","prompt":"hi"}'
 Une fois cela fait, testez qu'il autorise les requêtes "extérieures", comme celles provenant d'un conteneur docker.
 
 ```bash
-docker ps # obtenir la liste des conteneurs docker en cours d'exécution, pour un test plus précis choisissez le conteneur sandbox OpenHands.
+docker ps # obtenir la liste des conteneurs docker en cours d'exécution, pour un test plus précis choisissez le conteneur sandbox Dev.
 docker exec [ID CONTENEUR] curl http://host.docker.internal:11434/api/generate -d '{"model":"[NOM]","prompt":"hi"}'
 #ex. docker exec cd9cc82f7a11 curl http://host.docker.internal:11434/api/generate -d '{"model":"codellama","prompt":"hi"}'
 ```
@@ -136,7 +136,7 @@ Enfin, testez qu'ollama est accessible depuis le conteneur
 
 ```bash
 ollama list # obtenir la liste des modèles installés
-docker ps # obtenir la liste des conteneurs docker en cours d'exécution, pour un test plus précis choisissez le conteneur sandbox OpenHands.
+docker ps # obtenir la liste des conteneurs docker en cours d'exécution, pour un test plus précis choisissez le conteneur sandbox Dev.
 docker exec [ID CONTENEUR] curl http://host.docker.internal:11434/api/generate -d '{"model":"[NOM]","prompt":"hi"}'
 ```
 
@@ -181,7 +181,7 @@ base_url="http://localhost:1234/v1"
 custom_llm_provider="openai"
 ```
 
-Terminé ! Vous pouvez maintenant démarrer OpenHands avec : `make run` sans Docker. Vous devriez maintenant pouvoir vous connecter à `http://localhost:3000/`
+Terminé ! Vous pouvez maintenant démarrer Dev avec : `make run` sans Docker. Vous devriez maintenant pouvoir vous connecter à `http://localhost:3000/`
 
 # Note
 

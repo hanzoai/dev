@@ -2,9 +2,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.core.config import AppConfig
-from openhands.events import EventStream
-from openhands.runtime.impl.docker.docker_runtime import DockerRuntime
+from dev.core.config import AppConfig
+from dev.events import EventStream
+from dev.runtime.impl.docker.docker_runtime import DockerRuntime
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def event_stream():
     return MagicMock(spec=EventStream)
 
 
-@patch('openhands.runtime.impl.docker.docker_runtime.stop_all_containers')
+@patch('dev.runtime.impl.docker.docker_runtime.stop_all_containers')
 def test_container_stopped_when_keep_runtime_alive_false(
     mock_stop_containers, mock_docker_client, config, event_stream
 ):
@@ -52,10 +52,10 @@ def test_container_stopped_when_keep_runtime_alive_false(
     runtime.close()
 
     # Assert
-    mock_stop_containers.assert_called_once_with('openhands-runtime-test-sid')
+    mock_stop_containers.assert_called_once_with('dev-runtime-test-sid')
 
 
-@patch('openhands.runtime.impl.docker.docker_runtime.stop_all_containers')
+@patch('dev.runtime.impl.docker.docker_runtime.stop_all_containers')
 def test_container_not_stopped_when_keep_runtime_alive_true(
     mock_stop_containers, mock_docker_client, config, event_stream
 ):

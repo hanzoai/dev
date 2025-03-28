@@ -18,11 +18,11 @@ echo "EXP_NAME: $EXP_NAME"
 DATASET="SWE-Gym/SWE-Gym"  # change this to the "/SWE-Gym-Lite" if you want to rollout the lite subset
 SPLIT="train"
 
-if [ -z "$ALLHANDS_API_KEY" ]; then
-    echo "ALLHANDS_API_KEY is not set. Will rollout and evaluate locally using Docker. WARNING: A large value of N_WORKERS will result in a large number of Docker containers being spun up and may crash your machine."
+if [ -z "$HANZO_API_KEY" ]; then
+    echo "HANZO_API_KEY is not set. Will rollout and evaluate locally using Docker. WARNING: A large value of N_WORKERS will result in a large number of Docker containers being spun up and may crash your machine."
     export RUNTIME=docker
 else
-    echo "ALLHANDS_API_KEY is set. Continuing rollout and evaluation with remote runtime..."
+    echo "HANZO_API_KEY is set. Continuing rollout and evaluation with remote runtime..."
     export RUNTIME=remote
     export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
     export EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images"
@@ -34,9 +34,9 @@ MAX_ITER=100
 
 # ===== Run inference =====
 source "evaluation/utils/version_control.sh"
-get_openhands_version
+get_dev_version
 
-echo "OPENHANDS_VERSION: $OPENHANDS_VERSION"
+echo "DEV_VERSION: $DEV_VERSION"
 echo "MODEL_CONFIG: $MODEL_CONFIG"
 echo "DATASET: $DATASET"
 echo "SPLIT: $SPLIT"
@@ -46,7 +46,7 @@ export USE_INSTANCE_IMAGE=true
 export USE_HINT_TEXT=false
 export RUN_WITH_BROWSING=false
 echo "USE_HINT_TEXT: $USE_HINT_TEXT"
-EVAL_NOTE="$OPENHANDS_VERSION-no-hint-$EXP_NAME"
+EVAL_NOTE="$DEV_VERSION-no-hint-$EXP_NAME"
 
 function run_eval() {
   local eval_note=$1

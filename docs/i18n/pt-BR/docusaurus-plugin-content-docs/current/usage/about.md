@@ -1,4 +1,4 @@
-# Sobre o OpenHands
+# Sobre o Dev
 
 ## Estratégia de Pesquisa
 
@@ -14,12 +14,12 @@ Nosso Agente padrão atualmente é o [CodeActAgent](agents), que é capaz de ger
 
 ## Construído Com
 
-O OpenHands é construído usando uma combinação de poderosos frameworks e bibliotecas, fornecendo uma base robusta para seu desenvolvimento. Aqui estão as principais tecnologias usadas no projeto:
+O Dev é construído usando uma combinação de poderosos frameworks e bibliotecas, fornecendo uma base robusta para seu desenvolvimento. Aqui estão as principais tecnologias usadas no projeto:
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-black?style=for-the-badge) ![uvicorn](https://img.shields.io/badge/uvicorn-black?style=for-the-badge) ![LiteLLM](https://img.shields.io/badge/LiteLLM-black?style=for-the-badge) ![Docker](https://img.shields.io/badge/Docker-black?style=for-the-badge) ![Ruff](https://img.shields.io/badge/Ruff-black?style=for-the-badge) ![MyPy](https://img.shields.io/badge/MyPy-black?style=for-the-badge) ![LlamaIndex](https://img.shields.io/badge/LlamaIndex-black?style=for-the-badge) ![React](https://img.shields.io/badge/React-black?style=for-the-badge)
 
-Por favor, note que a seleção dessas tecnologias está em andamento, e tecnologias adicionais podem ser adicionadas ou as existentes podem ser removidas à medida que o projeto evolui. Nós nos esforçamos para adotar as ferramentas mais adequadas e eficientes para aprimorar as capacidades do OpenHands.
+Por favor, note que a seleção dessas tecnologias está em andamento, e tecnologias adicionais podem ser adicionadas ou as existentes podem ser removidas à medida que o projeto evolui. Nós nos esforçamos para adotar as ferramentas mais adequadas e eficientes para aprimorar as capacidades do Dev.
 
 ## Licença
 
-Distribuído sob a [Licença](https://github.com/All-Hands-AI/OpenHands/blob/main/LICENSE) MIT.
+Distribuído sob a [Licença](https://github.com/hanzoai/dev/blob/main/LICENSE) MIT.

@@ -1,6 +1,6 @@
 # Melhores Práticas de Prompt
 
-Ao trabalhar com o desenvolvedor de software OpenHands AI, é crucial fornecer prompts claros e eficazes. Este guia descreve as melhores práticas para criar prompts que produzirão as respostas mais precisas e úteis.
+Ao trabalhar com o desenvolvedor de software Dev AI, é crucial fornecer prompts claros e eficazes. Este guia descreve as melhores práticas para criar prompts que produzirão as respostas mais precisas e úteis.
 
 ## Características de Bons Prompts
 
@@ -32,6 +32,6 @@ Bons prompts são:
 - Inclua quaisquer mensagens de erro ou logs relevantes.
 - Especifique a linguagem de programação ou framework se não for óbvio a partir do contexto.
 
-Lembre-se, quanto mais preciso e informativo for o seu prompt, melhor a IA poderá ajudá-lo a desenvolver ou modificar o software OpenHands.
+Lembre-se, quanto mais preciso e informativo for o seu prompt, melhor a IA poderá ajudá-lo a desenvolver ou modificar o software Dev.
 
-Veja [Começando com o OpenHands](../getting-started) para mais exemplos de prompts úteis.
+Veja [Começando com o Dev](../getting-started) para mais exemplos de prompts úteis.

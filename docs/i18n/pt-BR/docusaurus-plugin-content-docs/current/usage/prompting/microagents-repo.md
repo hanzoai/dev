@@ -2,19 +2,19 @@
 
 ## Visão Geral
 
-O OpenHands pode ser personalizado para trabalhar de forma mais eficaz com repositórios específicos, fornecendo contexto
-e diretrizes específicas do repositório. Esta seção explica como otimizar o OpenHands para o seu projeto.
+O Dev pode ser personalizado para trabalhar de forma mais eficaz com repositórios específicos, fornecendo contexto
+e diretrizes específicas do repositório. Esta seção explica como otimizar o Dev para o seu projeto.
 
 ## Criando um Micro-Agente de Repositório
 
-Você pode personalizar o comportamento do OpenHands para o seu repositório criando um diretório `.openhands/microagents/` na raiz do seu repositório.
+Você pode personalizar o comportamento do Dev para o seu repositório criando um diretório `.dev/microagents/` na raiz do seu repositório.
 No mínimo, ele deve conter o arquivo
-`.openhands/microagents/repo.md`, que inclui instruções que serão
+`.dev/microagents/repo.md`, que inclui instruções que serão
 fornecidas ao agente toda vez que ele trabalhar com este repositório.
 
 ### Melhores Práticas para Microagentes de Repositório
 
-- **Mantenha as Instruções Atualizadas**: Atualize regularmente o seu diretório `.openhands/microagents/` à medida que o seu projeto evolui.
+- **Mantenha as Instruções Atualizadas**: Atualize regularmente o seu diretório `.dev/microagents/` à medida que o seu projeto evolui.
 - **Seja Específico**: Inclua caminhos, padrões e requisitos específicos exclusivos do seu projeto.
 - **Documente as Dependências**: Liste todas as ferramentas e dependências necessárias para o desenvolvimento.
 - **Inclua Exemplos**: Forneça exemplos de bons padrões de código do seu projeto.
@@ -32,7 +32,7 @@ Ao criar um micro-agente específico para um repositório, sugerimos incluir as 
 
 #### 2. Crie o Arquivo
 
-Crie um arquivo em seu repositório em `.openhands/microagents/` (Exemplo: `.openhands/microagents/repo.md`)
+Crie um arquivo em seu repositório em `.dev/microagents/` (Exemplo: `.dev/microagents/repo.md`)
 
 Atualize o arquivo com o frontmatter necessário [de acordo com o formato exigido](./microagents-overview#microagent-format)
 e as diretrizes especializadas necessárias para o seu repositório.

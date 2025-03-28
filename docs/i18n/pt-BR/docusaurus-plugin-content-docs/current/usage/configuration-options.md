@@ -1,6 +1,6 @@
 # Opções de Configuração
 
-Este guia detalha todas as opções de configuração disponíveis para o OpenHands, ajudando você a personalizar seu comportamento e integrá-lo com outros serviços.
+Este guia detalha todas as opções de configuração disponíveis para o Dev, ajudando você a personalizar seu comportamento e integrá-lo com outros serviços.
 
 :::note
 Se você estiver executando no [Modo GUI](https://docs.all-hands.dev/modules/usage/how-to/gui-mode), as configurações disponíveis na UI de Configurações sempre terão precedência.
@@ -118,10 +118,10 @@ As opções de configuração principais são definidas na seção `[core]` do a
   - Descrição: Caminho para reescrever o caminho de montagem do workspace. Você geralmente pode ignorar isso, refere-se a casos especiais de execução dentro de outro contêiner.
 
 ### Diversos
-- `run_as_openhands`
+- `run_as_dev`
   - Tipo: `bool`
   - Padrão: `true`
-  - Descrição: Executar como OpenHands
+  - Descrição: Executar como Dev
 
 - `runtime`
   - Tipo: `str`

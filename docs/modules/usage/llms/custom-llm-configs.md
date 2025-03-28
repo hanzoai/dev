@@ -1,6 +1,6 @@
 # Custom LLM Configurations
 
-OpenHands supports defining multiple named LLM configurations in your `config.toml` file. This feature allows you to use different LLM configurations for different purposes, such as using a cheaper model for tasks that don't require high-quality responses, or using different models with different parameters for specific agents.
+Dev supports defining multiple named LLM configurations in your `config.toml` file. This feature allows you to use different LLM configurations for different purposes, such as using a cheaper model for tasks that don't require high-quality responses, or using different models with different parameters for specific agents.
 
 ## How It Works
 
@@ -103,7 +103,7 @@ In this example:
 
 # Custom Configurations with Reserved Names
 
-OpenHands can use custom LLM configurations named with reserved names, for specific use cases. If you specify the model and other settings under the reserved names, then OpenHands will load and them for a specific purpose. As of now, one such configuration is implemented: draft editor.
+Dev can use custom LLM configurations named with reserved names, for specific use cases. If you specify the model and other settings under the reserved names, then Dev will load and them for a specific purpose. As of now, one such configuration is implemented: draft editor.
 
 ## Draft Editor Configuration
 
@@ -132,5 +132,5 @@ Use this configuration when you want to let an LLM draft edits before making the
 - Make precise, focused changes to code or text
 
 :::note
-Custom LLM configurations are only available when using OpenHands in development mode, via `main.py` or `cli.py`. When running via `docker run`, please use the standard configuration options.
+Custom LLM configurations are only available when using Dev in development mode, via `main.py` or `cli.py`. When running via `docker run`, please use the standard configuration options.
 :::

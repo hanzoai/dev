@@ -24,13 +24,13 @@ if [ -z "$AGENT" ]; then
   AGENT="VisualBrowsingAgent"
 fi
 
-get_openhands_version
+get_dev_version
 
 echo "AGENT: $AGENT"
-echo "AGENT_VERSION: $OPENHANDS_VERSION"
+echo "AGENT_VERSION: $DEV_VERSION"
 echo "MODEL_CONFIG: $MODEL_CONFIG"
 
-EVAL_NOTE="${OPENHANDS_VERSION}"
+EVAL_NOTE="${DEV_VERSION}"
 
 COMMAND="poetry run python evaluation/benchmarks/visualwebarena/run_infer.py \
   --agent-cls $AGENT \

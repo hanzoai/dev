@@ -21,7 +21,7 @@ development environment and LLM.
 
 - `model_config`, e.g. `eval_gpt4_1106_preview`, is the config group name for
     your LLM settings, as defined in your `config.toml`.
-- `git-version`, e.g. `HEAD`, is the git commit hash of the OpenHands version
+- `git-version`, e.g. `HEAD`, is the git commit hash of the Dev version
     you would like to evaluate. It could also be a release tag like `0.9.0`.
 - `agent`, e.g. `CodeActAgent`, is the name of the agent for benchmarks,
     defaulting to `CodeActAgent`.
@@ -65,7 +65,7 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 ./evaluation/benchmarks/aider_bench/scripts/run_infer.sh [model_config] [git-version] [agent] [eval_limit] [eval-num-workers] [eval_ids]
 
 # Example - This runs evaluation on CodeActAgent for 133 instances on aider_bench test set, with 2 workers running in parallel
-export ALLHANDS_API_KEY="YOUR-API-KEY"
+export HANZO_API_KEY="YOUR-API-KEY"
 export RUNTIME=remote
 export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
 ./evaluation/benchmarks/aider_bench/scripts/run_infer.sh llm.eval HEAD CodeActAgent 133 2

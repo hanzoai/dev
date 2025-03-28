@@ -5,28 +5,28 @@ from uuid import uuid4
 import pytest
 from litellm import ContextWindowExceededError
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State, TrafficControlState
-from openhands.core.config import AppConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.main import run_controller
-from openhands.core.schema import AgentState
-from openhands.events import Event, EventSource, EventStream, EventStreamSubscriber
-from openhands.events.action import ChangeAgentStateAction, CmdRunAction, MessageAction
-from openhands.events.action.agent import RecallAction
-from openhands.events.event import RecallType
-from openhands.events.observation import (
+from dev.controller.agent import Agent
+from dev.controller.agent_controller import AgentController
+from dev.controller.state.state import State, TrafficControlState
+from dev.core.config import AppConfig
+from dev.core.config.agent_config import AgentConfig
+from dev.core.main import run_controller
+from dev.core.schema import AgentState
+from dev.events import Event, EventSource, EventStream, EventStreamSubscriber
+from dev.events.action import ChangeAgentStateAction, CmdRunAction, MessageAction
+from dev.events.action.agent import RecallAction
+from dev.events.event import RecallType
+from dev.events.observation import (
     ErrorObservation,
 )
-from openhands.events.observation.agent import RecallObservation
-from openhands.events.observation.empty import NullObservation
-from openhands.events.serialization import event_to_dict
-from openhands.llm import LLM
-from openhands.llm.metrics import Metrics, TokenUsage
-from openhands.memory.memory import Memory
-from openhands.runtime.base import Runtime
-from openhands.storage.memory import InMemoryFileStore
+from dev.events.observation.agent import RecallObservation
+from dev.events.observation.empty import NullObservation
+from dev.events.serialization import event_to_dict
+from dev.llm import LLM
+from dev.llm.metrics import Metrics, TokenUsage
+from dev.memory.memory import Memory
+from dev.runtime.base import Runtime
+from dev.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture

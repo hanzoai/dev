@@ -1,6 +1,6 @@
 # 配置选项
 
-本指南详细介绍了 OpenHands 的所有可用配置选项,帮助您自定义其行为并与其他服务集成。
+本指南详细介绍了 Dev 的所有可用配置选项,帮助您自定义其行为并与其他服务集成。
 
 :::note
 如果您在 [GUI 模式](https://docs.all-hands.dev/modules/usage/how-to/gui-mode) 下运行,Settings UI 中的可用设置将始终优先。
@@ -153,10 +153,10 @@
   - 描述: 重写工作区挂载路径的路径。通常可以忽略这个,它指的是在另一个容器内运行的特殊情况。
 
 **其他**
-- `run_as_openhands`
+- `run_as_dev`
   - 类型: `bool`
   - 默认值: `true`
-  - 描述: 以 OpenHands 身份运行
+  - 描述: 以 Dev 身份运行
 
 - `runtime`
   - 类型: `str`

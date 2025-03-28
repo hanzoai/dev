@@ -1,10 +1,10 @@
 # 微代理
 
-OpenHands 使用专门的微代理来高效处理特定任务和上下文。这些微代理是小型、专注的组件，为特定场景提供专门的行为和知识。
+Dev 使用专门的微代理来高效处理特定任务和上下文。这些微代理是小型、专注的组件，为特定场景提供专门的行为和知识。
 
 ## 概述
 
-微代理在 `openhands/agenthub/codeact_agent/micro/` 目录下的 Markdown 文件中定义。每个微代理都配置有：
+微代理在 `dev/agenthub/codeact_agent/micro/` 目录下的 Markdown 文件中定义。每个微代理都配置有：
 
 - 唯一的名称
 - 代理类型（通常是 CodeActAgent）
@@ -65,7 +65,7 @@ triggers:
 
 ## 集成
 
-微代理自动集成到 OpenHands 的工作流程中。它们：
+微代理自动集成到 Dev 的工作流程中。它们：
 - 监视传入的命令是否包含触发词
 - 在检测到相关触发词时激活
 - 应用其专门的知识和能力
@@ -87,7 +87,7 @@ yes | npm install package-name
 
 ## 贡献微代理
 
-要为 OpenHands 贡献新的微代理，请遵循以下准则：
+要为 Dev 贡献新的微代理，请遵循以下准则：
 
 ### 1. 规划你的微代理
 
@@ -99,7 +99,7 @@ yes | npm install package-name
 
 ### 2. 文件结构
 
-在 `openhands/agenthub/codeact_agent/micro/` 中创建一个新的 Markdown 文件，文件名要有描述性（例如，`docker.md` 用于专注于 Docker 的代理）。
+在 `dev/agenthub/codeact_agent/micro/` 中创建一个新的 Markdown 文件，文件名要有描述性（例如，`docker.md` 用于专注于 Docker 的代理）。
 
 ### 3. 必需组件
 
@@ -210,4 +210,4 @@ triggers:
    - 更新文档（如果需要）
    - 代理的目的和功能说明
 
-请记住，微代理是在特定领域扩展 OpenHands 功能的强大方式。设计良好的代理可以显著提高系统处理专门任务的能力。
+请记住，微代理是在特定领域扩展 Dev 功能的强大方式。设计良好的代理可以显著提高系统处理专门任务的能力。

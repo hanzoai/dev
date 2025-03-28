@@ -2,11 +2,11 @@
 
 # OpenRouter
 
-OpenHands 使用 LiteLLM 调用 OpenRouter 上的聊天模型。你可以在[这里](https://docs.litellm.ai/docs/providers/openrouter)找到他们关于使用 OpenRouter 作为提供者的文档。
+Dev 使用 LiteLLM 调用 OpenRouter 上的聊天模型。你可以在[这里](https://docs.litellm.ai/docs/providers/openrouter)找到他们关于使用 OpenRouter 作为提供者的文档。
 
 ## 配置
 
-运行 OpenHands 时,你需要在设置中设置以下内容:
+运行 Dev 时,你需要在设置中设置以下内容:
 * `LLM Provider` 设置为 `OpenRouter`
 * `LLM Model` 设置为你将使用的模型。
 [访问此处查看 OpenRouter 模型的完整列表](https://openrouter.ai/models)。

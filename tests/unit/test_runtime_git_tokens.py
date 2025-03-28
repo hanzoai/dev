@@ -3,14 +3,14 @@ from types import MappingProxyType
 import pytest
 from pydantic import SecretStr
 
-from openhands.core.config import AppConfig
-from openhands.events.action import Action
-from openhands.events.action.commands import CmdRunAction
-from openhands.events.observation import NullObservation, Observation
-from openhands.events.stream import EventStream
-from openhands.integrations.provider import ProviderToken, ProviderType
-from openhands.runtime.base import Runtime
-from openhands.storage import get_file_store
+from dev.core.config import AppConfig
+from dev.events.action import Action
+from dev.events.action.commands import CmdRunAction
+from dev.events.observation import NullObservation, Observation
+from dev.events.stream import EventStream
+from dev.integrations.provider import ProviderToken, ProviderType
+from dev.runtime.base import Runtime
+from dev.storage import get_file_store
 
 
 class TestRuntime(Runtime):

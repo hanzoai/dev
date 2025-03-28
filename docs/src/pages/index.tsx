@@ -27,12 +27,12 @@ export default function Home(): JSX.Element {
         <ul style={{ listStyleType: 'none'}}>
           <li>
             <Link to="/modules/usage/prompting/microagents-repo">
-              <Translate>Customizing OpenHands to a repository</Translate>
+              <Translate>Customizing Dev to a repository</Translate>
             </Link>
           </li>
           <li>
             <Link to="/modules/usage/how-to/github-action">
-              <Translate>Integrating OpenHands with Github</Translate>
+              <Translate>Integrating Dev with Github</Translate>
             </Link>
           </li>
           <li>
@@ -42,7 +42,7 @@ export default function Home(): JSX.Element {
           </li>
           <li>
             <Link to="/modules/usage/runtimes#connecting-to-your-filesystem">
-              <Translate>Connecting OpenHands to your filesystem</Translate>
+              <Translate>Connecting Dev to your filesystem</Translate>
             </Link>
           </li>
         </ul>

@@ -41,12 +41,12 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.core.config import AppConfig, SandboxConfig, get_parser
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime
-from openhands.events.action import CmdRunAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.utils.async_utils import call_async_from_sync
+from dev.core.config import AppConfig, SandboxConfig, get_parser
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime
+from dev.events.action import CmdRunAction
+from dev.events.observation import CmdOutputObservation
+from dev.utils.async_utils import call_async_from_sync
 
 DOCKER_IMAGE_PREFIX = os.environ.get('EVAL_DOCKER_IMAGE_PREFIX', 'docker.io/kdjain/')
 logger.info(f'Using docker image prefix: {DOCKER_IMAGE_PREFIX}')
@@ -59,13 +59,13 @@ def get_config(instance: pd.Series) -> AppConfig:
     ), f"Invalid container image for instance {instance['instance_id_swebench']}."
     logger.info(f'Using instance container image: {base_container_image}.')
     return AppConfig(
-        run_as_openhands=False,
+        run_as_dev=False,
         runtime=os.environ.get('RUNTIME', 'eventstream'),
         sandbox=SandboxConfig(
             base_container_image=base_container_image,
             use_host_network=False,
             timeout=1800,
-            api_key=os.environ.get('ALLHANDS_API_KEY'),
+            api_key=os.environ.get('HANZO_API_KEY'),
             remote_runtime_api_url=os.environ.get(
                 'SANDBOX_REMOTE_RUNTIME_API_URL', 'http://localhost:8000'
             ),

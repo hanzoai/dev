@@ -2,11 +2,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openhands.controller.agent_controller import AgentController
-from openhands.core.config import AgentConfig, LLMConfig
-from openhands.events import EventStream
-from openhands.llm.llm import LLM
-from openhands.storage import InMemoryFileStore
+from dev.controller.agent_controller import AgentController
+from dev.core.config import AgentConfig, LLMConfig
+from dev.events import EventStream
+from dev.llm.llm import LLM
+from dev.storage import InMemoryFileStore
 
 
 @pytest.fixture

@@ -3,12 +3,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.core.config import LLMConfig
-from openhands.events.action.message import MessageAction
-from openhands.llm.llm import LLM
-from openhands.resolver.interfaces.gitlab import GitlabPRHandler
-from openhands.resolver.interfaces.issue import Issue, ReviewThread
-from openhands.resolver.interfaces.issue_definitions import ServiceContextPR
+from dev.core.config import LLMConfig
+from dev.events.action.message import MessageAction
+from dev.llm.llm import LLM
+from dev.resolver.interfaces.gitlab import GitlabPRHandler
+from dev.resolver.interfaces.issue import Issue, ReviewThread
+from dev.resolver.interfaces.issue_definitions import ServiceContextPR
 
 
 @pytest.fixture

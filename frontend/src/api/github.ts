@@ -2,9 +2,9 @@ import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
 import { openHands } from "./open-hands-axios";
 
 /**
- * Retrieves repositories where OpenHands Github App has been installed
+ * Retrieves repositories where Dev Github App has been installed
  * @param installationIndex Pagination cursor position for app installation IDs
- * @param installations Collection of all App installation IDs for OpenHands Github App
+ * @param installations Collection of all App installation IDs for Dev Github App
  * @returns A list of repositories
  */
 export const retrieveGitHubAppRepositories = async (

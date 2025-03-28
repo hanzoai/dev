@@ -1,4 +1,4 @@
-# Mini-World of Bits Evaluation with OpenHands Browsing Agents
+# Mini-World of Bits Evaluation with Dev Browsing Agents
 
 This folder contains evaluation for [MiniWoB++](https://miniwob.farama.org/) benchmark, powered by [BrowserGym](https://github.com/ServiceNow/BrowserGym) for easy evaluation of how well an agent capable of browsing can perform on synthetic web browsing tasks.
 
@@ -28,7 +28,7 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 ./evaluation/benchmarks/miniwob/scripts/run_infer.sh [model_config] [git-version] [agent] [note] [eval_limit] [num_workers]
 
 # Example - This runs evaluation on BrowsingAgent for 125 instances on miniwob, with 2 workers running in parallel
-export ALLHANDS_API_KEY="YOUR-API-KEY"
+export HANZO_API_KEY="YOUR-API-KEY"
 export RUNTIME=remote
 export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
 ./evaluation/benchmarks/miniwob/scripts/run_infer.sh llm.eval HEAD BrowsingAgent "" 125 2
@@ -44,7 +44,7 @@ poetry run python evaluation/benchmarks/miniwob/get_success_rate.py evaluation/e
 
 ## Submit your evaluation results
 
-You can start your own fork of [our huggingface evaluation outputs](https://huggingface.co/spaces/OpenHands/evaluation) and submit a PR of your evaluation results following the guide [here](https://huggingface.co/docs/hub/en/repositories-pull-requests-discussions#pull-requests-and-discussions).
+You can start your own fork of [our huggingface evaluation outputs](https://huggingface.co/spaces/Dev/evaluation) and submit a PR of your evaluation results following the guide [here](https://huggingface.co/docs/hub/en/repositories-pull-requests-discussions#pull-requests-and-discussions).
 
 ## BrowsingAgent V1.0 result
 

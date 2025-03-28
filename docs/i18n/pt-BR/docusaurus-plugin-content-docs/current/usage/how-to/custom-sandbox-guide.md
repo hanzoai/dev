@@ -3,7 +3,7 @@
 O sandbox é onde o agente realiza suas tarefas. Em vez de executar comandos diretamente no seu computador
 (o que poderia ser arriscado), o agente os executa dentro de um contêiner Docker.
 
-O sandbox padrão do OpenHands (`python-nodejs:python3.12-nodejs22`
+O sandbox padrão do Dev (`python-nodejs:python3.12-nodejs22`
 do [nikolaik/python-nodejs](https://hub.docker.com/r/nikolaik/python-nodejs)) vem com alguns pacotes instalados, como
 python e Node.js, mas pode precisar de outros softwares instalados por padrão.
 
@@ -18,7 +18,7 @@ Se você escolher a primeira opção, pode pular a seção `Crie Sua Imagem Dock
 
 Para criar uma imagem personalizada do Docker, ela deve ser baseada no Debian.
 
-Por exemplo, se você quiser que o OpenHands tenha o `ruby` instalado, você pode criar um `Dockerfile` com o seguinte conteúdo:
+Por exemplo, se você quiser que o Dev tenha o `ruby` instalado, você pode criar um `Dockerfile` com o seguinte conteúdo:
 
 ```dockerfile
 FROM nikolaik/python-nodejs:python3.12-nodejs22
@@ -43,7 +43,7 @@ Isso produzirá uma nova imagem chamada `custom-image`, que estará disponível 
 
 ## Usando o Comando Docker
 
-Ao executar o OpenHands usando [o comando docker](/modules/usage/installation#start-the-app), substitua
+Ao executar o Dev usando [o comando docker](/modules/usage/installation#start-the-app), substitua
 `-e SANDBOX_RUNTIME_CONTAINER_IMAGE=...` por `-e SANDBOX_BASE_CONTAINER_IMAGE=<nome da imagem personalizada>`:
 
 ```commandline
@@ -56,11 +56,11 @@ docker run -it --rm --pull=always \
 
 ### Configuração
 
-Primeiro, certifique-se de que você pode executar o OpenHands seguindo as instruções em [Development.md](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+Primeiro, certifique-se de que você pode executar o Dev seguindo as instruções em [Development.md](https://github.com/hanzoai/dev/blob/main/Development.md).
 
 ### Especifique a Imagem Base do Sandbox
 
-No arquivo `config.toml` dentro do diretório OpenHands, defina `base_container_image` como a imagem que você deseja usar.
+No arquivo `config.toml` dentro do diretório Dev, defina `base_container_image` como a imagem que você deseja usar.
 Isso pode ser uma imagem que você já baixou ou uma que você construiu:
 
 ```bash
@@ -94,4 +94,4 @@ platform = "linux/amd64"
 
 ### Executar
 
-Execute o OpenHands executando ```make run``` no diretório de nível superior.
+Execute o Dev executando ```make run``` no diretório de nível superior.

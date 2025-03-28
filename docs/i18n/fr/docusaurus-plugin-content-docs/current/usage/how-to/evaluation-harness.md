@@ -2,12 +2,12 @@
 
 # Évaluation
 
-Ce guide fournit un aperçu de la façon d'intégrer votre propre benchmark d'évaluation dans le framework OpenHands.
+Ce guide fournit un aperçu de la façon d'intégrer votre propre benchmark d'évaluation dans le framework Dev.
 
 ## Configuration de l'environnement et de la configuration LLM
 
-Veuillez suivre les instructions [ici](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md) pour configurer votre environnement de développement local.
-OpenHands en mode développement utilise `config.toml` pour garder une trace de la plupart des configurations.
+Veuillez suivre les instructions [ici](https://github.com/hanzoai/dev/blob/main/Development.md) pour configurer votre environnement de développement local.
+Dev en mode développement utilise `config.toml` pour garder une trace de la plupart des configurations.
 
 Voici un exemple de fichier de configuration que vous pouvez utiliser pour définir et utiliser plusieurs LLMs :
 
@@ -30,12 +30,12 @@ temperature = 0.0
 ```
 
 
-## Comment utiliser OpenHands en ligne de commande
+## Comment utiliser Dev en ligne de commande
 
-OpenHands peut être exécuté depuis la ligne de commande en utilisant le format suivant :
+Dev peut être exécuté depuis la ligne de commande en utilisant le format suivant :
 
 ```bash
-poetry run python ./openhands/core/main.py \
+poetry run python ./dev/core/main.py \
         -i <max_iterations> \
         -t "<task_description>" \
         -c <agent_class> \
@@ -45,22 +45,22 @@ poetry run python ./openhands/core/main.py \
 Par exemple :
 
 ```bash
-poetry run python ./openhands/core/main.py \
+poetry run python ./dev/core/main.py \
         -i 10 \
         -t "Écrivez-moi un script bash qui affiche hello world." \
         -c CodeActAgent \
         -l llm
 ```
 
-Cette commande exécute OpenHands avec :
+Cette commande exécute Dev avec :
 - Un maximum de 10 itérations
 - La description de tâche spécifiée
 - En utilisant CodeActAgent
 - Avec la configuration LLM définie dans la section `llm` de votre fichier `config.toml`
 
-## Comment fonctionne OpenHands
+## Comment fonctionne Dev
 
-Le point d'entrée principal d'OpenHands se trouve dans `openhands/core/main.py`. Voici un flux simplifié de son fonctionnement :
+Le point d'entrée principal d'Dev se trouve dans `dev/core/main.py`. Voici un flux simplifié de son fonctionnement :
 
 1. Analyse des arguments de ligne de commande et chargement de la configuration
 2. Création d'un environnement d'exécution à l'aide de `create_runtime()`
@@ -70,12 +70,12 @@ Le point d'entrée principal d'OpenHands se trouve dans `openhands/core/main.py`
    - Exécute la tâche de l'agent
    - Renvoie un état final une fois terminé
 
-La fonction `run_controller()` est le cœur de l'exécution d'OpenHands. Elle gère l'interaction entre l'agent, l'environnement d'exécution et la tâche, en gérant des choses comme la simulation d'entrée utilisateur et le traitement des événements.
+La fonction `run_controller()` est le cœur de l'exécution d'Dev. Elle gère l'interaction entre l'agent, l'environnement d'exécution et la tâche, en gérant des choses comme la simulation d'entrée utilisateur et le traitement des événements.
 
 
 ## Le moyen le plus simple de commencer : Explorer les benchmarks existants
 
-Nous vous encourageons à examiner les différents benchmarks d'évaluation disponibles dans le [répertoire `evaluation/benchmarks/`](https://github.com/All-Hands-AI/OpenHands/blob/main/evaluation/benchmarks) de notre dépôt.
+Nous vous encourageons à examiner les différents benchmarks d'évaluation disponibles dans le [répertoire `evaluation/benchmarks/`](https://github.com/hanzoai/dev/blob/main/evaluation/benchmarks) de notre dépôt.
 
 Pour intégrer votre propre benchmark, nous vous suggérons de commencer par celui qui ressemble le plus à vos besoins. Cette approche peut considérablement rationaliser votre processus d'intégration, vous permettant de vous appuyer sur les structures existantes et de les adapter à vos exigences spécifiques.
 
@@ -84,9 +84,9 @@ Pour intégrer votre propre benchmark, nous vous suggérons de commencer par cel
 
 Pour créer un workflow d'évaluation pour votre benchmark, suivez ces étapes :
 
-1. Importez les utilitaires OpenHands pertinents :
+1. Importez les utilitaires Dev pertinents :
    ```python
-    import openhands.agenthub
+    import dev.agenthub
     from evaluation.utils.shared import (
         EvalMetadata,
         EvalOutput,
@@ -95,18 +95,18 @@ Pour créer un workflow d'évaluation pour votre benchmark, suivez ces étapes :
         reset_logger_for_multiprocessing,
         run_evaluation,
     )
-    from openhands.controller.state.state import State
-    from openhands.core.config import (
+    from dev.controller.state.state import State
+    from dev.core.config import (
         AppConfig,
         SandboxConfig,
         get_llm_config_arg,
         parse_arguments,
     )
-    from openhands.core.logger import openhands_logger as logger
-    from openhands.core.main import create_runtime, run_controller
-    from openhands.events.action import CmdRunAction
-    from openhands.events.observation import CmdOutputObservation, ErrorObservation
-    from openhands.runtime.runtime import Runtime
+    from dev.core.logger import dev_logger as logger
+    from dev.core.main import create_runtime, run_controller
+    from dev.events.action import CmdRunAction
+    from dev.events.observation import CmdOutputObservation, ErrorObservation
+    from dev.runtime.runtime import Runtime
    ```
 
 2. Créez une configuration :
@@ -136,7 +136,7 @@ Pour créer un workflow d'évaluation pour votre benchmark, suivez ces étapes :
 
 4. Créez une fonction pour traiter chaque instance :
    ```python
-   from openhands.utils.async_utils import call_async_from_sync
+   from dev.utils.async_utils import call_async_from_sync
    def process_instance(instance: pd.Series, metadata: EvalMetadata) -> EvalOutput:
        config = get_config(instance, metadata)
        runtime = create_runtime(config)
@@ -185,12 +185,12 @@ Ce workflow configure la configuration, initialise l'environnement d'exécution,
 
 N'oubliez pas de personnaliser les fonctions `get_instruction`, `your_user_response_function` et `evaluate_agent_actions` en fonction des exigences spécifiques de votre benchmark.
 
-En suivant cette structure, vous pouvez créer un workflow d'évaluation robuste pour votre benchmark dans le framework OpenHands.
+En suivant cette structure, vous pouvez créer un workflow d'évaluation robuste pour votre benchmark dans le framework Dev.
 
 
 ## Comprendre la `user_response_fn`
 
-La `user_response_fn` est un composant crucial dans le workflow d'évaluation d'OpenHands. Elle simule l'interaction de l'utilisateur avec l'agent, permettant des réponses automatisées pendant le processus d'évaluation. Cette fonction est particulièrement utile lorsque vous voulez fournir des réponses cohérentes et prédéfinies aux requêtes ou actions de l'agent.
+La `user_response_fn` est un composant crucial dans le workflow d'évaluation d'Dev. Elle simule l'interaction de l'utilisateur avec l'agent, permettant des réponses automatisées pendant le processus d'évaluation. Cette fonction est particulièrement utile lorsque vous voulez fournir des réponses cohérentes et prédéfinies aux requêtes ou actions de l'agent.
 
 
 ### Workflow et interaction

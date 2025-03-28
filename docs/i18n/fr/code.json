@@ -1,6 +1,6 @@
 {
   "footer.title": {
-    "message": "OpenHands"
+    "message": "Dev"
   },
   "footer.docs": {
     "message": "Documents"
@@ -9,7 +9,7 @@
     "message": "Communauté"
   },
   "footer.copyright": {
-    "message": "© {year} OpenHands"
+    "message": "© {year} Dev"
   },
   "faq.title": {
     "message": "Questions Fréquemment Posées",
@@ -19,20 +19,20 @@
     "message": "Questions Fréquemment Posées"
   },
   "faq.section.title.1": {
-    "message": "Qu'est-ce qu'OpenHands ?",
+    "message": "Qu'est-ce qu'Dev ?",
     "description": "First Section Title"
   },
   "faq.section.highlight": {
-    "message": "OpenHands",
+    "message": "Dev",
     "description": "Highlight Text"
   },
   "faq.section.description.1": {
-    "message": "est un ingénieur logiciel autonome qui peut résoudre des tâches d'ingénierie logicielle et de navigation web à tout moment. Il peut exécuter des requêtes en sciences des données, telles que \"Trouver le nombre de demandes de pull à l'repository OpenHands dans les derniers mois\", et des tâches d'ingénierie logicielle, comme \"Veuillez ajouter des tests à ce fichier et vérifier si tous les tests passent. Si ce n'est pas le cas, réparez le fichier.\"",
-    "description": "Description for OpenHands"
+    "message": "est un ingénieur logiciel autonome qui peut résoudre des tâches d'ingénierie logicielle et de navigation web à tout moment. Il peut exécuter des requêtes en sciences des données, telles que \"Trouver le nombre de demandes de pull à l'repository Dev dans les derniers mois\", et des tâches d'ingénierie logicielle, comme \"Veuillez ajouter des tests à ce fichier et vérifier si tous les tests passent. Si ce n'est pas le cas, réparez le fichier.\"",
+    "description": "Description for Dev"
   },
   "faq.section.description.2": {
-    "message": "De plus, OpenHands est une plateforme et communauté pour les développeurs d'agents qui souhaitent tester et évaluer de nouveaux agents.",
-    "description": "Further Description for OpenHands"
+    "message": "De plus, Dev est une plateforme et communauté pour les développeurs d'agents qui souhaitent tester et évaluer de nouveaux agents.",
+    "description": "Further Description for Dev"
   },
   "faq.section.title.2": {
     "message": "Support",
@@ -43,15 +43,15 @@
     "description": "Support Answer"
   },
   "faq.section.title.3": {
-    "message": "Comment résoudre un problème sur GitHub avec OpenHands ?",
+    "message": "Comment résoudre un problème sur GitHub avec Dev ?",
     "description": "GitHub Issue Section Title"
   },
   "faq.section.github.steps.intro": {
-    "message": "Pour résoudre un problème sur GitHub en utilisant OpenHands, envoyez une commande à OpenHands demandant qu'il suit des étapes comme les suivantes :",
+    "message": "Pour résoudre un problème sur GitHub en utilisant Dev, envoyez une commande à Dev demandant qu'il suit des étapes comme les suivantes :",
     "description": "GitHub Steps Introduction"
   },
   "faq.section.github.step1": {
-    "message": "Lisez l'issue https://github.com/All-Hands-AI/OpenHands/issues/1611",
+    "message": "Lisez l'issue https://github.com/hanzoai/dev/issues/1611",
     "description": "GitHub Step 1"
   },
   "faq.section.github.step2": {
@@ -71,11 +71,11 @@
     "description": "GitHub Step 5"
   },
   "faq.section.github.steps.preRun": {
-    "message": "Avant de lancer OpenHands, vous pouvez faire :",
+    "message": "Avant de lancer Dev, vous pouvez faire :",
     "description": "GitHub Steps Pre-Run"
   },
   "faq.section.github.steps.tokenInfo": {
-    "message": "où XXX est un jeton GitHub que vous avez créé et qui a les autorisations pour pousser dans le dépôt OpenHands. Si vous n'avez pas d'autorisations de modification du dépôt OpenHands, vous devrez peut-être changer cela en :",
+    "message": "où XXX est un jeton GitHub que vous avez créé et qui a les autorisations pour pousser dans le dépôt Dev. Si vous n'avez pas d'autorisations de modification du dépôt Dev, vous devrez peut-être changer cela en :",
     "description": "GitHub Steps Token Info"
   },
   "faq.section.github.steps.usernameInfo": {
@@ -83,23 +83,23 @@
     "description": "GitHub Steps Username Info"
   },
   "faq.section.title.4": {
-    "message": "Comment OpenHands est-il différent de Devin ?",
+    "message": "Comment Dev est-il différent de Devin ?",
     "description": "Devin Section Title"
   },
-  "faq.section.openhands.linkText": {
+  "faq.section.dev.linkText": {
     "message": "Devin",
     "description": "Devin Link Text"
   },
-  "faq.section.openhands.description": {
-    "message": "est un produit commercial par Cognition Inc., qui a servi d'inspiration initiale pour OpenHands. Les deux visent à bien faire le travail d'ingénierie logicielle, mais vous pouvez télécharger, utiliser et modifier OpenHands, tandis que Devin peut être utilisé uniquement via le site de Cognition. De plus, OpenHands a évolué au-delà de l'inspiration initiale, et est maintenant un écosystème communautaire pour le développement d'agents en général, et nous serions ravis de vous voir rejoindre et",
+  "faq.section.dev.description": {
+    "message": "est un produit commercial par Cognition Inc., qui a servi d'inspiration initiale pour Dev. Les deux visent à bien faire le travail d'ingénierie logicielle, mais vous pouvez télécharger, utiliser et modifier Dev, tandis que Devin peut être utilisé uniquement via le site de Cognition. De plus, Dev a évolué au-delà de l'inspiration initiale, et est maintenant un écosystème communautaire pour le développement d'agents en général, et nous serions ravis de vous voir rejoindre et",
     "description": "Devin Description"
   },
-  "faq.section.openhands.contribute": {
+  "faq.section.dev.contribute": {
     "message": "contribuer",
     "description": "Contribute Link"
   },
   "faq.section.title.5": {
-    "message": "Comment OpenHands est-il différent de ChatGPT ?",
+    "message": "Comment Dev est-il différent de ChatGPT ?",
     "description": "ChatGPT Section Title"
   },
   "faq.section.chatgpt.description": {
@@ -114,7 +114,7 @@
     "message": "Commencer"
   },
   "welcome.message": {
-    "message": "Bienvenue à OpenHands, un système d'IA autonome ingénieur logiciel capable d'exécuter des tâches d'ingénierie complexes et de collaborer activement avec les utilisateurs sur les projets de développement logiciel."
+    "message": "Bienvenue à Dev, un système d'IA autonome ingénieur logiciel capable d'exécuter des tâches d'ingénierie complexes et de collaborer activement avec les utilisateurs sur les projets de développement logiciel."
   },
   "theme.ErrorPageContent.title": {
     "message": "Cette page a planté.",
@@ -406,22 +406,22 @@
   "Use AI to tackle the toil in your backlog. Our agents have all the same tools as a human developer: they can modify code, run commands, browse the web, call APIs, and yes-even copy code snippets from StackOverflow.": {
     "message": "Utilisez l'IA pour gérer les tâches répétitives de votre backlog. Nos agents disposent des mêmes outils qu'un développeur humain : ils peuvent modifier du code, exécuter des commandes, naviguer sur le web, appeler des API et même copier des extraits de code depuis StackOverflow."
   },
-  "Get started with OpenHands.": {
-    "message": "Commencer avec OpenHands"
+  "Get started with Dev.": {
+    "message": "Commencer avec Dev"
   },
   "Most Popular Links": {
     "message": "Liens Populaires"
   },
-  "Customizing OpenHands to a repository": {
-    "message": "Personnaliser OpenHands pour un dépôt"
+  "Customizing Dev to a repository": {
+    "message": "Personnaliser Dev pour un dépôt"
   },
-  "Integrating OpenHands with Github": {
-    "message": "Intégrer OpenHands avec Github"
+  "Integrating Dev with Github": {
+    "message": "Intégrer Dev avec Github"
   },
   "Recommended models to use": {
     "message": "Modèles recommandés"
   },
-  "Connecting OpenHands to your filesystem": {
-    "message": "Connecter OpenHands à votre système de fichiers"
+  "Connecting Dev to your filesystem": {
+    "message": "Connecter Dev à votre système de fichiers"
   }
 }

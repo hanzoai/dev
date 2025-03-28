@@ -4,16 +4,16 @@ sidebar_position: 9
 
 # Visão Geral do Desenvolvimento
 
-Este guia fornece uma visão geral dos principais recursos de documentação disponíveis no repositório OpenHands. Se você está procurando contribuir, entender a arquitetura ou trabalhar em componentes específicos, esses recursos irão ajudá-lo a navegar pelo codebase de forma eficaz.
+Este guia fornece uma visão geral dos principais recursos de documentação disponíveis no repositório Dev. Se você está procurando contribuir, entender a arquitetura ou trabalhar em componentes específicos, esses recursos irão ajudá-lo a navegar pelo codebase de forma eficaz.
 
 ## Documentação Principal
 
 ### Fundamentos do Projeto
 - **Visão Geral do Projeto Principal** (`/README.md`)
-  O ponto de entrada principal para entender o OpenHands, incluindo recursos e instruções básicas de configuração.
+  O ponto de entrada principal para entender o Dev, incluindo recursos e instruções básicas de configuração.
 
 - **Guia de Desenvolvimento** (`/Development.md`)
-  Guia abrangente para desenvolvedores que trabalham no OpenHands, incluindo configuração, requisitos e fluxos de trabalho de desenvolvimento.
+  Guia abrangente para desenvolvedores que trabalham no Dev, incluindo configuração, requisitos e fluxos de trabalho de desenvolvimento.
 
 - **Diretrizes de Contribuição** (`/CONTRIBUTING.md`)
   Informações essenciais para contribuidores, abrangendo estilo de código, processo de PR e fluxos de trabalho de contribuição.
@@ -25,13 +25,13 @@ Este guia fornece uma visão geral dos principais recursos de documentação dis
   Guia completo para configurar e desenvolver a aplicação frontend baseada em React.
 
 #### Backend
-- **Implementação do Backend** (`/openhands/README.md`)
+- **Implementação do Backend** (`/dev/README.md`)
   Documentação detalhada da implementação e arquitetura do backend em Python.
 
-- **Documentação do Servidor** (`/openhands/server/README.md`)
+- **Documentação do Servidor** (`/dev/server/README.md`)
   Detalhes de implementação do servidor, documentação da API e arquitetura de serviços.
 
-- **Ambiente de Execução** (`/openhands/runtime/README.md`)
+- **Ambiente de Execução** (`/dev/runtime/README.md`)
   Documentação abrangendo o ambiente de execução, modelo de execução e configurações de tempo de execução.
 
 #### Infraestrutura
@@ -55,14 +55,14 @@ Este guia fornece uma visão geral dos principais recursos de documentação dis
 
 ## Começando com o Desenvolvimento
 
-Se você é novo no desenvolvimento com OpenHands, recomendamos seguir esta sequência:
+Se você é novo no desenvolvimento com Dev, recomendamos seguir esta sequência:
 
 1. Comece com o `README.md` principal para entender o propósito e os recursos do projeto
 2. Revise as diretrizes em `CONTRIBUTING.md` se você planeja contribuir
 3. Siga as instruções de configuração em `Development.md`
 4. Mergulhe na documentação de componentes específicos com base na sua área de interesse:
    - Desenvolvedores frontend devem se concentrar em `/frontend/README.md`
-   - Desenvolvedores backend devem começar com `/openhands/README.md`
+   - Desenvolvedores backend devem começar com `/dev/README.md`
    - O trabalho de infraestrutura deve começar com `/containers/README.md`
 
 ## Atualizações da Documentação

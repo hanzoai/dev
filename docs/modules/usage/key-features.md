@@ -1,5 +1,5 @@
 
-# OpenHands Feature Overview
+# Dev Feature Overview
 
 ![overview](https://www.all-hands.dev/assets/product/product-slide-1.webp)
 

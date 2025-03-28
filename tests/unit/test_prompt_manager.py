@@ -3,18 +3,18 @@ import shutil
 
 import pytest
 
-from openhands.controller.state.state import State
-from openhands.core.message import Message, TextContent
-from openhands.events.observation.agent import MicroagentKnowledge
-from openhands.microagent import BaseMicroAgent
-from openhands.utils.prompt import PromptManager, RepositoryInfo, RuntimeInfo
+from dev.controller.state.state import State
+from dev.core.message import Message, TextContent
+from dev.events.observation.agent import MicroagentKnowledge
+from dev.microagent import BaseMicroAgent
+from dev.utils.prompt import PromptManager, RepositoryInfo, RuntimeInfo
 
 
 @pytest.fixture
 def prompt_dir(tmp_path):
-    # Copy contents from "openhands/agenthub/codeact_agent" to the temp directory
+    # Copy contents from "dev/agenthub/codeact_agent" to the temp directory
     shutil.copytree(
-        'openhands/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
+        'dev/agenthub/codeact_agent/prompts', tmp_path, dirs_exist_ok=True
     )
 
     # Return the temporary directory path

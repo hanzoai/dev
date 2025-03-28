@@ -2,8 +2,8 @@
 
 from conftest import _close_test_runtime, _load_runtime
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import CmdRunAction
+from dev.core.logger import dev_logger as logger
+from dev.events.action import CmdRunAction
 
 
 def test_stress_docker_runtime(temp_dir, runtime_cls, repeat=1):

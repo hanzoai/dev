@@ -14,7 +14,7 @@ Please follow instruction [here](../../README.md#setup) to setup your local deve
 
 - `model_config`, e.g. `eval_gpt4_1106_preview`, is the config group name for your
 LLM settings, as defined in your `config.toml`.
-- `git-version`, e.g. `HEAD`, is the git commit hash of the OpenHands version you would
+- `git-version`, e.g. `HEAD`, is the git commit hash of the Dev version you would
 like to evaluate. It could also be a release tag like `0.6.2`.
 - `agent`, e.g. `CodeActAgent`, is the name of the agent for benchmarks, defaulting
 to `CodeActAgent`.
@@ -45,7 +45,7 @@ To use the remote runtime, set the following environment variables:
 
 ```bash
 # Required environment variables
-export ALLHANDS_API_KEY="your-api-key"  # Contact the team to get an API key
+export HANZO_API_KEY="your-api-key"  # Contact the team to get an API key
 export RUNTIME=remote
 export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
 

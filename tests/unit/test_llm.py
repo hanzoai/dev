@@ -9,20 +9,20 @@ from litellm.exceptions import (
     RateLimitError,
 )
 
-from openhands.core.config import LLMConfig
-from openhands.core.exceptions import OperationCancelled
-from openhands.core.message import Message, TextContent
-from openhands.llm.llm import LLM
-from openhands.llm.metrics import Metrics, TokenUsage
+from dev.core.config import LLMConfig
+from dev.core.exceptions import OperationCancelled
+from dev.core.message import Message, TextContent
+from dev.llm.llm import LLM
+from dev.llm.metrics import Metrics, TokenUsage
 
 
 @pytest.fixture(autouse=True)
 def mock_logger(monkeypatch):
     # suppress logging of completion data to file
     mock_logger = MagicMock()
-    monkeypatch.setattr('openhands.llm.debug_mixin.llm_prompt_logger', mock_logger)
-    monkeypatch.setattr('openhands.llm.debug_mixin.llm_response_logger', mock_logger)
-    monkeypatch.setattr('openhands.llm.llm.logger', mock_logger)
+    monkeypatch.setattr('dev.llm.debug_mixin.llm_prompt_logger', mock_logger)
+    monkeypatch.setattr('dev.llm.debug_mixin.llm_response_logger', mock_logger)
+    monkeypatch.setattr('dev.llm.llm.logger', mock_logger)
     return mock_logger
 
 
@@ -123,7 +123,7 @@ def test_metrics_merge_accumulated_token_usage():
     assert token_usages[1]['response_id'] == 'response-2'
 
 
-@patch('openhands.llm.llm.litellm.get_model_info')
+@patch('dev.llm.llm.litellm.get_model_info')
 def test_llm_init_with_model_info(mock_get_model_info, default_config):
     mock_get_model_info.return_value = {
         'max_input_tokens': 8000,
@@ -135,7 +135,7 @@ def test_llm_init_with_model_info(mock_get_model_info, default_config):
     assert llm.config.max_output_tokens == 2000
 
 
-@patch('openhands.llm.llm.litellm.get_model_info')
+@patch('dev.llm.llm.litellm.get_model_info')
 def test_llm_init_without_model_info(mock_get_model_info, default_config):
     mock_get_model_info.side_effect = Exception('Model info not available')
     llm = LLM(default_config)
@@ -172,7 +172,7 @@ def test_llm_init_with_metrics():
     )  # because we didn't specify model_name in Metrics init
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 @patch('time.time')
 def test_response_latency_tracking(mock_time, mock_litellm_completion):
     # Mock time.time() to return controlled values
@@ -235,7 +235,7 @@ def test_llm_reset():
     assert accumulated_usage['cache_write_tokens'] == 0
 
 
-@patch('openhands.llm.llm.litellm.get_model_info')
+@patch('dev.llm.llm.litellm.get_model_info')
 def test_llm_init_with_openrouter_model(mock_get_model_info, default_config):
     default_config.model = 'openrouter:gpt-4o-mini'
     mock_get_model_info.return_value = {
@@ -252,7 +252,7 @@ def test_llm_init_with_openrouter_model(mock_get_model_info, default_config):
 # Tests involving completion and retries
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_with_mocked_logger(
     mock_litellm_completion, default_config, mock_logger
 ):
@@ -278,7 +278,7 @@ def test_completion_with_mocked_logger(
         (RateLimitError, {'llm_provider': 'test_provider', 'model': 'test_model'}, 2),
     ],
 )
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_retries(
     mock_litellm_completion,
     default_config,
@@ -301,7 +301,7 @@ def test_completion_retries(
     assert mock_litellm_completion.call_count == expected_retries
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_rate_limit_wait_time(mock_litellm_completion, default_config):
     with patch('time.sleep') as mock_sleep:
         mock_litellm_completion.side_effect = [
@@ -327,7 +327,7 @@ def test_completion_rate_limit_wait_time(mock_litellm_completion, default_config
         ), f'Expected wait time between {default_config.retry_min_wait} and {default_config.retry_max_wait} seconds, but got {wait_time}'
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_operation_cancelled(mock_litellm_completion, default_config):
     mock_litellm_completion.side_effect = OperationCancelled('Operation cancelled')
 
@@ -341,7 +341,7 @@ def test_completion_operation_cancelled(mock_litellm_completion, default_config)
     assert mock_litellm_completion.call_count == 1
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_keyboard_interrupt(mock_litellm_completion, default_config):
     def side_effect(*args, **kwargs):
         raise KeyboardInterrupt('Simulated KeyboardInterrupt')
@@ -361,7 +361,7 @@ def test_completion_keyboard_interrupt(mock_litellm_completion, default_config):
     assert mock_litellm_completion.call_count == 1
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_keyboard_interrupt_handler(mock_litellm_completion, default_config):
     global _should_exit
 
@@ -385,7 +385,7 @@ def test_completion_keyboard_interrupt_handler(mock_litellm_completion, default_
     _should_exit = False
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_with_litellm_mock(mock_litellm_completion, default_config):
     mock_response = {
         'choices': [{'message': {'content': 'This is a mocked response.'}}]
@@ -410,7 +410,7 @@ def test_completion_with_litellm_mock(mock_litellm_completion, default_config):
     assert not call_args['stream']
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_with_two_positional_args(mock_litellm_completion, default_config):
     mock_response = {
         'choices': [{'message': {'content': 'Response to positional args.'}}]
@@ -446,7 +446,7 @@ def test_completion_with_two_positional_args(mock_litellm_completion, default_co
     )  # No positional args should be passed to litellm_completion here
 
 
-@patch('openhands.llm.llm.litellm.token_counter')
+@patch('dev.llm.llm.litellm.token_counter')
 def test_get_token_count_with_dict_messages(mock_token_counter, default_config):
     mock_token_counter.return_value = 42
     llm = LLM(default_config)
@@ -460,7 +460,7 @@ def test_get_token_count_with_dict_messages(mock_token_counter, default_config):
     )
 
 
-@patch('openhands.llm.llm.litellm.token_counter')
+@patch('dev.llm.llm.litellm.token_counter')
 def test_get_token_count_with_message_objects(
     mock_token_counter, default_config, mock_logger
 ):
@@ -482,8 +482,8 @@ def test_get_token_count_with_message_objects(
     assert mock_token_counter.call_count == 2
 
 
-@patch('openhands.llm.llm.litellm.token_counter')
-@patch('openhands.llm.llm.create_pretrained_tokenizer')
+@patch('dev.llm.llm.litellm.token_counter')
+@patch('dev.llm.llm.create_pretrained_tokenizer')
 def test_get_token_count_with_custom_tokenizer(
     mock_create_tokenizer, mock_token_counter, default_config
 ):
@@ -505,7 +505,7 @@ def test_get_token_count_with_custom_tokenizer(
     )
 
 
-@patch('openhands.llm.llm.litellm.token_counter')
+@patch('dev.llm.llm.litellm.token_counter')
 def test_get_token_count_error_handling(
     mock_token_counter, default_config, mock_logger
 ):
@@ -522,7 +522,7 @@ def test_get_token_count_error_handling(
     )
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_llm_token_usage(mock_litellm_completion, default_config):
     # This mock response includes usage details with prompt_tokens,
     # completion_tokens, prompt_tokens_details.cached_tokens, and model_extra.cache_creation_input_tokens
@@ -581,7 +581,7 @@ def test_llm_token_usage(mock_litellm_completion, default_config):
     assert usage_entry_2['response_id'] == 'test-response-usage-2'
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_accumulated_token_usage(mock_litellm_completion, default_config):
     """Test that token usage is properly accumulated across multiple LLM calls."""
     # Mock responses with token usage information
@@ -657,7 +657,7 @@ def test_accumulated_token_usage(mock_litellm_completion, default_config):
     assert token_usages[1]['response_id'] == 'test-response-2'
 
 
-@patch('openhands.llm.llm.litellm_completion')
+@patch('dev.llm.llm.litellm_completion')
 def test_completion_with_log_completions(mock_litellm_completion, default_config):
     with tempfile.TemporaryDirectory() as temp_dir:
         default_config.log_completions = True

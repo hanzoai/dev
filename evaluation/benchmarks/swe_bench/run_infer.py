@@ -9,7 +9,7 @@ import pandas as pd
 import toml
 from datasets import load_dataset
 
-import openhands.agenthub
+import dev.agenthub
 from evaluation.benchmarks.swe_bench.resource.mapping import (
     get_instance_resource_factor,
 )
@@ -28,22 +28,22 @@ from evaluation.utils.shared import (
     run_evaluation,
     update_llm_config_for_completions_logging,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AgentConfig,
     AppConfig,
     get_llm_config_arg,
     get_parser,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.critic import AgentFinishedCritic
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation, ErrorObservation
-from openhands.events.serialization.event import event_from_dict, event_to_dict
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
-from openhands.utils.shutdown_listener import sleep_if_should_continue
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.critic import AgentFinishedCritic
+from dev.events.action import CmdRunAction, MessageAction
+from dev.events.observation import CmdOutputObservation, ErrorObservation
+from dev.events.serialization.event import event_from_dict, event_to_dict
+from dev.runtime.base import Runtime
+from dev.utils.async_utils import call_async_from_sync
+from dev.utils.shutdown_listener import sleep_if_should_continue
 
 USE_HINT_TEXT = os.environ.get('USE_HINT_TEXT', 'false').lower() == 'true'
 RUN_WITH_BROWSING = os.environ.get('RUN_WITH_BROWSING', 'false').lower() == 'true'
@@ -122,7 +122,7 @@ You SHOULD NEVER attempt to browse the web.
     return instruction
 
 
-# TODO: migrate all swe-bench docker to ghcr.io/openhands
+# TODO: migrate all swe-bench docker to ghcr.io/dev
 DEFAULT_DOCKER_IMAGE_PREFIX = os.environ.get(
     'EVAL_DOCKER_IMAGE_PREFIX', 'docker.io/xingyaoww/'
 )
@@ -138,7 +138,7 @@ def get_instance_docker_image(instance_id: str, official_image: bool = False) ->
         image_name = f'sweb.eval.x86_64.{repo}_1776_{name}:latest'
         logger.warning(f'Using official SWE-Bench image: {image_name}')
     else:
-        # OpenHands version of the image
+        # Dev version of the image
         docker_image_prefix = DEFAULT_DOCKER_IMAGE_PREFIX
         image_name = 'sweb.eval.x86_64.' + instance_id
         image_name = image_name.replace(
@@ -162,7 +162,7 @@ def get_config(
     logger.info(
         f'Using instance container image: {base_container_image}. '
         f'Please make sure this image exists. '
-        f'Submit an issue on https://github.com/All-Hands-AI/OpenHands if you run into any issues.'
+        f'Submit an issue on https://github.com/hanzoai/dev if you run into any issues.'
     )
 
     sandbox_config = get_default_sandbox_config_for_eval()
@@ -178,7 +178,7 @@ def get_config(
 
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         max_iterations=metadata.max_iterations,
         runtime=os.environ.get('RUNTIME', 'docker'),
         sandbox=sandbox_config,
@@ -589,7 +589,7 @@ if __name__ == '__main__':
     args, _ = parser.parse_known_args()
 
     # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
-    # so we don't need to manage file uploading to OpenHands's repo
+    # so we don't need to manage file uploading to Dev's repo
     dataset = load_dataset(args.dataset, split=args.split)
     swe_bench_tests = filter_dataset(dataset.to_pandas(), 'instance_id')
     logger.info(
@@ -623,7 +623,7 @@ if __name__ == '__main__':
         raise ValueError(f'Could not find LLM config: --llm_config {args.llm_config}')
 
     details = {}
-    _agent_cls = openhands.agenthub.Agent.get_cls(args.agent_cls)
+    _agent_cls = dev.agenthub.Agent.get_cls(args.agent_cls)
 
     dataset_descrption = (
         args.dataset.replace('/', '__') + '-' + args.split.replace('/', '__')

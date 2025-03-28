@@ -22,19 +22,19 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AgentConfig,
     AppConfig,
     get_llm_config_arg,
     parse_arguments,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import AgentFinishAction, CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.events.action import AgentFinishAction, CmdRunAction, MessageAction
+from dev.events.observation import CmdOutputObservation
+from dev.runtime.base import Runtime
+from dev.utils.async_utils import call_async_from_sync
 
 EVALUATION_LLM = 'gpt-4-1106-preview'
 
@@ -66,7 +66,7 @@ def get_config(
     sandbox_config.base_container_image = 'python:3.12-bookworm'
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         runtime='docker',
         max_iterations=metadata.max_iterations,
         sandbox=sandbox_config,
@@ -234,7 +234,7 @@ def process_instance(
     """
     Process and evaluate a single instance of the dataset.
 
-    This function executes the OpenHands agent
+    This function executes the Dev agent
     for a specific instance of the dataset. It retrieves
     the agent's results and evaluates them against the gold
     hypothesis.

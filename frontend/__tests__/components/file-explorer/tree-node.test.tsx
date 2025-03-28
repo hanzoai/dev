@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "test-utils";
 import { vi, describe, afterEach, it, expect } from "vitest";
 import TreeNode from "#/components/features/file-explorer/tree-node";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 
-const getFileSpy = vi.spyOn(OpenHands, "getFile");
-const getFilesSpy = vi.spyOn(OpenHands, "getFiles");
+const getFileSpy = vi.spyOn(Dev, "getFile");
+const getFilesSpy = vi.spyOn(Dev, "getFiles");
 
 vi.mock("../../services/fileService", async () => ({
   uploadFile: vi.fn(),
@@ -62,7 +62,7 @@ describe.skip("TreeNode", () => {
     expect(await screen.findByText("file2.ts")).toBeInTheDocument();
   });
 
-  it("should call `OpenHands.getFile` and return the full path of a file when clicking on a file", async () => {
+  it("should call `Dev.getFile` and return the full path of a file when clicking on a file", async () => {
     const user = userEvent.setup();
     renderWithProviders(<TreeNode path="/folder1/file2.ts" defaultOpen />);
 

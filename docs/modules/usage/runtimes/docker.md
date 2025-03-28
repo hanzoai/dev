@@ -1,6 +1,6 @@
 # Docker Runtime
 
-This is the default Runtime that's used when you start OpenHands.
+This is the default Runtime that's used when you start Dev.
 
 ## Image
 The `SANDBOX_RUNTIME_CONTAINER_IMAGE` from nikolaik is a pre-built runtime image
@@ -15,12 +15,12 @@ One useful feature here is the ability to connect to your local filesystem. To m
     export WORKSPACE_BASE=/path/to/your/code
 
     # Linux and Mac Example
-    # export WORKSPACE_BASE=$HOME/OpenHands
-    # Will set $WORKSPACE_BASE to /home/<username>/OpenHands
+    # export WORKSPACE_BASE=$HOME/Dev
+    # Will set $WORKSPACE_BASE to /home/<username>/Dev
     #
     # WSL on Windows Example
-    # export WORKSPACE_BASE=/mnt/c/dev/OpenHands
-    # Will set $WORKSPACE_BASE to C:\dev\OpenHands
+    # export WORKSPACE_BASE=/mnt/c/dev/Dev
+    # Will set $WORKSPACE_BASE to C:\dev\Dev
     ```
 2. Add the following options to the `docker run` command:
 
@@ -32,7 +32,7 @@ One useful feature here is the ability to connect to your local filesystem. To m
         # ...
     ```
 
-Be careful! There's nothing stopping the OpenHands agent from deleting or modifying
+Be careful! There's nothing stopping the Dev agent from deleting or modifying
 any files that are mounted into its workspace.
 
 This setup can cause some issues with file permissions (hence the `SANDBOX_USER_ID` variable)
@@ -40,7 +40,7 @@ but seems to work well on most systems.
 
 ## Hardened Docker Installation
 
-When deploying OpenHands in environments where security is a priority, you should consider implementing a hardened Docker configuration. This section provides recommendations for securing your OpenHands Docker deployment beyond the default configuration.
+When deploying Dev in environments where security is a priority, you should consider implementing a hardened Docker configuration. This section provides recommendations for securing your Dev Docker deployment beyond the default configuration.
 
 ### Security Considerations
 
@@ -49,11 +49,11 @@ you should implement additional security measures.
 
 ### Network Binding Security
 
-By default, OpenHands binds to all network interfaces (`0.0.0.0`), which can expose your instance to all networks the host is connected to. For a more secure setup:
+By default, Dev binds to all network interfaces (`0.0.0.0`), which can expose your instance to all networks the host is connected to. For a more secure setup:
 
 1. **Restrict Network Binding**:
 
-   Use the `runtime_binding_address` configuration to restrict which network interfaces OpenHands listens on:
+   Use the `runtime_binding_address` configuration to restrict which network interfaces Dev listens on:
 
    ```bash
    docker run # ...
@@ -61,7 +61,7 @@ By default, OpenHands binds to all network interfaces (`0.0.0.0`), which can exp
        # ...
    ```
 
-   This configuration ensures OpenHands only listens on the loopback interface (`127.0.0.1`), making it accessible only from the local machine.
+   This configuration ensures Dev only listens on the loopback interface (`127.0.0.1`), making it accessible only from the local machine.
 
 2. **Secure Port Binding**:
 
@@ -72,17 +72,17 @@ By default, OpenHands binds to all network interfaces (`0.0.0.0`), which can exp
        -p 127.0.0.1:3000:3000 \
    ```
 
-   This ensures that the OpenHands web interface is only accessible from the local machine, not from other machines on the network.
+   This ensures that the Dev web interface is only accessible from the local machine, not from other machines on the network.
 
 ### Network Isolation
 
-Use Docker's network features to isolate OpenHands:
+Use Docker's network features to isolate Dev:
 
 ```bash
 # Create an isolated network
-docker network create openhands-network
+docker network create dev-network
 
-# Run OpenHands in the isolated network
+# Run Dev in the isolated network
 docker run # ... \
-    --network openhands-network \
+    --network dev-network \
 ```

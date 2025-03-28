@@ -1,6 +1,6 @@
 import pytest
 
-from openhands.core.config import OH_DEFAULT_AGENT, OH_MAX_ITERATIONS, get_parser
+from dev.core.config import OH_DEFAULT_AGENT, OH_MAX_ITERATIONS, get_parser
 
 
 def test_parser_default_values():

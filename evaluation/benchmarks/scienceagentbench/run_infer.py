@@ -18,18 +18,18 @@ from evaluation.utils.shared import (
     run_evaluation,
     update_llm_config_for_completions_logging,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AppConfig,
     get_llm_config_arg,
     get_parser,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.events.action import CmdRunAction, MessageAction
+from dev.events.observation import CmdOutputObservation
+from dev.runtime.base import Runtime
+from dev.utils.async_utils import call_async_from_sync
 
 AGENT_CLS_TO_FAKE_USER_RESPONSE_FN = {
     'CodeActAgent': codeact_user_response,
@@ -61,11 +61,11 @@ def get_config(
 ) -> AppConfig:
     sandbox_config = get_default_sandbox_config_for_eval()
     sandbox_config.base_container_image = (
-        'docker.io/xingyaoww/openhands-eval-scienceagentbench'
+        'docker.io/xingyaoww/dev-eval-scienceagentbench'
     )
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         runtime=os.environ.get('RUNTIME', 'docker'),
         max_budget_per_task=4,
         max_iterations=metadata.max_iterations,

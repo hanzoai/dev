@@ -6,9 +6,9 @@
 
 ### 配置中的重大变更
 
-在此版本中,我们对后端配置引入了一些重大变更。如果你只通过前端(Web GUI)使用OpenHands,则无需处理任何事情。
+在此版本中,我们对后端配置引入了一些重大变更。如果你只通过前端(Web GUI)使用Dev,则无需处理任何事情。
 
-以下是配置中重大变更的列表。它们仅适用于通过 `main.py` 使用 OpenHands CLI 的用户。更多详情,请参阅 [#2756](https://github.com/All-Hands-AI/OpenHands/pull/2756)。
+以下是配置中重大变更的列表。它们仅适用于通过 `main.py` 使用 Dev CLI 的用户。更多详情,请参阅 [#2756](https://github.com/hanzoai/dev/pull/2756)。
 
 #### 从 main.py 中移除 --model-name 选项
 

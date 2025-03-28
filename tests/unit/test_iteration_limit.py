@@ -2,12 +2,12 @@ import asyncio
 
 import pytest
 
-from openhands.controller.agent_controller import AgentController
-from openhands.core.schema import AgentState
-from openhands.events import EventStream
-from openhands.events.action import MessageAction
-from openhands.events.event import EventSource
-from openhands.llm.metrics import Metrics
+from dev.controller.agent_controller import AgentController
+from dev.core.schema import AgentState
+from dev.events import EventStream
+from dev.events.action import MessageAction
+from dev.events.event import EventSource
+from dev.llm.metrics import Metrics
 
 
 class DummyAgent:
@@ -29,7 +29,7 @@ class DummyAgent:
 @pytest.mark.asyncio
 async def test_iteration_limit_extends_on_user_message():
     # Initialize test components
-    from openhands.storage.memory import InMemoryFileStore
+    from dev.storage.memory import InMemoryFileStore
 
     file_store = InMemoryFileStore()
     event_stream = EventStream(sid='test', file_store=file_store)

@@ -1,6 +1,6 @@
 import httpx
 
-from openhands.utils.ensure_httpx_close import ensure_httpx_close
+from dev.utils.ensure_httpx_close import ensure_httpx_close
 
 
 def test_ensure_httpx_close_basic():

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from openhands.utils.async_utils import (
+from dev.utils.async_utils import (
     AsyncException,
     call_async_from_sync,
     call_sync_from_async,

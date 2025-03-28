@@ -1,6 +1,6 @@
 # Local Runtime
 
-The Local Runtime allows the OpenHands agent to execute actions directly on your local machine without using Docker. This runtime is primarily intended for controlled environments like CI pipelines or testing scenarios where Docker is not available.
+The Local Runtime allows the Dev agent to execute actions directly on your local machine without using Docker. This runtime is primarily intended for controlled environments like CI pipelines or testing scenarios where Docker is not available.
 
 :::caution
 **Security Warning**: The Local Runtime runs without any sandbox isolation. The agent can directly access and modify files on your machine. Only use this runtime in controlled environments or when you fully understand the security implications.
@@ -10,12 +10,12 @@ The Local Runtime allows the OpenHands agent to execute actions directly on your
 
 Before using the Local Runtime, ensure that:
 
-1. You have followed the [Development setup instructions](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md).
+1. You have followed the [Development setup instructions](https://github.com/hanzoai/dev/blob/main/Development.md).
 2. tmux is available on your system.
 
 ## Configuration
 
-To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/All-Hands-AI/OpenHands/blob/main/config.template.toml) when starting OpenHands:
+To use the Local Runtime, besides required configurations like the model, API key, you'll need to set the following options via environment variables or the [config.toml file](https://github.com/hanzoai/dev/blob/main/config.template.toml) when starting Dev:
 
 - Via environment variables:
 
@@ -39,7 +39,7 @@ If `WORKSPACE_BASE` is not set, the runtime will create a temporary directory fo
 
 ## Example Usage
 
-Here's an example of how to start OpenHands with the Local Runtime in Headless Mode:
+Here's an example of how to start Dev with the Local Runtime in Headless Mode:
 
 ```bash
 # Set the runtime type to local
@@ -48,8 +48,8 @@ export RUNTIME=local
 # Optionally set a workspace directory
 export WORKSPACE_BASE=/path/to/your/project
 
-# Start OpenHands
-poetry run python -m openhands.core.main -t "write a bash script that prints hi"
+# Start Dev
+poetry run python -m dev.core.main -t "write a bash script that prints hi"
 ```
 
 ## Use Cases
@@ -57,6 +57,6 @@ poetry run python -m openhands.core.main -t "write a bash script that prints hi"
 The Local Runtime is particularly useful for:
 
 - CI/CD pipelines where Docker is not available.
-- Testing and development of OpenHands itself.
+- Testing and development of Dev itself.
 - Environments where container usage is restricted.
 - Scenarios where direct file system access is required.

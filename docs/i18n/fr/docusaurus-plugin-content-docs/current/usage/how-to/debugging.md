@@ -2,7 +2,7 @@
 
 # Débogage
 
-Ce qui suit est destiné à servir d'introduction au débogage d'OpenHands à des fins de développement.
+Ce qui suit est destiné à servir d'introduction au débogage d'Dev à des fins de développement.
 
 ## Serveur / VSCode
 
@@ -13,19 +13,19 @@ Le `launch.json` suivant permettra de déboguer les éléments agent, contrôleu
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "OpenHands CLI",
+            "name": "Dev CLI",
             "type": "debugpy",
             "request": "launch",
-            "module": "openhands.core.cli",
+            "module": "dev.core.cli",
             "justMyCode": false
         },
         {
-            "name": "OpenHands WebApp",
+            "name": "Dev WebApp",
             "type": "debugpy",
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "openhands.server.listen:app",
+                "dev.server.listen:app",
                 "--reload",
                 "--reload-exclude",
                 "${workspaceFolder}/workspace",
@@ -46,7 +46,7 @@ Des configurations de débogage plus spécifiques qui incluent plus de paramètr
       "name": "Debug CodeAct",
       "type": "debugpy",
       "request": "launch",
-      "module": "openhands.core.main",
+      "module": "dev.core.main",
       "args": [
         "-t",
         "Demandez-moi quelle est votre tâche.",
@@ -67,7 +67,7 @@ Des configurations de débogage plus spécifiques qui incluent plus de paramètr
 Les valeurs dans l'extrait ci-dessus peuvent être mises à jour de telle sorte que :
 
     * *t* : la tâche
-    * *d* : le répertoire de l'espace de travail openhands
+    * *d* : le répertoire de l'espace de travail dev
     * *c* : l'agent
     * *l* : la configuration LLM (prédéfinie dans config.toml)
     * *n* : le nom de la session (par exemple, le nom du flux d'événements)

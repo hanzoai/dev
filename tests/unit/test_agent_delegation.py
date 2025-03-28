@@ -5,26 +5,26 @@ from uuid import uuid4
 
 import pytest
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State
-from openhands.core.config import LLMConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.core.schema import AgentState
-from openhands.events import EventSource, EventStream
-from openhands.events.action import (
+from dev.controller.agent import Agent
+from dev.controller.agent_controller import AgentController
+from dev.controller.state.state import State
+from dev.core.config import LLMConfig
+from dev.core.config.agent_config import AgentConfig
+from dev.core.schema import AgentState
+from dev.events import EventSource, EventStream
+from dev.events.action import (
     AgentDelegateAction,
     AgentFinishAction,
     MessageAction,
 )
-from openhands.events.action.agent import RecallAction
-from openhands.events.event import Event, RecallType
-from openhands.events.observation.agent import RecallObservation
-from openhands.events.stream import EventStreamSubscriber
-from openhands.llm.llm import LLM
-from openhands.llm.metrics import Metrics
-from openhands.memory.memory import Memory
-from openhands.storage.memory import InMemoryFileStore
+from dev.events.action.agent import RecallAction
+from dev.events.event import Event, RecallType
+from dev.events.observation.agent import RecallObservation
+from dev.events.stream import EventStreamSubscriber
+from dev.llm.llm import LLM
+from dev.llm.metrics import Metrics
+from dev.memory.memory import Memory
+from dev.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ import pandas as pd
 from commit0.harness.constants import SPLIT
 from datasets import load_dataset
 
-import openhands.agenthub
+import dev.agenthub
 from evaluation.utils.shared import (
     EvalException,
     EvalMetadata,
@@ -22,21 +22,21 @@ from evaluation.utils.shared import (
     run_evaluation,
     update_llm_config_for_completions_logging,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AgentConfig,
     AppConfig,
     get_llm_config_arg,
     get_parser,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation, ErrorObservation
-from openhands.events.serialization.event import event_to_dict
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
-from openhands.utils.shutdown_listener import sleep_if_should_continue
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.events.action import CmdRunAction, MessageAction
+from dev.events.observation import CmdOutputObservation, ErrorObservation
+from dev.events.serialization.event import event_to_dict
+from dev.runtime.base import Runtime
+from dev.utils.async_utils import call_async_from_sync
+from dev.utils.shutdown_listener import sleep_if_should_continue
 
 USE_HINT_TEXT = os.environ.get('USE_HINT_TEXT', 'false').lower() == 'true'
 RUN_WITH_BROWSING = os.environ.get('RUN_WITH_BROWSING', 'false').lower() == 'true'
@@ -89,7 +89,7 @@ def get_instruction(instance: pd.Series, metadata: EvalMetadata):
     return instruction
 
 
-# TODO: migrate all swe-bench docker to ghcr.io/openhands
+# TODO: migrate all swe-bench docker to ghcr.io/dev
 DOCKER_IMAGE_PREFIX = os.environ.get(
     'EVAL_DOCKER_IMAGE_PREFIX', 'docker.io/wentingzhao/'
 )
@@ -109,7 +109,7 @@ def get_config(
     logger.info(
         f'Using instance container image: {base_container_image}. '
         f'Please make sure this image exists. '
-        f'Submit an issue on https://github.com/All-Hands-AI/OpenHands if you run into any issues.'
+        f'Submit an issue on https://github.com/hanzoai/dev if you run into any issues.'
     )
 
     sandbox_config = get_default_sandbox_config_for_eval()
@@ -117,7 +117,7 @@ def get_config(
 
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         max_iterations=metadata.max_iterations,
         runtime=os.environ.get('RUNTIME', 'docker'),
         sandbox=sandbox_config,
@@ -175,13 +175,13 @@ def initialize_runtime(
         f'Failed to cd to /workspace/{workspace_dir_name}: {str(obs)}',
     )
 
-    action = CmdRunAction(command='git checkout -b openhands')
+    action = CmdRunAction(command='git checkout -b dev')
     action.set_hard_timeout(600)
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert_and_raise(
-        obs.exit_code == 0, f'Failed to git checkout new branch openhands: {str(obs)}'
+        obs.exit_code == 0, f'Failed to git checkout new branch dev: {str(obs)}'
     )
 
     # Install commit0
@@ -225,7 +225,7 @@ def complete_runtime(
         f'Failed to git add -A: {str(obs)}',
     )
 
-    action = CmdRunAction(command='git commit -m "openhands edits"')
+    action = CmdRunAction(command='git commit -m "dev edits"')
     action.set_hard_timeout(600)
     logger.info(action, extra={'msg_type': 'ACTION'})
     obs = runtime.run_action(action)
@@ -233,7 +233,7 @@ def complete_runtime(
     assert_and_raise(
         isinstance(obs, CmdOutputObservation)
         and (obs.exit_code == 0 or obs.exit_code == 1),
-        f'Failed to git commit -m "openhands": {str(obs)}',
+        f'Failed to git commit -m "dev": {str(obs)}',
     )
 
     # Generate diff patch compared to base commit, excluding spec.pdf.bz2 files
@@ -548,7 +548,7 @@ if __name__ == '__main__':
     args, _ = parser.parse_known_args()
 
     # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
-    # so we don't need to manage file uploading to OpenHands's repo
+    # so we don't need to manage file uploading to Dev's repo
     dataset = load_dataset(args.dataset, split=args.split)
 
     commit0_datasets = commit0_setup(dataset.to_pandas(), args.repo_split)
@@ -566,7 +566,7 @@ if __name__ == '__main__':
         raise ValueError(f'Could not find LLM config: --llm_config {args.llm_config}')
 
     details = {}
-    _agent_cls = openhands.agenthub.Agent.get_cls(args.agent_cls)
+    _agent_cls = dev.agenthub.Agent.get_cls(args.agent_cls)
 
     dataset_descrption = (
         args.dataset.replace('/', '__') + '-' + args.repo_split.replace('/', '__')

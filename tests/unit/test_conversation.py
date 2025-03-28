@@ -5,20 +5,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openhands.runtime.impl.docker.docker_runtime import DockerRuntime
-from openhands.server.data_models.conversation_info import ConversationInfo
-from openhands.server.data_models.conversation_info_result_set import (
+from dev.runtime.impl.docker.docker_runtime import DockerRuntime
+from dev.server.data_models.conversation_info import ConversationInfo
+from dev.server.data_models.conversation_info_result_set import (
     ConversationInfoResultSet,
 )
-from openhands.server.routes.manage_conversations import (
+from dev.server.routes.manage_conversations import (
     delete_conversation,
     get_conversation,
     search_conversations,
     update_conversation,
 )
-from openhands.storage.data_models.conversation_status import ConversationStatus
-from openhands.storage.locations import get_conversation_metadata_filename
-from openhands.storage.memory import InMemoryFileStore
+from dev.storage.data_models.conversation_status import ConversationStatus
+from dev.storage.locations import get_conversation_metadata_filename
+from dev.storage.memory import InMemoryFileStore
 
 
 @contextmanager
@@ -39,11 +39,11 @@ def _patch_store():
         ),
     )
     with patch(
-        'openhands.storage.conversation.file_conversation_store.get_file_store',
+        'dev.storage.conversation.file_conversation_store.get_file_store',
         MagicMock(return_value=file_store),
     ):
         with patch(
-            'openhands.server.routes.manage_conversations.conversation_manager.file_store',
+            'dev.server.routes.manage_conversations.conversation_manager.file_store',
             file_store,
         ):
             yield
@@ -53,11 +53,11 @@ def _patch_store():
 async def test_search_conversations():
     with _patch_store():
         with patch(
-            'openhands.server.routes.manage_conversations.config'
+            'dev.server.routes.manage_conversations.config'
         ) as mock_config:
             mock_config.conversation_max_age_seconds = 864000  # 10 days
             with patch(
-                'openhands.server.routes.manage_conversations.conversation_manager'
+                'dev.server.routes.manage_conversations.conversation_manager'
             ) as mock_manager:
 
                 async def mock_get_running_agent_loops(*args, **kwargs):
@@ -65,7 +65,7 @@ async def test_search_conversations():
 
                 mock_manager.get_running_agent_loops = mock_get_running_agent_loops
                 with patch(
-                    'openhands.server.routes.manage_conversations.datetime'
+                    'dev.server.routes.manage_conversations.datetime'
                 ) as mock_datetime:
                     mock_datetime.now.return_value = datetime.fromisoformat(
                         '2025-01-01T00:00:00+00:00'

@@ -2,7 +2,7 @@
 
 # 持久化会话数据
 
-使用标准安装,会话数据存储在内存中。目前,如果 OpenHands 服务重新启动,之前的会话将失效(生成新的密钥),因此无法恢复。
+使用标准安装,会话数据存储在内存中。目前,如果 Dev 服务重新启动,之前的会话将失效(生成新的密钥),因此无法恢复。
 
 ## 如何持久化会话数据
 
@@ -12,6 +12,6 @@
 [core]
 ...
 file_store="local"
-file_store_path="/absolute/path/to/openhands/cache/directory"
+file_store_path="/absolute/path/to/dev/cache/directory"
 jwt_secret="secretpass"
 ```

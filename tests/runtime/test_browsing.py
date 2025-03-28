@@ -2,12 +2,12 @@
 
 from conftest import _close_test_runtime, _load_runtime
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from dev.core.logger import dev_logger as logger
+from dev.events.action import (
     BrowseURLAction,
     CmdRunAction,
 )
-from openhands.events.observation import (
+from dev.events.observation import (
     BrowserOutputObservation,
     CmdOutputObservation,
 )
@@ -18,8 +18,8 @@ from openhands.events.observation import (
 # ============================================================================================================================
 
 
-def test_simple_browse(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_simple_browse(temp_dir, runtime_cls, run_as_dev):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
 
     # Test browse
     action_cmd = CmdRunAction(command='python3 -m http.server 8000 > server.log 2>&1 &')

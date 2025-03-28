@@ -1,14 +1,14 @@
 # 🚧 Solução de Problemas
 
 :::tip
-O OpenHands só suporta Windows via WSL. Certifique-se de executar todos os comandos dentro do seu terminal WSL.
+O Dev só suporta Windows via WSL. Certifique-se de executar todos os comandos dentro do seu terminal WSL.
 :::
 
 ### Falha ao iniciar o cliente docker
 
 **Descrição**
 
-Ao executar o OpenHands, o seguinte erro é visto:
+Ao executar o Dev, o seguinte erro é visto:
 
 ```
 Launch docker client failed. Please make sure you have installed docker and started docker desktop/daemon.
@@ -40,9 +40,9 @@ InRelease At least one invalid signature was encountered.
 
 Isso parece acontecer quando o hash de uma biblioteca externa existente muda e sua instância local do docker tem uma versão anterior em cache. Para contornar isso, tente o seguinte:
 
-- Pare quaisquer contêineres onde o nome tenha o prefixo `openhands-runtime-`:
-  `docker ps --filter name=openhands-runtime- --filter status=running -aq | xargs docker stop`
-- Remova quaisquer contêineres onde o nome tenha o prefixo `openhands-runtime-`:
-  `docker rmi $(docker images --filter name=openhands-runtime- -q --no-trunc)`
-- Pare e remova quaisquer contêineres / imagens onde o nome tenha o prefixo `openhands-runtime-`
+- Pare quaisquer contêineres onde o nome tenha o prefixo `dev-runtime-`:
+  `docker ps --filter name=dev-runtime- --filter status=running -aq | xargs docker stop`
+- Remova quaisquer contêineres onde o nome tenha o prefixo `dev-runtime-`:
+  `docker rmi $(docker images --filter name=dev-runtime- -q --no-trunc)`
+- Pare e remova quaisquer contêineres / imagens onde o nome tenha o prefixo `dev-runtime-`
 - Limpe contêineres / imagens: `docker container prune -f && docker image prune -f`

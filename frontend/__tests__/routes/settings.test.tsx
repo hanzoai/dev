@@ -3,7 +3,7 @@ import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent, { UserEvent } from "@testing-library/user-event";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 import { AuthProvider } from "#/context/auth-context";
 import SettingsScreen from "#/routes/settings";
 import * as AdvancedSettingsUtlls from "#/utils/has-advanced-settings-set";
@@ -17,10 +17,10 @@ const toggleAdvancedSettings = async (user: UserEvent) => {
 };
 
 describe("Settings Screen", () => {
-  const getSettingsSpy = vi.spyOn(OpenHands, "getSettings");
-  const saveSettingsSpy = vi.spyOn(OpenHands, "saveSettings");
-  const resetSettingsSpy = vi.spyOn(OpenHands, "resetSettings");
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getSettingsSpy = vi.spyOn(Dev, "getSettings");
+  const saveSettingsSpy = vi.spyOn(Dev, "saveSettings");
+  const resetSettingsSpy = vi.spyOn(Dev, "resetSettings");
+  const getConfigSpy = vi.spyOn(Dev, "getConfig");
 
   const { handleLogoutMock } = vi.hoisted(() => ({
     handleLogoutMock: vi.fn(),

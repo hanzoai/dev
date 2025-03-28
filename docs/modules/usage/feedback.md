@@ -1,12 +1,12 @@
 # ✅ Providing Feedback
 
-When using OpenHands, you will encounter cases where things work well, and others where they don't. We encourage you to
-provide feedback when you use OpenHands to help give feedback to the development team, and perhaps more importantly,
-create an open corpus of coding agent training examples -- Share-OpenHands!
+When using Dev, you will encounter cases where things work well, and others where they don't. We encourage you to
+provide feedback when you use Dev to help give feedback to the development team, and perhaps more importantly,
+create an open corpus of coding agent training examples -- Share-Dev!
 
 ## 📝 How to Provide Feedback
 
-Providing feedback is easy! When you are using OpenHands, you can press the thumbs-up or thumbs-down button at any point
+Providing feedback is easy! When you are using Dev, you can press the thumbs-up or thumbs-down button at any point
 during your interaction. You will be prompted to provide your email address
 (e.g. so we can contact you if we want to ask any follow-up questions), and you can choose whether you want to provide feedback publicly or privately.
 
@@ -18,15 +18,15 @@ during your interaction. You will be prompted to provide your email address
 
 When you submit data, you can submit it either publicly or privately.
 
-- **Public** data will be distributed under the MIT License, like OpenHands itself, and can be used by the community to
+- **Public** data will be distributed under the MIT License, like Dev itself, and can be used by the community to
 train and test models. Obviously, feedback that you can make public will be more valuable for the community as a whole,
 so when you are not dealing with sensitive information, we would encourage you to choose this option!
-- **Private** data will be made available to the OpenHands team for the purpose of improving OpenHands.
+- **Private** data will be made available to the Dev team for the purpose of improving Dev.
 However, a link with a unique ID will still be created that you can share publicly with others.
 
 ### Who collects and stores the data?
 
-The data is collected and stored by [All Hands AI](https://all-hands.dev), a company founded by OpenHands maintainers to support and improve OpenHands.
+The data is collected and stored by [Hanzo AI](https://all-hands.dev), a company founded by Dev maintainers to support and improve Dev.
 
 ### How will public data be released?
 
@@ -40,7 +40,7 @@ removing email submitter email addresses, and attempting to remove any sensitive
 
 ### What if I want my data deleted?
 
-For data on the All Hands AI servers, we are happy to delete it at request:
+For data on the Hanzo AI servers, we are happy to delete it at request:
 
 **One Piece of Data:** If you want one piece of data deleted, we will shortly be adding a mechanism to delete pieces of
 data using the link and password that is displayed on the interface when you submit data.

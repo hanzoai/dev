@@ -3,12 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoutesStub } from "react-router";
 import { renderWithProviders } from "test-utils";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 import SettingsScreen from "#/routes/settings";
 import { PaymentForm } from "#/components/features/payment/payment-form";
 
 describe("Settings Billing", () => {
-  const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+  const getConfigSpy = vi.spyOn(Dev, "getConfig");
 
   const RoutesStub = createRoutesStub([
     {

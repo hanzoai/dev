@@ -23,18 +23,18 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
 )
-from openhands.core.config import (
+from dev.core.config import (
     AppConfig,
     LLMConfig,
     get_parser,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime
-from openhands.events.action import CmdRunAction
-from openhands.events.observation import CmdOutputObservation
-from openhands.utils.async_utils import call_async_from_sync
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime
+from dev.events.action import CmdRunAction
+from dev.events.observation import CmdOutputObservation
+from dev.utils.async_utils import call_async_from_sync
 
-# TODO: migrate all swe-bench docker to ghcr.io/openhands
+# TODO: migrate all swe-bench docker to ghcr.io/dev
 DOCKER_IMAGE_PREFIX = os.environ.get('EVAL_DOCKER_IMAGE_PREFIX', 'docker.io/xingyaoww/')
 logger.info(f'Using docker image prefix: {DOCKER_IMAGE_PREFIX}')
 
@@ -49,7 +49,7 @@ def process_git_patch(patch):
 
     patch = patch.replace('\r\n', '\n')
     # There might be some weird characters at the beginning of the patch
-    # due to some OpenHands inference command outputs
+    # due to some Dev inference command outputs
 
     # FOR EXAMPLE:
     # git diff --no-color --cached 895f28f9cbed817c00ab68770433170d83132d90
@@ -75,7 +75,7 @@ def get_config(metadata: EvalMetadata, instance: pd.Series) -> AppConfig:
     logger.info(
         f'Using instance container image: {base_container_image}. '
         f'Please make sure this image exists. '
-        f'Submit an issue on https://github.com/All-Hands-AI/OpenHands if you run into any issues.'
+        f'Submit an issue on https://github.com/hanzoai/dev if you run into any issues.'
     )
     sandbox_config = get_default_sandbox_config_for_eval()
     sandbox_config.base_container_image = base_container_image
@@ -84,7 +84,7 @@ def get_config(metadata: EvalMetadata, instance: pd.Series) -> AppConfig:
         instance_id=instance['instance_id'],
     )
     config = AppConfig(
-        run_as_openhands=False,
+        run_as_dev=False,
         runtime=os.environ.get('RUNTIME', 'docker'),
         sandbox=sandbox_config,
         # do not mount workspace

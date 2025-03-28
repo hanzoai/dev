@@ -7,12 +7,12 @@ from conftest import (
     _load_runtime,
 )
 
-from openhands.microagent import KnowledgeMicroAgent, RepoMicroAgent, TaskMicroAgent
+from dev.microagent import KnowledgeMicroAgent, RepoMicroAgent, TaskMicroAgent
 
 
 def _create_test_microagents(test_dir: str):
     """Create test microagent files in the given directory."""
-    microagents_dir = Path(test_dir) / '.openhands' / 'microagents'
+    microagents_dir = Path(test_dir) / '.dev' / 'microagents'
     microagents_dir.mkdir(parents=True, exist_ok=True)
 
     # Create test knowledge agent
@@ -69,16 +69,16 @@ Test task content
 
 These are legacy repository instructions.
 """
-    (Path(test_dir) / '.openhands_instructions').write_text(legacy_instructions)
+    (Path(test_dir) / '.dev_instructions').write_text(legacy_instructions)
 
 
 def test_load_microagents_with_trailing_slashes(
-    temp_dir, runtime_cls, run_as_openhands
+    temp_dir, runtime_cls, run_as_dev
 ):
     """Test loading microagents when directory paths have trailing slashes."""
     # Create test files
     _create_test_microagents(temp_dir)
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
     try:
         # Load microagents
         loaded_agents = runtime.get_microagents_from_selected_repo(None)
@@ -98,7 +98,7 @@ def test_load_microagents_with_trailing_slashes(
         assert 'pytest' in agent.triggers
 
         # Check repo agents (including legacy)
-        assert len(repo_agents) == 2  # repo.md + .openhands_instructions
+        assert len(repo_agents) == 2  # repo.md + .dev_instructions
         repo_names = {a.name for a in repo_agents}
         assert 'test_repo_agent' in repo_names
         assert 'repo_legacy' in repo_names
@@ -112,18 +112,18 @@ def test_load_microagents_with_trailing_slashes(
         _close_test_runtime(runtime)
 
 
-def test_load_microagents_with_selected_repo(temp_dir, runtime_cls, run_as_openhands):
+def test_load_microagents_with_selected_repo(temp_dir, runtime_cls, run_as_dev):
     """Test loading microagents from a selected repository."""
     # Create test files in a repository-like structure
-    repo_dir = Path(temp_dir) / 'OpenHands'
+    repo_dir = Path(temp_dir) / 'Dev'
     repo_dir.mkdir(parents=True)
     _create_test_microagents(str(repo_dir))
 
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
     try:
         # Load microagents with selected repository
         loaded_agents = runtime.get_microagents_from_selected_repo(
-            'All-Hands-AI/OpenHands'
+            'hanzoai/dev'
         )
 
         # Verify all agents are loaded
@@ -141,7 +141,7 @@ def test_load_microagents_with_selected_repo(temp_dir, runtime_cls, run_as_openh
         assert 'pytest' in agent.triggers
 
         # Check repo agents (including legacy)
-        assert len(repo_agents) == 2  # repo.md + .openhands_instructions
+        assert len(repo_agents) == 2  # repo.md + .dev_instructions
         repo_names = {a.name for a in repo_agents}
         assert 'test_repo_agent' in repo_names
         assert 'repo_legacy' in repo_names
@@ -155,10 +155,10 @@ def test_load_microagents_with_selected_repo(temp_dir, runtime_cls, run_as_openh
         _close_test_runtime(runtime)
 
 
-def test_load_microagents_with_missing_files(temp_dir, runtime_cls, run_as_openhands):
+def test_load_microagents_with_missing_files(temp_dir, runtime_cls, run_as_dev):
     """Test loading microagents when some files are missing."""
     # Create only repo.md, no other files
-    microagents_dir = Path(temp_dir) / '.openhands' / 'microagents'
+    microagents_dir = Path(temp_dir) / '.dev' / 'microagents'
     microagents_dir.mkdir(parents=True, exist_ok=True)
 
     repo_agent = """---
@@ -174,7 +174,7 @@ Repository-specific test instructions.
 """
     (microagents_dir / 'repo.md').write_text(repo_agent)
 
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
     try:
         # Load microagents
         loaded_agents = runtime.get_microagents_from_selected_repo(None)

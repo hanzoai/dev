@@ -6,27 +6,27 @@ import psutil
 import pytest
 from pytest import TempPathFactory
 
-from openhands.core.schema import ActionType, ObservationType
-from openhands.events import EventSource, EventStream
-from openhands.events.action import (
+from dev.core.schema import ActionType, ObservationType
+from dev.events import EventSource, EventStream
+from dev.events.action import (
     NullAction,
 )
-from openhands.events.action.files import (
+from dev.events.action.files import (
     FileEditAction,
     FileReadAction,
     FileWriteAction,
 )
-from openhands.events.action.message import MessageAction
-from openhands.events.event import FileEditSource, FileReadSource
-from openhands.events.observation import NullObservation
-from openhands.events.observation.files import (
+from dev.events.action.message import MessageAction
+from dev.events.event import FileEditSource, FileReadSource
+from dev.events.observation import NullObservation
+from dev.events.observation.files import (
     FileEditObservation,
     FileReadObservation,
     FileWriteObservation,
 )
-from openhands.events.serialization.event import event_to_dict
-from openhands.storage import get_file_store
-from openhands.storage.locations import get_conversation_event_filename
+from dev.events.serialization.event import event_to_dict
+from dev.storage import get_file_store
+from dev.storage.locations import get_conversation_event_filename
 
 
 @pytest.fixture

@@ -401,7 +401,7 @@ function AccountSettings() {
                   <b>
                     {" "}
                     <a
-                      href="https://github.com/settings/tokens/new?description=openhands-app&scopes=repo,user,workflow"
+                      href="https://github.com/settings/tokens/new?description=dev-app&scopes=repo,user,workflow"
                       target="_blank"
                       className="underline underline-offset-2"
                       rel="noopener noreferrer"

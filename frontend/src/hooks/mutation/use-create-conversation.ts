@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import posthog from "posthog-js";
 import { useDispatch, useSelector } from "react-redux";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 import { setInitialPrompt } from "#/state/initial-query-slice";
 import { RootState } from "#/store";
 
@@ -28,7 +28,7 @@ export const useCreateConversation = () => {
 
       if (variables.q) dispatch(setInitialPrompt(variables.q));
 
-      return OpenHands.createConversation(
+      return Dev.createConversation(
         selectedRepository || undefined,
         variables.q,
         files,

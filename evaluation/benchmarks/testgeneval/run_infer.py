@@ -11,7 +11,7 @@ import pandas as pd
 import toml
 from datasets import load_dataset
 
-import openhands.agenthub
+import dev.agenthub
 from evaluation.benchmarks.testgeneval.constants import MAP_REPO_VERSION_TO_SPECS
 from evaluation.benchmarks.testgeneval.prompt import (
     CODEACT_TESTGEN_PROMPT,
@@ -32,21 +32,21 @@ from evaluation.utils.shared import (
     run_evaluation,
     update_llm_config_for_completions_logging,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import (
+from dev.controller.state.state import State
+from dev.core.config import (
     AgentConfig,
     AppConfig,
     SandboxConfig,
     get_llm_config_arg,
     get_parser,
 )
-from openhands.core.logger import openhands_logger as logger
-from openhands.core.main import create_runtime, run_controller
-from openhands.events.action import CmdRunAction, MessageAction
-from openhands.events.observation import CmdOutputObservation, ErrorObservation
-from openhands.events.serialization.event import event_to_dict
-from openhands.runtime.base import Runtime
-from openhands.utils.async_utils import call_async_from_sync
+from dev.core.logger import dev_logger as logger
+from dev.core.main import create_runtime, run_controller
+from dev.events.action import CmdRunAction, MessageAction
+from dev.events.observation import CmdOutputObservation, ErrorObservation
+from dev.events.serialization.event import event_to_dict
+from dev.runtime.base import Runtime
+from dev.utils.async_utils import call_async_from_sync
 
 RUN_WITH_BROWSING = os.environ.get('RUN_WITH_BROWSING', 'false').lower() == 'true'
 
@@ -103,7 +103,7 @@ def get_instruction(instance: pd.Series, metadata: EvalMetadata):
     return instruction
 
 
-# TODO: migrate all swe-bench docker to ghcr.io/openhands
+# TODO: migrate all swe-bench docker to ghcr.io/dev
 DOCKER_IMAGE_PREFIX = os.environ.get('EVAL_DOCKER_IMAGE_PREFIX', 'docker.io/kdjain/')
 logger.info(f'Using docker image prefix: {DOCKER_IMAGE_PREFIX}')
 
@@ -125,12 +125,12 @@ def get_config(
     logger.info(
         f'Using instance container image: {base_container_image}. '
         f'Please make sure this image exists. '
-        f'Submit an issue on https://github.com/All-Hands-AI/OpenHands if you run into any issues.'
+        f'Submit an issue on https://github.com/hanzoai/dev if you run into any issues.'
     )
 
     config = AppConfig(
         default_agent=metadata.agent_class,
-        run_as_openhands=False,
+        run_as_dev=False,
         max_iterations=metadata.max_iterations,
         runtime=os.environ.get('RUNTIME', 'eventstream'),
         sandbox=SandboxConfig(
@@ -141,7 +141,7 @@ def get_config(
             timeout=300,
             # Add platform to the sandbox config to solve issue 4401
             platform='linux/amd64',
-            api_key=os.environ.get('ALLHANDS_API_KEY', None),
+            api_key=os.environ.get('HANZO_API_KEY', None),
             remote_runtime_api_url=os.environ.get(
                 'SANDBOX_REMOTE_RUNTIME_API_URL', 'http://localhost:8000'
             ),
@@ -532,7 +532,7 @@ if __name__ == '__main__':
                 preds_map[pred['id']] = pred['preds']['full'][0]
 
     # NOTE: It is preferable to load datasets from huggingface datasets and perform post-processing
-    # so we don't need to manage file uploading to OpenHands's repo
+    # so we don't need to manage file uploading to Dev's repo
     dataset = load_dataset(args.dataset, split=args.split)
     logger.info(f'Loaded dataset {args.dataset} with split {args.split}')
     testgeneval_filepairs = prepare_dataset_pre(dataset.to_pandas(), 'id')
@@ -548,7 +548,7 @@ if __name__ == '__main__':
         raise ValueError(f'Could not find LLM config: --llm_config {args.llm_config}')
 
     details = {}
-    _agent_cls = openhands.agenthub.Agent.get_cls(args.agent_cls)
+    _agent_cls = dev.agenthub.Agent.get_cls(args.agent_cls)
 
     dataset_descrption = (
         args.dataset.replace('/', '__') + '-' + args.split.replace('/', '__')

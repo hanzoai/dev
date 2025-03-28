@@ -21,5 +21,5 @@ RUN micromamba run -n sci-agent pip install -r requirements.txt
 RUN find ./ -type f -exec sed -i 's/conda/micromamba/g' {} \;
 
 # pushd evaluation/scienceagentbench
-# docker build -t xingyaoww/openhands-eval-scienceagentbench-evaluator -f Dockerfile.evaluator .
+# docker build -t xingyaoww/dev-eval-scienceagentbench-evaluator -f Dockerfile.evaluator .
 # popd

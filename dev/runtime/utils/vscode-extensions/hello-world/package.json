@@ -1,0 +1,23 @@
+{
+    "name": "dev-hello-world",
+    "displayName": "Dev Hello World",
+    "description": "A simple hello world extension for Dev",
+    "version": "0.0.1",
+    "publisher": "dev",
+    "engines": {
+        "vscode": "^1.94.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:dev-hello-world.helloWorld"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [{
+            "command": "dev-hello-world.helloWorld",
+            "title": "Hello World from Dev"
+        }]
+    }
+}

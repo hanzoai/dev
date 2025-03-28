@@ -1,26 +1,26 @@
-# Commit0 Evaluation with OpenHands
+# Commit0 Evaluation with Dev
 
 This folder contains the evaluation harness that we built on top of the original [Commit0](https://commit-0.github.io/) ([paper](https://arxiv.org/abs/2412.01769v1)).
 
 The evaluation consists of three steps:
 
-1. Environment setup: [install python environment](../../README.md#development-environment), [configure LLM config](../../README.md#configure-openhands-and-your-llm).
+1. Environment setup: [install python environment](../../README.md#development-environment), [configure LLM config](../../README.md#configure-dev-and-your-llm).
 2. [Run Evaluation](#run-inference-on-commit0-instances): Generate a edit patch for each Commit0 Repo, and get the evaluation results
 
 ## Setup Environment and LLM Configuration
 
 Please follow instruction [here](../../README.md#setup) to setup your local development environment and LLM.
 
-## OpenHands Commit0 Instance-level Docker Support
+## Dev Commit0 Instance-level Docker Support
 
-OpenHands supports using the Commit0 Docker for **[inference](#run-inference-on-commit0-instances).
+Dev supports using the Commit0 Docker for **[inference](#run-inference-on-commit0-instances).
 This is now the default behavior.
 
 ## Run Inference on Commit0 Instances
 
-Make sure your Docker daemon is running, and you have ample disk space (at least 200-500GB, depends on the Commit0 set you are running on) for the [instance-level docker image](#openhands-commit0-instance-level-docker-support).
+Make sure your Docker daemon is running, and you have ample disk space (at least 200-500GB, depends on the Commit0 set you are running on) for the [instance-level docker image](#dev-commit0-instance-level-docker-support).
 
-When the `run_infer.sh` script is started, it will automatically pull the `lite` split in Commit0. For example, for instance ID `commit-0/minitorch`, it will try to pull our pre-build docker image `wentingzhao/minitorch` from DockerHub. This image will be used create an OpenHands runtime image where the agent will operate on.
+When the `run_infer.sh` script is started, it will automatically pull the `lite` split in Commit0. For example, for instance ID `commit-0/minitorch`, it will try to pull our pre-build docker image `wentingzhao/minitorch` from DockerHub. This image will be used create an Dev runtime image where the agent will operate on.
 
 ```bash
 ./evaluation/benchmarks/commit0/scripts/run_infer.sh [repo_split] [model_config] [git-version] [agent] [eval_limit] [max_iter] [num_workers] [dataset] [dataset_split]
@@ -34,7 +34,7 @@ where `model_config` is mandatory, and the rest are optional.
 - `repo_split`, e.g. `lite`, is the split of the Commit0 dataset you would like to evaluate on. Available options are `lite`, `all` and each individual repo.
 - `model_config`, e.g. `eval_gpt4_1106_preview`, is the config group name for your
 LLM settings, as defined in your `config.toml`.
-- `git-version`, e.g. `HEAD`, is the git commit hash of the OpenHands version you would
+- `git-version`, e.g. `HEAD`, is the git commit hash of the Dev version you would
 like to evaluate. It could also be a release tag like `0.6.2`.
 - `agent`, e.g. `CodeActAgent`, is the name of the agent for benchmarks, defaulting
 to `CodeActAgent`.
@@ -65,14 +65,14 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 ./evaluation/benchmarks/commit0/scripts/run_infer.sh [repo_split] [model_config] [git-version] [agent] [eval_limit] [max_iter] [num_workers] [dataset] [dataset_split]
 
 # Example - This runs evaluation on CodeActAgent for 10 instances on "wentingzhao/commit0_combined"'s test set, with max 30 iteration per instances, with 1 number of workers running in parallel
-ALLHANDS_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev" EVAL_DOCKER_IMAGE_PREFIX="docker.io/wentingzhao" \
+HANZO_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev" EVAL_DOCKER_IMAGE_PREFIX="docker.io/wentingzhao" \
 ./evaluation/benchmarks/commit0/scripts/run_infer.sh lite llm.eval_sonnet HEAD CodeActAgent 10 30 1 wentingzhao/commit0_combined test
 ```
 
 To clean-up all existing runtime you've already started, run:
 
 ```bash
-ALLHANDS_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
+HANZO_API_KEY="YOUR-API-KEY" ./evaluation/utils/scripts/cleanup_remote_runtime.sh
 ```
 
 ### Specify a subset of tasks to run infer

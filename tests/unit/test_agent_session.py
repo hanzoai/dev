@@ -2,18 +2,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openhands.controller.agent import Agent
-from openhands.controller.agent_controller import AgentController
-from openhands.controller.state.state import State
-from openhands.core.config import AppConfig, LLMConfig
-from openhands.core.config.agent_config import AgentConfig
-from openhands.events import EventStream, EventStreamSubscriber
-from openhands.llm import LLM
-from openhands.llm.metrics import Metrics
-from openhands.memory.memory import Memory
-from openhands.runtime.base import Runtime
-from openhands.server.session.agent_session import AgentSession
-from openhands.storage.memory import InMemoryFileStore
+from dev.controller.agent import Agent
+from dev.controller.agent_controller import AgentController
+from dev.controller.state.state import State
+from dev.core.config import AppConfig, LLMConfig
+from dev.core.config.agent_config import AgentConfig
+from dev.events import EventStream, EventStreamSubscriber
+from dev.llm import LLM
+from dev.llm.metrics import Metrics
+from dev.memory.memory import Memory
+from dev.runtime.base import Runtime
+from dev.server.session.agent_session import AgentSession
+from dev.storage.memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -92,14 +92,14 @@ async def test_agent_session_start_with_no_state(mock_agent):
 
     # Patch AgentController and State.restore_from_session to fail; patch Memory in AgentSession
     with patch(
-        'openhands.server.session.agent_session.AgentController', SpyAgentController
+        'dev.server.session.agent_session.AgentController', SpyAgentController
     ), patch(
-        'openhands.server.session.agent_session.EventStream',
+        'dev.server.session.agent_session.EventStream',
         return_value=mock_event_stream,
     ), patch(
-        'openhands.controller.state.state.State.restore_from_session',
+        'dev.controller.state.state.State.restore_from_session',
         side_effect=Exception('No state found'),
-    ), patch('openhands.server.session.agent_session.Memory', return_value=memory):
+    ), patch('dev.server.session.agent_session.Memory', return_value=memory):
         await session.start(
             runtime_name='test-runtime',
             config=AppConfig(),
@@ -182,14 +182,14 @@ async def test_agent_session_start_with_restored_state(mock_agent):
 
     # Patch AgentController and State.restore_from_session to succeed, patch Memory in AgentSession
     with patch(
-        'openhands.server.session.agent_session.AgentController', SpyAgentController
+        'dev.server.session.agent_session.AgentController', SpyAgentController
     ), patch(
-        'openhands.server.session.agent_session.EventStream',
+        'dev.server.session.agent_session.EventStream',
         return_value=mock_event_stream,
     ), patch(
-        'openhands.controller.state.state.State.restore_from_session',
+        'dev.controller.state.state.State.restore_from_session',
         return_value=mock_restored_state,
-    ), patch('openhands.server.session.agent_session.Memory', mock_memory):
+    ), patch('dev.server.session.agent_session.Memory', mock_memory):
         await session.start(
             runtime_name='test-runtime',
             config=AppConfig(),

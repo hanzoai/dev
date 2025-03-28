@@ -1,17 +1,17 @@
 # 运行时配置
 
-运行时是 OpenHands 代理可以编辑文件和运行命令的环境。
+运行时是 Dev 代理可以编辑文件和运行命令的环境。
 
-默认情况下，OpenHands 使用基于 Docker 的运行时，在您的本地计算机上运行。这意味着您只需要为使用的 LLM 付费，并且您的代码只会发送到 LLM。
+默认情况下，Dev 使用基于 Docker 的运行时，在您的本地计算机上运行。这意味着您只需要为使用的 LLM 付费，并且您的代码只会发送到 LLM。
 
-我们还支持"远程"运行时，通常由第三方管理。它们可以使设置更简单、更具可扩展性，特别是当您并行运行多个 OpenHands 对话时（例如进行评估）。
+我们还支持"远程"运行时，通常由第三方管理。它们可以使设置更简单、更具可扩展性，特别是当您并行运行多个 Dev 对话时（例如进行评估）。
 
 ## Docker 运行时
-这是启动 OpenHands 时使用的默认运行时。您可能会注意到传递给 `docker run` 的一些标志使这成为可能：
+这是启动 Dev 时使用的默认运行时。您可能会注意到传递给 `docker run` 的一些标志使这成为可能：
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -26,12 +26,12 @@ docker run # ...
 export WORKSPACE_BASE=/path/to/your/code
 
 # Linux 和 Mac 示例
-# export WORKSPACE_BASE=$HOME/OpenHands
-# 将 $WORKSPACE_BASE 设置为 /home/<username>/OpenHands
+# export WORKSPACE_BASE=$HOME/Dev
+# 将 $WORKSPACE_BASE 设置为 /home/<username>/Dev
 #
 # Windows 上的 WSL 示例
-# export WORKSPACE_BASE=/mnt/c/dev/OpenHands
-# 将 $WORKSPACE_BASE 设置为 C:\dev\OpenHands
+# export WORKSPACE_BASE=/mnt/c/dev/Dev
+# 将 $WORKSPACE_BASE 设置为 C:\dev\Dev
 ```
 
 然后将以下选项添加到 `docker run` 命令中：
@@ -44,14 +44,14 @@ docker run # ...
     # ...
 ```
 
-请小心！没有任何措施可以阻止 OpenHands 代理删除或修改挂载到其工作区的任何文件。
+请小心！没有任何措施可以阻止 Dev 代理删除或修改挂载到其工作区的任何文件。
 
 此设置可能会导致一些文件权限问题（因此有 `SANDBOX_USER_ID` 变量），但似乎在大多数系统上都能很好地工作。
 
-## All Hands 运行时
-All Hands 运行时目前处于测试阶段。您可以通过加入 Slack 上的 #remote-runtime-limited-beta 频道来请求访问权限（[请参阅自述文件](https://github.com/All-Hands-AI/OpenHands?tab=readme-ov-file#-join-our-community)以获取邀请）。
+## Hanzo 运行时
+Hanzo 运行时目前处于测试阶段。您可以通过加入 Slack 上的 #remote-runtime-limited-beta 频道来请求访问权限（[请参阅自述文件](https://github.com/hanzoai/dev?tab=readme-ov-file#-join-our-community)以获取邀请）。
 
-要使用 All Hands 运行时，请在启动 OpenHands 时设置以下环境变量：
+要使用 Hanzo 运行时，请在启动 Dev 时设置以下环境变量：
 
 ```bash
 docker run # ...
@@ -63,11 +63,11 @@ docker run # ...
 ```
 
 ## Modal 运行时
-我们在 [Modal](https://modal.com/) 的合作伙伴也为 OpenHands 提供了一个运行时。
+我们在 [Modal](https://modal.com/) 的合作伙伴也为 Dev 提供了一个运行时。
 
 要使用 Modal 运行时，请创建一个帐户，然后[创建一个 API 密钥](https://modal.com/settings)。
 
-然后，您需要在启动 OpenHands 时设置以下环境变量：
+然后，您需要在启动 Dev 时设置以下环境变量：
 ```bash
 docker run # ...
     -e RUNTIME=modal \

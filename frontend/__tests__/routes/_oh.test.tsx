@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import MainApp from "#/routes/_oh/route";
 import i18n from "#/i18n";
 import * as CaptureConsent from "#/utils/handle-capture-consent";
-import OpenHands from "#/api/open-hands";
+import Dev from "#/api/open-hands";
 
 describe("frontend/routes/_oh", () => {
   const RouteStub = createRoutesStub([{ Component: MainApp, path: "/" }]);
@@ -58,8 +58,8 @@ describe("frontend/routes/_oh", () => {
   // FIXME: This test fails when it shouldn't be, please investigate
   it.skip("should render and capture the user's consent if oss mode", async () => {
     const user = userEvent.setup();
-    const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
-    const getSettingsSpy = vi.spyOn(OpenHands, "getSettings");
+    const getConfigSpy = vi.spyOn(Dev, "getConfig");
+    const getSettingsSpy = vi.spyOn(Dev, "getSettings");
     const handleCaptureConsentSpy = vi.spyOn(
       CaptureConsent,
       "handleCaptureConsent",
@@ -99,7 +99,7 @@ describe("frontend/routes/_oh", () => {
   });
 
   it("should not render the user consent form if saas mode", async () => {
-    const getConfigSpy = vi.spyOn(OpenHands, "getConfig");
+    const getConfigSpy = vi.spyOn(Dev, "getConfig");
     getConfigSpy.mockResolvedValue({
       APP_MODE: "saas",
       GITHUB_CLIENT_ID: "test-id",

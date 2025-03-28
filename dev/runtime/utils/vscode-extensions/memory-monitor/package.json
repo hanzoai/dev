@@ -1,0 +1,50 @@
+{
+    "name": "dev-memory-monitor",
+    "displayName": "Dev Memory Monitor",
+    "description": "A VSCode extension for monitoring system and process memory usage",
+    "version": "0.1.0",
+    "publisher": "dev",
+    "engines": {
+        "vscode": "^1.94.0"
+    },
+    "categories": [
+        "Other",
+        "Monitoring"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "dev-memory-monitor.startMemoryMonitor",
+                "title": "Start Memory Monitor"
+            },
+            {
+                "command": "dev-memory-monitor.stopMemoryMonitor",
+                "title": "Stop Memory Monitor"
+            },
+            {
+                "command": "dev-memory-monitor.showMemoryDetails",
+                "title": "Show Memory Details"
+            }
+        ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "dev-memory-monitor.startMemoryMonitor",
+                    "group": "Dev"
+                },
+                {
+                    "command": "dev-memory-monitor.stopMemoryMonitor",
+                    "group": "Dev"
+                },
+                {
+                    "command": "dev-memory-monitor.showMemoryDetails",
+                    "group": "Dev"
+                }
+            ]
+        }
+    }
+}

@@ -7,14 +7,14 @@ from conftest import (
     _load_runtime,
 )
 
-from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import (
+from dev.core.logger import dev_logger as logger
+from dev.events.action import (
     CmdRunAction,
     FileReadAction,
     FileWriteAction,
     IPythonRunCellAction,
 )
-from openhands.events.observation import (
+from dev.events.observation import (
     CmdOutputObservation,
     ErrorObservation,
     FileReadObservation,
@@ -27,8 +27,8 @@ from openhands.events.observation import (
 # ============================================================================================================================
 
 
-def test_simple_cmd_ipython_and_fileop(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_simple_cmd_ipython_and_fileop(temp_dir, runtime_cls, run_as_dev):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
 
     # Test run command
     action_cmd = CmdRunAction(command='ls -l')
@@ -51,7 +51,7 @@ def test_simple_cmd_ipython_and_fileop(temp_dir, runtime_cls, run_as_openhands):
     assert obs.content.strip() == (
         'Hello, `World`!\n'
         '[Jupyter current working directory: /workspace]\n'
-        '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
+        '[Jupyter Python interpreter: /dev/poetry/dev-ai-5O4_aCHf-py3.12/bin/python]'
     )
 
     # Test read file (file should not exist)
@@ -99,8 +99,8 @@ def test_simple_cmd_ipython_and_fileop(temp_dir, runtime_cls, run_as_openhands):
     TEST_IN_CI != 'True',
     reason='This test is not working in WSL (file ownership)',
 )
-def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+def test_ipython_multi_user(temp_dir, runtime_cls, run_as_dev):
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
 
     # Test run ipython
     # get username
@@ -111,8 +111,8 @@ def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
     assert isinstance(obs, IPythonRunCellObservation)
 
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
-    if run_as_openhands:
-        assert 'openhands' in obs.content
+    if run_as_dev:
+        assert 'dev' in obs.content
     else:
         assert 'root' in obs.content
 
@@ -128,7 +128,7 @@ def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
         == (
             '/workspace\n'
             '[Jupyter current working directory: /workspace]\n'
-            '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
+            '[Jupyter Python interpreter: /dev/poetry/dev-ai-5O4_aCHf-py3.12/bin/python]'
         ).strip()
     )
 
@@ -144,7 +144,7 @@ def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
         == (
             '[Code executed successfully with no output]\n'
             '[Jupyter current working directory: /workspace]\n'
-            '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
+            '[Jupyter Python interpreter: /dev/poetry/dev-ai-5O4_aCHf-py3.12/bin/python]'
         ).strip()
     )
 
@@ -154,9 +154,9 @@ def test_ipython_multi_user(temp_dir, runtime_cls, run_as_openhands):
     obs = runtime.run_action(action)
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert obs.exit_code == 0
-    if run_as_openhands:
-        # -rw-r--r-- 1 openhands root 13 Jul 28 03:53 test.txt
-        assert 'openhands' in obs.content.split('\r\n')[0]
+    if run_as_dev:
+        # -rw-r--r-- 1 dev root 13 Jul 28 03:53 test.txt
+        assert 'dev' in obs.content.split('\r\n')[0]
     else:
         # -rw-r--r-- 1 root root 13 Jul 28 03:53 test.txt
         assert 'root' in obs.content.split('\r\n')[0]
@@ -187,16 +187,16 @@ def test_ipython_simple(temp_dir, runtime_cls):
         == (
             '1\n'
             '[Jupyter current working directory: /workspace]\n'
-            '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
+            '[Jupyter Python interpreter: /dev/poetry/dev-ai-5O4_aCHf-py3.12/bin/python]'
         ).strip()
     )
 
     _close_test_runtime(runtime)
 
 
-def test_ipython_package_install(temp_dir, runtime_cls, run_as_openhands):
+def test_ipython_package_install(temp_dir, runtime_cls, run_as_dev):
     """Make sure that cd in bash also update the current working directory in ipython."""
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev)
 
     # It should error out since pymsgbox is not installed
     action = IPythonRunCellAction(code='import pymsgbox')
@@ -223,15 +223,15 @@ def test_ipython_package_install(temp_dir, runtime_cls, run_as_openhands):
     assert obs.content.strip() == (
         '[Code executed successfully with no output]\n'
         '[Jupyter current working directory: /workspace]\n'
-        '[Jupyter Python interpreter: /openhands/poetry/openhands-ai-5O4_aCHf-py3.12/bin/python]'
+        '[Jupyter Python interpreter: /dev/poetry/dev-ai-5O4_aCHf-py3.12/bin/python]'
     )
 
     _close_test_runtime(runtime)
 
 
-def test_ipython_file_editor_permissions_as_openhands(temp_dir, runtime_cls):
+def test_ipython_file_editor_permissions_as_dev(temp_dir, runtime_cls):
     """Test file editor permission behavior when running as different users."""
-    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_openhands=True)
+    runtime, config = _load_runtime(temp_dir, runtime_cls, run_as_dev=True)
 
     # Create a file owned by root with restricted permissions
     action = CmdRunAction(
@@ -242,7 +242,7 @@ def test_ipython_file_editor_permissions_as_openhands(temp_dir, runtime_cls):
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert obs.exit_code == 0
 
-    # Try to view the file as openhands user - should fail with permission denied
+    # Try to view the file as dev user - should fail with permission denied
     test_code = "print(file_editor(command='view', path='/root/test.txt'))"
     action = IPythonRunCellAction(code=test_code)
     logger.info(action, extra={'msg_type': 'ACTION'})
@@ -250,7 +250,7 @@ def test_ipython_file_editor_permissions_as_openhands(temp_dir, runtime_cls):
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert 'Permission denied' in obs.content
 
-    # Try to edit the file as openhands user - should fail with permission denied
+    # Try to edit the file as dev user - should fail with permission denied
     test_code = "print(file_editor(command='str_replace', path='/root/test.txt', old_str='', new_str='test'))"
     action = IPythonRunCellAction(code=test_code)
     logger.info(action, extra={'msg_type': 'ACTION'})
@@ -268,7 +268,7 @@ def test_ipython_file_editor_permissions_as_openhands(temp_dir, runtime_cls):
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert 'Permission denied' in obs.content
 
-    # Try to use file editor in openhands sandbox directory - should work
+    # Try to use file editor in dev sandbox directory - should work
     test_code = """
 # Create file
 print(file_editor(command='create', path='/workspace/test.txt', file_text='Line 1\\nLine 2\\nLine 3'))

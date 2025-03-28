@@ -3,8 +3,8 @@ from unittest.mock import Mock
 import pytest
 from litellm import ChatCompletionMessageToolCall
 
-from openhands.agenthub.codeact_agent.codeact_agent import CodeActAgent
-from openhands.agenthub.codeact_agent.function_calling import (
+from dev.agenthub.codeact_agent.codeact_agent import CodeActAgent
+from dev.agenthub.codeact_agent.function_calling import (
     BrowserTool,
     IPythonTool,
     LLMBasedFileEditTool,
@@ -14,24 +14,24 @@ from openhands.agenthub.codeact_agent.function_calling import (
     get_tools,
     response_to_actions,
 )
-from openhands.agenthub.codeact_agent.tools.browser import (
+from dev.agenthub.codeact_agent.tools.browser import (
     _BROWSER_DESCRIPTION,
     _BROWSER_TOOL_DESCRIPTION,
 )
-from openhands.controller.state.state import State
-from openhands.core.config import AgentConfig, LLMConfig
-from openhands.core.exceptions import FunctionCallNotExistsError
-from openhands.core.message import ImageContent, Message, TextContent
-from openhands.events.action import (
+from dev.controller.state.state import State
+from dev.core.config import AgentConfig, LLMConfig
+from dev.core.exceptions import FunctionCallNotExistsError
+from dev.core.message import ImageContent, Message, TextContent
+from dev.events.action import (
     CmdRunAction,
     MessageAction,
 )
-from openhands.events.event import EventSource
-from openhands.events.observation.commands import (
+from dev.events.event import EventSource
+from dev.events.observation.commands import (
     CmdOutputObservation,
 )
-from openhands.events.tool import ToolCallMetadata
-from openhands.llm.llm import LLM
+from dev.events.tool import ToolCallMetadata
+from dev.llm.llm import LLM
 
 
 @pytest.fixture
