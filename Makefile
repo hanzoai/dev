@@ -230,15 +230,15 @@ start-frontend:
 	@cd frontend && VITE_BACKEND_HOST=$(BACKEND_HOST_PORT) VITE_FRONTEND_PORT=$(FRONTEND_PORT) npm run dev -- --port $(FRONTEND_PORT) --host $(BACKEND_HOST)
 
 _run_setup:
-	@if [ "$$(uname)" = "MINGW"* ]; then \
+	@if [[ "$$(uname)" == MINGW* ]]; then \
 		echo "$(RED)Windows is not supported, use WSL instead.$(RESET)"; \
 		exit 1; \
 	fi; \
 	mkdir -p logs; \
 	echo "$(YELLOW)Starting backend server...$(RESET)"; \
-	uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) &; \
+	uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) & \
 	echo "$(YELLOW)Waiting for backend to start...$(RESET)"; \
-	until nc -z localhost $(BACKEND_PORT); do sleep 0.1; done; \
+	until nc -z localhost $(BACKEND_PORT) 2>/dev/null; do sleep 0.1; done; \
 	echo "$(GREEN)Backend started.$(RESET)"
 
 run:
@@ -257,7 +257,7 @@ docker-run:
 		export WORKSPACE_BASE=${WORKSPACE_BASE}; \
 		export SANDBOX_USER_ID=$$(id -u); \
 		export DATE=$$(date +%Y%m%d%H%M%S); \
-		docker compose up $(OPTIONS); \
+		docker compose up $(OPTIONS) || docker-compose up $(OPTIONS); \
 	fi
 
 run-wsl:
