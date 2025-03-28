@@ -76,14 +76,6 @@ dependencies = [
   "whatthepatch>=1.0.6",
   "zope-interface==7.2",
 ]
-
-[project.urls]
-Homepage = "https://github.com/hanzoai/dev"
-Repository = "https://github.com/hanzoai/dev"
-
-[project.scripts]
-dev = "dev.core.cli:main"
-
 [project.optional-dependencies]
 dev = [
   "build",
@@ -133,6 +125,11 @@ testgeneval = [
   "rouge>=1.0.1",
   "tree-sitter-python>=0.23.6",
 ]
+[project.urls]
+Homepage = "https://github.com/hanzoai/dev"
+Repository = "https://github.com/hanzoai/dev"
+[project.scripts]
+dev = "dev.core.cli:main"
 
 [build-system]
 requires = [
