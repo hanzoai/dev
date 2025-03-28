@@ -153,7 +153,7 @@ install-python-dependencies:
 	fi; \
 	if [ ! -d ".venv" ]; then \
 		echo "$(BLUE)No virtual environment found. Creating one using 'uv venv --python=python$(PYTHON_VERSION) .venv'...$(RESET)"; \
-		uv venv --python=python$(PYTHON_VERSION) .venv; \
+		uv venv --python=python$(PYTHON_VERSION) .venv || { echo "$(RED)Failed to create virtual environment.$(RESET)"; exit 1; }; \
 	else \
 		VENV_PY_VERSION=`.venv/bin/python --version 2>&1 | awk '{print $$2}'`; \
 		echo "$(BLUE)Found virtual environment Python version: $$VENV_PY_VERSION$(RESET)"; \
@@ -162,13 +162,18 @@ install-python-dependencies:
 		else \
 			echo "$(YELLOW)Virtual environment version ($$VENV_PY_VERSION) does not match target $(PYTHON_VERSION). Recreating...$(RESET)"; \
 			rm -rf .venv; \
-			uv venv --python=python$(PYTHON_VERSION) .venv; \
+			uv venv --python=python$(PYTHON_VERSION) .venv || { echo "$(RED)Failed to create virtual environment.$(RESET)"; exit 1; }; \
 		fi; \
 	fi; \
-	echo "$(BLUE)Upgrading pip, setuptools, and wheel...$(RESET)"; \
-	source .venv/bin/activate && pip install --upgrade pip setuptools wheel; \
-	echo "$(BLUE)Activating virtual environment and installing project dependencies via pip...$(RESET)"; \
-	source .venv/bin/activate && pip install .; \
+	echo "$(BLUE)Installing project in development mode with uv...$(RESET)"; \
+	source .venv/bin/activate && uv pip install -e . || { \
+		echo "$(YELLOW)Installation with uv failed. Trying with pip in development mode...$(RESET)"; \
+		source .venv/bin/activate && pip install -e . || { \
+			echo "$(RED)Installation failed. Check your pyproject.toml for deprecated configurations.$(RESET)"; \
+			echo "$(YELLOW)Hint: If you're seeing license deprecation warnings, update the license format in pyproject.toml.$(RESET)"; \
+			exit 1; \
+		}; \
+	}; \
 	echo "$(GREEN)Python dependencies installed.$(RESET)"
 
 install-frontend-dependencies:

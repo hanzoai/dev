@@ -934,8 +934,8 @@ describe("Settings Screen", () => {
       const user = userEvent.setup();
       renderSettingsScreen();
 
-      const saveButton = screen.queryByTestId("save-changes-button") ||
-                       screen.getByText("Save Changes");
+      // Wait for the save button to be rendered
+      const saveButton = await screen.findByTestId("save-changes-button");
       await user.click(saveButton);
 
       expect(saveSettingsSpy).toHaveBeenCalledWith(
