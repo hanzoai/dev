@@ -13,7 +13,7 @@ C'est le Runtime par défaut qui est utilisé lorsque vous démarrez Dev. Vous r
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -58,8 +58,8 @@ Pour utiliser le Runtime Hanzo, définissez les variables d'environnement suivan
 ```bash
 docker run # ...
     -e RUNTIME=remote \
-    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.all-hands.dev" \
-    -e SANDBOX_API_KEY="votre-clé-api-all-hands" \
+    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
+    -e SANDBOX_API_KEY="votre-clé-api-dev" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```

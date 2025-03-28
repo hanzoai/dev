@@ -2,7 +2,7 @@
 
 
 # API base URL
-BASE_URL="https://runtime.eval.all-hands.dev"
+BASE_URL="https://runtime.eval.hanzo.ai"
 
 # Get the list of runtimes
 response=$(curl --silent --location --request GET "${BASE_URL}/list" \

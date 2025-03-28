@@ -1,4 +1,4 @@
-import { openHands } from "./open-hands-axios";
+import { openHands } from "./dev-axios";
 
 class InvariantService {
   static async getPolicy() {

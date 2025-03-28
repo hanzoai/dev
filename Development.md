@@ -60,7 +60,7 @@ Note: If you have previously run Dev using the docker command, you may have alre
 Environment variables > config.toml variables > default variables
 
 **Note on Alternative Models:**
-See [our documentation](https://docs.all-hands.dev/modules/usage/llms) for recommended models.
+See [our documentation](https://docs.hanzo.ai/modules/usage/llms) for recommended models.
 
 ### 4. Running the application
 

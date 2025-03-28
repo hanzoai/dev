@@ -5,7 +5,7 @@ Example usage:
 ```bash
 export HANZO_API_KEY="YOUR_API_KEY"
 export RUNTIME=remote
-export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.staging.all-hands.dev"
+export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.staging.hanzo.ai"
 poetry run pytest -vvxss tests/runtime/test_stress_remote_runtime.py
 ```
 

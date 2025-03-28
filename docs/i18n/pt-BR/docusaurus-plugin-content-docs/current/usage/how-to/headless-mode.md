@@ -32,7 +32,7 @@ Para executar o Dev no modo Headless com Docker:
 ```bash
 docker run -it \
     --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -e SANDBOX_USER_ID=$(id -u) \
     -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
     -e LLM_API_KEY=$LLM_API_KEY \
@@ -43,7 +43,7 @@ docker run -it \
     -v ~/.dev-state:/.dev-state \
     --add-host host.docker.internal:host-gateway \
     --name dev-app-$(date +%Y%m%d%H%M%S) \
-    docker.all-hands.dev/hanzoai/dev:0.30 \
+    docker.hanzo.ai/hanzoai/dev:0.30 \
     python -m dev.core.main -t "escreva um script bash que imprima oi"
 ```
 

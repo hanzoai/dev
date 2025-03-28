@@ -379,9 +379,9 @@ jobs:
             -p 3000:3000 \
             -v /var/run/docker.sock:/var/run/docker.sock \
             --add-host host.docker.internal:host-gateway \
-            -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:$SHORT_SHA-nikolaik \
+            -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:$SHORT_SHA-nikolaik \
             --name dev-app-$SHORT_SHA \
-            docker.all-hands.dev/all-hands-ai/dev:$SHORT_SHA"
+            docker.hanzo.ai/hanzoai/dev:$SHORT_SHA"
 
           PR_BODY=$(gh pr view $PR_NUMBER --json body --jq .body)
 

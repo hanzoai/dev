@@ -59,4 +59,4 @@ Exécutez Dev en exécutant ```make run``` dans le répertoire de niveau supéri
 
 ## Explication Technique
 
-Veuillez vous référer à la [section image docker personnalisée de la documentation d'exécution](https://docs.all-hands.dev/modules/usage/architecture/runtime#advanced-how-dev-builds-and-maintains-od-runtime-images) pour plus de détails.
+Veuillez vous référer à la [section image docker personnalisée de la documentation d'exécution](https://docs.hanzo.ai/modules/usage/architecture/runtime#advanced-how-dev-builds-and-maintains-od-runtime-images) pour plus de détails.

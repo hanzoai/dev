@@ -58,25 +58,25 @@
 A maneira mais fácil de executar o Dev é no Docker.
 
 ```bash
-docker pull docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik
+docker pull docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v ~/.dev-state:/.dev-state \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name dev-app \
-    docker.all-hands.dev/hanzoai/dev:0.30
+    docker.hanzo.ai/hanzoai/dev:0.30
 ```
 
 Você encontrará o Dev em execução em http://localhost:3000!
 
-Você também pode [conectar o Dev ao seu sistema de arquivos local](https://docs.all-hands.dev/modules/usage/runtimes#connecting-to-your-filesystem),
-executar o Dev em um [modo headless programável](https://docs.all-hands.dev/modules/usage/how-to/headless-mode),
-interagir com ele através de uma [CLI amigável](https://docs.all-hands.dev/modules/usage/how-to/cli-mode),
-ou executá-lo em issues marcadas com [uma ação do GitHub](https://docs.all-hands.dev/modules/usage/how-to/github-action).
+Você também pode [conectar o Dev ao seu sistema de arquivos local](https://docs.hanzo.ai/modules/usage/runtimes#connecting-to-your-filesystem),
+executar o Dev em um [modo headless programável](https://docs.hanzo.ai/modules/usage/how-to/headless-mode),
+interagir com ele através de uma [CLI amigável](https://docs.hanzo.ai/modules/usage/how-to/cli-mode),
+ou executá-lo em issues marcadas com [uma ação do GitHub](https://docs.hanzo.ai/modules/usage/how-to/github-action).
 
 ## Configuração
 
@@ -101,4 +101,4 @@ Você pode escolher a tag que melhor se adapta às suas necessidades com base no
 
 Para o fluxo de trabalho de desenvolvimento, consulte [Development.md](https://github.com/hanzoai/dev/blob/main/Development.md).
 
-Está tendo problemas? Confira nosso [Guia de Solução de Problemas](https://docs.all-hands.dev/modules/usage/troubleshooting).
+Está tendo problemas? Confira nosso [Guia de Solução de Problemas](https://docs.hanzo.ai/modules/usage/troubleshooting).

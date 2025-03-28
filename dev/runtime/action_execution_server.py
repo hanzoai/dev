@@ -278,9 +278,9 @@ class ActionExecutor:
 
     async def _init_bash_commands(self):
         INIT_COMMANDS = [
-            'git config --file ./.git_config user.name "dev" && git config --file ./.git_config user.email "dev@all-hands.dev" && alias git="git --no-pager" && export GIT_CONFIG=$(pwd)/.git_config'
+            'git config --file ./.git_config user.name "dev" && git config --file ./.git_config user.email "dev@hanzo.ai" && alias git="git --no-pager" && export GIT_CONFIG=$(pwd)/.git_config'
             if os.environ.get('LOCAL_RUNTIME_MODE') == '1'
-            else 'git config --global user.name "dev" && git config --global user.email "dev@all-hands.dev" && alias git="git --no-pager"'
+            else 'git config --global user.name "dev" && git config --global user.email "dev@hanzo.ai" && alias git="git --no-pager"'
         ]
         logger.debug(f'Initializing by running {len(INIT_COMMANDS)} bash commands...')
         for command in INIT_COMMANDS:

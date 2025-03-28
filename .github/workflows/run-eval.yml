@@ -37,7 +37,7 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             -d "{\"ref\": \"main\", \"inputs\": {\"github-repo\": \"${REPO_URL}\", \"github-branch\": \"${PR_BRANCH}\", \"pr-number\": \"${{ github.event.pull_request.number }}\", \"eval-instances\": \"${EVAL_INSTANCES}\"}}" \
-            https://api.github.com/repos/All-Hands-AI/evaluation/actions/workflows/create-branch.yml/dispatches
+            https://api.github.com/repos/hanzoai/evaluation/actions/workflows/create-branch.yml/dispatches
 
           # Send Slack message
           PR_URL="https://github.com/${{ github.repository }}/pull/${{ github.event.pull_request.number }}"

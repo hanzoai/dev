@@ -1,5 +1,5 @@
 import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
-import { openHands } from "./open-hands-axios";
+import { openHands } from "./dev-axios";
 
 /**
  * Retrieves repositories where Dev Github App has been installed

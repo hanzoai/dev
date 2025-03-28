@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AnalyticsConsentFormModal } from "#/components/features/analytics/analytics-consent-form-modal";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { AuthProvider } from "#/context/auth-context";
 
 describe("AnalyticsConsentFormModal", () => {

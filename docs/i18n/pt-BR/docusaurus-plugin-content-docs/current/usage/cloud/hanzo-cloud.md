@@ -5,7 +5,7 @@ O Dev Cloud é a versão hospedada na nuvem do Dev da Hanzo AI.
 ## Acessando o Dev Cloud
 
 Atualmente, os usuários estão sendo admitidos para acessar o Dev Cloud em ondas. Para se inscrever,
-[entre na lista de espera](https://www.all-hands.dev/join-waitlist). Assim que for aprovado, você receberá um e-mail com
+[entre na lista de espera](https://www.hanzo.ai/join-waitlist). Assim que for aprovado, você receberá um e-mail com
 instruções sobre como acessá-lo.
 
 ## Primeiros Passos

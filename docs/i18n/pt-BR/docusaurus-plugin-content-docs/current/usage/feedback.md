@@ -19,7 +19,7 @@ Quando você envia dados, você pode enviá-los publicamente ou privadamente.
 
 ### Quem coleta e armazena os dados?
 
-Os dados são coletados e armazenados pela [Hanzo AI](https://all-hands.dev), uma empresa fundada pelos mantenedores do Dev para apoiar e melhorar o Dev.
+Os dados são coletados e armazenados pela [Hanzo AI](https://hanzo.ai), uma empresa fundada pelos mantenedores do Dev para apoiar e melhorar o Dev.
 
 ### Como os dados públicos serão divulgados?
 
@@ -35,4 +35,4 @@ Para dados nos servidores da Hanzo AI, teremos prazer em excluí-los mediante so
 
 **Uma Parte dos Dados:** Se você deseja que uma parte dos dados seja excluída, em breve adicionaremos um mecanismo para excluir partes dos dados usando o link e a senha exibidos na interface quando você envia os dados.
 
-**Todos os Dados:** Se você deseja que todas as partes de seus dados sejam excluídas, ou se você não possui o ID e a senha que recebeu ao enviar os dados, entre em contato com `contact@all-hands.dev` a partir do endereço de e-mail que você registrou quando enviou os dados originalmente.
+**Todos os Dados:** Se você deseja que todas as partes de seus dados sejam excluídas, ou se você não possui o ID e a senha que recebeu ao enviar os dados, entre em contato com `contact@hanzo.ai` a partir do endereço de e-mail que você registrou quando enviou os dados originalmente.

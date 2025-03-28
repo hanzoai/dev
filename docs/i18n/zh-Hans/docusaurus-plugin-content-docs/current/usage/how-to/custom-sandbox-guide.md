@@ -57,4 +57,4 @@ base_container_image="custom-image"
 
 ## 技术解释
 
-请参阅[运行时文档的自定义 docker 镜像部分](https://docs.all-hands.dev/modules/usage/architecture/runtime#advanced-how-dev-builds-and-maintains-od-runtime-images)以获取更多详细信息。
+请参阅[运行时文档的自定义 docker 镜像部分](https://docs.hanzo.ai/modules/usage/architecture/runtime#advanced-how-dev-builds-and-maintains-od-runtime-images)以获取更多详细信息。

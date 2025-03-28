@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "test-utils";
 import { vi, describe, afterEach, it, expect } from "vitest";
 import TreeNode from "#/components/features/file-explorer/tree-node";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 const getFileSpy = vi.spyOn(Dev, "getFile");
 const getFilesSpy = vi.spyOn(Dev, "getFiles");

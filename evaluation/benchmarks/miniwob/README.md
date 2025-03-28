@@ -30,7 +30,7 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 # Example - This runs evaluation on BrowsingAgent for 125 instances on miniwob, with 2 workers running in parallel
 export HANZO_API_KEY="YOUR-API-KEY"
 export RUNTIME=remote
-export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
+export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai"
 ./evaluation/benchmarks/miniwob/scripts/run_infer.sh llm.eval HEAD BrowsingAgent "" 125 2
 ```
 

@@ -13,7 +13,7 @@ export function WaitlistMessage({ content }: WaitlistMessageProps) {
         <p>
           or{" "}
           <a
-            href="https://www.all-hands.dev/join-waitlist"
+            href="https://www.hanzo.ai/join-waitlist"
             target="_blank"
             rel="noreferrer noopener"
             className="text-blue-500 hover:underline underline-offset-2"

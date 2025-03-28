@@ -6,7 +6,7 @@ Dev peut se connecter à n'importe quel LLM supporté par LiteLLM. Cependant, il
 
 ## Recommandations de modèles
 
-Sur la base de nos évaluations des modèles de langage pour les tâches de codage (en utilisant le jeu de données SWE-bench), nous pouvons fournir quelques recommandations pour la sélection des modèles. Certaines analyses peuvent être trouvées dans [cet article de blog comparant les LLM](https://www.all-hands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed) et [cet article de blog avec des résultats plus récents](https://www.all-hands.dev/blog/dev-codeact-21-an-open-state-of-the-art-software-development-agent).
+Sur la base de nos évaluations des modèles de langage pour les tâches de codage (en utilisant le jeu de données SWE-bench), nous pouvons fournir quelques recommandations pour la sélection des modèles. Certaines analyses peuvent être trouvées dans [cet article de blog comparant les LLM](https://www.hanzo.ai/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed) et [cet article de blog avec des résultats plus récents](https://www.hanzo.ai/blog/dev-codeact-21-an-open-state-of-the-art-software-development-agent).
 
 Lors du choix d'un modèle, considérez à la fois la qualité des sorties et les coûts associés. Voici un résumé des résultats :
 
@@ -14,7 +14,7 @@ Lors du choix d'un modèle, considérez à la fois la qualité des sorties et le
 - GPT-4o est à la traîne, et o1-mini a en fait obtenu des performances légèrement inférieures à celles de GPT-4o. Nous avons analysé les résultats un peu, et brièvement, il semblait que o1 "réfléchissait trop" parfois, effectuant des tâches de configuration d'environnement supplémentaires alors qu'il aurait pu simplement aller de l'avant et terminer la tâche.
 - Enfin, les modèles ouverts les plus puissants étaient Llama 3.1 405 B et deepseek-v2.5, et ils ont obtenu des performances raisonnables, surpassant même certains des modèles fermés.
 
-Veuillez vous référer à [l'article complet](https://www.all-hands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed) pour plus de détails.
+Veuillez vous référer à [l'article complet](https://www.hanzo.ai/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed) pour plus de détails.
 
 Sur la base de ces résultats et des commentaires de la communauté, il a été vérifié que les modèles suivants fonctionnent raisonnablement bien avec Dev :
 

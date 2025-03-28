@@ -16,7 +16,7 @@
   <a href="https://discord.gg/ESHStjSjD4"><img src="https://img.shields.io/badge/Discord-Join%20Us-purple?logo=discord&logoColor=white&style=for-the-badge" alt="Join our Discord community"></a>
   <a href="https://github.com/hanzoai/dev/blob/main/CREDITS.md"><img src="https://img.shields.io/badge/Project-Credits-blue?style=for-the-badge&color=FFE165&logo=github&logoColor=white" alt="Credits"></a>
   <br/>
-  <a href="https://docs.all-hands.dev/modules/usage/getting-started"><img src="https://img.shields.io/badge/Documentation-000?logo=googledocs&logoColor=FFE165&style=for-the-badge" alt="Check out the documentation"></a>
+  <a href="https://docs.hanzo.ai/modules/usage/getting-started"><img src="https://img.shields.io/badge/Documentation-000?logo=googledocs&logoColor=FFE165&style=for-the-badge" alt="Check out the documentation"></a>
   <a href="https://arxiv.org/abs/2407.16741"><img src="https://img.shields.io/badge/Paper%20on%20Arxiv-000?logoColor=FFE165&logo=arxiv&style=for-the-badge" alt="Paper on Arxiv"></a>
   <a href="https://huggingface.co/spaces/Dev/evaluation"><img src="https://img.shields.io/badge/Benchmark%20score-000?logoColor=FFE165&logo=huggingface&style=for-the-badge" alt="Evaluation Benchmark Score"></a>
   <hr>
@@ -27,7 +27,7 @@ Welcome to Dev (formerly OpenDevin), a platform for software development agents 
 Dev agents can do anything a human developer can: modify code, run commands, browse the web,
 call APIs, and yes—even copy code snippets from StackOverflow.
 
-Learn more at [docs.all-hands.dev](https://docs.all-hands.dev), or jump to the [Quick Start](#-quick-start).
+Learn more at [docs.hanzo.ai](https://docs.hanzo.ai), or jump to the [Quick Start](#-quick-start).
 
 > [!IMPORTANT]
 > Using Dev for work? We'd love to chat! Fill out
@@ -39,41 +39,41 @@ Learn more at [docs.all-hands.dev](https://docs.all-hands.dev), or jump to the [
 ## ⚡ Quick Start
 
 The easiest way to run Dev is in Docker.
-See the [Running Dev](https://docs.all-hands.dev/modules/usage/installation) guide for
+See the [Running Dev](https://docs.hanzo.ai/modules/usage/installation) guide for
 system requirements and more information.
 
 ```bash
-docker pull docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik
+docker pull docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v ~/.dev-state:/.dev-state \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name dev-app \
-    docker.all-hands.dev/hanzoai/dev:0.30
+    docker.hanzo.ai/hanzoai/dev:0.30
 ```
 
 > [!WARNING]
-> On a public network? See our [Hardened Docker Installation](https://docs.all-hands.dev/modules/usage/runtimes/docker#hardened-docker-installation) guide
+> On a public network? See our [Hardened Docker Installation](https://docs.hanzo.ai/modules/usage/runtimes/docker#hardened-docker-installation) guide
 > to secure your deployment by restricting network binding and implementing additional security measures.
 
 You'll find Dev running at [http://localhost:3000](http://localhost:3000)!
 
 Finally, you'll need a model provider and API key.
 [Anthropic's Claude 3.5 Sonnet](https://www.anthropic.com/api) (`anthropic/claude-3-5-sonnet-20241022`)
-works best, but you have [many options](https://docs.all-hands.dev/modules/usage/llms).
+works best, but you have [many options](https://docs.hanzo.ai/modules/usage/llms).
 
 ---
 
-You can also [connect Dev to your local filesystem](https://docs.all-hands.dev/modules/usage/runtimes#connecting-to-your-filesystem),
-run Dev in a scriptable [headless mode](https://docs.all-hands.dev/modules/usage/how-to/headless-mode),
-interact with it via a [friendly CLI](https://docs.all-hands.dev/modules/usage/how-to/cli-mode),
-or run it on tagged issues with [a github action](https://docs.all-hands.dev/modules/usage/how-to/github-action).
+You can also [connect Dev to your local filesystem](https://docs.hanzo.ai/modules/usage/runtimes#connecting-to-your-filesystem),
+run Dev in a scriptable [headless mode](https://docs.hanzo.ai/modules/usage/how-to/headless-mode),
+interact with it via a [friendly CLI](https://docs.hanzo.ai/modules/usage/how-to/cli-mode),
+or run it on tagged issues with [a github action](https://docs.hanzo.ai/modules/usage/how-to/github-action).
 
-Visit [Running Dev](https://docs.all-hands.dev/modules/usage/installation) for more information and setup instructions.
+Visit [Running Dev](https://docs.hanzo.ai/modules/usage/installation) for more information and setup instructions.
 
 > [!CAUTION]
 > Dev is meant to be run by a single user on their local workstation.
@@ -85,12 +85,12 @@ Visit [Running Dev](https://docs.all-hands.dev/modules/usage/installation) for m
 
 If you want to modify the Dev source code, check out [Development.md](https://github.com/hanzoai/dev/blob/main/Development.md).
 
-Having issues? The [Troubleshooting Guide](https://docs.all-hands.dev/modules/usage/troubleshooting) can help.
+Having issues? The [Troubleshooting Guide](https://docs.hanzo.ai/modules/usage/troubleshooting) can help.
 
 ## 📖 Documentation
 
 To learn more about the project, and for tips on using Dev,
-check out our [documentation](https://docs.all-hands.dev/modules/usage/getting-started).
+check out our [documentation](https://docs.hanzo.ai/modules/usage/getting-started).
 
 There you'll find resources on how to use different LLM providers,
 troubleshooting resources, and advanced configuration options.

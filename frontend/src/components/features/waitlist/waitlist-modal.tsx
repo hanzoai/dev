@@ -1,5 +1,5 @@
 import React from "react";
-import HanzoLogo from "#/assets/branding/all-hands-logo.svg?react";
+import HanzoLogo from "#/assets/branding/hanzo-logo.svg?react";
 import { JoinWaitlistAnchor } from "./join-waitlist-anchor";
 import { WaitlistMessage } from "./waitlist-message";
 import { ModalBackdrop } from "#/components/shared/modals/modal-backdrop";

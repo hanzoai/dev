@@ -58,25 +58,25 @@ A system with a modern processor and a minimum of **4GB RAM** is recommended to 
 The easiest way to run Dev is in Docker.
 
 ```bash
-docker pull docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik
+docker pull docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik
 
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -e LOG_ALL_EVENTS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v ~/.dev-state:/.dev-state \
     -p 3000:3000 \
     --add-host host.docker.internal:host-gateway \
     --name dev-app \
-    docker.all-hands.dev/hanzoai/dev:0.30
+    docker.hanzo.ai/hanzoai/dev:0.30
 ```
 
 You'll find Dev running at http://localhost:3000!
 
-You can also [connect Dev to your local filesystem](https://docs.all-hands.dev/modules/usage/runtimes#connecting-to-your-filesystem),
-run Dev in a scriptable [headless mode](https://docs.all-hands.dev/modules/usage/how-to/headless-mode),
-interact with it via a [friendly CLI](https://docs.all-hands.dev/modules/usage/how-to/cli-mode),
-or run it on tagged issues with [a GitHub action](https://docs.all-hands.dev/modules/usage/how-to/github-action).
+You can also [connect Dev to your local filesystem](https://docs.hanzo.ai/modules/usage/runtimes#connecting-to-your-filesystem),
+run Dev in a scriptable [headless mode](https://docs.hanzo.ai/modules/usage/how-to/headless-mode),
+interact with it via a [friendly CLI](https://docs.hanzo.ai/modules/usage/how-to/cli-mode),
+or run it on tagged issues with [a GitHub action](https://docs.hanzo.ai/modules/usage/how-to/github-action).
 
 ## Setup
 
@@ -119,4 +119,4 @@ You can choose the tag that best suits your needs based on stability requirement
 
 For the development workflow, see [Development.md](https://github.com/hanzoai/dev/blob/main/Development.md).
 
-Are you having trouble? Check out our [Troubleshooting Guide](https://docs.all-hands.dev/modules/usage/troubleshooting).
+Are you having trouble? Check out our [Troubleshooting Guide](https://docs.hanzo.ai/modules/usage/troubleshooting).

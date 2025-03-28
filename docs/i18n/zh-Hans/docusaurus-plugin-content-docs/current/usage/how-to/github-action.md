@@ -46,4 +46,4 @@ Github resolver 将自动检查有效的 [仓库机密](https://docs.github.com/
 | `LLM_MODEL`                      | Variable | 设置与 Dev 一起使用的 LLM                                                                | `LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"`   |
 | `DEV_MAX_ITER`             | Variable | 设置代理迭代的最大限制                                                                             | `DEV_MAX_ITER=10`                              |
 | `DEV_MACRO`                | Variable | 自定义用于调用 resolver 的默认宏                                                                   | `DEV_MACRO=@resolveit`                         |
-| `DEV_BASE_CONTAINER_IMAGE` | Variable | 自定义沙箱 ([了解更多](https://docs.all-hands.dev/modules/usage/how-to/custom-sandbox-guide))   | `DEV_BASE_CONTAINER_IMAGE="custom_image"`      |
+| `DEV_BASE_CONTAINER_IMAGE` | Variable | 自定义沙箱 ([了解更多](https://docs.hanzo.ai/modules/usage/how-to/custom-sandbox-guide))   | `DEV_BASE_CONTAINER_IMAGE="custom_image"`      |

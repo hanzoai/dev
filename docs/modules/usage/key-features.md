@@ -1,7 +1,7 @@
 
 # Dev Feature Overview
 
-![overview](https://www.all-hands.dev/assets/product/product-slide-1.webp)
+![overview](https://www.hanzo.ai/assets/product/product-slide-1.webp)
 
 ## 1. Workspace
 The Workspace feature provides a comprehensive development environment with the following key capabilities:

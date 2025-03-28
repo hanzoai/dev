@@ -4,7 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUpdateConversation } from "./mutation/use-update-conversation";
 import { RootState } from "#/store";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { useUserConversation } from "#/hooks/query/use-user-conversation";
 
 const defaultTitlePattern = /^Conversation [a-f0-9]+$/;

@@ -48,4 +48,4 @@ Les options de personnalisation que vous pouvez définir sont :
 | `LLM_MODEL`                      | Variable | Définir le LLM à utiliser avec Dev                                                                    | `LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"`   |
 | `DEV_MAX_ITER`             | Variable | Définir la limite maximale pour les itérations de l'agent                                                   | `DEV_MAX_ITER=10`                              |
 | `DEV_MACRO`                | Variable | Personnaliser la macro par défaut pour invoquer le resolver                                                 | `DEV_MACRO=@resolveit`                         |
-| `DEV_BASE_CONTAINER_IMAGE` | Variable | Sandbox personnalisé ([en savoir plus](https://docs.all-hands.dev/modules/usage/how-to/custom-sandbox-guide))| `DEV_BASE_CONTAINER_IMAGE="custom_image"`      |
+| `DEV_BASE_CONTAINER_IMAGE` | Variable | Sandbox personnalisé ([en savoir plus](https://docs.hanzo.ai/modules/usage/how-to/custom-sandbox-guide))| `DEV_BASE_CONTAINER_IMAGE="custom_image"`      |

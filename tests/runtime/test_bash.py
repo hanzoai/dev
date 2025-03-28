@@ -496,7 +496,7 @@ def test_git_operation(temp_dir, runtime_cls):
             logger.info('Setting git config author')
             obs = _run_cmd_action(
                 runtime,
-                'git config --file ./.git_config user.name "dev" && git config --file ./.git_config user.email "dev@all-hands.dev"',
+                'git config --file ./.git_config user.name "dev" && git config --file ./.git_config user.email "dev@hanzo.ai"',
             )
             assert obs.exit_code == 0
 

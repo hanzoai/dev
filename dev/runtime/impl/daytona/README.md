@@ -57,14 +57,14 @@ This command pulls and runs the Dev container using Docker. Once executed, Dev s
 
 ```bash
 docker run -it --rm --pull=always \
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:${DEV_VERSION}-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:${DEV_VERSION}-nikolaik \
     -e LOG_ALL_EVENTS=true \
     -e RUNTIME=daytona \
     -e DAYTONA_API_KEY=${DAYTONA_API_KEY} \
     -v ~/.dev-state:/.dev-state \
     -p 3000:3000 \
     --name dev-app \
-    docker.all-hands.dev/hanzoai/dev:${DEV_VERSION}
+    docker.hanzo.ai/hanzoai/dev:${DEV_VERSION}
 ```
 
 > **Tip:** If you don't want your sandboxes to default to the EU region, you can set the `DAYTONA_TARGET` environment variable to `us`

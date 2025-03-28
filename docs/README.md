@@ -2,7 +2,7 @@
 
 This website is built using [Docusaurus](https://docusaurus.io/).
 
-When published, the content will be published at https://docs.all-hands.dev/.
+When published, the content will be published at https://docs.hanzo.ai/.
 
 ### Installation
 

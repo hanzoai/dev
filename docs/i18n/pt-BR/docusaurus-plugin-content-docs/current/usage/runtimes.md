@@ -13,7 +13,7 @@ Este é o Runtime padrão que é usado quando você inicia o Dev. Você pode not
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -51,7 +51,7 @@ Essa configuração pode causar alguns problemas com permissões de arquivo (da�
 
 ## Dev Remote Runtime
 
-O Dev Remote Runtime está atualmente em beta (leia [aqui](https://runtime.all-hands.dev/) para mais detalhes), ele permite que você inicie runtimes em paralelo na nuvem. Preencha [este formulário](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZjCtr7aoBFI2Mwdan3f75J_TrdMS1JV2g/viewform) para se inscrever se quiser experimentar isso!
+O Dev Remote Runtime está atualmente em beta (leia [aqui](https://runtime.hanzo.ai/) para mais detalhes), ele permite que você inicie runtimes em paralelo na nuvem. Preencha [este formulário](https://docs.google.com/forms/d/e/1FAIpQLSckVz_JFwg2_mOxNZjCtr7aoBFI2Mwdan3f75J_TrdMS1JV2g/viewform) para se inscrever se quiser experimentar isso!
 
 NOTA: Este runtime é projetado especificamente apenas para fins de avaliação de agentes por meio do [harness de avaliação do Dev](https://github.com/hanzoai/dev/tree/main/evaluation). Ele não deve ser usado para iniciar aplicativos Dev em produção.
 

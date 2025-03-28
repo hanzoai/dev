@@ -3,7 +3,7 @@
 本指南详细介绍了 Dev 的所有可用配置选项,帮助您自定义其行为并与其他服务集成。
 
 :::note
-如果您在 [GUI 模式](https://docs.all-hands.dev/modules/usage/how-to/gui-mode) 下运行,Settings UI 中的可用设置将始终优先。
+如果您在 [GUI 模式](https://docs.hanzo.ai/modules/usage/how-to/gui-mode) 下运行,Settings UI 中的可用设置将始终优先。
 :::
 
 ---

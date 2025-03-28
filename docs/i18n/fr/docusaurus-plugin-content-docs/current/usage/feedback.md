@@ -21,7 +21,7 @@ Lorsque vous soumettez des données, vous pouvez les soumettre publiquement ou e
 
 ### Qui collecte et stocke les données ?
 
-Les données sont collectées et stockées par [Hanzo AI](https://all-hands.dev), une entreprise fondée par les mainteneurs d'Dev pour soutenir et améliorer Dev.
+Les données sont collectées et stockées par [Hanzo AI](https://hanzo.ai), une entreprise fondée par les mainteneurs d'Dev pour soutenir et améliorer Dev.
 
 ### Comment les données publiques seront-elles publiées ?
 
@@ -38,4 +38,4 @@ Pour les données sur les serveurs d'Hanzo AI, nous sommes heureux de les suppri
 
 **Une pièce de données :** Si vous souhaitez supprimer une pièce de données, nous ajouterons prochainement un mécanisme pour supprimer les pièces de données en utilisant le lien et le mot de passe qui s'affichent sur l'interface lorsque vous soumettez des données.
 
-**Toutes les données :** Si vous souhaitez que toutes vos données soient supprimées, ou si vous n'avez pas l'ID et le mot de passe que vous avez reçus lors de la soumission des données, veuillez contacter `contact@all-hands.dev` à partir de l'adresse e-mail que vous avez enregistrée lorsque vous avez initialement soumis les données.
+**Toutes les données :** Si vous souhaitez que toutes vos données soient supprimées, ou si vous n'avez pas l'ID et le mot de passe que vous avez reçus lors de la soumission des données, veuillez contacter `contact@hanzo.ai` à partir de l'adresse e-mail que vous avez enregistrée lorsque vous avez initialement soumis les données.

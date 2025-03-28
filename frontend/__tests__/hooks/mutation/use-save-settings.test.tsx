@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { useSaveSettings } from "#/hooks/mutation/use-save-settings";
 import { AuthProvider } from "#/context/auth-context";
 

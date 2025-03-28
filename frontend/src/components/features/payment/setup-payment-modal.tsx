@@ -1,9 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { Trans, useTranslation } from "react-i18next";
-import HanzoLogo from "#/assets/branding/all-hands-logo.svg?react";
+import HanzoLogo from "#/assets/branding/hanzo-logo.svg?react";
 import { ModalBackdrop } from "#/components/shared/modals/modal-backdrop";
 import { ModalBody } from "#/components/shared/modals/modal-body";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { BrandButton } from "../settings/brand-button";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 

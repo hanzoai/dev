@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "test-utils";
 import { screen, waitFor } from "@testing-library/react";
 import App from "#/routes/_oh.app/route";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import * as CustomToast from "#/utils/custom-toast-handlers";
 
 describe("App", () => {

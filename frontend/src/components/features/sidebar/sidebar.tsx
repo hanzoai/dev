@@ -5,7 +5,7 @@ import posthog from "posthog-js";
 import { NavLink, useLocation } from "react-router";
 import { useGitHubUser } from "#/hooks/query/use-github-user";
 import { UserActions } from "./user-actions";
-import { HanzoLogoButton } from "#/components/shared/buttons/all-hands-logo-button";
+import { HanzoLogoButton } from "#/components/shared/buttons/hanzo-logo-button";
 import { DocsButton } from "#/components/shared/buttons/docs-button";
 import { ExitProjectButton } from "#/components/shared/buttons/exit-project-button";
 import { SettingsButton } from "#/components/shared/buttons/settings-button";

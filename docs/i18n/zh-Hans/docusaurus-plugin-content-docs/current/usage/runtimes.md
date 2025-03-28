@@ -11,7 +11,7 @@
 
 ```
 docker run # ...
-    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/hanzoai/runtime:0.30-nikolaik \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.hanzo.ai/hanzoai/runtime:0.30-nikolaik \
     -v /var/run/docker.sock:/var/run/docker.sock \
     # ...
 ```
@@ -56,8 +56,8 @@ Hanzo 运行时目前处于测试阶段。您可以通过加入 Slack 上的 #re
 ```bash
 docker run # ...
     -e RUNTIME=remote \
-    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.all-hands.dev" \
-    -e SANDBOX_API_KEY="your-all-hands-api-key" \
+    -e SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.app.hanzo.ai" \
+    -e SANDBOX_API_KEY="your-dev-api-key" \
     -e SANDBOX_KEEP_RUNTIME_ALIVE="true" \
     # ...
 ```

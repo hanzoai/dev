@@ -1,4 +1,4 @@
-import { ErrorResponse, FileUploadSuccessResponse } from "./open-hands.types";
+import { ErrorResponse, FileUploadSuccessResponse } from "./dev.types";
 
 export const isDevErrorResponse = (
   data: ErrorResponse | FileUploadSuccessResponse,

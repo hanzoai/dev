@@ -65,7 +65,7 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 ./evaluation/benchmarks/commit0/scripts/run_infer.sh [repo_split] [model_config] [git-version] [agent] [eval_limit] [max_iter] [num_workers] [dataset] [dataset_split]
 
 # Example - This runs evaluation on CodeActAgent for 10 instances on "wentingzhao/commit0_combined"'s test set, with max 30 iteration per instances, with 1 number of workers running in parallel
-HANZO_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev" EVAL_DOCKER_IMAGE_PREFIX="docker.io/wentingzhao" \
+HANZO_API_KEY="YOUR-API-KEY" RUNTIME=remote SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai" EVAL_DOCKER_IMAGE_PREFIX="docker.io/wentingzhao" \
 ./evaluation/benchmarks/commit0/scripts/run_infer.sh lite llm.eval_sonnet HEAD CodeActAgent 10 30 1 wentingzhao/commit0_combined test
 ```
 

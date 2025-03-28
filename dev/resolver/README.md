@@ -40,7 +40,7 @@ Follow these steps to use this workflow in your own repository:
 
    Note: You can set these secrets at the organization level to use across multiple repositories.
 
-6. Set up any [custom configurations required](https://docs.all-hands.dev/modules/usage/how-to/github-action#custom-configurations)
+6. Set up any [custom configurations required](https://docs.hanzo.ai/modules/usage/how-to/github-action#custom-configurations)
 
 7. Usage:
    There are two ways to trigger the Dev agent:
@@ -62,7 +62,7 @@ Follow these steps to use this workflow in your own repository:
         2. Create a draft PR if successful, or push a branch if unsuccessful
         3. Comment on the issue with the results
 
-Need help? Feel free to [open an issue](https://github.com/hanzoai/dev/issues) or email us at [contact@all-hands.dev](mailto:contact@all-hands.dev).
+Need help? Feel free to [open an issue](https://github.com/hanzoai/dev/issues) or email us at [contact@hanzo.ai](mailto:contact@hanzo.ai).
 
 ## Manual Installation
 
@@ -200,4 +200,4 @@ You can customize how the AI agent approaches issue resolution by adding a `.dev
 ## Troubleshooting
 
 If you have any issues, please open an issue on this github or gitlab repo, we're happy to help!
-Alternatively, you can [email us](mailto:contact@all-hands.dev) or join the Dev Slack workspace (see [the README](/README.md) for an invite link).
+Alternatively, you can [email us](mailto:contact@hanzo.ai) or join the Dev Slack workspace (see [the README](/README.md) for an invite link).

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 export const useCreateStripeCheckoutSession = () =>
   useMutation({

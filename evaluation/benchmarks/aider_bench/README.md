@@ -67,7 +67,7 @@ This is in beta. Fill out [this form](https://docs.google.com/forms/d/e/1FAIpQLS
 # Example - This runs evaluation on CodeActAgent for 133 instances on aider_bench test set, with 2 workers running in parallel
 export HANZO_API_KEY="YOUR-API-KEY"
 export RUNTIME=remote
-export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
+export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai"
 ./evaluation/benchmarks/aider_bench/scripts/run_infer.sh llm.eval HEAD CodeActAgent 133 2
 ```
 

@@ -3,7 +3,7 @@ import {
   GetConfigResponse,
   Conversation,
   ResultSet,
-} from "#/api/open-hands.types";
+} from "#/api/dev.types";
 import { DEFAULT_SETTINGS } from "#/services/settings";
 import { STRIPE_BILLING_HANDLERS } from "./billing-handlers";
 import { ApiSettings, PostApiSettings } from "#/types/settings";

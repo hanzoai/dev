@@ -47,7 +47,7 @@ To use the remote runtime, set the following environment variables:
 # Required environment variables
 export HANZO_API_KEY="your-api-key"  # Contact the team to get an API key
 export RUNTIME=remote
-export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
+export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai"
 
 # Run the evaluation
 ./evaluation/benchmarks/agent_bench/scripts/run_infer.sh llm.eval_gpt4_1106_preview HEAD CodeActAgent 1

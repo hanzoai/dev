@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSelector } from "react-redux";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { useConversation } from "#/context/conversation-context";
 import { RootState } from "#/store";
 import { RUNTIME_INACTIVE_STATES } from "#/types/agent-state";

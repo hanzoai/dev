@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { useAuth } from "#/context/auth-context";
 import { useConfig } from "../query/use-config";
 

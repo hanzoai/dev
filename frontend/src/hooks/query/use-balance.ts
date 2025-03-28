@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConfig } from "./use-config";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 export const useBalance = () => {
   const { data: config } = useConfig();

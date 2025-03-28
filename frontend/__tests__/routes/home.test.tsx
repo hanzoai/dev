@@ -7,7 +7,7 @@ import { AxiosError } from "axios";
 import MainApp from "#/routes/_oh/route";
 import SettingsScreen from "#/routes/settings";
 import Home from "#/routes/_oh._index/route";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 const createAxiosNotFoundErrorObject = () =>
   new AxiosError(

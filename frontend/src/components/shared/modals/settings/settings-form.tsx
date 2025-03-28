@@ -104,7 +104,7 @@ export function SettingsForm({ settings, models, onClose }: SettingsFormProps) {
             testId="llm-api-key-help-anchor"
             text="Don't know your API key?"
             linkText="Click here for instructions"
-            href="https://docs.all-hands.dev/modules/usage/installation#getting-an-api-key"
+            href="https://docs.hanzo.ai/modules/usage/installation#getting-an-api-key"
           />
         </div>
 

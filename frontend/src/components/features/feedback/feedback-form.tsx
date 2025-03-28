@@ -2,12 +2,12 @@ import React from "react";
 import hotToast from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { I18nKey } from "#/i18n/declaration";
-import { Feedback } from "#/api/open-hands.types";
+import { Feedback } from "#/api/dev.types";
 import { useSubmitFeedback } from "#/hooks/mutation/use-submit-feedback";
 import { BrandButton } from "../settings/brand-button";
 
 const FEEDBACK_VERSION = "1.0";
-const VIEWER_PAGE = "https://www.all-hands.dev/share";
+const VIEWER_PAGE = "https://www.hanzo.ai/share";
 
 interface FeedbackFormProps {
   onClose: () => void;

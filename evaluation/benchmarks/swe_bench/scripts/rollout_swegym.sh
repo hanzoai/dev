@@ -24,7 +24,7 @@ if [ -z "$HANZO_API_KEY" ]; then
 else
     echo "HANZO_API_KEY is set. Continuing rollout and evaluation with remote runtime..."
     export RUNTIME=remote
-    export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.all-hands.dev"
+    export SANDBOX_REMOTE_RUNTIME_API_URL="https://runtime.eval.hanzo.ai"
     export EVAL_DOCKER_IMAGE_PREFIX="us-central1-docker.pkg.dev/evaluation-092424/swe-bench-images"
 fi
 

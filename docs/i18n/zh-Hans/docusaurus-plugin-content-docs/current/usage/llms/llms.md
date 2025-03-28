@@ -4,7 +4,7 @@ Dev 可以连接到 LiteLLM 支持的任何 LLM。但是，它需要一个强大
 
 ## 模型推荐
 
-根据我们对编码任务语言模型的评估（使用 SWE-bench 数据集），我们可以为模型选择提供一些建议。一些分析可以在[这篇比较 LLM 的博客文章](https://www.all-hands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed)和[这篇包含一些最新结果的博客文章](https://www.all-hands.dev/blog/dev-codeact-21-an-open-state-of-the-art-software-development-agent)中找到。
+根据我们对编码任务语言模型的评估（使用 SWE-bench 数据集），我们可以为模型选择提供一些建议。一些分析可以在[这篇比较 LLM 的博客文章](https://www.hanzo.ai/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed)和[这篇包含一些最新结果的博客文章](https://www.hanzo.ai/blog/dev-codeact-21-an-open-state-of-the-art-software-development-agent)中找到。
 
 在选择模型时，要同时考虑输出质量和相关成本。以下是调查结果的总结：
 
@@ -12,7 +12,7 @@ Dev 可以连接到 LiteLLM 支持的任何 LLM。但是，它需要一个强大
 - GPT-4o 落后于 Claude，而 o1-mini 的表现甚至比 GPT-4o 还要差一些。我们进行了一些分析，简单来说，o1 有时会"想得太多"，在可以直接完成任务的情况下执行额外的环境配置任务。
 - 最后，最强大的开放模型是 Llama 3.1 405 B 和 deepseek-v2.5，它们表现得相当不错，甚至超过了一些封闭模型。
 
-请参阅[完整文章](https://www.all-hands.dev/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed)了解更多详情。
+请参阅[完整文章](https://www.hanzo.ai/blog/evaluation-of-llms-as-coding-agents-on-swe-bench-at-30x-speed)了解更多详情。
 
 根据这些发现和社区反馈，以下模型已经验证可以与 Dev 很好地配合使用：
 

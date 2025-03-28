@@ -3,7 +3,7 @@
 Ce guide détaille toutes les options de configuration disponibles pour Dev, vous aidant à personnaliser son comportement et à l'intégrer avec d'autres services.
 
 :::note
-Si vous exécutez en [Mode GUI](https://docs.all-hands.dev/modules/usage/how-to/gui-mode), les paramètres disponibles dans l'interface utilisateur des paramètres auront toujours
+Si vous exécutez en [Mode GUI](https://docs.hanzo.ai/modules/usage/how-to/gui-mode), les paramètres disponibles dans l'interface utilisateur des paramètres auront toujours
 la priorité.
 :::
 

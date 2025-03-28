@@ -180,7 +180,7 @@ def make_commit(repo_dir: str, issue: Issue, issue_type: str) -> None:
         # If username is not set, configure git
         subprocess.run(
             f'git -C {repo_dir} config user.name "dev" && '
-            f'git -C {repo_dir} config user.email "dev@all-hands.dev" && '
+            f'git -C {repo_dir} config user.email "dev@hanzo.ai" && '
             f'git -C {repo_dir} config alias.git "git --no-pager"',
             shell=True,
             check=True,

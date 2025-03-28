@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "test-utils";
 import { createRoutesStub } from "react-router";
 import { ExpandableMessage } from "#/components/features/chat/expandable-message";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 vi.mock("react-i18next", async () => {
   const actual = await vi.importActual("react-i18next");

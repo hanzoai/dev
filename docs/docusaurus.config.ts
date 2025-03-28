@@ -8,7 +8,7 @@ const config: Config = {
   favicon: 'img/logo-square.png',
 
   // Set the production url of your site here
-  url: 'https://docs.all-hands.dev',
+  url: 'https://docs.hanzo.ai',
   baseUrl: '/',
 
   // GitHub pages deployment config.
@@ -80,7 +80,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://all-hands.dev',
+          href: 'https://hanzo.ai',
           label: 'Company',
           position: 'right',
         },

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 const fetchAiConfigOptions = async () => ({
   models: await Dev.getModels(),

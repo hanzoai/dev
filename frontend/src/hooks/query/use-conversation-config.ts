@@ -5,7 +5,7 @@ import {
   WsClientProviderStatus,
 } from "#/context/ws-client-provider";
 import { useConversation } from "#/context/conversation-context";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 
 export const useConversationConfig = () => {
   const { status } = useWsClient();

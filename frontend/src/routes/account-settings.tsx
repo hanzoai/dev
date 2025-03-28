@@ -283,7 +283,7 @@ function AccountSettings() {
                   testId="llm-api-key-help-anchor"
                   text="Don't know your API key?"
                   linkText="Click here for instructions"
-                  href="https://docs.all-hands.dev/modules/usage/installation#getting-an-api-key"
+                  href="https://docs.hanzo.ai/modules/usage/installation#getting-an-api-key"
                 />
               )}
 
@@ -310,7 +310,7 @@ function AccountSettings() {
                   label={
                     <>
                       Runtime Settings (
-                      <a href="mailto:contact@all-hands.dev">
+                      <a href="mailto:contact@hanzo.ai">
                         get in touch for access
                       </a>
                       )

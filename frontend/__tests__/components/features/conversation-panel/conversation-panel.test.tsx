@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
 import React from "react";
 import { ConversationPanel } from "#/components/features/conversation-panel/conversation-panel";
-import Dev from "#/api/open-hands";
+import Dev from "#/api/dev";
 import { AuthProvider } from "#/context/auth-context";
 import { clickOnEditButton } from "./utils";
 import { queryClientConfig } from "#/query-client-config";

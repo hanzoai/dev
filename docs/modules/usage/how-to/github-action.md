@@ -47,5 +47,5 @@ The customization options you can set are:
 | `LLM_MODEL`                      | Variable | Set the LLM to use with Dev                                                                   | `LLM_MODEL="anthropic/claude-3-5-sonnet-20241022"` |
 | `DEV_MAX_ITER`             | Variable | Set max limit for agent iterations                                                                  | `DEV_MAX_ITER=10`                            |
 | `DEV_MACRO`                | Variable | Customize default macro for invoking the resolver                                                   | `DEV_MACRO=@resolveit`                       |
-| `DEV_BASE_CONTAINER_IMAGE` | Variable | Custom Sandbox ([learn more](https://docs.all-hands.dev/modules/usage/how-to/custom-sandbox-guide)) | `DEV_BASE_CONTAINER_IMAGE="custom_image"`    |
+| `DEV_BASE_CONTAINER_IMAGE` | Variable | Custom Sandbox ([learn more](https://docs.hanzo.ai/modules/usage/how-to/custom-sandbox-guide)) | `DEV_BASE_CONTAINER_IMAGE="custom_image"`    |
 | `TARGET_BRANCH`                  | Variable | Merge to branch other than `main`                                                                   | `TARGET_BRANCH="dev"`                              |

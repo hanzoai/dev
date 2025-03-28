@@ -3,7 +3,7 @@
 ## Introduction
 
 The Dev Runtime folder contains the core components responsible for executing actions and managing the runtime environment for the Dev project. This README provides an overview of the main components and their interactions.
-You can learn more about how the runtime works in the [Docker Runtime](https://docs.all-hands.dev/modules/usage/architecture/runtime) documentation.
+You can learn more about how the runtime works in the [Docker Runtime](https://docs.hanzo.ai/modules/usage/architecture/runtime) documentation.
 
 ## Main Components
 

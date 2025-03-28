@@ -11,8 +11,8 @@ import {
   Conversation,
   ResultSet,
   GetTrajectoryResponse,
-} from "./open-hands.types";
-import { openHands } from "./open-hands-axios";
+} from "./dev.types";
+import { openHands } from "./dev-axios";
 import { ApiSettings, PostApiSettings } from "#/types/settings";
 
 class Dev {
