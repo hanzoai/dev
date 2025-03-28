@@ -12,7 +12,7 @@ import {
   ResultSet,
   GetTrajectoryResponse,
 } from "./dev.types";
-import { openHands } from "./dev-axios";
+import { dev } from "./dev-axios";
 import { ApiSettings, PostApiSettings } from "#/types/settings";
 
 class Dev {
@@ -21,7 +21,7 @@ class Dev {
    * @returns List of models available
    */
   static async getModels(): Promise<string[]> {
-    const { data } = await openHands.get<string[]>("/api/options/models");
+    const { data } = await dev.get<string[]>("/api/options/models");
     return data;
   }
 
@@ -30,7 +30,7 @@ class Dev {
    * @returns List of agents available
    */
   static async getAgents(): Promise<string[]> {
-    const { data } = await openHands.get<string[]>("/api/options/agents");
+    const { data } = await dev.get<string[]>("/api/options/agents");
     return data;
   }
 
@@ -39,14 +39,14 @@ class Dev {
    * @returns List of security analyzers available
    */
   static async getSecurityAnalyzers(): Promise<string[]> {
-    const { data } = await openHands.get<string[]>(
+    const { data } = await dev.get<string[]>(
       "/api/options/security-analyzers",
     );
     return data;
   }
 
   static async getConfig(): Promise<GetConfigResponse> {
-    const { data } = await openHands.get<GetConfigResponse>(
+    const { data } = await dev.get<GetConfigResponse>(
       "/api/options/config",
     );
     return data;
@@ -62,7 +62,7 @@ class Dev {
     path?: string,
   ): Promise<string[]> {
     const url = `/api/conversations/${conversationId}/list-files`;
-    const { data } = await openHands.get<string[]>(url, {
+    const { data } = await dev.get<string[]>(url, {
       params: { path },
     });
     return data;
@@ -75,7 +75,7 @@ class Dev {
    */
   static async getFile(conversationId: string, path: string): Promise<string> {
     const url = `/api/conversations/${conversationId}/select-file`;
-    const { data } = await openHands.get<{ code: string }>(url, {
+    const { data } = await dev.get<{ code: string }>(url, {
       params: { file: path },
     });
 
@@ -94,7 +94,7 @@ class Dev {
     content: string,
   ): Promise<SaveFileSuccessResponse> {
     const url = `/api/conversations/${conversationId}/save-file`;
-    const { data } = await openHands.post<
+    const { data } = await dev.post<
       SaveFileSuccessResponse | ErrorResponse
     >(url, {
       filePath: path,
@@ -118,7 +118,7 @@ class Dev {
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
 
-    const { data } = await openHands.post<
+    const { data } = await dev.post<
       FileUploadSuccessResponse | ErrorResponse
     >(url, formData);
 
@@ -136,7 +136,7 @@ class Dev {
     feedback: Feedback,
   ): Promise<FeedbackResponse> {
     const url = `/api/conversations/${conversationId}/submit-feedback`;
-    const { data } = await openHands.post<FeedbackResponse>(url, feedback);
+    const { data } = await dev.post<FeedbackResponse>(url, feedback);
     return data;
   }
 
@@ -150,7 +150,7 @@ class Dev {
     if (appMode === "oss") return true;
 
     const response =
-      await openHands.post<AuthenticateResponse>("/api/authenticate");
+      await dev.post<AuthenticateResponse>("/api/authenticate");
     return response.status === 200;
   }
 
@@ -160,7 +160,7 @@ class Dev {
    */
   static async getWorkspaceZip(conversationId: string): Promise<Blob> {
     const url = `/api/conversations/${conversationId}/zip-directory`;
-    const response = await openHands.get(url, {
+    const response = await dev.get(url, {
       responseType: "blob",
     });
     return response.data;
@@ -173,7 +173,7 @@ class Dev {
   static async getGitHubAccessToken(
     code: string,
   ): Promise<GitHubAccessTokenResponse> {
-    const { data } = await openHands.post<GitHubAccessTokenResponse>(
+    const { data } = await dev.post<GitHubAccessTokenResponse>(
       "/api/keycloak/callback",
       {
         code,
@@ -189,7 +189,7 @@ class Dev {
   static async getVSCodeUrl(
     conversationId: string,
   ): Promise<GetVSCodeUrlResponse> {
-    const { data } = await openHands.get<GetVSCodeUrlResponse>(
+    const { data } = await dev.get<GetVSCodeUrlResponse>(
       `/api/conversations/${conversationId}/vscode-url`,
     );
     return data;
@@ -198,28 +198,28 @@ class Dev {
   static async getRuntimeId(
     conversationId: string,
   ): Promise<{ runtime_id: string }> {
-    const { data } = await openHands.get<{ runtime_id: string }>(
+    const { data } = await dev.get<{ runtime_id: string }>(
       `/api/conversations/${conversationId}/config`,
     );
     return data;
   }
 
   static async getUserConversations(): Promise<Conversation[]> {
-    const { data } = await openHands.get<ResultSet<Conversation>>(
+    const { data } = await dev.get<ResultSet<Conversation>>(
       "/api/conversations?limit=9",
     );
     return data.results;
   }
 
   static async deleteUserConversation(conversationId: string): Promise<void> {
-    await openHands.delete(`/api/conversations/${conversationId}`);
+    await dev.delete(`/api/conversations/${conversationId}`);
   }
 
   static async updateUserConversation(
     conversationId: string,
     conversation: Partial<Omit<Conversation, "conversation_id">>,
   ): Promise<void> {
-    await openHands.patch(`/api/conversations/${conversationId}`, conversation);
+    await dev.patch(`/api/conversations/${conversationId}`, conversation);
   }
 
   static async createConversation(
@@ -236,7 +236,7 @@ class Dev {
       replay_json: replayJson,
     };
 
-    const { data } = await openHands.post<Conversation>(
+    const { data } = await dev.post<Conversation>(
       "/api/conversations",
       body,
     );
@@ -247,7 +247,7 @@ class Dev {
   static async getConversation(
     conversationId: string,
   ): Promise<Conversation | null> {
-    const { data } = await openHands.get<Conversation | null>(
+    const { data } = await dev.get<Conversation | null>(
       `/api/conversations/${conversationId}`,
     );
 
@@ -258,7 +258,7 @@ class Dev {
    * Get the settings from the server or use the default settings if not found
    */
   static async getSettings(): Promise<ApiSettings> {
-    const { data } = await openHands.get<ApiSettings>("/api/settings");
+    const { data } = await dev.get<ApiSettings>("/api/settings");
     return data;
   }
 
@@ -269,7 +269,7 @@ class Dev {
   static async saveSettings(
     settings: Partial<PostApiSettings>,
   ): Promise<boolean> {
-    const data = await openHands.post("/api/settings", settings);
+    const data = await dev.post("/api/settings", settings);
     return data.status === 200;
   }
 
@@ -277,12 +277,12 @@ class Dev {
    * Reset user settings in server
    */
   static async resetSettings(): Promise<boolean> {
-    const response = await openHands.post("/api/reset-settings");
+    const response = await dev.post("/api/reset-settings");
     return response.status === 200;
   }
 
   static async createCheckoutSession(amount: number): Promise<string> {
-    const { data } = await openHands.post(
+    const { data } = await dev.post(
       "/api/billing/create-checkout-session",
       {
         amount,
@@ -292,21 +292,21 @@ class Dev {
   }
 
   static async createBillingSessionResponse(): Promise<string> {
-    const { data } = await openHands.post(
+    const { data } = await dev.post(
       "/api/billing/create-customer-setup-session",
     );
     return data.redirect_url;
   }
 
   static async getBalance(): Promise<string> {
-    const { data } = await openHands.get<{ credits: string }>(
+    const { data } = await dev.get<{ credits: string }>(
       "/api/billing/credits",
     );
     return data.credits;
   }
 
   static async getGitHubUser(): Promise<GitHubUser> {
-    const response = await openHands.get<GitHubUser>("/api/github/user");
+    const response = await dev.get<GitHubUser>("/api/github/user");
 
     const { data } = response;
 
@@ -323,7 +323,7 @@ class Dev {
   }
 
   static async getGitHubUserInstallationIds(): Promise<number[]> {
-    const response = await openHands.get<number[]>("/api/github/installations");
+    const response = await dev.get<number[]>("/api/github/installations");
     return response.data;
   }
 
@@ -331,7 +331,7 @@ class Dev {
     query: string,
     per_page = 5,
   ): Promise<GitHubRepository[]> {
-    const response = await openHands.get<GitHubRepository[]>(
+    const response = await dev.get<GitHubRepository[]>(
       "/api/github/search/repositories",
       {
         params: {
@@ -347,7 +347,7 @@ class Dev {
   static async getTrajectory(
     conversationId: string,
   ): Promise<GetTrajectoryResponse> {
-    const { data } = await openHands.get<GetTrajectoryResponse>(
+    const { data } = await dev.get<GetTrajectoryResponse>(
       `/api/conversations/${conversationId}/trajectory`,
     );
     return data;
@@ -356,7 +356,7 @@ class Dev {
   static async logout(appMode: GetConfigResponse["APP_MODE"]): Promise<void> {
     const endpoint =
       appMode === "saas" ? "/api/logout" : "/api/unset-settings-tokens";
-    await openHands.post(endpoint);
+    await dev.post(endpoint);
   }
 }
 

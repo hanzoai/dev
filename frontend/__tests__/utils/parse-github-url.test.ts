@@ -8,7 +8,7 @@ test("parseGithubUrl", () => {
 
   expect(parseGithubUrl("https://github.com/hanzoai/dev")).toEqual([
     "hanzoai",
-    "Dev",
+    "dev",
   ]);
 
   expect(parseGithubUrl("https://github.com/hanzoai/")).toEqual([

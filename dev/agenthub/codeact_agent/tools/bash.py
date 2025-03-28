@@ -5,7 +5,7 @@ _DETAILED_BASH_DESCRIPTION = """Execute a bash command in the terminal within a 
 ### Command Execution
 * One command at a time: You can only execute one bash command at a time. If you need to run multiple commands sequentially, use `&&` or `;` to chain them together.
 * Persistent session: Commands execute in a persistent shell session where environment variables, virtual environments, and working directory persist between commands.
-* Timeout: Commands have a soft timeout of 120 seconds, once that's reached, you have the option to continue or interrupt the command (see section below for details)
+* Timeout: Commands have a soft timeout of 1200 seconds, once that's reached, you have the option to continue or interrupt the command (see section below for details)
 
 ### Running and Interacting with Processes
 * Long running commands: For commands that may run indefinitely, run them in the background and redirect output to a file, e.g. `python3 app.py > server.log 2>&1 &`.

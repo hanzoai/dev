@@ -71,7 +71,7 @@ const CONVERSATIONS = new Map<string, Conversation>(
   ]),
 );
 
-const openHandsHandlers = [
+const devHandlers = [
   http.get("/api/options/models", async () =>
     HttpResponse.json([
       "gpt-3.5-turbo",
@@ -147,7 +147,7 @@ const openHandsHandlers = [
 
 export const handlers = [
   ...STRIPE_BILLING_HANDLERS,
-  ...openHandsHandlers,
+  ...devHandlers,
   http.get("/api/github/repositories", () =>
     HttpResponse.json([
       { id: 1, full_name: "octocat/hello-world" },

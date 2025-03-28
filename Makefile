@@ -1,5 +1,5 @@
 SHELL=/usr/bin/env bash
-# Makefile for Dev project
+# Makefile for Dev project using uv
 
 # Variables
 BACKEND_HOST ?= "127.0.0.1"
@@ -12,6 +12,10 @@ CONFIG_FILE = config.toml
 PRE_COMMIT_CONFIG_PATH = "./dev_config/python/.pre-commit-config.yaml"
 PYTHON_VERSION = 3.12
 
+# Docker image variables (customize these)
+IMAGE_NAME ?= yourusername/hanzo-dev
+IMAGE_TAG ?= latest
+
 # ANSI color codes
 GREEN=$(shell tput -Txterm setaf 2)
 YELLOW=$(shell tput -Txterm setaf 3)
@@ -19,33 +23,71 @@ RED=$(shell tput -Txterm setaf 1)
 BLUE=$(shell tput -Txterm setaf 6)
 RESET=$(shell tput -Txterm sgr0)
 
-# Build
-build:
-	@echo "$(GREEN)Building project...$(RESET)"
-	@$(MAKE) -s check-dependencies
-	@$(MAKE) -s install-python-dependencies
-	@$(MAKE) -s install-frontend-dependencies
-	@$(MAKE) -s install-pre-commit-hooks
-	@$(MAKE) -s build-frontend
-	@echo "$(GREEN)Build completed successfully.$(RESET)"
+### Default target: install, build package, then run tests.
+all: install build-package test
+	@echo "$(GREEN)All tasks completed.$(RESET)"
+
+### Installation targets
+install: check-dependencies install-python-dependencies install-frontend-dependencies install-pre-commit-hooks
+	@echo "$(GREEN)Installation complete.$(RESET)"
+
+### Build Python package (CLI) distribution
+build-package: install
+	@echo "$(YELLOW)Building package (Python CLI)...$(RESET)"
+	@uv build
+	@echo "$(GREEN)Package built. Distribution files are in 'dist/'$(RESET)"
+
+### Publish package to PyPI (requires twine)
+publish: build-package
+	@echo "$(YELLOW)Publishing package...$(RESET)"
+	@twine upload dist/*
+	@echo "$(GREEN)Package published.$(RESET)"
+
+### Build project (frontend)
+build: install
+	@echo "$(YELLOW)Building project...$(RESET)"
+	@$(MAKE) build-frontend
+	@echo "$(GREEN)Build complete.$(RESET)"
+
+### Docker targets
+docker-build:
+	@echo "$(YELLOW)Building Docker image...$(RESET)"
+	@docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	@echo "$(GREEN)Docker image built: $(IMAGE_NAME):$(IMAGE_TAG)$(RESET)"
+
+docker-push: docker-build
+	@echo "$(YELLOW)Pushing Docker image...$(RESET)"
+	@docker push $(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "$(GREEN)Docker image pushed: $(IMAGE_NAME):$(IMAGE_TAG)$(RESET)"
+
+### System & dependency checks
+check-uv:
+	@echo "$(YELLOW)Checking uv installation...$(RESET)"
+	@if ! command -v uv > /dev/null; then \
+		echo "$(YELLOW)uv not found. Installing uv...$(RESET)"; \
+		pip install uv || { echo "$(RED)Failed to install uv. Please install it manually.$(RESET)"; exit 1; }; \
+		echo "$(BLUE)uv installed successfully.$(RESET)"; \
+	else \
+		echo "$(BLUE)uv is installed.$(RESET)"; \
+	fi
 
 check-dependencies:
 	@echo "$(YELLOW)Checking dependencies...$(RESET)"
 	@$(MAKE) -s check-system
+	@$(MAKE) -s check-uv
 	@$(MAKE) -s check-python
-	@$(MAKE) -s check-npm
 	@$(MAKE) -s check-nodejs
+	@$(MAKE) -s check-npm
 ifeq ($(INSTALL_DOCKER),)
 	@$(MAKE) -s check-docker
 endif
-	@$(MAKE) -s check-poetry
 	@echo "$(GREEN)Dependencies checked successfully.$(RESET)"
 
 check-system:
 	@echo "$(YELLOW)Checking system...$(RESET)"
-	@if [ "$(shell uname)" = "Darwin" ]; then \
+	@if [ "$$(uname)" = "Darwin" ]; then \
 		echo "$(BLUE)macOS detected.$(RESET)"; \
-	elif [ "$(shell uname)" = "Linux" ]; then \
+	elif [ "$$(uname)" = "Linux" ]; then \
 		if [ -f "/etc/manjaro-release" ]; then \
 			echo "$(BLUE)Manjaro Linux detected.$(RESET)"; \
 		else \
@@ -54,250 +96,227 @@ check-system:
 	elif [ "$$(uname -r | grep -i microsoft)" ]; then \
 		echo "$(BLUE)Windows Subsystem for Linux detected.$(RESET)"; \
 	else \
-		echo "$(RED)Unsupported system detected. Please use macOS, Linux, or Windows Subsystem for Linux (WSL).$(RESET)"; \
+		echo "$(RED)Unsupported system detected. Please use macOS, Linux, or WSL.$(RESET)"; \
 		exit 1; \
 	fi
 
 check-python:
-	@echo "$(YELLOW)Checking Python installation...$(RESET)"
-	@if command -v python$(PYTHON_VERSION) > /dev/null; then \
-		echo "$(BLUE)$(shell python$(PYTHON_VERSION) --version) is already installed.$(RESET)"; \
+	@echo "$(YELLOW)Checking Python $(PYTHON_VERSION) installation...$(RESET)"
+	@if ! command -v python$(PYTHON_VERSION) > /dev/null; then \
+		echo "$(YELLOW)Python $(PYTHON_VERSION) not found. Installing it using uv...$(RESET)"; \
+		uv python install $(PYTHON_VERSION) || { echo "$(RED)Failed to install Python $(PYTHON_VERSION).$(RESET)"; exit 1; }; \
+		echo "$(BLUE)Python $(PYTHON_VERSION) installed.$(RESET)"; \
 	else \
-		echo "$(RED)Python $(PYTHON_VERSION) is not installed. Please install Python $(PYTHON_VERSION) to continue.$(RESET)"; \
-		exit 1; \
+		echo "$(BLUE)$$(python$(PYTHON_VERSION) --version) is installed.$(RESET)"; \
 	fi
 
 check-npm:
 	@echo "$(YELLOW)Checking npm installation...$(RESET)"
 	@if command -v npm > /dev/null; then \
-		echo "$(BLUE)npm $(shell npm --version) is already installed.$(RESET)"; \
+		echo "$(BLUE)npm $$(npm --version) is installed.$(RESET)"; \
 	else \
-		echo "$(RED)npm is not installed. Please install Node.js to continue.$(RESET)"; \
+		echo "$(RED)npm is not installed. Please install Node.js.$(RESET)"; \
 		exit 1; \
 	fi
 
 check-nodejs:
 	@echo "$(YELLOW)Checking Node.js installation...$(RESET)"
 	@if command -v node > /dev/null; then \
-		NODE_VERSION=$(shell node --version | sed -E 's/v//g'); \
-		IFS='.' read -r -a NODE_VERSION_ARRAY <<< "$$NODE_VERSION"; \
-		if [ "$${NODE_VERSION_ARRAY[0]}" -ge 22 ]; then \
-			echo "$(BLUE)Node.js $$NODE_VERSION is already installed.$(RESET)"; \
+		NODE_VERSION=$$(node --version | sed -E 's/v//g'); \
+		IFS='.' read -r -a ver <<< "$$NODE_VERSION"; \
+		if [ "$${ver[0]}" -ge 22 ]; then \
+			echo "$(BLUE)Node.js $$NODE_VERSION is installed.$(RESET)"; \
 		else \
-			echo "$(RED)Node.js 22.x or later is required. Please install Node.js 22.x or later to continue.$(RESET)"; \
+			echo "$(RED)Node.js 22.x or later is required.$(RESET)"; \
 			exit 1; \
 		fi; \
 	else \
-		echo "$(RED)Node.js is not installed. Please install Node.js to continue.$(RESET)"; \
+		echo "$(RED)Node.js is not installed. Please install Node.js.$(RESET)"; \
 		exit 1; \
 	fi
 
 check-docker:
 	@echo "$(YELLOW)Checking Docker installation...$(RESET)"
 	@if command -v docker > /dev/null; then \
-		echo "$(BLUE)$(shell docker --version) is already installed.$(RESET)"; \
+		echo "$(BLUE)$$(docker --version) is installed.$(RESET)"; \
 	else \
-		echo "$(RED)Docker is not installed. Please install Docker to continue.$(RESET)"; \
+		echo "$(RED)Docker is not installed. Please install Docker.$(RESET)"; \
 		exit 1; \
 	fi
 
-check-poetry:
-	@echo "$(YELLOW)Checking Poetry installation...$(RESET)"
-	@if command -v poetry > /dev/null; then \
-		POETRY_VERSION=$(shell poetry --version 2>&1 | sed -E 's/Poetry \(version ([0-9]+\.[0-9]+\.[0-9]+)\)/\1/'); \
-		IFS='.' read -r -a POETRY_VERSION_ARRAY <<< "$$POETRY_VERSION"; \
-		if [ $${POETRY_VERSION_ARRAY[0]} -gt 1 ] || ([ $${POETRY_VERSION_ARRAY[0]} -eq 1 ] && [ $${POETRY_VERSION_ARRAY[1]} -ge 8 ]); then \
-			echo "$(BLUE)$(shell poetry --version) is already installed.$(RESET)"; \
-		else \
-			echo "$(RED)Poetry 1.8 or later is required. You can install poetry by running the following command, then adding Poetry to your PATH:"; \
-			echo "$(RED) curl -sSL https://install.python-poetry.org | python$(PYTHON_VERSION) -$(RESET)"; \
-			echo "$(RED)More detail here: https://python-poetry.org/docs/#installing-with-the-official-installer$(RESET)"; \
-			exit 1; \
-		fi; \
-	else \
-		echo "$(RED)Poetry is not installed. You can install poetry by running the following command, then adding Poetry to your PATH:"; \
-		echo "$(RED) curl -sSL https://install.python-poetry.org | python$(PYTHON_VERSION) -$(RESET)"; \
-		echo "$(RED)More detail here: https://python-poetry.org/docs/#installing-with-the-official-installer$(RESET)"; \
-		exit 1; \
-	fi
-
+### Python dependency installation & virtual environment
 install-python-dependencies:
 	@echo "$(GREEN)Installing Python dependencies...$(RESET)"
-	@if [ -z "${TZ}" ]; then \
+	@if [ -z "$${TZ}" ]; then \
 		echo "Defaulting TZ (timezone) to UTC"; \
 		export TZ="UTC"; \
-	fi
-	poetry env use python$(PYTHON_VERSION)
-	@if [ "$(shell uname)" = "Darwin" ]; then \
-		echo "$(BLUE)Installing chroma-hnswlib...$(RESET)"; \
-		export HNSWLIB_NO_NATIVE=1; \
-		poetry run pip install chroma-hnswlib; \
-	fi
-	@poetry install
-	@if [ -f "/etc/manjaro-release" ]; then \
-		echo "$(BLUE)Detected Manjaro Linux. Installing Playwright dependencies...$(RESET)"; \
-		poetry run pip install playwright; \
-		poetry run playwright install chromium; \
+	fi; \
+	if [ ! -d ".venv" ]; then \
+		echo "$(BLUE)No virtual environment found. Creating one using 'uv venv --python=python$(PYTHON_VERSION) .venv'...$(RESET)"; \
+		uv venv --python=python$(PYTHON_VERSION) .venv; \
 	else \
-		if [ ! -f cache/playwright_chromium_is_installed.txt ]; then \
-			echo "Running playwright install --with-deps chromium..."; \
-			poetry run playwright install --with-deps chromium; \
-			mkdir -p cache; \
-			touch cache/playwright_chromium_is_installed.txt; \
+		VENV_PY_VERSION=`.venv/bin/python --version 2>&1 | awk '{print $$2}'`; \
+		echo "$(BLUE)Found virtual environment Python version: $$VENV_PY_VERSION$(RESET)"; \
+		if echo "$$VENV_PY_VERSION" | grep -q "^$(PYTHON_VERSION)"; then \
+			echo "$(BLUE)Virtual environment matches target version $(PYTHON_VERSION).$(RESET)"; \
 		else \
-			echo "Setup already done. Skipping playwright installation."; \
-		fi \
-	fi
-	@echo "$(GREEN)Python dependencies installed successfully.$(RESET)"
+			echo "$(YELLOW)Virtual environment version ($$VENV_PY_VERSION) does not match target $(PYTHON_VERSION). Recreating...$(RESET)"; \
+			rm -rf .venv; \
+			uv venv --python=python$(PYTHON_VERSION) .venv; \
+		fi; \
+	fi; \
+	echo "$(BLUE)Upgrading pip, setuptools, and wheel...$(RESET)"; \
+	source .venv/bin/activate && pip install --upgrade pip setuptools wheel; \
+	echo "$(BLUE)Activating virtual environment and installing project dependencies via pip...$(RESET)"; \
+	source .venv/bin/activate && pip install .; \
+	echo "$(GREEN)Python dependencies installed.$(RESET)"
 
 install-frontend-dependencies:
 	@echo "$(YELLOW)Setting up frontend environment...$(RESET)"
-	@echo "$(YELLOW)Detect Node.js version...$(RESET)"
 	@cd frontend && node ./scripts/detect-node-version.js
-	echo "$(BLUE)Installing frontend dependencies with npm...$(RESET)"
+	@echo "$(BLUE)Installing frontend dependencies with npm...$(RESET)"
 	@cd frontend && npm install
-	@echo "$(GREEN)Frontend dependencies installed successfully.$(RESET)"
+	@echo "$(GREEN)Frontend dependencies installed.$(RESET)"
 
 install-pre-commit-hooks:
 	@echo "$(YELLOW)Installing pre-commit hooks...$(RESET)"
-	@git config --unset-all core.hooksPath || true
-	@poetry run pre-commit install --config $(PRE_COMMIT_CONFIG_PATH)
-	@echo "$(GREEN)Pre-commit hooks installed successfully.$(RESET)"
+	@git config --unset-all core.hooksPath || true; \
+	if [ -d ".venv" ]; then \
+		echo "$(BLUE)Activating virtual environment...$(RESET)"; \
+		source .venv/bin/activate && uv run pre-commit install --config $(PRE_COMMIT_CONFIG_PATH); \
+	else \
+		echo "$(RED)Virtual environment not found. Please run 'make install-python-dependencies' first.$(RESET)"; \
+		exit 1; \
+	fi; \
+	echo "$(GREEN)Pre-commit hooks installed.$(RESET)"
 
+### Lint and test targets
 lint-backend:
-	@echo "$(YELLOW)Running linters...$(RESET)"
-	@poetry run pre-commit run --files dev/**/* agenthub/**/* evaluation/**/* --show-diff-on-failure --config $(PRE_COMMIT_CONFIG_PATH)
+	@echo "$(YELLOW)Running backend linters...$(RESET)"
+	@if [ -d ".venv" ]; then \
+		source .venv/bin/activate && uv run pre-commit run --files dev/**/* agenthub/**/* evaluation/**/* --show-diff-on-failure --config $(PRE_COMMIT_CONFIG_PATH); \
+	else \
+		echo "$(RED)Virtual environment not found. Please run 'make install-python-dependencies' first.$(RESET)"; \
+		exit 1; \
+	fi
 
 lint-frontend:
-	@echo "$(YELLOW)Running linters for frontend...$(RESET)"
+	@echo "$(YELLOW)Running frontend linters...$(RESET)"
 	@cd frontend && npm run lint
 
 lint:
-	@$(MAKE) -s lint-frontend
-	@$(MAKE) -s lint-backend
+	@$(MAKE) lint-frontend
+	@$(MAKE) lint-backend
 
 test-frontend:
-	@echo "$(YELLOW)Running tests for frontend...$(RESET)"
+	@echo "$(YELLOW)Running frontend tests...$(RESET)"
 	@cd frontend && npm run test
 
 test:
-	@$(MAKE) -s test-frontend
+	@echo "$(YELLOW)Running tests...$(RESET)"
+	@$(MAKE) test-frontend
+	@echo "$(GREEN)Tests passed.$(RESET)"
 
 build-frontend:
 	@echo "$(YELLOW)Building frontend...$(RESET)"
 	@cd frontend && npm run build
 
-# Start backend
 start-backend:
 	@echo "$(YELLOW)Starting backend...$(RESET)"
-	@poetry run uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) --reload --reload-exclude "./workspace"
+	@uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) --reload --reload-exclude "./workspace"
 
-# Start frontend
 start-frontend:
 	@echo "$(YELLOW)Starting frontend...$(RESET)"
 	@cd frontend && VITE_BACKEND_HOST=$(BACKEND_HOST_PORT) VITE_FRONTEND_PORT=$(FRONTEND_PORT) npm run dev -- --port $(FRONTEND_PORT) --host $(BACKEND_HOST)
 
-# Common setup for running the app (non-callable)
 _run_setup:
-	@if [ "$(OS)" = "Windows_NT" ]; then \
-		echo "$(RED) Windows is not supported, use WSL instead!$(RESET)"; \
+	@if [ "$$(uname)" = "MINGW"* ]; then \
+		echo "$(RED)Windows is not supported, use WSL instead.$(RESET)"; \
 		exit 1; \
-	fi
-	@mkdir -p logs
-	@echo "$(YELLOW)Starting backend server...$(RESET)"
-	@poetry run uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) &
-	@echo "$(YELLOW)Waiting for the backend to start...$(RESET)"
-	@until nc -z localhost $(BACKEND_PORT); do sleep 0.1; done
-	@echo "$(GREEN)Backend started successfully.$(RESET)"
+	fi; \
+	mkdir -p logs; \
+	echo "$(YELLOW)Starting backend server...$(RESET)"; \
+	uvicorn dev.server.listen:app --host $(BACKEND_HOST) --port $(BACKEND_PORT) &; \
+	echo "$(YELLOW)Waiting for backend to start...$(RESET)"; \
+	until nc -z localhost $(BACKEND_PORT); do sleep 0.1; done; \
+	echo "$(GREEN)Backend started.$(RESET)"
 
-# Run the app (standard mode)
 run:
-	@echo "$(YELLOW)Running the app...$(RESET)"
-	@$(MAKE) -s _run_setup
-	@$(MAKE) -s start-frontend
-	@echo "$(GREEN)Application started successfully.$(RESET)"
+	@echo "$(YELLOW)Running the application...$(RESET)"
+	@$(MAKE) _run_setup
+	@$(MAKE) start-frontend
+	@echo "$(GREEN)Application started.$(RESET)"
 
-# Run the app (in docker)
 docker-run: WORKSPACE_BASE ?= $(PWD)/workspace
 docker-run:
 	@if [ -f /.dockerenv ]; then \
-		echo "Running inside a Docker container. Exiting..."; \
+		echo "Running inside Docker. Exiting..."; \
 		exit 0; \
 	else \
 		echo "$(YELLOW)Running the app in Docker $(OPTIONS)...$(RESET)"; \
 		export WORKSPACE_BASE=${WORKSPACE_BASE}; \
-		export SANDBOX_USER_ID=$(shell id -u); \
-		export DATE=$(shell date +%Y%m%d%H%M%S); \
+		export SANDBOX_USER_ID=$$(id -u); \
+		export DATE=$$(date +%Y%m%d%H%M%S); \
 		docker compose up $(OPTIONS); \
 	fi
 
-# Run the app (WSL mode)
 run-wsl:
 	@echo "$(YELLOW)Running the app in WSL mode...$(RESET)"
-	@$(MAKE) -s _run_setup
-	@cd frontend && echo "$(BLUE)Starting frontend with npm (WSL mode)...$(RESET)" && npm run dev_wsl -- --port $(FRONTEND_PORT)
-	@echo "$(GREEN)Application started successfully in WSL mode.$(RESET)"
+	@$(MAKE) _run_setup
+	@cd frontend && npm run dev_wsl -- --port $(FRONTEND_PORT)
+	@echo "$(GREEN)Application started in WSL mode.$(RESET)"
 
-# Setup config.toml
 setup-config:
-	@echo "$(YELLOW)Setting up config.toml...$(RESET)"
+	@echo "$(YELLOW)Setting up $(CONFIG_FILE)...$(RESET)"
 	@$(MAKE) setup-config-prompts
 	@mv $(CONFIG_FILE).tmp $(CONFIG_FILE)
-	@echo "$(GREEN)Config.toml setup completed.$(RESET)"
+	@echo "$(GREEN)Config setup completed.$(RESET)"
 
 setup-config-prompts:
 	@echo "[core]" > $(CONFIG_FILE).tmp
+	@read -p "Enter your workspace directory (absolute path) [default: $(DEFAULT_WORKSPACE_DIR)]: " ws_dir; \
+	 ws_dir=$${ws_dir:-$(DEFAULT_WORKSPACE_DIR)}; \
+	 echo "workspace_base=\"$$ws_dir\"" >> $(CONFIG_FILE).tmp; \
+	echo "" >> $(CONFIG_FILE).tmp; \
+	echo "[llm]" >> $(CONFIG_FILE).tmp; \
+	read -p "Enter your LLM model name [default: $(DEFAULT_MODEL)]: " llm_model; \
+	llm_model=$${llm_model:-$(DEFAULT_MODEL)}; \
+	echo "model=\"$$llm_model\"" >> $(CONFIG_FILE).tmp; \
+	read -p "Enter your LLM api key: " llm_api_key; \
+	echo "api_key=\"$$llm_api_key\"" >> $(CONFIG_FILE).tmp; \
+	read -p "Enter your LLM base URL (leave blank if not needed): " llm_url; \
+	if [ -n "$$llm_url" ]; then echo "base_url=\"$$llm_url\"" >> $(CONFIG_FILE).tmp; fi
 
-	@read -p "Enter your workspace directory (as absolute path) [default: $(DEFAULT_WORKSPACE_DIR)]: " workspace_dir; \
-	 workspace_dir=$${workspace_dir:-$(DEFAULT_WORKSPACE_DIR)}; \
-	 echo "workspace_base=\"$$workspace_dir\"" >> $(CONFIG_FILE).tmp
-
-	@echo "" >> $(CONFIG_FILE).tmp
-
-	@echo "[llm]" >> $(CONFIG_FILE).tmp
-	@read -p "Enter your LLM model name, used for running without UI. Set the model in the UI after you start the app. (see https://docs.litellm.ai/docs/providers for full list) [default: $(DEFAULT_MODEL)]: " llm_model; \
-	 llm_model=$${llm_model:-$(DEFAULT_MODEL)}; \
-	 echo "model=\"$$llm_model\"" >> $(CONFIG_FILE).tmp
-
-	@read -p "Enter your LLM api key: " llm_api_key; \
-	 echo "api_key=\"$$llm_api_key\"" >> $(CONFIG_FILE).tmp
-
-	@read -p "Enter your LLM base URL [mostly used for local LLMs, leave blank if not needed - example: http://localhost:5001/v1/]: " llm_base_url; \
-	 if [[ ! -z "$$llm_base_url" ]]; then echo "base_url=\"$$llm_base_url\"" >> $(CONFIG_FILE).tmp; fi
-
-
-# Develop in container
 docker-dev:
 	@if [ -f /.dockerenv ]; then \
-		echo "Running inside a Docker container. Exiting..."; \
+		echo "Running inside Docker. Exiting..."; \
 		exit 0; \
 	else \
-		echo "$(YELLOW)Build and run in Docker $(OPTIONS)...$(RESET)"; \
+		echo "$(YELLOW)Building and running in Docker $(OPTIONS)...$(RESET)"; \
 		./containers/dev/dev.sh $(OPTIONS); \
 	fi
 
-# Clean up all caches
 clean:
-	@echo "$(YELLOW)Cleaning up caches...$(RESET)"
+	@echo "$(YELLOW)Cleaning caches...$(RESET)"
 	@rm -rf dev/.cache
-	@echo "$(GREEN)Caches cleaned up successfully.$(RESET)"
+	@echo "$(GREEN)Caches cleaned.$(RESET)"
 
-# Help
 help:
 	@echo "$(BLUE)Usage: make [target]$(RESET)"
 	@echo "Targets:"
-	@echo "  $(GREEN)build$(RESET)               - Build project, including environment setup and dependencies."
-	@echo "  $(GREEN)lint$(RESET)                - Run linters on the project."
-	@echo "  $(GREEN)setup-config$(RESET)        - Setup the configuration for Dev by providing LLM API key,"
-	@echo "                        LLM Model name, and workspace directory."
-	@echo "  $(GREEN)start-backend$(RESET)       - Start the backend server for the Dev project."
-	@echo "  $(GREEN)start-frontend$(RESET)      - Start the frontend server for the Dev project."
-	@echo "  $(GREEN)run$(RESET)                 - Run the Dev application, starting both backend and frontend servers."
-	@echo "                        Backend Log file will be stored in the 'logs' directory."
-	@echo "  $(GREEN)docker-dev$(RESET)          - Build and run the Dev application in Docker."
-	@echo "  $(GREEN)docker-run$(RESET)          - Run the Dev application, starting both backend and frontend servers in Docker."
-	@echo "  $(GREEN)help$(RESET)                - Display this help message, providing information on available targets."
+	@echo "  $(GREEN)all$(RESET)                 - Install dependencies, build package, and run tests."
+	@echo "  $(GREEN)install$(RESET)             - Install dependencies."
+	@echo "  $(GREEN)build-package$(RESET)       - Build Python package (CLI) distribution."
+	@echo "  $(GREEN)publish$(RESET)             - Publish package to PyPI."
+	@echo "  $(GREEN)build$(RESET)               - Build project (frontend)."
+	@echo "  $(GREEN)test$(RESET)                - Run tests."
+	@echo "  $(GREEN)docker-build$(RESET)        - Build Docker image."
+	@echo "  $(GREEN)docker-push$(RESET)         - Push Docker image."
+	@echo "  $(GREEN)docker-run$(RESET)          - Run application in Docker."
+	@echo "  $(GREEN)run$(RESET)                 - Run full application."
+	@echo "  $(GREEN)docker-dev$(RESET)          - Run development in Docker."
+	@echo "  $(GREEN)setup-config$(RESET)        - Setup configuration."
+	@echo "  $(GREEN)clean$(RESET)               - Clean caches."
+	@echo "  $(GREEN)help$(RESET)                - Show this help message."
 
-# Phony targets
-.PHONY: build check-dependencies check-python check-npm check-docker check-poetry install-python-dependencies install-frontend-dependencies install-pre-commit-hooks lint start-backend start-frontend run run-wsl setup-config setup-config-prompts help
-.PHONY: docker-dev docker-run
+.PHONY: all install build-package publish build test docker-build docker-push docker-run run docker-dev run-wsl setup-config setup-config-prompts clean help check-dependencies check-uv check-python check-npm check-nodejs check-docker

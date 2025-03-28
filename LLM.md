@@ -1,8 +1,28 @@
-# Dev Project Knowledge Base
+# Hanzo Dev Project Knowledge Base
+
+## Package Configuration
+
+### Project URLs in pyproject.toml
+
+As of March 2025, we've fixed an issue with the package configuration in `pyproject.toml`. The repository URL was incorrectly specified in the optional dependencies section as:
+
+```toml
+[project.optional-dependencies]
+urls = ["https://github.com/hanzoai/dev"]
+```
+
+This format doesn't comply with PEP 508 (Python dependency specification standard). We've moved it to the proper section according to the PyPA specification:
+
+```toml
+[project.urls]
+Repository = "https://github.com/hanzoai/dev"
+```
+
+This change resolves build and installation errors related to invalid pyproject.toml configuration.
 
 ## Project Overview
 
-Dev (formerly OpenDevin) is a platform for software development agents powered by AI. The agents can modify code, run commands, browse the web, call APIs, and more.
+Hanzo Dev (formerly OpenDevin) is a platform for software development agents powered by AI. The agents can modify code, run commands, browse the web, call APIs, and more.
 
 ## Settings Migration from localStorage to Server API
 

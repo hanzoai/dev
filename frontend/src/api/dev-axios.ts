@@ -1,24 +1,24 @@
 import axios from "axios";
 
-export const openHands = axios.create({
+export const dev = axios.create({
   baseURL: `${window.location.protocol}//${import.meta.env.VITE_BACKEND_BASE_URL || window?.location.host}`,
 });
 export const setAuthTokenHeader = (token: string) => {
-  openHands.defaults.headers.common.Authorization = `Bearer ${token}`;
+  dev.defaults.headers.common.Authorization = `Bearer ${token}`;
 };
 
 export const setGitHubTokenHeader = (token: string) => {
-  openHands.defaults.headers.common["X-GitHub-Token"] = token;
+  dev.defaults.headers.common["X-GitHub-Token"] = token;
 };
 
 export const removeAuthTokenHeader = () => {
-  if (openHands.defaults.headers.common.Authorization) {
-    delete openHands.defaults.headers.common.Authorization;
+  if (dev.defaults.headers.common.Authorization) {
+    delete dev.defaults.headers.common.Authorization;
   }
 };
 
 export const removeGitHubTokenHeader = () => {
-  if (openHands.defaults.headers.common["X-GitHub-Token"]) {
-    delete openHands.defaults.headers.common["X-GitHub-Token"];
+  if (dev.defaults.headers.common["X-GitHub-Token"]) {
+    delete dev.defaults.headers.common["X-GitHub-Token"];
   }
 };

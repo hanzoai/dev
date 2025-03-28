@@ -1,5 +1,5 @@
 import { extractNextPageFromLink } from "#/utils/extract-next-page-from-link";
-import { openHands } from "./dev-axios";
+import { dev } from "./dev-axios";
 
 /**
  * Retrieves repositories where Dev Github App has been installed
@@ -14,7 +14,7 @@ export const retrieveGitHubAppRepositories = async (
   per_page = 30,
 ) => {
   const installationId = installations[installationIndex];
-  const response = await openHands.get<GitHubRepository[]>(
+  const response = await dev.get<GitHubRepository[]>(
     "/api/github/repositories",
     {
       params: {
@@ -57,7 +57,7 @@ export const retrieveGitHubUserRepositories = async (
   page = 1,
   per_page = 30,
 ) => {
-  const response = await openHands.get<GitHubRepository[]>(
+  const response = await dev.get<GitHubRepository[]>(
     "/api/github/repositories",
     {
       params: {
