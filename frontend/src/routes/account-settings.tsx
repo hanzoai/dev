@@ -114,6 +114,8 @@ function AccountSettings() {
       formData.get("enable-memory-condenser-switch")?.toString() === "on";
     const enableSoundNotifications =
       formData.get("enable-sound-notifications-switch")?.toString() === "on";
+    const confirmationMode =
+      formData.get("enable-confirmation-mode-switch")?.toString() === "on";
     const llmBaseUrl = formData.get("base-url-input")?.toString() || "";
     const llmApiKey =
       formData.get("llm-api-key-input")?.toString() ||
@@ -152,7 +154,7 @@ function AccountSettings() {
       REMOTE_RUNTIME_RESOURCE_FACTOR:
         remoteRuntimeResourceFactor ||
         DEFAULT_SETTINGS.REMOTE_RUNTIME_RESOURCE_FACTOR,
-      CONFIRMATION_MODE: confirmationModeIsEnabled,
+      CONFIRMATION_MODE: confirmationMode,
     };
 
     saveSettings(newSettings, {
@@ -326,6 +328,7 @@ function AccountSettings() {
               {llmConfigMode === "advanced" && (
                 <SettingsSwitch
                   testId="enable-confirmation-mode-switch"
+                  name="enable-confirmation-mode-switch"
                   onToggle={setConfirmationModeIsEnabled}
                   defaultIsToggled={!!settings.CONFIRMATION_MODE}
                   isBeta
@@ -485,6 +488,7 @@ function AccountSettings() {
           onClick={() => {
             formRef.current?.requestSubmit();
           }}
+          data-testid="save-changes-button"
         >
           Save Changes
         </BrandButton>
