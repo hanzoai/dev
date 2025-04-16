@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "@openai/codex",
-  "version": "0.1.04152057",
+  "version": "0.1.04160940",
   "license": "Apache-2.0",
   "bin": {
     "codex": "dist/cli.js"
@@ -73,5 +73,9 @@
   },
   "overrides": {
     "punycode": "^2.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openai/codex"
   }
 }
