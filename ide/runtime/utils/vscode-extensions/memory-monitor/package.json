@@ -1,0 +1,50 @@
+{
+    "name": "ide-memory-monitor",
+    "displayName": "IDE Memory Monitor",
+    "description": "A VSCode extension for monitoring system and process memory usage",
+    "version": "0.1.0",
+    "publisher": "ide",
+    "engines": {
+        "vscode": "^1.98.2"
+    },
+    "categories": [
+        "Other",
+        "Monitoring"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "ide-memory-monitor.startMemoryMonitor",
+                "title": "Start Memory Monitor"
+            },
+            {
+                "command": "ide-memory-monitor.stopMemoryMonitor",
+                "title": "Stop Memory Monitor"
+            },
+            {
+                "command": "ide-memory-monitor.showMemoryDetails",
+                "title": "Show Memory Details"
+            }
+        ],
+        "menus": {
+            "commandPalette": [
+                {
+                    "command": "ide-memory-monitor.startMemoryMonitor",
+                    "group": "IDE"
+                },
+                {
+                    "command": "ide-memory-monitor.stopMemoryMonitor",
+                    "group": "IDE"
+                },
+                {
+                    "command": "ide-memory-monitor.showMemoryDetails",
+                    "group": "IDE"
+                }
+            ]
+        }
+    }
+}

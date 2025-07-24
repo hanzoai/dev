@@ -1,0 +1,23 @@
+{
+    "name": "ide-hello-world",
+    "displayName": "IDE Hello World",
+    "description": "A simple hello world extension for IDE",
+    "version": "0.0.1",
+    "publisher": "ide",
+    "engines": {
+        "vscode": "^1.98.2"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:ide-hello-world.helloWorld"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [{
+            "command": "ide-hello-world.helloWorld",
+            "title": "Hello World from IDE"
+        }]
+    }
+}
