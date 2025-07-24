@@ -236,6 +236,14 @@ export class MCPClient extends EventEmitter {
 // Default MCP server configurations
 export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = [
   {
+    name: 'hanzo-mcp',
+    command: 'npx',
+    args: ['-y', '@hanzo/mcp', 'serve', '--project', process.cwd()],
+    env: {
+      NODE_ENV: process.env.NODE_ENV || 'development'
+    }
+  },
+  {
     name: 'filesystem',
     command: 'npx',
     args: ['@modelcontextprotocol/server-filesystem'],
@@ -250,10 +258,5 @@ export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = [
     env: {
       MCP_GIT_REPO: process.cwd()
     }
-  },
-  {
-    name: 'search',
-    command: 'npx',
-    args: ['@modelcontextprotocol/server-search']
   }
 ];
