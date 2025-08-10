@@ -1,9 +1,10 @@
 {
-  "name": "@openai/codex",
-  "version": "0.0.0-dev",
+  "name": "@just-every/code",
+  "version": "0.1.1",
   "license": "Apache-2.0",
+  "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
   "bin": {
-    "codex": "bin/codex.js"
+    "code": "bin/code.js"
   },
   "type": "module",
   "engines": {
@@ -15,6 +16,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openai/codex.git"
+    "url": "git+https://github.com/just-every/code.git"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
