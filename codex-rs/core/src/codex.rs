@@ -230,6 +230,9 @@ pub(crate) struct Session {
     /// Manager for external MCP servers/tools.
     mcp_connection_manager: McpConnectionManager,
 
+    /// Configuration for available agent models
+    agents: Vec<crate::config_types::AgentConfig>,
+
     /// External notifier command (will be passed as args to exec()). When
     /// `None` this feature is disabled.
     notify: Option<Vec<String>>,
@@ -887,6 +890,7 @@ async fn submission_loop(
                     cwd,
                     writable_roots,
                     mcp_connection_manager,
+                    agents: config.agents.clone(),
                     notify,
                     state: Mutex::new(state),
                     rollout: Mutex::new(rollout_recorder),
@@ -1834,16 +1838,44 @@ async fn handle_run_agent(
             
             let mut agent_ids = Vec::new();
             for model in models {
-                let agent_id = manager.create_agent(
-                    model,
-                    params.agent.clone(),
-                    params.context.clone(),
-                    params.output.clone(),
-                    params.files.clone().unwrap_or_default(),
-                    params.read_only.unwrap_or(false),
-                    batch_id.clone(),
-                ).await;
-                agent_ids.push(agent_id);
+                // Check if this model is configured and enabled
+                let agent_config = sess.agents.iter().find(|a| 
+                    a.name.to_lowercase() == model.to_lowercase() || 
+                    a.command.to_lowercase() == model.to_lowercase()
+                );
+                
+                if let Some(config) = agent_config {
+                    if !config.enabled {
+                        continue; // Skip disabled agents
+                    }
+                    
+                    // Override read_only if agent is configured as read-only
+                    let read_only = config.read_only || params.read_only.unwrap_or(false);
+                    
+                    let agent_id = manager.create_agent_with_config(
+                        model,
+                        params.agent.clone(),
+                        params.context.clone(),
+                        params.output.clone(),
+                        params.files.clone().unwrap_or_default(),
+                        read_only,
+                        batch_id.clone(),
+                        config.clone(),
+                    ).await;
+                    agent_ids.push(agent_id);
+                } else {
+                    // Use default configuration for unknown agents
+                    let agent_id = manager.create_agent(
+                        model,
+                        params.agent.clone(),
+                        params.context.clone(),
+                        params.output.clone(),
+                        params.files.clone().unwrap_or_default(),
+                        params.read_only.unwrap_or(false),
+                        batch_id.clone(),
+                    ).await;
+                    agent_ids.push(agent_id);
+                }
             }
             
             // Send status update showing agents are running

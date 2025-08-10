@@ -11,6 +11,41 @@ use wildmatch::WildMatchPattern;
 use serde::Deserialize;
 use serde::Serialize;
 
+/// Configuration for external agent models
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct AgentConfig {
+    /// Name of the agent (e.g., "claude", "gemini", "gpt-4")
+    pub name: String,
+    
+    /// Command to execute the agent (e.g., "claude", "gemini")
+    pub command: String,
+    
+    /// Optional arguments to pass to the agent command
+    #[serde(default)]
+    pub args: Vec<String>,
+    
+    /// Whether this agent can only run in read-only mode
+    #[serde(default)]
+    pub read_only: bool,
+    
+    /// Whether this agent is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    
+    /// Optional description of the agent
+    #[serde(default)]
+    pub description: Option<String>,
+    
+    /// Optional environment variables for the agent
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct McpServerConfig {
     pub command: String,
