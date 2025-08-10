@@ -65,6 +65,8 @@ pub(crate) struct ChatWidget<'a> {
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
     active_history_cell: Option<HistoryCell>,
+    history_cells: Vec<HistoryCell>,  // Store all history in memory
+    history_scroll: u16,  // Scroll position in history
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -200,14 +202,13 @@ impl ChatWidget<'_> {
             self.request_redraw();
         }
     }
-    fn layout_areas(&self, area: Rect) -> [Rect; 2] {
+    fn layout_areas(&self, area: Rect) -> [Rect; 3] {
+        // Status bar at top (3 lines for box border), history in middle, bottom pane at bottom
+        let bottom_height = 6u16.max(self.bottom_pane.desired_height(area.width)).min(15);
         Layout::vertical([
-            Constraint::Max(
-                self.active_history_cell
-                    .as_ref()
-                    .map_or(0, |c| c.desired_height(area.width)),
-            ),
-            Constraint::Min(self.bottom_pane.desired_height(area.width)),
+            Constraint::Length(3), // Status bar with box border
+            Constraint::Fill(1), // History takes all remaining space
+            Constraint::Length(bottom_height),
         ])
         .areas(area)
     }
@@ -274,6 +275,13 @@ impl ChatWidget<'_> {
             }
         });
 
+        // Add initial welcome message to history
+        let mut history_cells = Vec::new();
+        history_cells.push(HistoryCell::new_text_line(
+            ratatui::text::Line::from("Welcome to Codex TUI! Type your message below or use /help for commands.")
+                .style(ratatui::style::Style::default().fg(crate::colors::text_dim()))
+        ));
+
         Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -283,6 +291,8 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
             }),
             active_history_cell: None,
+            history_cells,
+            history_scroll: 0,
             config,
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -409,12 +419,28 @@ impl ChatWidget<'_> {
     }
 
     fn add_to_history(&mut self, cell: HistoryCell) {
-        self.app_event_tx
-            .send(AppEvent::InsertHistory(cell.plain_lines()));
+        // Store in memory instead of sending to scrollback
+        self.history_cells.push(cell);
+        // Request redraw to show new history
+        self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
         let UserMessage { text, image_paths } = user_message;
+        
+        // Check for slash commands
+        if text.trim() == "/theme" {
+            // Get current theme from config
+            let current_theme = self.config.tui.theme.name;
+            self.bottom_pane.show_theme_selection(current_theme);
+            return;
+        } else if text.trim() == "/reasoning" {
+            // Get current reasoning effort from config
+            let current_effort = self.config.model_reasoning_effort;
+            self.bottom_pane.show_reasoning_selection(current_effort);
+            return;
+        }
+        
         let mut items: Vec<InputItem> = Vec::new();
 
         if !text.is_empty() {
@@ -787,6 +813,59 @@ impl ChatWidget<'_> {
     pub(crate) fn apply_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
         self.bottom_pane.on_file_search_result(query, matches);
     }
+    
+    pub(crate) fn get_current_theme(&self) -> codex_core::config_types::ThemeName {
+        self.config.tui.theme.name
+    }
+    
+    pub(crate) fn show_theme_selection(&mut self) {
+        self.bottom_pane.show_theme_selection(self.config.tui.theme.name);
+    }
+    
+    pub(crate) fn set_theme(&mut self, new_theme: codex_core::config_types::ThemeName) {
+        // Update the config
+        self.config.tui.theme.name = new_theme;
+        
+        // Save the theme to config file
+        self.save_theme_to_config(new_theme);
+        
+        // Add confirmation message to history
+        let theme_name = match new_theme {
+            codex_core::config_types::ThemeName::CarbonNight => "Carbon Night",
+            codex_core::config_types::ThemeName::PhotonLight => "Photon Light",
+            codex_core::config_types::ThemeName::ShinobiDusk => "Shinobi Dusk",
+            codex_core::config_types::ThemeName::OledBlackPro => "OLED Black Pro",
+            codex_core::config_types::ThemeName::AmberTerminal => "Amber Terminal",
+            codex_core::config_types::ThemeName::AuroraFlux => "Aurora Flux",
+            codex_core::config_types::ThemeName::CharcoalRainbow => "Charcoal Rainbow",
+            codex_core::config_types::ThemeName::ZenGarden => "Zen Garden",
+            codex_core::config_types::ThemeName::PaperLightPro => "Paper Light Pro",
+            codex_core::config_types::ThemeName::Custom => "Custom",
+        };
+        let message = format!("✓ Theme changed to {}", theme_name);
+        self.add_to_history(HistoryCell::new_background_event(message));
+    }
+    
+    fn save_theme_to_config(&self, new_theme: codex_core::config_types::ThemeName) {
+        // For now, just log the theme change - config saving could be implemented
+        // using the core config system in a future update
+        let theme_str = match new_theme {
+            codex_core::config_types::ThemeName::CarbonNight => "carbon-night",
+            codex_core::config_types::ThemeName::PhotonLight => "photon-light",
+            codex_core::config_types::ThemeName::ShinobiDusk => "shinobi-dusk",
+            codex_core::config_types::ThemeName::OledBlackPro => "oled-black-pro",
+            codex_core::config_types::ThemeName::AmberTerminal => "amber-terminal",
+            codex_core::config_types::ThemeName::AuroraFlux => "aurora-flux",
+            codex_core::config_types::ThemeName::CharcoalRainbow => "charcoal-rainbow",
+            codex_core::config_types::ThemeName::ZenGarden => "zen-garden",
+            codex_core::config_types::ThemeName::PaperLightPro => "paper-light-pro",
+            codex_core::config_types::ThemeName::Custom => "custom",
+        };
+        tracing::info!("Theme changed to: {}", theme_str);
+        // Note: To persist the theme, add the following to your config.toml:
+        // [tui.theme]
+        // name = "{}"
+    }
 
     pub(crate) fn on_esc(&mut self) -> bool {
         if self.bottom_pane.is_task_running() {
@@ -855,8 +934,66 @@ impl ChatWidget<'_> {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let [_, bottom_pane_area] = self.layout_areas(area);
+        let [_status_bar_area, _history_area, bottom_pane_area] = self.layout_areas(area);
         self.bottom_pane.cursor_pos(bottom_pane_area)
+    }
+    
+    fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Paragraph, Block, Borders};
+        use ratatui::style::{Style, Modifier};
+        use ratatui::layout::Margin;
+        use crate::exec_command::relativize_to_home;
+        
+        // Add same horizontal padding as the Message input (2 chars on each side)
+        let horizontal_padding = 2u16;
+        let padded_area = Rect {
+            x: area.x + horizontal_padding,
+            y: area.y,
+            width: area.width.saturating_sub(horizontal_padding * 2),
+            height: area.height,
+        };
+        
+        // Get current working directory string
+        let cwd_str = match relativize_to_home(&self.config.cwd) {
+            Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
+            Some(_) => "~".to_string(),
+            None => self.config.cwd.display().to_string(),
+        };
+        
+        // Create status bar content - more compact single line
+        let status_line = Line::from(vec![
+            Span::styled("Codex TUI", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" • "),
+            Span::styled("Model: ", Style::default().dim()),
+            Span::styled(
+                format!("{}", self.config.model),
+                Style::default().fg(crate::colors::info())
+            ),
+            Span::raw(" • "),
+            Span::styled("Directory: ", Style::default().dim()),
+            Span::styled(cwd_str, Style::default().fg(crate::colors::info())),
+            Span::raw(" • "),
+            Span::raw("Type "),
+            Span::styled("/help", Style::default().fg(crate::colors::light_blue())),
+            Span::raw(" for commands"),
+        ]);
+        
+        // Create box border similar to Message input
+        let status_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()));
+        
+        // Add padding inside the box (1 char horizontal only, like Message input)
+        let inner_area = status_block.inner(padded_area);
+        let padded_inner = inner_area.inner(Margin::new(1, 0));
+        
+        // Render the block first
+        status_block.render(padded_area, buf);
+        
+        // Then render the text inside with padding
+        let status_widget = Paragraph::new(vec![status_line]);
+        ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 }
 
@@ -904,7 +1041,11 @@ impl ChatWidget<'_> {
             for r in drained {
                 lines.push(ratatui::text::Line::from(r.text));
             }
-            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+            // Add to in-memory history instead of scrollback
+            for line in lines {
+                self.history_cells.push(HistoryCell::new_text_line(line));
+            }
+            self.app_event_tx.send(AppEvent::RequestRedraw);
         }
 
         // Update the live ring overlay lines (text-only, newest at bottom).
@@ -947,7 +1088,11 @@ impl ChatWidget<'_> {
             }
             // Close the block with a blank line for readability.
             lines.push(ratatui::text::Line::from(""));
-            self.app_event_tx.send(AppEvent::InsertHistory(lines));
+            // Add to in-memory history instead of scrollback
+            for line in lines {
+                self.history_cells.push(HistoryCell::new_text_line(line));
+            }
+            self.app_event_tx.send(AppEvent::RequestRedraw);
         }
 
         // Clear the live overlay and reset state for the next stream.
@@ -960,11 +1105,128 @@ impl ChatWidget<'_> {
 
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let [active_cell_area, bottom_pane_area] = self.layout_areas(area);
-        (&self.bottom_pane).render(bottom_pane_area, buf);
-        if let Some(cell) = &self.active_history_cell {
-            cell.render_ref(active_cell_area, buf);
+        use ratatui::style::Style;
+        
+        // Fill entire area with theme background
+        let bg_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_style(bg_style);
+            }
         }
+        
+        let [status_bar_area, history_area, bottom_pane_area] = self.layout_areas(area);
+        
+        // Render status bar
+        self.render_status_bar(status_bar_area, buf);
+        
+        // Add horizontal padding to match the bottom pane (3 chars on each side)
+        let horizontal_padding = 3u16;
+        let padded_history_area = Rect {
+            x: history_area.x + horizontal_padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(horizontal_padding * 2),
+            height: history_area.height,
+        };
+        
+        // Calculate total height of all history cells with padded width
+        let mut total_height = 0u16;
+        let mut cell_heights = Vec::new();
+        
+        for cell in &self.history_cells {
+            let h = cell.desired_height(padded_history_area.width);
+            cell_heights.push(h);
+            total_height += h;
+        }
+        
+        // Add active cell height if present
+        if let Some(cell) = &self.active_history_cell {
+            let h = cell.desired_height(padded_history_area.width);
+            cell_heights.push(h);
+            total_height += h;
+        }
+        
+        // Add a small top padding for better visual spacing
+        let top_padding = 2u16;
+        
+        // Start rendering from bottom if total height is less than area height
+        let start_y = if total_height < padded_history_area.height.saturating_sub(top_padding) {
+            // Align to bottom with top padding
+            padded_history_area.y + top_padding.max(padded_history_area.height - total_height)
+        } else {
+            // Scroll: show most recent messages at bottom
+            padded_history_area.y + top_padding
+        };
+        
+        // Render history cells from bottom alignment
+        let mut y_offset = if total_height < padded_history_area.height {
+            0u16
+        } else {
+            // When scrolling, skip older messages that don't fit
+            total_height.saturating_sub(padded_history_area.height)
+        };
+        
+        let mut current_y = start_y;
+        let mut cell_idx = 0;
+        
+        // Skip cells that are scrolled off the top
+        for (i, _cell) in self.history_cells.iter().enumerate() {
+            if y_offset >= cell_heights[i] {
+                y_offset = y_offset.saturating_sub(cell_heights[i]);
+                cell_idx += 1;
+            } else {
+                break;
+            }
+        }
+        
+        // Render visible history cells
+        for (i, cell) in self.history_cells.iter().enumerate().skip(cell_idx) {
+            if current_y >= padded_history_area.y + padded_history_area.height {
+                break;
+            }
+            
+            let cell_height = cell_heights[i];
+            let visible_height = (padded_history_area.y + padded_history_area.height).saturating_sub(current_y);
+            
+            if visible_height > 0 {
+                let cell_area = Rect {
+                    x: padded_history_area.x,
+                    y: current_y,
+                    width: padded_history_area.width,
+                    height: visible_height.min(cell_height),
+                };
+                
+                // If we're partially scrolled, adjust the rendering
+                if y_offset > 0 && i == cell_idx {
+                    // This cell is partially scrolled off
+                    // We need to render it with an offset
+                    // For now, just render what's visible
+                }
+                
+                cell.render_ref(cell_area, buf);
+                current_y += cell_height.saturating_sub(y_offset);
+                y_offset = 0; // Only first cell can be partially scrolled
+            }
+        }
+        
+        // Render active cell if present and there's room
+        if let Some(cell) = &self.active_history_cell {
+            if current_y < padded_history_area.y + padded_history_area.height {
+                let cell_area = Rect {
+                    x: padded_history_area.x,
+                    y: current_y,
+                    width: padded_history_area.width,
+                    height: (padded_history_area.y + padded_history_area.height).saturating_sub(current_y),
+                };
+                cell.render_ref(cell_area, buf);
+            }
+        }
+        
+        // Render the bottom pane directly without a border for now
+        // The composer has its own layout with hints at the bottom
+        (&self.bottom_pane).render(bottom_pane_area, buf);
     }
 }
 

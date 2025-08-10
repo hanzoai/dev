@@ -95,27 +95,53 @@ impl ChatComposer {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        self.textarea.desired_height(width - 1)
-            + match &self.active_popup {
-                ActivePopup::None => 1u16,
-                ActivePopup::Command(c) => c.calculate_required_height(),
-                ActivePopup::File(c) => c.calculate_required_height(),
-            }
+        // Calculate hint/popup height
+        let hint_height = match &self.active_popup {
+            ActivePopup::None => 1u16,
+            ActivePopup::Command(c) => c.calculate_required_height(),
+            ActivePopup::File(c) => c.calculate_required_height(),
+        };
+        
+        // Calculate actual content height of textarea
+        // Account for: 2 border + 2 horizontal padding (1 left + 1 right)
+        let content_width = width.saturating_sub(4); // 2 border + 2 horizontal padding
+        let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
+        
+        // Total input height: content + border (2) only, no vertical padding
+        // Minimum of 3 ensures at least 1 visible line with border
+        let input_height = (content_lines + 2).max(3).min(15);
+        
+        input_height + hint_height
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let popup_height = match &self.active_popup {
-            ActivePopup::Command(popup) => popup.calculate_required_height(),
-            ActivePopup::File(popup) => popup.calculate_required_height(),
-            ActivePopup::None => 1,
+        // Split area: textarea with border at top, hints/popup at bottom
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else {
+            match &self.active_popup {
+                ActivePopup::Command(popup) => popup.calculate_required_height(),
+                ActivePopup::File(popup) => popup.calculate_required_height(),
+                ActivePopup::None => 1,
+            }
         };
-        let [textarea_rect, _] =
-            Layout::vertical([Constraint::Min(0), Constraint::Max(popup_height)]).areas(area);
-        let mut textarea_rect = textarea_rect;
-        textarea_rect.width = textarea_rect.width.saturating_sub(1);
-        textarea_rect.x += 1;
+        // Calculate dynamic height based on content  
+        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        
+        // Use desired height but don't exceed available space
+        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
+        let [input_area, _] =
+            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
+        
+        // Get inner area of the bordered input box
+        let input_block = Block::default().borders(Borders::ALL);
+        let textarea_rect = input_block.inner(input_area);
+        
+        // Apply same padding as in render (1 char horizontal only, no vertical padding)
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        
         let state = self.textarea_state.borrow();
-        self.textarea.cursor_pos_with_state(textarea_rect, &state)
+        self.textarea.cursor_pos_with_state(padded_textarea_rect, &state)
     }
 
     /// Returns true if the composer currently contains no user input.
@@ -661,18 +687,28 @@ impl WidgetRef for &ChatComposer {
             ActivePopup::File(popup) => popup.calculate_required_height(),
             ActivePopup::None => 1,
         };
-        let [textarea_rect, popup_rect] =
-            Layout::vertical([Constraint::Min(0), Constraint::Max(popup_height)]).areas(area);
+        // Split area: textarea with border at top, hints/popup at bottom
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else { popup_height };
+        
+        // Calculate dynamic height based on content
+        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        
+        // Use desired height but don't exceed available space
+        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
+        let [input_area, hint_area] =
+            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
         match &self.active_popup {
             ActivePopup::Command(popup) => {
-                popup.render_ref(popup_rect, buf);
+                popup.render_ref(hint_area, buf);
             }
             ActivePopup::File(popup) => {
-                popup.render_ref(popup_rect, buf);
+                popup.render_ref(hint_area, buf);
             }
             ActivePopup::None => {
-                let bottom_line_rect = popup_rect;
-                let key_hint_style = Style::default().fg(Color::Cyan);
+                let bottom_line_rect = hint_area;
+                let key_hint_style = Style::default().fg(crate::colors::light_blue());
                 let mut hint = if self.ctrl_c_quit_hint {
                     vec![
                         Span::from(" "),
@@ -727,29 +763,23 @@ impl WidgetRef for &ChatComposer {
                     .render_ref(bottom_line_rect, buf);
             }
         }
-        Block::default()
-            .border_style(Style::default().dim())
-            .borders(Borders::LEFT)
-            .border_type(BorderType::QuadrantOutside)
-            .border_style(Style::default().fg(if self.has_focus {
-                Color::Cyan
-            } else {
-                Color::Gray
-            }))
-            .render_ref(
-                Rect::new(textarea_rect.x, textarea_rect.y, 1, textarea_rect.height),
-                buf,
-            );
-        let mut textarea_rect = textarea_rect;
-        textarea_rect.width = textarea_rect.width.saturating_sub(1);
-        textarea_rect.x += 1;
+        // Draw border around input area (no title) - use lighter border color
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()));
+        
+        let textarea_rect = input_block.inner(input_area);
+        input_block.render_ref(input_area, buf);
 
+        // Add padding inside the text area (1 char horizontal only, no vertical padding)
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        
         let mut state = self.textarea_state.borrow_mut();
-        StatefulWidgetRef::render_ref(&(&self.textarea), textarea_rect, buf, &mut state);
+        StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
         if self.textarea.text().is_empty() {
             Line::from(BASE_PLACEHOLDER_TEXT)
                 .style(Style::default().dim())
-                .render_ref(textarea_rect.inner(Margin::new(1, 0)), buf);
+                .render_ref(padded_textarea_rect, buf);
         }
     }
 }

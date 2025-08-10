@@ -18,7 +18,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
-use crate::colors::LIGHT_BLUE;
+use crate::colors::light_blue;
 
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
@@ -80,9 +80,9 @@ impl WidgetRef for &TrustDirectoryWidget {
                     Line::from(vec![
                         Span::styled(
                             format!("> {}. ", idx + 1),
-                            Style::default().fg(LIGHT_BLUE).add_modifier(Modifier::DIM),
+                            Style::default().fg(light_blue()).add_modifier(Modifier::DIM),
                         ),
-                        Span::styled(text.to_owned(), Style::default().fg(LIGHT_BLUE)),
+                        Span::styled(text.to_owned(), Style::default().fg(light_blue())),
                     ])
                 } else {
                     Line::from(format!("  {}. {}", idx + 1, text))
