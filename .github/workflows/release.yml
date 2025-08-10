@@ -27,10 +27,10 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: code-aarch64-unknown-linux-musl
-          - os: macos-latest
+          - os: macos-13  # Use Intel Mac for x86_64 builds
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
-          - os: macos-latest
+          - os: macos-latest  # Use ARM Mac for aarch64 builds
             target: aarch64-apple-darwin
             artifact: code-aarch64-apple-darwin
           - os: windows-latest
