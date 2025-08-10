@@ -3,6 +3,7 @@ members = [
     "ansi-escape",
     "apply-patch",
     "arg0",
+    "browser",
     "cli",
     "common",
     "core",

@@ -78,6 +78,57 @@ pub enum HistoryPersistence {
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Tui {}
 
+/// Browser configuration for integrated screenshot capabilities.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct BrowserConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    
+    #[serde(default)]
+    pub viewport: Option<BrowserViewportConfig>,
+    
+    #[serde(default)]
+    pub wait: Option<BrowserWaitStrategy>,
+    
+    #[serde(default)]
+    pub fullpage: bool,
+    
+    #[serde(default)]
+    pub segments_max: Option<usize>,
+    
+    #[serde(default)]
+    pub idle_timeout_ms: Option<u64>,
+    
+    #[serde(default)]
+    pub format: Option<BrowserImageFormat>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct BrowserViewportConfig {
+    pub width: u32,
+    pub height: u32,
+    
+    #[serde(default)]
+    pub device_scale_factor: Option<f64>,
+    
+    #[serde(default)]
+    pub mobile: bool,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum BrowserWaitStrategy {
+    Event(String),
+    Delay { delay_ms: u64 },
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserImageFormat {
+    Png,
+    Webp,
+}
+
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SandboxMode {
