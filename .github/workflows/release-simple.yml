@@ -64,4 +64,4 @@ jobs:
       working-directory: codex-cli
       run: npm publish --access public
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}Triggering workflow by adding a comment
