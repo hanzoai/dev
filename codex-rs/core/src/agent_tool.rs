@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 use chrono::{DateTime, Utc, Duration};
 
+use crate::config_types::AgentConfig;
 use crate::openai_tools::{JsonSchema, OpenAiTool, ResponsesApiTool};
 
 // Agent status enum
@@ -41,6 +42,8 @@ pub struct Agent {
     pub progress: Vec<String>,
     pub worktree_path: Option<String>,
     pub branch_name: Option<String>,
+    #[serde(skip)]
+    pub config: Option<AgentConfig>,
 }
 
 // Global agent manager
@@ -71,6 +74,52 @@ impl AgentManager {
         read_only: bool,
         batch_id: Option<String>,
     ) -> String {
+        self.create_agent_internal(
+            model,
+            prompt,
+            context,
+            output_goal,
+            files,
+            read_only,
+            batch_id,
+            None,
+        ).await
+    }
+    
+    pub async fn create_agent_with_config(
+        &mut self,
+        model: String,
+        prompt: String,
+        context: Option<String>,
+        output_goal: Option<String>,
+        files: Vec<String>,
+        read_only: bool,
+        batch_id: Option<String>,
+        config: AgentConfig,
+    ) -> String {
+        self.create_agent_internal(
+            model,
+            prompt,
+            context,
+            output_goal,
+            files,
+            read_only,
+            batch_id,
+            Some(config),
+        ).await
+    }
+    
+    async fn create_agent_internal(
+        &mut self,
+        model: String,
+        prompt: String,
+        context: Option<String>,
+        output_goal: Option<String>,
+        files: Vec<String>,
+        read_only: bool,
+        batch_id: Option<String>,
+        config: Option<AgentConfig>,
+    ) -> String {
         let agent_id = Uuid::new_v4().to_string();
         
         let agent = Agent {
@@ -91,6 +140,7 @@ impl AgentManager {
             progress: Vec::new(),
             worktree_path: None,
             branch_name: None,
+            config: config.clone(),
         };
         
         self.agents.insert(agent_id.clone(), agent.clone());
@@ -98,7 +148,7 @@ impl AgentManager {
         // Spawn async agent
         let agent_id_clone = agent_id.clone();
         let handle = tokio::spawn(async move {
-            execute_agent(agent_id_clone).await;
+            execute_agent(agent_id_clone, config).await;
         });
         
         self.handles.insert(agent_id.clone(), handle);
@@ -290,7 +340,7 @@ async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, Str
     Ok(worktree_path)
 }
 
-async fn execute_agent(agent_id: String) {
+async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     let mut manager = AGENT_MANAGER.write().await;
     
     // Get agent details
@@ -343,7 +393,7 @@ async fn execute_agent(agent_id: String) {
                         drop(manager);
                         
                         // Execute with full permissions in the worktree
-                        execute_model_with_permissions(&model, &full_prompt, false, Some(worktree_path)).await
+                        execute_model_with_permissions(&model, &full_prompt, false, Some(worktree_path), config.clone()).await
                     }
                     Err(e) => Err(format!("Failed to setup worktree: {}", e))
                 }
@@ -353,7 +403,7 @@ async fn execute_agent(agent_id: String) {
     } else {
         // Execute in read-only mode
         full_prompt = format!("{}\n\n[Running in read-only mode - no modifications allowed]", full_prompt);
-        execute_model_with_permissions(&model, &full_prompt, true, None).await
+        execute_model_with_permissions(&model, &full_prompt, true, None, config).await
     };
     
     // Update result
@@ -365,17 +415,47 @@ async fn execute_model_with_permissions(
     model: &str, 
     prompt: &str, 
     read_only: bool,
-    working_dir: Option<PathBuf>
+    working_dir: Option<PathBuf>,
+    config: Option<AgentConfig>
 ) -> Result<String, String> {
-    let mut cmd = Command::new(model.to_lowercase());
+    // Use config command if provided, otherwise use model name
+    let command = if let Some(ref cfg) = config {
+        cfg.command.clone()
+    } else {
+        model.to_lowercase()
+    };
+    
+    let mut cmd = Command::new(command.clone());
     
     // Set working directory if provided
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
     }
     
+    // Add environment variables from config if provided
+    if let Some(ref cfg) = config {
+        if let Some(ref env) = cfg.env {
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
+        }
+        
+        // Add any configured args first
+        for arg in &cfg.args {
+            cmd.arg(arg);
+        }
+    }
+    
     // Build command based on model and permissions
-    match model.to_lowercase().as_str() {
+    // Use command instead of model for matching if config provided
+    let model_lower = model.to_lowercase();
+    let model_name = if config.is_some() {
+        command.as_str()
+    } else {
+        model_lower.as_str()
+    };
+    
+    match model_name {
         "claude" => {
             if read_only {
                 cmd.args(&[
