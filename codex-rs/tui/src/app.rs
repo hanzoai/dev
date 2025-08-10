@@ -11,7 +11,6 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
-use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
@@ -379,6 +378,17 @@ impl App<'_> {
                     SlashCommand::Prompts => {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.add_prompts_output();
+                        }
+                    }
+                    // Prompt-expanding commands should have been handled in submit_user_message
+                    // but add a fallback just in case
+                    SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {
+                        // These should have been expanded already, but handle them anyway
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            let expanded = command.expand_prompt(&command_text);
+                            if let Some(prompt) = expanded {
+                                widget.submit_text_message(prompt);
+                            }
                         }
                     }
                     #[cfg(debug_assertions)]

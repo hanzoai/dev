@@ -415,10 +415,37 @@ impl ChatWidget<'_> {
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
         let UserMessage { text, image_paths } = user_message;
+        
+        // Keep the original text for display purposes
+        let original_text = text.clone();
+        let mut actual_text = text;
+        
+        // Process slash commands and expand them if needed
+        let processed = crate::slash_command::process_slash_command_message(&actual_text);
+        match processed {
+            crate::slash_command::ProcessedCommand::ExpandedPrompt(expanded) => {
+                // Replace the slash command with the expanded prompt for the LLM
+                actual_text = expanded;
+            }
+            crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
+                // This is a regular slash command, dispatch it normally
+                self.app_event_tx.send(AppEvent::DispatchCommand(cmd, actual_text.clone()));
+                return;
+            }
+            crate::slash_command::ProcessedCommand::Error(error_msg) => {
+                // Show error in history
+                self.add_to_history(HistoryCell::new_error_event(error_msg));
+                return;
+            }
+            crate::slash_command::ProcessedCommand::NotCommand(_) => {
+                // Not a slash command, process normally
+            }
+        }
+        
         let mut items: Vec<InputItem> = Vec::new();
 
-        if !text.is_empty() {
-            items.push(InputItem::Text { text: text.clone() });
+        if !actual_text.is_empty() {
+            items.push(InputItem::Text { text: actual_text.clone() });
         }
 
         for path in image_paths {
@@ -435,18 +462,18 @@ impl ChatWidget<'_> {
                 tracing::error!("failed to send message: {e}");
             });
 
-        // Persist the text to cross-session message history.
-        if !text.is_empty() {
+        // Persist the original text to cross-session message history.
+        if !original_text.is_empty() {
             self.codex_op_tx
-                .send(Op::AddToHistory { text: text.clone() })
+                .send(Op::AddToHistory { text: original_text.clone() })
                 .unwrap_or_else(|e| {
                     tracing::error!("failed to send AddHistory op: {e}");
                 });
         }
 
-        // Only show text portion in conversation history for now.
-        if !text.is_empty() {
-            self.add_to_history(HistoryCell::new_user_prompt(text.clone()));
+        // Show the original text (slash command) in conversation history, not the expanded version
+        if !original_text.is_empty() {
+            self.add_to_history(HistoryCell::new_user_prompt(original_text));
         }
     }
 
@@ -833,7 +860,7 @@ impl ChatWidget<'_> {
 
     /// Programmatically submit a user text message as if typed in the
     /// composer. The text will be added to conversation history and sent to
-    /// the agent.
+    /// the agent. This also handles slash command expansion.
     pub(crate) fn submit_text_message(&mut self, text: String) {
         if text.is_empty() {
             return;

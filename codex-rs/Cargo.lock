@@ -684,6 +684,7 @@ dependencies = [
  "fs2",
  "futures",
  "landlock",
+ "lazy_static",
  "libc",
  "maplit",
  "mcp-types",

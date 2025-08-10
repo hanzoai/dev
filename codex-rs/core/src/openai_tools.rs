@@ -4,7 +4,10 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use crate::agent_tool::create_agent_tool;
+use crate::agent_tool::{
+    create_run_agent_tool, create_check_agent_status_tool, create_get_agent_result_tool,
+    create_cancel_agent_tool, create_wait_for_agent_tool, create_list_agents_tool,
+};
 use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
@@ -333,8 +336,13 @@ pub(crate) fn get_openai_tools(
         tools.push(PLAN_TOOL.clone());
     }
 
-    // Add the agent tool for calling external LLMs
-    tools.push(create_agent_tool());
+    // Add agent management tools for calling external LLMs asynchronously
+    tools.push(create_run_agent_tool());
+    tools.push(create_check_agent_status_tool());
+    tools.push(create_get_agent_result_tool());
+    tools.push(create_cancel_agent_tool());
+    tools.push(create_wait_for_agent_tool());
+    tools.push(create_list_agents_tool());
 
     if let Some(mcp_tools) = mcp_tools {
         for (name, tool) in mcp_tools {
