@@ -90,10 +90,21 @@ pub fn insert_history_lines_to_writer<B, W>(
     // terminal's last_known_cursor_position, which hopefully will still be accurate after we
     // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
     queue!(writer, MoveTo(0, cursor_top)).ok();
+    
+    // Set theme colors for the newlines and any unstyled content
+    let theme_fg = crate::colors::text();
+    let theme_bg = crate::colors::background();
+    queue!(
+        writer,
+        SetColors(Colors::new(theme_fg.into(), theme_bg.into()))
+    ).ok();
 
     for line in lines {
+        // Fill entire line with background before writing content
         queue!(writer, Print("\r\n")).ok();
+        queue!(writer, Print("\x1b[K")).ok(); // Clear to end of line with current bg
         write_spans(writer, line.iter()).ok();
+        queue!(writer, Print("\x1b[K")).ok(); // Clear remainder of line after content
     }
 
     queue!(writer, ResetScrollRegion).ok();
@@ -245,9 +256,20 @@ fn write_spans<'a, I>(mut writer: &mut impl Write, content: I) -> io::Result<()>
 where
     I: Iterator<Item = &'a Span<'a>>,
 {
-    let mut fg = Color::Reset;
-    let mut bg = Color::Reset;
+    // Use theme colors as defaults instead of terminal defaults
+    let theme_fg = crate::colors::text();
+    let theme_bg = crate::colors::background();
+    
+    let mut fg = theme_fg;
+    let mut bg = theme_bg;
     let mut last_modifier = Modifier::empty();
+    
+    // Set initial theme colors
+    queue!(
+        writer,
+        SetColors(Colors::new(theme_fg.into(), theme_bg.into()))
+    )?;
+    
     for span in content {
         let mut modifier = Modifier::empty();
         modifier.insert(span.style.add_modifier);
@@ -260,8 +282,8 @@ where
             diff.queue(&mut writer)?;
             last_modifier = modifier;
         }
-        let next_fg = span.style.fg.unwrap_or(Color::Reset);
-        let next_bg = span.style.bg.unwrap_or(Color::Reset);
+        let next_fg = span.style.fg.unwrap_or(theme_fg);
+        let next_bg = span.style.bg.unwrap_or(theme_bg);
         if next_fg != fg || next_bg != bg {
             queue!(
                 writer,
@@ -274,10 +296,10 @@ where
         queue!(writer, Print(span.content.clone()))?;
     }
 
+    // Reset to theme colors instead of terminal defaults
     queue!(
         writer,
-        SetForegroundColor(CColor::Reset),
-        SetBackgroundColor(CColor::Reset),
+        SetColors(Colors::new(theme_fg.into(), theme_bg.into())),
         SetAttribute(crossterm::style::Attribute::Reset),
     )
 }

@@ -293,15 +293,17 @@ where
     pub fn with_options(mut backend: B) -> io::Result<Self> {
         let screen_size = backend.size()?;
         let cursor_pos = backend.get_cursor_position()?;
+        // In alternate screen mode, use full terminal as viewport
+        let viewport_area = Rect::new(0, 0, screen_size.width, screen_size.height);
         Ok(Self {
             backend,
             buffers: [
-                Buffer::empty(Rect::new(0, 0, 0, 0)),
-                Buffer::empty(Rect::new(0, 0, 0, 0)),
+                Buffer::empty(viewport_area),
+                Buffer::empty(viewport_area),
             ],
             current: 0,
             hidden_cursor: false,
-            viewport_area: Rect::new(0, cursor_pos.y, 0, 0),
+            viewport_area,
             last_known_screen_size: screen_size,
             last_known_cursor_pos: cursor_pos,
             frame_count: 0,

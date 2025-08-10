@@ -11,6 +11,7 @@ use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
+use crossterm::style::SetColors;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
@@ -21,9 +22,15 @@ use crate::custom_terminal::Terminal;
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-/// Initialize the terminal (inline viewport; history stays in normal scrollback)
-pub fn init(_config: &Config) -> Result<Tui> {
+/// Initialize the terminal (full screen mode with alternate screen)
+pub fn init(config: &Config) -> Result<Tui> {
+    // Initialize the theme based on config
+    crate::theme::init_theme(&config.tui.theme);
+    
     execute!(stdout(), EnableBracketedPaste)?;
+    
+    // Enter alternate screen mode for full screen TUI
+    execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
 
     enable_raw_mode()?;
     // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
@@ -42,8 +49,15 @@ pub fn init(_config: &Config) -> Result<Tui> {
     );
     set_panic_hook();
 
-    // Clear screen and move cursor to top-left before drawing UI
-    execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+    // Clear screen with theme background color
+    let theme_bg = crate::colors::background();
+    let theme_fg = crate::colors::text();
+    execute!(
+        stdout(), 
+        SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+        Clear(ClearType::All), 
+        MoveTo(0, 0)
+    )?;
 
     let backend = CrosstermBackend::new(stdout());
     let tui = Terminal::with_options(backend)?;
@@ -64,5 +78,7 @@ pub fn restore() -> Result<()> {
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     execute!(stdout(), DisableBracketedPaste)?;
     disable_raw_mode()?;
+    // Leave alternate screen mode
+    execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
 }
