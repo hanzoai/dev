@@ -36,6 +36,7 @@ use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self};
+use crate::agent_tool::{AgentCallParams, execute_agent_call};
 use crate::client::ModelClient;
 use crate::client_common::EnvironmentContext;
 use crate::client_common::Prompt;
@@ -1715,6 +1716,7 @@ async fn handle_function_call(
                 .await
         }
         "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id).await,
+        "agent" => handle_agent_call(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -1792,6 +1794,50 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
         }
     }
     params
+}
+
+async fn handle_agent_call(
+    _sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    // Parse the arguments
+    match serde_json::from_str::<AgentCallParams>(&arguments) {
+        Ok(params) => {
+            // Execute the agent calls
+            match execute_agent_call(params).await {
+                Ok(output) => {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: output,
+                            success: Some(true),
+                        },
+                    }
+                }
+                Err(e) => {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Error calling agents: {}", e),
+                            success: Some(false),
+                        },
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            // Allow model to re-sample
+            ResponseInputItem::FunctionCallOutput {
+                call_id: call_id.clone(),
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid agent call arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
 }
 
 async fn handle_container_exec_with_params(
