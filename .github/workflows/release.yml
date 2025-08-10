@@ -138,10 +138,23 @@ jobs:
         
         # Get current version
         CURRENT_VERSION=$(node -p "require('./package.json').version")
-        echo "Current version: $CURRENT_VERSION"
+        echo "Current version in package.json: $CURRENT_VERSION"
         
-        # Bump version
-        npm version patch --no-git-tag-version
+        # Check latest published version
+        PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
+        echo "Latest published version: $PUBLISHED_VERSION"
+        
+        # Compare versions and bump appropriately
+        if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
+          # Need to bump from published version
+          echo "Bumping from published version $PUBLISHED_VERSION"
+          # Set to published version first, then bump
+          npm version $PUBLISHED_VERSION --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
+        else
+          echo "Current version $CURRENT_VERSION is already ahead of published $PUBLISHED_VERSION"
+        fi
+        
         NEW_VERSION=$(node -p "require('./package.json').version")
         echo "New version: $NEW_VERSION"
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
@@ -153,7 +166,12 @@ jobs:
           echo "skip_push=true" >> $GITHUB_OUTPUT
         else
           git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
-          git tag "v${NEW_VERSION}"
+          # Only create tag if it doesn't exist
+          if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
+            git tag "v${NEW_VERSION}"
+          else
+            echo "Tag v${NEW_VERSION} already exists, skipping tag creation"
+          fi
           echo "skip_push=false" >> $GITHUB_OUTPUT
         fi
       
