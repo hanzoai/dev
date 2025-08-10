@@ -36,7 +36,11 @@ use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self};
-use crate::agent_tool::{AgentCallParams, execute_agent_call};
+use crate::agent_tool::{
+    RunAgentParams, CheckAgentStatusParams, GetAgentResultParams, 
+    CancelAgentParams, WaitForAgentParams, ListAgentsParams,
+    AgentStatus, AGENT_MANAGER,
+};
 use crate::client::ModelClient;
 use crate::client_common::EnvironmentContext;
 use crate::client_common::Prompt;
@@ -204,7 +208,7 @@ impl Codex {
 
 /// Context for an initialized model agent
 ///
-/// A session has at most 1 running task at a time, and can be interrupted by user input.
+/// A session has at most 1 running agent at a time, and can be interrupted by user input.
 pub(crate) struct Session {
     client: ModelClient,
     pub(crate) tx_event: Sender<Event>,
@@ -251,26 +255,26 @@ impl Session {
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<Vec<String>>,
-    current_task: Option<AgentTask>,
+    current_agent: Option<AgentAgent>,
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
     history: ConversationHistory,
 }
 
 impl Session {
-    pub fn set_task(&self, task: AgentTask) {
+    pub fn set_agent(&self, agent: AgentAgent) {
         let mut state = self.state.lock().unwrap();
-        if let Some(current_task) = state.current_task.take() {
-            current_task.abort();
+        if let Some(current_agent) = state.current_agent.take() {
+            current_agent.abort();
         }
-        state.current_task = Some(task);
+        state.current_agent = Some(agent);
     }
 
-    pub fn remove_task(&self, sub_id: &str) {
+    pub fn remove_agent(&self, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
-        if let Some(task) = &state.current_task {
-            if task.sub_id == sub_id {
-                state.current_task.take();
+        if let Some(agent) = &state.current_agent {
+            if agent.sub_id == sub_id {
+                state.current_agent.take();
             }
         }
     }
@@ -541,10 +545,10 @@ impl Session {
         [self.state.lock().unwrap().history.contents(), extra].concat()
     }
 
-    /// Returns the input if there was no task running to inject into
+    /// Returns the input if there was no agent running to inject into
     pub fn inject_input(&self, input: Vec<InputItem>) -> Result<(), Vec<InputItem>> {
         let mut state = self.state.lock().unwrap();
-        if state.current_task.is_some() {
+        if state.current_agent.is_some() {
             state.pending_input.push(input.into());
             Ok(())
         } else {
@@ -580,8 +584,8 @@ impl Session {
         let mut state = self.state.lock().unwrap();
         state.pending_approvals.clear();
         state.pending_input.clear();
-        if let Some(task) = state.current_task.take() {
-            task.abort();
+        if let Some(agent) = state.current_agent.take() {
+            agent.abort();
         }
     }
 
@@ -647,16 +651,16 @@ pub(crate) struct ApplyPatchCommandContext {
 }
 
 /// A series of Turns in response to user input.
-pub(crate) struct AgentTask {
+pub(crate) struct AgentAgent {
     sess: Arc<Session>,
     sub_id: String,
     handle: AbortHandle,
 }
 
-impl AgentTask {
+impl AgentAgent {
     fn spawn(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) -> Self {
         let handle =
-            tokio::spawn(run_task(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
+            tokio::spawn(run_agent(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
         Self {
             sess,
             sub_id,
@@ -669,7 +673,7 @@ impl AgentTask {
         input: Vec<InputItem>,
         compact_instructions: String,
     ) -> Self {
-        let handle = tokio::spawn(run_compact_task(
+        let handle = tokio::spawn(run_compact_agent(
             Arc::clone(&sess),
             sub_id.clone(),
             input,
@@ -930,11 +934,11 @@ async fn submission_loop(
                     }
                 };
 
-                // attempt to inject input into current task
+                // attempt to inject input into current agent
                 if let Err(items) = sess.inject_input(items) {
-                    // no current task, spawn a new one
-                    let task = AgentTask::spawn(Arc::clone(sess), sub.id, items);
-                    sess.set_task(task);
+                    // no current agent, spawn a new one
+                    let agent = AgentAgent::spawn(Arc::clone(sess), sub.id, items);
+                    sess.set_agent(agent);
                 }
             }
             Op::ExecApproval { id, decision } => {
@@ -1021,17 +1025,17 @@ async fn submission_loop(
                 // Create a summarization request as user input
                 const SUMMARIZATION_PROMPT: &str = include_str!("prompt_for_compact_command.md");
 
-                // Attempt to inject input into current task
+                // Attempt to inject input into current agent
                 if let Err(items) = sess.inject_input(vec![InputItem::Text {
                     text: "Start Summarization".to_string(),
                 }]) {
-                    let task = AgentTask::compact(
+                    let agent = AgentAgent::compact(
                         sess.clone(),
                         sub.id,
                         items,
                         SUMMARIZATION_PROMPT.to_string(),
                     );
-                    sess.set_task(task);
+                    sess.set_agent(agent);
                 }
             }
             Op::Shutdown => {
@@ -1082,8 +1086,8 @@ async fn submission_loop(
 /// - If the model requests a function call, we execute it and send the output
 ///   back to the model in the next turn.
 /// - If the model sends only an assistant message, we record it in the
-///   conversation history and consider the task complete.
-async fn run_task(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
+///   conversation history and consider the agent complete.
+async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     if input.is_empty() {
         return;
     }
@@ -1099,8 +1103,8 @@ async fn run_task(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     sess.record_conversation_items(&[initial_input_for_turn.clone().into()])
         .await;
 
-    let mut last_agent_message: Option<String> = None;
-    // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
+    let mut last_task_message: Option<String> = None;
+    // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Agent which contains
     // many turns, from the perspective of the user, it is a single turn.
     let mut turn_diff_tracker = TurnDiffTracker::new();
 
@@ -1229,13 +1233,13 @@ async fn run_task(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
 
                 if responses.is_empty() {
                     debug!("Turn completed");
-                    last_agent_message = get_last_assistant_message_from_turn(
+                    last_task_message = get_last_assistant_message_from_turn(
                         &items_to_record_in_conversation_history,
                     );
                     sess.maybe_notify(UserNotification::AgentTurnComplete {
                         turn_id: sub_id.clone(),
                         input_messages: turn_input_messages,
-                        last_assistant_message: last_agent_message.clone(),
+                        last_assistant_message: last_task_message.clone(),
                     });
                     break;
                 }
@@ -1254,10 +1258,10 @@ async fn run_task(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             }
         }
     }
-    sess.remove_task(&sub_id);
+    sess.remove_agent(&sub_id);
     let event = Event {
         id: sub_id,
-        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: last_task_message }),
     };
     sess.tx_event.send(event).await.ok();
 }
@@ -1490,7 +1494,7 @@ async fn try_run_turn(
     }
 }
 
-async fn run_compact_task(
+async fn run_compact_agent(
     sess: Arc<Session>,
     sub_id: String,
     input: Vec<InputItem>,
@@ -1553,11 +1557,11 @@ async fn run_compact_task(
         }
     }
 
-    sess.remove_task(&sub_id);
+    sess.remove_agent(&sub_id);
     let event = Event {
         id: sub_id.clone(),
         msg: EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Compact task completed".to_string(),
+            message: "Compact agent completed".to_string(),
         }),
     };
     sess.send_event(event).await;
@@ -1716,7 +1720,12 @@ async fn handle_function_call(
                 .await
         }
         "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id).await,
-        "agent" => handle_agent_call(sess, arguments, sub_id, call_id).await,
+        "run_agent" => handle_run_agent(sess, arguments, sub_id, call_id).await,
+        "check_agent_status" => handle_check_agent_status(sess, arguments, sub_id, call_id).await,
+        "get_agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id).await,
+        "cancel_agent" => handle_cancel_agent(sess, arguments, sub_id, call_id).await,
+        "wait_for_agent" => handle_wait_for_agent(sess, arguments, sub_id, call_id).await,
+        "list_agents" => handle_list_agents(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -1796,43 +1805,433 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
     params
 }
 
-async fn handle_agent_call(
+async fn handle_run_agent(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    match serde_json::from_str::<RunAgentParams>(&arguments) {
+        Ok(params) => {
+            let mut manager = AGENT_MANAGER.write().await;
+            
+            // Handle model parameter (can be string or array)
+            let models = match params.model {
+                Some(serde_json::Value::String(model)) => vec![model],
+                Some(serde_json::Value::Array(models)) => {
+                    models.into_iter()
+                        .filter_map(|m| m.as_str().map(String::from))
+                        .collect()
+                }
+                _ => vec!["codex".to_string()], // Default model
+            };
+            
+            let batch_id = if models.len() > 1 {
+                Some(Uuid::new_v4().to_string())
+            } else {
+                None
+            };
+            
+            let mut agent_ids = Vec::new();
+            for model in models {
+                let agent_id = manager.create_agent(
+                    model,
+                    params.agent.clone(),
+                    params.context.clone(),
+                    params.output.clone(),
+                    params.files.clone().unwrap_or_default(),
+                    params.read_only.unwrap_or(false),
+                    batch_id.clone(),
+                ).await;
+                agent_ids.push(agent_id);
+            }
+            
+            // Send status update showing agents are running
+            if agent_ids.len() > 0 {
+                let status_msg = format!("🤖 {} agent{} running", agent_ids.len(), if agent_ids.len() > 1 { "s" } else { "" });
+                let event = Event {
+                    id: "agent-status".to_string(),
+                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                        message: status_msg,
+                    }),
+                };
+                let _ = sess.tx_event.send(event).await;
+            }
+            
+            let response = if let Some(batch_id) = batch_id {
+                serde_json::json!({
+                    "batch_id": batch_id,
+                    "agent_ids": agent_ids,
+                    "status": "started",
+                    "message": format!("Started {} agents", agent_ids.len())
+                })
+            } else {
+                serde_json::json!({
+                    "agent_id": agent_ids[0],
+                    "status": "started",
+                    "message": "Agent started successfully"
+                })
+            };
+            
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: response.to_string(),
+                    success: Some(true),
+                },
+            }
+        }
+        Err(e) => {
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid run_agent arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
+}
+
+async fn handle_check_agent_status(
     _sess: &Session,
     arguments: String,
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    // Parse the arguments
-    match serde_json::from_str::<AgentCallParams>(&arguments) {
+    match serde_json::from_str::<CheckAgentStatusParams>(&arguments) {
         Ok(params) => {
-            // Execute the agent calls
-            match execute_agent_call(params).await {
-                Ok(output) => {
-                    ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: output,
-                            success: Some(true),
-                        },
-                    }
+            let manager = AGENT_MANAGER.read().await;
+            
+            if let Some(agent) = manager.get_agent(&params.agent_id) {
+                let response = serde_json::json!({
+                    "agent_id": agent.id,
+                    "status": agent.status,
+                    "model": agent.model,
+                    "created_at": agent.created_at,
+                    "started_at": agent.started_at,
+                    "completed_at": agent.completed_at,
+                    "progress": agent.progress,
+                    "error": agent.error,
+                    "worktree_path": agent.worktree_path,
+                    "branch_name": agent.branch_name,
+                });
+                
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: response.to_string(),
+                        success: Some(true),
+                    },
                 }
-                Err(e) => {
-                    ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: format!("Error calling agents: {}", e),
-                            success: Some(false),
-                        },
-                    }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Agent not found: {}", params.agent_id),
+                        success: Some(false),
+                    },
                 }
             }
         }
         Err(e) => {
-            // Allow model to re-sample
             ResponseInputItem::FunctionCallOutput {
-                call_id: call_id.clone(),
+                call_id,
                 output: FunctionCallOutputPayload {
-                    content: format!("Invalid agent call arguments: {}", e),
+                    content: format!("Invalid check_agent_status arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
+}
+
+async fn handle_get_agent_result(
+    _sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    match serde_json::from_str::<GetAgentResultParams>(&arguments) {
+        Ok(params) => {
+            let manager = AGENT_MANAGER.read().await;
+            
+            if let Some(agent) = manager.get_agent(&params.agent_id) {
+                if agent.status == AgentStatus::Completed {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: agent.result.unwrap_or_else(|| "No result available".to_string()),
+                            success: Some(true),
+                        },
+                    }
+                } else if agent.status == AgentStatus::Failed {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Agent failed: {}", agent.error.unwrap_or_else(|| "Unknown error".to_string())),
+                            success: Some(false),
+                        },
+                    }
+                } else {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Agent is still {}: cannot get result yet", serde_json::to_string(&agent.status).unwrap_or_else(|_| "running".to_string())),
+                            success: Some(false),
+                        },
+                    }
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Agent not found: {}", params.agent_id),
+                        success: Some(false),
+                    },
+                }
+            }
+        }
+        Err(e) => {
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid get_agent_result arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
+}
+
+async fn handle_cancel_agent(
+    _sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    match serde_json::from_str::<CancelAgentParams>(&arguments) {
+        Ok(params) => {
+            let mut manager = AGENT_MANAGER.write().await;
+            
+            if let Some(agent_id) = params.agent_id {
+                if manager.cancel_agent(&agent_id).await {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Agent {} cancelled", agent_id),
+                            success: Some(true),
+                        },
+                    }
+                } else {
+                    ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to cancel agent {}", agent_id),
+                            success: Some(false),
+                        },
+                    }
+                }
+            } else if let Some(batch_id) = params.batch_id {
+                let count = manager.cancel_batch(&batch_id).await;
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Cancelled {} agents in batch {}", count, batch_id),
+                        success: Some(true),
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: "Either agent_id or batch_id must be provided".to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
+        }
+        Err(e) => {
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid cancel_agent arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
+}
+
+async fn handle_wait_for_agent(
+    _sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    match serde_json::from_str::<WaitForAgentParams>(&arguments) {
+        Ok(params) => {
+            let timeout = std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300).min(600));
+            let start = std::time::Instant::now();
+            
+            loop {
+                if start.elapsed() > timeout {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content: "Timeout waiting for agent completion".to_string(),
+                            success: Some(false),
+                        },
+                    };
+                }
+                
+                let manager = AGENT_MANAGER.read().await;
+                
+                if let Some(agent_id) = &params.agent_id {
+                    if let Some(agent) = manager.get_agent(agent_id) {
+                        if matches!(agent.status, AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled) {
+                            let response = serde_json::json!({
+                                "agent_id": agent.id,
+                                "status": agent.status,
+                                "wait_time_seconds": start.elapsed().as_secs(),
+                            });
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id,
+                                output: FunctionCallOutputPayload {
+                                    content: response.to_string(),
+                                    success: Some(true),
+                                },
+                            };
+                        }
+                    }
+                } else if let Some(batch_id) = &params.batch_id {
+                    let agents = manager.list_agents(None, Some(batch_id.clone()), false);
+                    let completed_agents: Vec<_> = agents.into_iter()
+                        .filter(|t| matches!(t.status, AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled))
+                        .collect();
+                    
+                    if !completed_agents.is_empty() {
+                        let response = if params.return_all.unwrap_or(false) {
+                            serde_json::json!({
+                                "batch_id": batch_id,
+                                "completed_agents": completed_agents.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+                                "wait_time_seconds": start.elapsed().as_secs(),
+                            })
+                        } else {
+                            serde_json::json!({
+                                "agent_id": completed_agents[0].id,
+                                "status": completed_agents[0].status,
+                                "wait_time_seconds": start.elapsed().as_secs(),
+                            })
+                        };
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: response.to_string(),
+                                success: Some(true),
+                            },
+                        };
+                    }
+                }
+                
+                drop(manager);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+        Err(e) => {
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid wait_for_agent arguments: {}", e),
+                    success: None,
+                },
+            }
+        }
+    }
+}
+
+async fn handle_list_agents(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    match serde_json::from_str::<ListAgentsParams>(&arguments) {
+        Ok(params) => {
+            let manager = AGENT_MANAGER.read().await;
+            
+            let status_filter = params.status_filter.and_then(|s| {
+                match s.to_lowercase().as_str() {
+                    "pending" => Some(AgentStatus::Pending),
+                    "running" => Some(AgentStatus::Running),
+                    "completed" => Some(AgentStatus::Completed),
+                    "failed" => Some(AgentStatus::Failed),
+                    "cancelled" => Some(AgentStatus::Cancelled),
+                    _ => None,
+                }
+            });
+            
+            let agents = manager.list_agents(
+                status_filter,
+                params.batch_id,
+                params.recent_only.unwrap_or(false),
+            );
+            
+            // Count running agents for status update
+            let running_count = agents.iter().filter(|a| a.status == AgentStatus::Running).count();
+            if running_count > 0 {
+                let status_msg = format!("🤖 {} agent{} currently running", running_count, if running_count != 1 { "s" } else { "" });
+                let event = Event {
+                    id: "agent-status".to_string(),
+                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                        message: status_msg,
+                    }),
+                };
+                let _ = sess.tx_event.send(event).await;
+            }
+            
+            // Add status counts to summary
+            let pending_count = agents.iter().filter(|a| a.status == AgentStatus::Pending).count();
+            let running_count = agents.iter().filter(|a| a.status == AgentStatus::Running).count();
+            let completed_count = agents.iter().filter(|a| a.status == AgentStatus::Completed).count();
+            let failed_count = agents.iter().filter(|a| a.status == AgentStatus::Failed).count();
+            let cancelled_count = agents.iter().filter(|a| a.status == AgentStatus::Cancelled).count();
+            
+            let summary = serde_json::json!({
+                "total_agents": agents.len(),
+                "status_counts": {
+                    "pending": pending_count,
+                    "running": running_count,
+                    "completed": completed_count,
+                    "failed": failed_count,
+                    "cancelled": cancelled_count,
+                },
+                "agents": agents.iter().map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "model": t.model,
+                        "status": t.status,
+                        "created_at": t.created_at,
+                        "batch_id": t.batch_id,
+                        "worktree_path": t.worktree_path,
+                        "branch_name": t.branch_name,
+                    })
+                }).collect::<Vec<_>>(),
+            });
+            
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: summary.to_string(),
+                    success: Some(true),
+                },
+            }
+        }
+        Err(e) => {
+            ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Invalid list_agents arguments: {}", e),
                     success: None,
                 },
             }
