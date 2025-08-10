@@ -48,16 +48,20 @@ jobs:
         ls -la *.tgz
         tar -tzf *.tgz | head -20
         
-    - name: Check npm publish readiness
+    - name: Check if NPM_TOKEN is configured
+      id: check_npm
       run: |
-        echo "Package is ready for publishing once NPM_TOKEN is configured"
-        echo "To publish:"
-        echo "1. Set NPM_TOKEN secret in repository settings"
-        echo "2. Uncomment the publish step below"
+        if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+          echo "NPM_TOKEN not configured - skipping publish"
+          echo "publish=false" >> $GITHUB_OUTPUT
+        else
+          echo "NPM_TOKEN is configured - will publish"
+          echo "publish=true" >> $GITHUB_OUTPUT
+        fi
         
-    # Uncomment when NPM_TOKEN is configured:
-    # - name: Publish to npm
-    #   working-directory: codex-cli
-    #   run: npm publish --access public
-    #   env:
-    #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    - name: Publish to npm
+      if: steps.check_npm.outputs.publish == 'true'
+      working-directory: codex-cli
+      run: npm publish --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
