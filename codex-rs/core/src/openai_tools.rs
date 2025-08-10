@@ -4,6 +4,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use crate::agent_tool::create_agent_tool;
 use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
@@ -331,6 +332,9 @@ pub(crate) fn get_openai_tools(
     if config.plan_tool {
         tools.push(PLAN_TOOL.clone());
     }
+
+    // Add the agent tool for calling external LLMs
+    tools.push(create_agent_tool());
 
     if let Some(mcp_tools) = mcp_tools {
         for (name, tool) in mcp_tools {
