@@ -107,7 +107,7 @@ pub(crate) fn render_rows(
                         .add_modifier(Modifier::BOLD),
                 );
             } else if *is_current {
-                cell = cell.style(Style::default().fg(Color::Cyan));
+                cell = cell.style(Style::default().fg(crate::colors::light_blue()));
             }
             rows.push(Row::new(vec![cell]));
         }
@@ -118,7 +118,7 @@ pub(crate) fn render_rows(
             Block::default()
                 .borders(Borders::LEFT)
                 .border_type(BorderType::QuadrantOutside)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(Style::default().fg(crate::colors::dim())),
         )
         .widths([Constraint::Percentage(100)]);
 

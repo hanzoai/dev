@@ -76,7 +76,86 @@ pub enum HistoryPersistence {
 
 /// Collection of settings that are specific to the TUI.
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
-pub struct Tui {}
+pub struct Tui {
+    /// Theme configuration for the TUI
+    #[serde(default)]
+    pub theme: ThemeConfig,
+}
+
+/// Theme configuration for the TUI
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ThemeConfig {
+    /// Name of the predefined theme to use
+    #[serde(default)]
+    pub name: ThemeName,
+    
+    /// Custom color overrides (optional)
+    #[serde(default)]
+    pub colors: ThemeColors,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            name: ThemeName::default(),
+            colors: ThemeColors::default(),
+        }
+    }
+}
+
+/// Available predefined themes
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeName {
+    CarbonNight,
+    #[default]
+    PhotonLight,
+    ShinobiDusk,
+    OledBlackPro,
+    AmberTerminal,
+    AuroraFlux,
+    CharcoalRainbow,
+    ZenGarden,
+    PaperLightPro,
+    Custom,
+}
+
+/// Theme colors that can be customized
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ThemeColors {
+    // Primary colors
+    pub primary: Option<String>,
+    pub secondary: Option<String>,
+    pub background: Option<String>,
+    pub foreground: Option<String>,
+    
+    // UI elements
+    pub border: Option<String>,
+    pub border_focused: Option<String>,
+    pub selection: Option<String>,
+    pub cursor: Option<String>,
+    
+    // Status colors
+    pub success: Option<String>,
+    pub warning: Option<String>,
+    pub error: Option<String>,
+    pub info: Option<String>,
+    
+    // Text colors
+    pub text: Option<String>,
+    pub text_dim: Option<String>,
+    pub text_bright: Option<String>,
+    
+    // Syntax/special colors
+    pub keyword: Option<String>,
+    pub string: Option<String>,
+    pub comment: Option<String>,
+    pub function: Option<String>,
+    
+    // Animation colors
+    pub spinner: Option<String>,
+    pub progress: Option<String>,
+}
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
