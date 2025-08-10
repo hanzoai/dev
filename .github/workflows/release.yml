@@ -23,18 +23,27 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # Linux builds
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             artifact: code-x86_64-unknown-linux-musl
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: code-x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             artifact: code-aarch64-unknown-linux-musl
-          - os: macos-13  # Use Intel Mac for x86_64 builds
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: code-aarch64-unknown-linux-gnu
+          # macOS builds
+          - os: macos-14  # ARM Mac for both targets
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
-          - os: macos-latest  # Use ARM Mac for aarch64 builds
+          - os: macos-14
             target: aarch64-apple-darwin
             artifact: code-aarch64-apple-darwin
+          # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: code-x86_64-pc-windows-msvc.exe
@@ -44,26 +53,15 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      
-    - name: Add Rust target
-      run: rustup target add ${{ matrix.target }}
+      uses: dtolnay/rust-toolchain@1.88
+      with:
+        targets: ${{ matrix.target }}
         
-    - name: Install musl tools (Linux x86_64)
-      if: matrix.target == 'x86_64-unknown-linux-musl'
+    - name: Install musl tools (Linux)
+      if: contains(matrix.target, 'musl')
       run: |
         sudo apt-get update
-        sudo apt-get install -y musl-tools
-        
-    - name: Install musl tools (Linux aarch64)
-      if: matrix.target == 'aarch64-unknown-linux-musl'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
-        # Set up cross compilation
-        echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-        echo "AR_aarch64_unknown_linux_musl=aarch64-linux-gnu-ar" >> $GITHUB_ENV
-        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+        sudo apt-get install -y musl-tools pkg-config
         
     - name: Build binaries
       run: |
