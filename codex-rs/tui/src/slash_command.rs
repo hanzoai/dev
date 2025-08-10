@@ -18,6 +18,7 @@ pub enum SlashCommand {
     Diff,
     Status,
     Browser,
+    Theme,
     Reasoning,
     Prompts,
     // Prompt-expanding commands
@@ -41,6 +42,7 @@ impl SlashCommand {
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Browser => "manage browser mode (on/off/status/config)",
+            SlashCommand::Theme => "switch between color themes",
             SlashCommand::Reasoning => "change reasoning effort (low/medium/high/none)",
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Plan => "create a comprehensive plan using multiple LLMs",
