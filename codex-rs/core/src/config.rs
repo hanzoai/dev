@@ -728,30 +728,45 @@ fn default_model() -> String {
     OPENAI_DEFAULT_MODEL.to_string()
 }
 
-/// Returns the path to the Codex configuration directory, which can be
-/// specified by the `CODEX_HOME` environment variable. If not set, defaults to
-/// `~/.codex`.
+/// Returns the path to the Code/Codex configuration directory, which can be
+/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set, 
+/// defaults to `~/.code` (falling back to `~/.codex` if it exists for compatibility).
 ///
-/// - If `CODEX_HOME` is set, the value will be canonicalized and this
+/// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
-/// - If `CODEX_HOME` is not set, this function does not verify that the
-///   directory exists.
+/// - If neither is set, this function does not verify that the directory exists.
 pub fn find_codex_home() -> std::io::Result<PathBuf> {
-    // Honor the `CODEX_HOME` environment variable when it is set to allow users
-    // (and tests) to override the default location.
+    // First check CODE_HOME for the fork
+    if let Ok(val) = std::env::var("CODE_HOME") {
+        if !val.is_empty() {
+            return PathBuf::from(val).canonicalize();
+        }
+    }
+    
+    // Fall back to CODEX_HOME for compatibility
     if let Ok(val) = std::env::var("CODEX_HOME") {
         if !val.is_empty() {
             return PathBuf::from(val).canonicalize();
         }
     }
 
-    let mut p = home_dir().ok_or_else(|| {
+    let home = home_dir().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not find home directory",
         )
     })?;
-    p.push(".codex");
+    
+    // Check if ~/.codex exists for backward compatibility
+    let mut codex_path = home.clone();
+    codex_path.push(".codex");
+    if codex_path.exists() {
+        return Ok(codex_path);
+    }
+    
+    // Otherwise use ~/.code for the fork
+    let mut p = home;
+    p.push(".code");
     Ok(p)
 }
 

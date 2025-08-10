@@ -4,7 +4,7 @@ name = "codex-tui"
 version = { workspace = true }
 
 [[bin]]
-name = "codex-tui"
+name = "code-tui"
 path = "src/main.rs"
 
 [lib]

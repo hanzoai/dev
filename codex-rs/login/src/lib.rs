@@ -312,7 +312,8 @@ pub fn spawn_login_with_chatgpt(codex_home: &Path) -> std::io::Result<SpawnedLog
     let script_path = write_login_script_to_disk()?;
     let mut cmd = std::process::Command::new("python3");
     cmd.arg(&script_path)
-        .env("CODEX_HOME", codex_home)
+        .env("CODE_HOME", codex_home)
+        .env("CODEX_HOME", codex_home) // Keep for compatibility
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -350,7 +351,8 @@ pub async fn login_with_chatgpt(codex_home: &Path, capture_output: bool) -> std:
     let script_path = write_login_script_to_disk()?;
     let child = Command::new("python3")
         .arg(&script_path)
-        .env("CODEX_HOME", codex_home)
+        .env("CODE_HOME", codex_home)
+        .env("CODEX_HOME", codex_home) // Keep for compatibility
         .env("CODEX_CLIENT_ID", CLIENT_ID)
         .stdin(Stdio::null())
         .stdout(if capture_output {
