@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use async_channel::Receiver;
 use async_channel::Sender;
+use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
@@ -71,6 +72,8 @@ use crate::models::ShellToolCallParams;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
 use crate::plan_tool::handle_update_plan;
+use serde_json::Value;
+use codex_browser::manager::BrowserManager;
 use crate::project_doc::get_user_instructions;
 use crate::protocol::AgentMessageDeltaEvent;
 use crate::protocol::AgentMessageEvent;
@@ -244,6 +247,10 @@ pub(crate) struct Session {
     codex_linux_sandbox_exe: Option<PathBuf>,
     user_shell: shell::Shell,
     show_raw_agent_reasoning: bool,
+    /// Browser manager for controlling headless browser
+    browser_manager: Mutex<Option<Arc<BrowserManager>>>,
+    /// Pending browser screenshots to include in the next model request
+    pending_browser_screenshots: Mutex<Vec<PathBuf>>,
 }
 
 impl Session {
@@ -544,8 +551,87 @@ impl Session {
 
     /// Build the full turn input by concatenating the current conversation
     /// history with additional items for this turn.
+    /// Browser screenshots are filtered out from history to keep them ephemeral.
     pub fn turn_input_with_history(&self, extra: Vec<ResponseItem>) -> Vec<ResponseItem> {
-        [self.state.lock().unwrap().history.contents(), extra].concat()
+        let history = self.state.lock().unwrap().history.contents();
+        
+        // Count images in extra for debugging (we can't distinguish ephemeral at this level anymore)
+        let images_in_extra = extra.iter().filter(|item| {
+            if let ResponseItem::Message { content, .. } = item {
+                content.iter().any(|c| {
+                    matches!(c, crate::models::ContentItem::InputImage { .. })
+                })
+            } else {
+                false
+            }
+        }).count();
+        
+        if images_in_extra > 0 {
+            tracing::info!("Found {} images in current turn's extra items", images_in_extra);
+        }
+        
+        // Filter out browser screenshots from historical messages
+        // We identify them by the [EPHEMERAL:...] marker that precedes them
+        let filtered_history: Vec<ResponseItem> = history
+            .into_iter()
+            .map(|item| {
+                if let ResponseItem::Message { id, role, content } = item {
+                    if role == "user" {
+                        // Filter out ephemeral content from user messages
+                        let mut filtered_content: Vec<crate::models::ContentItem> = Vec::new();
+                        let mut skip_next_image = false;
+                        
+                        for content_item in content {
+                            match &content_item {
+                                crate::models::ContentItem::InputText { text } if text.starts_with("[EPHEMERAL:") => {
+                                    // This is an ephemeral marker, skip it and the next image
+                                    skip_next_image = true;
+                                    tracing::info!("Filtering out ephemeral marker: {}", text);
+                                }
+                                crate::models::ContentItem::InputImage { .. } if skip_next_image => {
+                                    // Skip this image as it follows an ephemeral marker
+                                    skip_next_image = false;
+                                    tracing::info!("Filtering out ephemeral image from history");
+                                }
+                                _ => {
+                                    // Keep everything else
+                                    filtered_content.push(content_item);
+                                }
+                            }
+                        }
+                        
+                        ResponseItem::Message {
+                            id,
+                            role,
+                            content: filtered_content,
+                        }
+                    } else {
+                        // Keep assistant messages unchanged
+                        ResponseItem::Message { id, role, content }
+                    }
+                } else {
+                    item
+                }
+            })
+            .collect();
+        
+        // Concatenate filtered history with current turn's extras (which includes current ephemeral images)
+        let result = [filtered_history, extra].concat();
+        
+        // Count total images in result for debugging
+        let total_images = result.iter().filter(|item| {
+            if let ResponseItem::Message { content, .. } = item {
+                content.iter().any(|c| matches!(c, crate::models::ContentItem::InputImage { .. }))
+            } else {
+                false
+            }
+        }).count();
+        
+        if total_images > 0 {
+            tracing::info!("Total images being sent to model: {}", total_images);
+        }
+        
+        result
     }
 
     /// Returns the input if there was no agent running to inject into
@@ -568,6 +654,11 @@ impl Session {
             std::mem::swap(&mut ret, &mut state.pending_input);
             ret
         }
+    }
+
+    pub fn add_pending_input(&self, input: ResponseInputItem) {
+        let mut state = self.state.lock().unwrap();
+        state.pending_input.push(input);
     }
 
     pub async fn call_tool(
@@ -898,6 +989,8 @@ async fn submission_loop(
                     disable_response_storage,
                     user_shell: default_shell,
                     show_raw_agent_reasoning: config.show_raw_agent_reasoning,
+                    browser_manager: Mutex::new(None), // Initialize on-demand when browser tools are used
+                    pending_browser_screenshots: Mutex::new(Vec::new()),
                 }));
 
                 // Patch restored state into the newly created session.
@@ -1103,25 +1196,50 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         return;
     }
 
+    // Debug logging for ephemeral images
+    let ephemeral_count = input.iter().filter(|item| {
+        matches!(item, InputItem::EphemeralImage { .. })
+    }).count();
+    
+    if ephemeral_count > 0 {
+        tracing::info!("Processing {} ephemeral images in user input", ephemeral_count);
+    }
+    
+    // Convert input to ResponseInputItem
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
-    sess.record_conversation_items(&[initial_input_for_turn.clone().into()])
+    let initial_response_item: ResponseItem = initial_input_for_turn.clone().into();
+    
+    // Record to history but we'll handle ephemeral images separately
+    sess.record_conversation_items(&[initial_response_item.clone()])
         .await;
 
     let mut last_task_message: Option<String> = None;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Agent which contains
     // many turns, from the perspective of the user, it is a single turn.
     let mut turn_diff_tracker = TurnDiffTracker::new();
+    
+    // Track if this is the first iteration - if so, include the initial input
+    let mut first_iteration = true;
 
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
-        let pending_input = sess
+        let mut pending_input = sess
             .get_pending_input()
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
-        sess.record_conversation_items(&pending_input).await;
+        
+        // On the first iteration, add the initial input to pending_input
+        // This ensures ephemeral images are included in the current turn
+        if first_iteration {
+            pending_input.insert(0, initial_response_item.clone());
+            first_iteration = false;
+        } else {
+            // Only record pending input to history on subsequent iterations
+            sess.record_conversation_items(&pending_input).await;
+        }
 
         // Construct the input that we will send to the model. When using the
         // Chat completions API (or ZDR clients), the model needs the full
@@ -1233,6 +1351,19 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                 if !items_to_record_in_conversation_history.is_empty() {
                     sess.record_conversation_items(&items_to_record_in_conversation_history)
                         .await;
+                }
+
+                // Add any pending browser screenshots to the responses
+                let screenshot_responses = consume_pending_screenshots(&sess);
+                for screenshot_response in screenshot_responses {
+                    responses.push(screenshot_response);
+                }
+
+                // If there are responses, add them to pending input for the next iteration
+                if !responses.is_empty() {
+                    for response in &responses {
+                        sess.add_pending_input(response.clone());
+                    }
                 }
 
                 if responses.is_empty() {
@@ -1730,6 +1861,13 @@ async fn handle_function_call(
         "cancel_agent" => handle_cancel_agent(sess, arguments, sub_id, call_id).await,
         "wait_for_agent" => handle_wait_for_agent(sess, arguments, sub_id, call_id).await,
         "list_agents" => handle_list_agents(sess, arguments, sub_id, call_id).await,
+        "browser_open" => handle_browser_open(sess, arguments, sub_id, call_id).await,
+        "browser_close" => handle_browser_close(sess, sub_id, call_id).await,
+        "browser_status" => handle_browser_status(sess, sub_id, call_id).await,
+        "browser_click" => handle_browser_click(sess, arguments, sub_id, call_id).await,
+        "browser_type" => handle_browser_type(sess, arguments, sub_id, call_id).await,
+        "browser_key" => handle_browser_key(sess, arguments, sub_id, call_id).await,
+        "browser_javascript" => handle_browser_javascript(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -2724,6 +2862,501 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
             }
             Ok(_) => continue,
             Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Capture a screenshot from the browser and store it for the next model request
+async fn capture_browser_screenshot(sess: &Session) -> Option<PathBuf> {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        if browser_manager.is_enabled().await {
+            match browser_manager.capture_screenshot().await {
+                Ok(screenshots) => {
+                    if let Some(first_screenshot) = screenshots.first() {
+                        tracing::info!("Captured browser screenshot: {}", first_screenshot.display());
+                        return Some(first_screenshot.clone());
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to capture browser screenshot: {}", e);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Add a screenshot to pending screenshots for the next model request
+fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf) {
+    let mut pending = sess.pending_browser_screenshots.lock().unwrap();
+    pending.push(screenshot_path);
+    tracing::info!("Added pending screenshot for next model request");
+}
+
+/// Consume pending screenshots and return them as ResponseInputItems
+fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
+    let mut pending = sess.pending_browser_screenshots.lock().unwrap();
+    let screenshots = pending.drain(..).collect::<Vec<_>>();
+    
+    screenshots.into_iter().map(|path| {
+        let metadata = format!("[EPHEMERAL:browser_screenshot] Browser screenshot at {}", 
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+        
+        // Read the screenshot file and create an ephemeral image
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let mime = mime_guess::from_path(&path)
+                    .first()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| "image/png".to_string());
+                let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                
+                ResponseInputItem::Message {
+                    role: "user".to_string(),
+                    content: vec![
+                        ContentItem::InputText { text: metadata },
+                        ContentItem::InputImage {
+                            image_url: format!("data:{mime};base64,{encoded}"),
+                        },
+                    ],
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to read screenshot {}: {}", path.display(), e);
+                ResponseInputItem::Message {
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: format!("Failed to load browser screenshot: {}", e),
+                    }],
+                }
+            }
+        }
+    }).collect()
+}
+
+async fn handle_browser_open(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    // Parse the URL from arguments
+    let args: Result<Value, _> = serde_json::from_str(&arguments);
+    
+    match args {
+        Ok(json) => {
+            let url = json.get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("about:blank");
+            
+            // Use the global browser manager
+            let needs_init = sess.browser_manager.lock().unwrap().is_none();
+            let browser_manager = if needs_init {
+                let manager = codex_browser::global::get_or_create_browser_manager().await;
+                // Enable the browser
+                manager.set_enabled_sync(true);
+                *sess.browser_manager.lock().unwrap() = Some(manager.clone());
+                Some(manager)
+            } else {
+                sess.browser_manager.lock().unwrap().clone()
+            };
+            
+            if let Some(browser_manager) = browser_manager {
+                // Navigate to the URL
+                match browser_manager.goto(url).await {
+                    Ok(_) => {
+                        // Capture screenshot after navigation
+                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path);
+                        }
+                        
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Browser opened to: {}. Screenshots will be automatically attached to messages.", url),
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => {
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Failed to navigate browser to {}: {}", url, e),
+                                success: Some(false),
+                            },
+                        }
+                    }
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: "Failed to initialize browser manager.".to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
+        }
+        Err(e) => ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: format!("Failed to parse browser_open arguments: {}", e),
+                success: Some(false),
+            },
+        },
+    }
+}
+
+async fn handle_browser_close(
+    sess: &Session,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        match browser_manager.stop().await {
+            Ok(_) => {
+                // Clear the browser manager from the session and global
+                *sess.browser_manager.lock().unwrap() = None;
+                codex_browser::global::clear_browser_manager().await;
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser closed. Screenshot capture disabled.".to_string(),
+                        success: Some(true),
+                    },
+                }
+            }
+            Err(e) => {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload {
+                        content: format!("Failed to close browser: {}", e),
+                        success: Some(false),
+                    },
+                }
+            }
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not currently open.".to_string(),
+                success: Some(false),
+            },
+        }
+    }
+}
+
+async fn handle_browser_status(
+    sess: &Session,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        let status = browser_manager.get_status().await;
+        let status_msg = if status.enabled {
+            if let Some(url) = status.current_url {
+                format!("Browser status: Enabled, currently at {}", url)
+            } else {
+                "Browser status: Enabled, no page loaded".to_string()
+            }
+        } else {
+            "Browser status: Disabled".to_string()
+        };
+        
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: status_msg,
+                success: Some(true),
+            },
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                success: Some(false),
+            },
+        }
+    }
+}
+
+async fn handle_browser_click(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        let args: Result<Value, _> = serde_json::from_str(&arguments);
+        match args {
+            Ok(json) => {
+                let x = json.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = json.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                
+                match browser_manager.click(x, y).await {
+                    Ok(_) => {
+                        // Capture screenshot after clicking
+                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path);
+                        }
+                        
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Clicked at ({}, {})", x, y),
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => {
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Failed to click: {}", e),
+                                success: Some(false),
+                            },
+                        }
+                    }
+                }
+            }
+            Err(e) => ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Failed to parse browser_click arguments: {}", e),
+                    success: Some(false),
+                },
+            },
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                success: Some(false),
+            },
+        }
+    }
+}
+
+async fn handle_browser_type(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        let args: Result<Value, _> = serde_json::from_str(&arguments);
+        match args {
+            Ok(json) => {
+                let text = json.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                
+                match browser_manager.type_text(text).await {
+                    Ok(_) => {
+                        // Capture screenshot after typing
+                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path);
+                        }
+                        
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Typed: {}", text),
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => {
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Failed to type text: {}", e),
+                                success: Some(false),
+                            },
+                        }
+                    }
+                }
+            }
+            Err(e) => ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Failed to parse browser_type arguments: {}", e),
+                    success: Some(false),
+                },
+            },
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                success: Some(false),
+            },
+        }
+    }
+}
+
+async fn handle_browser_key(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        let args: Result<Value, _> = serde_json::from_str(&arguments);
+        match args {
+            Ok(json) => {
+                let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                
+                match browser_manager.press_key(key).await {
+                    Ok(_) => {
+                        // Capture screenshot after pressing key
+                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path);
+                        }
+                        
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Pressed key: {}", key),
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => {
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Failed to press key: {}", e),
+                                success: Some(false),
+                            },
+                        }
+                    }
+                }
+            }
+            Err(e) => ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Failed to parse browser_key arguments: {}", e),
+                    success: Some(false),
+                },
+            },
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                success: Some(false),
+            },
+        }
+    }
+}
+
+async fn handle_browser_javascript(
+    sess: &Session,
+    arguments: String,
+    _sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    if let Some(browser_manager) = browser_manager {
+        let args: Result<Value, _> = serde_json::from_str(&arguments);
+        match args {
+            Ok(json) => {
+                let code = json.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                
+                match browser_manager.execute_javascript(code).await {
+                    Ok(result) => {
+                        // Log the JavaScript execution result
+                        tracing::info!("JavaScript execution returned: {:?}", result);
+                        
+                        // Format the result for the LLM
+                        let formatted_result = if let Some(obj) = result.as_object() {
+                            // Check if it's our wrapped result format
+                            if let (Some(success), Some(value)) = (obj.get("success"), obj.get("value")) {
+                                let logs = obj.get("logs").and_then(|v| v.as_array());
+                                let mut output = String::new();
+                                
+                                if let Some(logs) = logs {
+                                    if !logs.is_empty() {
+                                        output.push_str("Console logs:\n");
+                                        for log in logs {
+                                            if let Some(log_str) = log.as_str() {
+                                                output.push_str(&format!("  {}\n", log_str));
+                                            }
+                                        }
+                                        output.push_str("\n");
+                                    }
+                                }
+                                
+                                if success.as_bool().unwrap_or(false) {
+                                    output.push_str("Result: ");
+                                    output.push_str(&serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string()));
+                                } else if let Some(error) = obj.get("error") {
+                                    output.push_str("Error: ");
+                                    output.push_str(&error.to_string());
+                                }
+                                
+                                output
+                            } else {
+                                // Fallback to raw JSON if not in expected format
+                                serde_json::to_string_pretty(&result).unwrap_or_else(|_| "null".to_string())
+                            }
+                        } else {
+                            // Not an object, return as-is
+                            serde_json::to_string_pretty(&result).unwrap_or_else(|_| "null".to_string())
+                        };
+                        
+                        tracing::info!("Returning to LLM: {}", formatted_result);
+                        
+                        // Capture screenshot after executing JavaScript
+                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path);
+                        }
+                        
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: formatted_result,
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => {
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload {
+                                content: format!("Failed to execute JavaScript: {}", e),
+                                success: Some(false),
+                            },
+                        }
+                    }
+                }
+            }
+            Err(e) => ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Failed to parse browser_javascript arguments: {}", e),
+                    success: Some(false),
+                },
+            },
+        }
+    } else {
+        ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                success: Some(false),
+            },
         }
     }
 }
