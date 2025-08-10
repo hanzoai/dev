@@ -25,6 +25,7 @@ mod scroll_state;
 mod selection_popup_common;
 mod status_indicator_view;
 mod textarea;
+mod theme_selection_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -38,8 +39,9 @@ pub(crate) use chat_composer::InputResult;
 use crate::status_indicator_widget::StatusIndicatorWidget;
 use approval_modal_view::ApprovalModalView;
 use reasoning_selection_view::ReasoningSelectionView;
+use theme_selection_view::ThemeSelectionView;
 use status_indicator_view::StatusIndicatorView;
-use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::{ReasoningEffort, ThemeName};
 
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
@@ -127,14 +129,27 @@ impl BottomPane<'_> {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        // Hide the cursor whenever an overlay view is active (e.g. the
-        // status indicator shown while a task is running, or approval modal).
-        // In these states the textarea is not interactable, so we should not
-        // show its caret.
+        // Hide the cursor whenever an overlay view is active (e.g. approval modal).
+        // But keep cursor visible when only status overlay is shown.
         if self.active_view.is_some() {
             None
         } else {
-            self.composer.cursor_pos(area)
+            // Calculate y_offset for status overlay if present
+            let mut y_offset = 0u16;
+            if let Some(status) = &self.live_status {
+                y_offset = status.desired_height(area.width).min(area.height);
+            }
+            
+            // Adjust composer area to account for status overlay and padding
+            let horizontal_padding = 2u16;  // Message input uses 2 chars padding
+            let composer_rect = Rect {
+                x: area.x + horizontal_padding,
+                y: area.y + y_offset,
+                width: area.width.saturating_sub(horizontal_padding * 2),
+                height: (area.height.saturating_sub(y_offset))
+                    - BottomPane::BOTTOM_PAD_LINES.min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
+            };
+            self.composer.cursor_pos(composer_rect)
         }
     }
 
@@ -144,12 +159,8 @@ impl BottomPane<'_> {
             view.handle_key_event(self, key_event);
             if !view.is_complete() {
                 self.active_view = Some(view);
-            } else if self.is_task_running {
-                let mut v = StatusIndicatorView::new(self.app_event_tx.clone());
-                v.update_text("waiting for model".to_string());
-                self.active_view = Some(Box::new(v));
-                self.status_view_active = true;
             }
+            // Don't create a status view - keep composer visible
             self.request_redraw();
             InputResult::None
         } else {
@@ -174,13 +185,8 @@ impl BottomPane<'_> {
             CancellationEvent::Handled => {
                 if !view.is_complete() {
                     self.active_view = Some(view);
-                } else if self.is_task_running {
-                    // Modal aborted but task still running – restore status indicator.
-                    let mut v = StatusIndicatorView::new(self.app_event_tx.clone());
-                    v.update_text("waiting for model".to_string());
-                    self.active_view = Some(Box::new(v));
-                    self.status_view_active = true;
                 }
+                // Don't create a status view - keep composer visible
                 self.show_ctrl_c_quit_hint();
             }
             CancellationEvent::Ignored => {
@@ -199,10 +205,10 @@ impl BottomPane<'_> {
         }
     }
 
-    /// Update the status indicator text. Prefer replacing the composer with
-    /// the StatusIndicatorView so the input pane shows a single-line status
-    /// like: `▌ Working waiting for model`.
+    /// Update the status indicator text. Shows status as overlay above composer
+    /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
+        // If there's an active modal view that can handle status updates, let it
         let mut handled_by_view = false;
         if let Some(view) = self.active_view.as_mut() {
             if matches!(
@@ -211,18 +217,9 @@ impl BottomPane<'_> {
             ) {
                 handled_by_view = true;
             }
-        } else {
-            let mut v = StatusIndicatorView::new(self.app_event_tx.clone());
-            v.update_text(text.clone());
-            self.active_view = Some(Box::new(v));
-            self.status_view_active = true;
-            handled_by_view = true;
         }
 
-        // Fallback: if the current active view did not consume status updates
-        // and no modal view is active, present an overlay above the composer.
-        // If a modal is active, do NOT render the overlay to avoid drawing
-        // over the dialog.
+        // If not handled by a modal, show as overlay above composer
         if !handled_by_view && self.active_view.is_none() {
             if self.live_status.is_none() {
                 self.live_status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
@@ -261,11 +258,12 @@ impl BottomPane<'_> {
         self.is_task_running = running;
 
         if running {
-            if self.active_view.is_none() {
-                self.active_view = Some(Box::new(StatusIndicatorView::new(
-                    self.app_event_tx.clone(),
-                )));
-                self.status_view_active = true;
+            // Show status as overlay above composer instead of replacing it
+            if self.live_status.is_none() {
+                self.live_status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
+            }
+            if let Some(status) = &mut self.live_status {
+                status.update_text("waiting for model".to_string());
             }
             self.request_redraw();
         } else {
@@ -328,6 +326,15 @@ impl BottomPane<'_> {
     /// Show the reasoning selection UI
     pub fn show_reasoning_selection(&mut self, current_effort: ReasoningEffort) {
         let view = ReasoningSelectionView::new(current_effort, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.live_status = None;
+        self.status_view_active = false;
+        self.request_redraw()
+    }
+    
+    /// Show the theme selection UI
+    pub fn show_theme_selection(&mut self, current_theme: ThemeName) {
+        let view = ThemeSelectionView::new(current_theme, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.live_status = None;
         self.status_view_active = false;
@@ -402,14 +409,17 @@ impl WidgetRef for &BottomPane<'_> {
             y_offset = y_offset.saturating_add(1);
         }
         if let Some(status) = &self.live_status {
+            // Add horizontal padding (3 chars on each side) to match composer
+            let horizontal_padding = 3u16;
+            let padded_width = area.width.saturating_sub(horizontal_padding * 2);
             let live_h = status
-                .desired_height(area.width)
+                .desired_height(padded_width)
                 .min(area.height.saturating_sub(y_offset));
             if live_h > 0 {
                 let live_rect = Rect {
-                    x: area.x,
+                    x: area.x + horizontal_padding,
                     y: area.y + y_offset,
-                    width: area.width,
+                    width: padded_width,
                     height: live_h,
                 };
                 status.render_ref(live_rect, buf);
@@ -422,19 +432,23 @@ impl WidgetRef for &BottomPane<'_> {
                 // Reserve bottom padding lines; keep at least 1 line for the view.
                 let avail = area.height - y_offset;
                 let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
+                // Add horizontal padding (2 chars on each side) for views
+                let horizontal_padding = 2u16;
                 let view_rect = Rect {
-                    x: area.x,
+                    x: area.x + horizontal_padding,
                     y: area.y + y_offset,
-                    width: area.width,
+                    width: area.width.saturating_sub(horizontal_padding * 2),
                     height: avail - pad,
                 };
                 view.render(view_rect, buf);
             }
         } else if y_offset < area.height {
+            // Add horizontal padding (2 chars on each side) for Message input
+            let horizontal_padding = 2u16;
             let composer_rect = Rect {
-                x: area.x,
+                x: area.x + horizontal_padding,
                 y: area.y + y_offset,
-                width: area.width,
+                width: area.width.saturating_sub(horizontal_padding * 2),
                 // Reserve bottom padding
                 height: (area.height - y_offset)
                     - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
@@ -564,15 +578,15 @@ mod tests {
         }
         assert!(r2.trim().is_empty(), "expected blank spacer line: {r2:?}");
 
-        // Bottom row is the status line; it should contain the left bar and "Working".
+        // Bottom row is the status line; it should contain the left bar and "Coding".
         let mut r3 = String::new();
         for x in 0..area.width {
             r3.push(buf[(x, 3)].symbol().chars().next().unwrap_or(' '));
         }
         assert_eq!(buf[(0, 3)].symbol().chars().next().unwrap_or(' '), '▌');
         assert!(
-            r3.contains("Working"),
-            "expected Working header in status line: {r3:?}"
+            r3.contains("Coding"),
+            "expected Coding header in status line: {r3:?}"
         );
     }
 
@@ -591,7 +605,7 @@ mod tests {
         // Attempt to update status; this should NOT create an overlay while modal is visible.
         pane.update_status_text("running command".to_string());
 
-        // Render and verify the top row does not include the Working header overlay.
+        // Render and verify the top row does not include the Coding header overlay.
         let area = Rect::new(0, 0, 60, 6);
         let mut buf = Buffer::empty(area);
         (&pane).render_ref(area, &mut buf);
@@ -601,8 +615,8 @@ mod tests {
             r0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            !r0.contains("Working"),
-            "overlay Working header should not render above modal"
+            !r0.contains("Coding"),
+            "overlay Coding header should not render above modal"
         );
     }
 
@@ -637,7 +651,7 @@ mod tests {
         );
         assert!(pane.active_view.is_some(), "active view should be present");
 
-        // Render and ensure the top row includes the Working header instead of the composer.
+        // Render and ensure the top row includes the Coding header instead of the composer.
         // Give the animation thread a moment to tick.
         std::thread::sleep(std::time::Duration::from_millis(120));
         let area = Rect::new(0, 0, 40, 3);
@@ -648,8 +662,8 @@ mod tests {
             row0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            row0.contains("Working"),
-            "expected Working header after denial: {row0:?}"
+            row0.contains("Coding"),
+            "expected Coding header after denial: {row0:?}"
         );
 
         // Drain the channel to avoid unused warnings.
@@ -677,7 +691,7 @@ mod tests {
         // Allow some frames so the animation thread ticks.
         std::thread::sleep(std::time::Duration::from_millis(120));
 
-        // Render and confirm the line contains the "Working" header.
+        // Render and confirm the line contains the "Coding" header.
         let area = Rect::new(0, 0, 40, 3);
         let mut buf = Buffer::empty(area);
         (&pane).render_ref(area, &mut buf);
@@ -687,8 +701,8 @@ mod tests {
             row0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            row0.contains("Working"),
-            "expected Working header: {row0:?}"
+            row0.contains("Coding"),
+            "expected Coding header: {row0:?}"
         );
     }
 
@@ -723,8 +737,8 @@ mod tests {
         }
         assert_eq!(buf[(0, 0)].symbol().chars().next().unwrap_or(' '), '▌');
         assert!(
-            top.contains("Working"),
-            "expected Working header on top row: {top:?}"
+            top.contains("Coding"),
+            "expected Coding header on top row: {top:?}"
         );
 
         // Bottom two rows are blank padding
@@ -768,8 +782,8 @@ mod tests {
             row1.push(buf2[(x, 1)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            row0.contains("Working"),
-            "expected Working header on row 0: {row0:?}"
+            row0.contains("Coding"),
+            "expected Coding header on row 0: {row0:?}"
         );
         assert!(
             row1.trim().is_empty(),
@@ -785,8 +799,8 @@ mod tests {
             only.push(buf1[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            only.contains("Working"),
-            "expected Working header with no padding: {only:?}"
+            only.contains("Coding"),
+            "expected Coding header with no padding: {only:?}"
         );
     }
 }

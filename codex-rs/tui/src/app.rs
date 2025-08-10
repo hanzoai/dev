@@ -11,7 +11,6 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
-use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
@@ -19,8 +18,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::terminal::supports_keyboard_enhancement;
-use ratatui::layout::Offset;
 use ratatui::prelude::Backend;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -211,8 +210,9 @@ impl App<'_> {
 
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
-                AppEvent::InsertHistory(lines) => {
-                    self.pending_history_lines.extend(lines);
+                AppEvent::InsertHistory(_lines) => {
+                    // No longer using scrollback, history is managed in ChatWidget
+                    // Just trigger a redraw
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::RequestRedraw => {
@@ -376,6 +376,13 @@ impl App<'_> {
                             widget.handle_reasoning_command(command_text);
                         }
                     }
+                    SlashCommand::Theme => {
+                        // Theme selection is handled in submit_user_message
+                        // This case is here for completeness
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.show_theme_selection();
+                        }
+                    }
                     SlashCommand::Prompts => {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.add_prompts_output();
@@ -386,6 +393,7 @@ impl App<'_> {
                         use std::collections::HashMap;
 
                         use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+                        use codex_core::protocol::EventMsg;
                         use codex_core::protocol::FileChange;
 
                         self.app_event_tx.send(AppEvent::CodexEvent(Event {
@@ -425,6 +433,28 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_reasoning_effort(new_effort);
                     }
+                }
+                AppEvent::UpdateTheme(new_theme) => {
+                    // Switch the theme immediately
+                    crate::theme::switch_theme(new_theme);
+                    
+                    // Clear terminal with new theme colors
+                    let theme_bg = crate::colors::background();
+                    let theme_fg = crate::colors::text();
+                    let _ = crossterm::execute!(
+                        std::io::stdout(),
+                        crossterm::style::SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::cursor::MoveTo(0, 0)
+                    );
+                    
+                    // Update config and save to file
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_theme(new_theme);
+                    }
+                    
+                    // Request a redraw to apply the new theme
+                    self.schedule_redraw();
                 }
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
@@ -472,60 +502,38 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
-        let screen_size = terminal.size()?;
-        let last_known_screen_size = terminal.last_known_screen_size;
-        if screen_size != last_known_screen_size {
-            let cursor_pos = terminal.get_cursor_position()?;
-            let last_known_cursor_pos = terminal.last_known_cursor_pos;
-            if cursor_pos.y != last_known_cursor_pos.y {
-                // The terminal was resized. The only point of reference we have for where our viewport
-                // was moved is the cursor position.
-                // NB this assumes that the cursor was not wrapped as part of the resize.
-                let cursor_delta = cursor_pos.y as i32 - last_known_cursor_pos.y as i32;
-
-                let new_viewport_area = terminal.viewport_area.offset(Offset {
-                    x: 0,
-                    y: cursor_delta,
-                });
-                terminal.set_viewport_area(new_viewport_area);
-                terminal.clear()?;
-            }
-        }
-
+        // In alternate screen mode, we use the full terminal
         let size = terminal.size()?;
-        let desired_height = match &self.app_state {
-            AppState::Chat { widget } => widget.desired_height(size.width),
-            AppState::Onboarding { .. } => size.height,
-        };
-
-        let mut area = terminal.viewport_area;
-        area.height = desired_height.min(size.height);
-        area.width = size.width;
-        if area.bottom() > size.height {
-            terminal
-                .backend_mut()
-                .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
-            area.y = size.height - area.height;
+        
+        // Update viewport to full terminal size if it changed
+        if size != terminal.last_known_screen_size {
+            let full_area = Rect::new(0, 0, size.width, size.height);
+            terminal.set_viewport_area(full_area);
+            terminal.resize(size)?;
         }
-        if area != terminal.viewport_area {
-            terminal.clear()?;
-            terminal.set_viewport_area(area);
-        }
-        if !self.pending_history_lines.is_empty() {
-            crate::insert_history::insert_history_lines(
-                terminal,
-                self.pending_history_lines.clone(),
-            );
-            self.pending_history_lines.clear();
-        }
-        terminal.draw(|frame| match &mut self.app_state {
-            AppState::Chat { widget } => {
-                if let Some((x, y)) = widget.cursor_pos(frame.area()) {
-                    frame.set_cursor_position((x, y));
+        
+        // Draw to the full terminal
+        terminal.draw(|frame| {
+            // Fill entire frame with theme background
+            let bg_style = ratatui::style::Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
+            let area = frame.area();
+            for y in area.top()..area.bottom() {
+                for x in area.left()..area.right() {
+                    frame.buffer_mut()[(x, y)].set_style(bg_style);
                 }
-                frame.render_widget_ref(&**widget, frame.area())
             }
-            AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
+            
+            match &mut self.app_state {
+                AppState::Chat { widget } => {
+                    if let Some((x, y)) = widget.cursor_pos(frame.area()) {
+                        frame.set_cursor_position((x, y));
+                    }
+                    frame.render_widget_ref(&**widget, frame.area())
+                }
+                AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
+            }
         })?;
         Ok(())
     }
