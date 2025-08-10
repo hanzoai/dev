@@ -47,21 +47,26 @@ jobs:
     - name: Add Rust target
       run: rustup target add ${{ matrix.target }}
         
-    - name: Install musl tools (Linux)
-      if: contains(matrix.target, 'musl')
+    - name: Install musl tools (Linux x86_64)
+      if: matrix.target == 'x86_64-unknown-linux-musl'
       run: |
         sudo apt-get update
         sudo apt-get install -y musl-tools
-        if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-        fi
+        
+    - name: Install musl tools (Linux aarch64)
+      if: matrix.target == 'aarch64-unknown-linux-musl'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+        # Set up cross compilation
+        echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+        echo "AR_aarch64_unknown_linux_musl=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
         
     - name: Build binaries
       run: |
         cd codex-rs
         cargo build --release --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
-      env:
-        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         
     - name: Prepare artifacts
       run: |
