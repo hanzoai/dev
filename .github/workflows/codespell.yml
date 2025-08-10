@@ -15,6 +15,7 @@ jobs:
   codespell:
     name: Check for spelling errors
     runs-on: ubuntu-latest
+    if: github.repository == 'openai/codex'
 
     steps:
       - name: Checkout

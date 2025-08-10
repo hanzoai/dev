@@ -17,10 +17,12 @@ jobs:
     # Note the label values should match the ones in the .github/codex/labels
     # folder.
     if: |
-      (github.event_name == 'issues' && (
-        (github.event.action == 'labeled' && (github.event.label.name == 'codex-attempt' || github.event.label.name == 'codex-triage'))
-      )) ||
-      (github.event_name == 'pull_request' && github.event.action == 'labeled' && (github.event.label.name == 'codex-review' || github.event.label.name == 'codex-rust-review'))
+      github.repository == 'openai/codex' && (
+        (github.event_name == 'issues' && (
+          (github.event.action == 'labeled' && (github.event.label.name == 'codex-attempt' || github.event.label.name == 'codex-triage'))
+        )) ||
+        (github.event_name == 'pull_request' && github.event.action == 'labeled' && (github.event.label.name == 'codex-review' || github.event.label.name == 'codex-rust-review'))
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write # can push or create branches
