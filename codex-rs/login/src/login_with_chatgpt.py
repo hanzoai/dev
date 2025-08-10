@@ -3,7 +3,7 @@
 - Listens on 127.0.0.1:1455
 - Opens http://localhost:1455/auth/callback in the browser
 - If the user successfully navigates the auth flow,
-  $CODEX_HOME/auth.json will be written with the API key.
+  $CODE_HOME/auth.json (or $CODEX_HOME/auth.json) will be written with the API key.
 - User will be redirected to http://localhost:1455/success upon success.
 
 The script should exit with a non-zero code if the user fails to navigate the
@@ -12,8 +12,8 @@ auth flow.
 To test this script locally without overwriting your existing auth.json file:
 
 ```
-rm -rf /tmp/codex_home && mkdir /tmp/codex_home
-CODEX_HOME=/tmp/codex_home python3 codex-rs/login/src/login_with_chatgpt.py
+rm -rf /tmp/code_home && mkdir /tmp/code_home
+CODE_HOME=/tmp/code_home python3 codex-rs/login/src/login_with_chatgpt.py
 ```
 """
 
@@ -81,9 +81,10 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Enable request logging")
     args = parser.parse_args()
 
-    codex_home = os.environ.get("CODEX_HOME")
+    # Check CODE_HOME first, fall back to CODEX_HOME for compatibility
+    codex_home = os.environ.get("CODE_HOME") or os.environ.get("CODEX_HOME")
     if not codex_home:
-        eprint("ERROR: CODEX_HOME environment variable is not set")
+        eprint("ERROR: CODE_HOME or CODEX_HOME environment variable is not set")
         sys.exit(1)
 
     client_id = os.getenv("CODEX_CLIENT_ID")

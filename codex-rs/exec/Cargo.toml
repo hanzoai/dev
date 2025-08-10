@@ -4,7 +4,7 @@ name = "codex-exec"
 version = { workspace = true }
 
 [[bin]]
-name = "codex-exec"
+name = "code-exec"
 path = "src/main.rs"
 
 [lib]
