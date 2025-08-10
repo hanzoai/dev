@@ -1,0 +1,63 @@
+name: Simple Release
+
+on:
+  push:
+    branches: [ code-release ]
+    paths-ignore:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/test.yml'
+      - '*.md'
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build native binaries
+      run: |
+        cd codex-rs
+        cargo build --release --bin code --bin code-tui --bin code-exec
+        
+    - name: Prepare npm package
+      run: |
+        # Copy binaries to codex-cli
+        mkdir -p codex-cli/bin
+        cp codex-rs/target/release/code codex-cli/bin/code-x86_64-unknown-linux-gnu
+        cp codex-rs/target/release/code-tui codex-cli/bin/code-tui-x86_64-unknown-linux-gnu
+        cp codex-rs/target/release/code-exec codex-cli/bin/code-exec-x86_64-unknown-linux-gnu
+        chmod +x codex-cli/bin/*
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+        
+    - name: Test npm package locally
+      working-directory: codex-cli
+      run: |
+        # Create a simple test script to verify the package structure
+        npm pack
+        ls -la *.tgz
+        tar -tzf *.tgz | head -20
+        
+    - name: Check npm publish readiness
+      run: |
+        echo "Package is ready for publishing once NPM_TOKEN is configured"
+        echo "To publish:"
+        echo "1. Set NPM_TOKEN secret in repository settings"
+        echo "2. Uncomment the publish step below"
+        
+    # Uncomment when NPM_TOKEN is configured:
+    # - name: Publish to npm
+    #   working-directory: codex-cli
+    #   run: npm publish --access public
+    #   env:
+    #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
