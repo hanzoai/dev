@@ -43,8 +43,9 @@ jobs:
       
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
+      
+    - name: Add Rust target
+      run: rustup target add ${{ matrix.target }}
         
     - name: Install musl tools (Linux)
       if: contains(matrix.target, 'musl')
