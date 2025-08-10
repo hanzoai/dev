@@ -1,8 +1,16 @@
-<h1 align="center">OpenAI Codex CLI</h1>
+<h1 align="center">Code CLI - Enhanced Fork of OpenAI Codex</h1>
 
-<p align="center"><code>npm i -g @openai/codex</code><br />or <code>brew install codex</code></p>
+<p align="center"><code>npm i -g @just-every/code</code></p>
 
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, see <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+<p align="center"><strong>Code CLI</strong> is an enhanced fork of OpenAI's Codex CLI with additional features for improved terminal experience.</br>This fork adds image handling capabilities and dynamic reasoning control while maintaining full compatibility with the original Codex.</p>
+
+<p align="center">
+  <strong>New Features:</strong><br/>
+  ✨ Enhanced image support (drag-and-drop, paste, file paths)<br/>
+  🧠 Dynamic reasoning effort control with /reasoning command<br/>
+  🔧 Improved environment variable handling (CODE_HOME/CODEX_HOME)<br/>
+  📦 Available as <code>@just-every/code</code> on npm
+</p>
 
 <p align="center">
   <img src="./.github/codex-cli-splash.png" alt="Codex CLI splash" width="50%" />
@@ -61,9 +69,25 @@
 
 ---
 
-## Quickstart
+## Installation
 
-### Installing and running Codex CLI
+### Installing Code CLI (Enhanced Fork)
+
+Install the enhanced Code CLI fork:
+
+```bash
+npm install -g @just-every/code
+```
+
+Then run it:
+
+```bash
+code
+```
+
+The fork uses `~/.code` as its home directory (or `~/.codex` if it already exists for compatibility). You can override this with the `CODE_HOME` or `CODEX_HOME` environment variables.
+
+### Installing Original OpenAI Codex CLI
 
 Install globally with your preferred package manager:
 
