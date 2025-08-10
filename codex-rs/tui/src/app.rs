@@ -11,6 +11,7 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
+#[cfg(debug_assertions)]
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
@@ -379,6 +380,11 @@ impl App<'_> {
                     SlashCommand::Prompts => {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.add_prompts_output();
+                        }
+                    }
+                    SlashCommand::Browser => {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.handle_browser_command(command_text);
                         }
                     }
                     #[cfg(debug_assertions)]
