@@ -11,6 +11,8 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
+#[cfg(debug_assertions)]
+use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
@@ -389,6 +391,11 @@ impl App<'_> {
                             if let Some(prompt) = expanded {
                                 widget.submit_text_message(prompt);
                             }
+                        }
+                    }
+                    SlashCommand::Browser => {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.handle_browser_command(command_text);
                         }
                     }
                     #[cfg(debug_assertions)]

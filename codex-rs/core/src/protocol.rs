@@ -338,6 +338,14 @@ pub enum InputItem {
     LocalImage {
         path: std::path::PathBuf,
     },
+    
+    /// Ephemeral image (like browser screenshots) that should not be persisted in history.
+    /// This will be converted to an `Image` variant but marked as ephemeral.
+    EphemeralImage {
+        path: std::path::PathBuf,
+        /// Optional metadata to help identify the image (e.g., "screenshot:1234567890:https://example.com")
+        metadata: Option<String>,
+    },
 }
 
 /// Event Queue Entry - events from agent
