@@ -211,22 +211,8 @@ impl HistoryCell {
             history_entry_count: _,
         } = event;
         if is_first_event {
-            let cwd_str = match relativize_to_home(&config.cwd) {
-                Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
-                Some(_) => "~".to_string(),
-                None => config.cwd.display().to_string(),
-            };
-
+            // Since we now have a status bar, just show helpful commands in history
             let lines: Vec<Line<'static>> = vec![
-                Line::from(vec![
-                    Span::raw(">_ ").dim(),
-                    Span::styled(
-                        "You are using OpenAI Codex in",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!(" {cwd_str}")).dim(),
-                ]),
-                Line::from("".dim()),
                 Line::from(" To get started, describe a task or try one of these commands:".dim()),
                 Line::from("".dim()),
                 Line::from(format!(" /init - {}", SlashCommand::Init.description()).dim()),
@@ -257,7 +243,7 @@ impl HistoryCell {
 
     pub(crate) fn new_user_prompt(message: String) -> Self {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from("user".cyan().bold()));
+        lines.push(Line::from(Span::styled("user", Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))));
         lines.extend(message.lines().map(|l| Line::from(l.to_string())));
         lines.push(Line::from(""));
 
@@ -273,12 +259,12 @@ impl HistoryCell {
         let mut iter = command_escaped.lines();
         if let Some(first) = iter.next() {
             lines.push(Line::from(vec![
-                "▌ ".cyan(),
-                "Running command ".magenta(),
+                Span::styled("▌ ", Style::default().fg(crate::colors::primary())),
+                Span::styled("Running command ", Style::default().fg(crate::colors::secondary())),
                 first.to_string().into(),
             ]));
         } else {
-            lines.push(Line::from(vec!["▌ ".cyan(), "Running command".magenta()]));
+            lines.push(Line::from(vec![Span::styled("▌ ", Style::default().fg(crate::colors::primary())), Span::styled("Running command", Style::default().fg(crate::colors::secondary()))]));
         }
         for cont in iter {
             lines.push(Line::from(cont.to_string()));
@@ -851,12 +837,23 @@ impl HistoryCell {
             view: TextBlock::new(lines),
         }
     }
+
+    /// Create a simple text line cell for streaming messages
+    pub(crate) fn new_text_line(line: Line<'static>) -> Self {
+        HistoryCell::BackgroundEvent {
+            view: TextBlock::new(vec![line]),
+        }
+    }
 }
 
 impl WidgetRef for &HistoryCell {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        // Apply theme background and text color to the paragraph
         Paragraph::new(Text::from(self.plain_lines()))
             .wrap(Wrap { trim: false })
+            .style(Style::default()
+                .fg(crate::colors::text())
+                .bg(crate::colors::background()))
             .render(area, buf);
     }
 }

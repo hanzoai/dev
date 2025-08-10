@@ -340,7 +340,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
             .enumerate()
             .map(|(idx, opt)| {
                 let style = if idx == self.selected_option {
-                    Style::new().bg(Color::Cyan).fg(Color::Black)
+                    Style::new().bg(crate::colors::light_blue()).fg(Color::Black)
                 } else {
                     Style::new().bg(Color::DarkGray)
                 };
@@ -379,7 +379,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
 
         Block::bordered()
             .border_type(BorderType::QuadrantOutside)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(crate::colors::light_blue()))
             .borders(Borders::LEFT)
             .render_ref(
                 Rect::new(0, response_chunk.y, 1, response_chunk.height),

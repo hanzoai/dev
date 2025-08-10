@@ -123,7 +123,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
         // Create a centered box
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue))
+            .border_style(Style::default().fg(crate::colors::light_blue()))
             .title(" Select Reasoning Effort ")
             .title_alignment(Alignment::Center);
 
@@ -160,14 +160,14 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
                 Span::raw(prefix),
                 Span::styled(format!("{:<8}", name), style),
                 Span::raw(" - "),
-                Span::styled(description, Style::default().fg(Color::Gray)),
+                Span::styled(description, Style::default().fg(crate::colors::dim())),
             ]);
             lines.push(line);
         }
 
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(Color::Cyan)),
+            Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
             Span::raw(" Navigate  "),
             Span::styled("Enter", Style::default().fg(Color::Green)),
             Span::raw(" Select  "),
