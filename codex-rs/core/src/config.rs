@@ -1,5 +1,6 @@
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
+use crate::config_types::BrowserConfig;
 use crate::config_types::History;
 use crate::config_types::McpServerConfig;
 use crate::config_types::ReasoningEffort;
@@ -384,6 +385,9 @@ pub struct ConfigToml {
 
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
+
+    /// Browser configuration for integrated screenshot capabilities.
+    pub browser: Option<BrowserConfig>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.

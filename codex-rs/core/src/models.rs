@@ -146,23 +146,27 @@ pub enum ReasoningItemContent {
 
 impl From<Vec<InputItem>> for ResponseInputItem {
     fn from(items: Vec<InputItem>) -> Self {
-        Self::Message {
-            role: "user".to_string(),
-            content: items
-                .into_iter()
-                .filter_map(|c| match c {
-                    InputItem::Text { text } => Some(ContentItem::InputText { text }),
-                    InputItem::Image { image_url } => Some(ContentItem::InputImage { image_url }),
-                    InputItem::LocalImage { path } => match std::fs::read(&path) {
+        let mut content_items = Vec::new();
+        
+        for item in items {
+            match item {
+                InputItem::Text { text } => {
+                    content_items.push(ContentItem::InputText { text });
+                }
+                InputItem::Image { image_url } => {
+                    content_items.push(ContentItem::InputImage { image_url });
+                }
+                InputItem::LocalImage { path } => {
+                    match std::fs::read(&path) {
                         Ok(bytes) => {
                             let mime = mime_guess::from_path(&path)
                                 .first()
                                 .map(|m| m.essence_str().to_owned())
                                 .unwrap_or_else(|| "application/octet-stream".to_string());
                             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            Some(ContentItem::InputImage {
+                            content_items.push(ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                            })
+                            });
                         }
                         Err(err) => {
                             tracing::warn!(
@@ -170,11 +174,46 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                                 path.display(),
                                 err
                             );
-                            None
                         }
-                    },
-                })
-                .collect::<Vec<ContentItem>>(),
+                    }
+                }
+                InputItem::EphemeralImage { path, metadata } => {
+                    tracing::info!("Processing ephemeral image: {} with metadata: {:?}", path.display(), metadata);
+                    
+                    // Add metadata text BEFORE the image so the LLM sees context first
+                    if let Some(meta) = metadata {
+                        content_items.push(ContentItem::InputText { 
+                            text: format!("[EPHEMERAL:{}]", meta)
+                        });
+                    }
+                    
+                    match std::fs::read(&path) {
+                        Ok(bytes) => {
+                            let mime = mime_guess::from_path(&path)
+                                .first()
+                                .map(|m| m.essence_str().to_owned())
+                                .unwrap_or_else(|| "application/octet-stream".to_string());
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            tracing::info!("Created ephemeral image data URL with mime: {}", mime);
+                            content_items.push(ContentItem::InputImage {
+                                image_url: format!("data:{mime};base64,{encoded}"),
+                            });
+                        }
+                        Err(err) => {
+                            tracing::error!(
+                                "Failed to read ephemeral image {} – {}",
+                                path.display(),
+                                err
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        Self::Message {
+            role: "user".to_string(),
+            content: content_items,
         }
     }
 }

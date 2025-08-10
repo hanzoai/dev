@@ -34,6 +34,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use tokio::sync::mpsc::UnboundedSender;
@@ -50,7 +51,9 @@ use crate::history_cell::CommandOutput;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
 use crate::live_wrap::RowBuilder;
+use crate::text_block::TextBlock;
 use crate::user_approval_widget::ApprovalRequest;
+use codex_browser::{BrowserManager, config::BrowserConfig};
 use codex_file_search::FileMatch;
 use ratatui::style::Stylize;
 
@@ -83,6 +86,8 @@ pub(crate) struct ChatWidget<'a> {
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     welcome_shown: bool,
+    // Browser manager for screenshot functionality
+    browser_manager: Arc<BrowserManager>,
 }
 
 struct UserMessage {
@@ -274,6 +279,11 @@ impl ChatWidget<'_> {
             }
         });
 
+        // Browser manager will be initialized lazily when needed
+        // For now, create a placeholder that will be replaced on first use
+        let browser_config = BrowserConfig::default();
+        let browser_manager = Arc::new(BrowserManager::new(browser_config));
+        
         Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -300,6 +310,7 @@ impl ChatWidget<'_> {
             live_max_rows: 3,
             pending_images: HashMap::new(),
             welcome_shown: false,
+            browser_manager,
         }
     }
 
@@ -443,17 +454,125 @@ impl ChatWidget<'_> {
         }
         
         let mut items: Vec<InputItem> = Vec::new();
+        let mut browser_screenshot_count = 0;
+
+        // Check if browser mode is enabled and capture screenshot
+        // Always check both local and global browser managers
+        let local_browser_manager = self.browser_manager.clone();
+        
+        // Check if either local or global browser is enabled
+        let local_enabled = local_browser_manager.config.try_read()
+            .map(|c| c.enabled)
+            .unwrap_or(false);
+        
+        // Check global browser manager async
+        let (tx_global, rx_global) = std::sync::mpsc::channel();
+        tokio::spawn(async move {
+            let global_manager = codex_browser::global::get_browser_manager().await;
+            let enabled = if let Some(ref mgr) = global_manager {
+                mgr.is_enabled().await
+            } else {
+                false
+            };
+            let _ = tx_global.send((global_manager, enabled));
+        });
+        
+        // Get global browser state
+        let (global_manager, global_enabled) = rx_global.recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap_or((None, false));
+        
+        // Use global manager if it exists and is enabled, otherwise use local
+        let (browser_manager, browser_enabled) = if global_enabled && global_manager.is_some() {
+            (global_manager.unwrap(), true)
+        } else if local_enabled {
+            (local_browser_manager, true)
+        } else if let Some(global) = global_manager {
+            // Global exists but not enabled, still prefer it over local
+            (global, false)
+        } else {
+            (local_browser_manager, false)
+        };
+        
+        // Get current browser URL for display
+        let mut browser_url = None;
+        
+        if browser_enabled {
+            tracing::info!("Browser is enabled, attempting to capture screenshot...");
+            
+            // We need to capture screenshots synchronously before sending the message
+            // Use a channel to get the result from the async task
+            let (tx, rx) = std::sync::mpsc::channel();
+            let browser_manager_capture = browser_manager.clone();
+            
+            tokio::spawn(async move {
+                tracing::info!("Starting async screenshot capture...");
+                let result = browser_manager_capture.capture_screenshot_with_url().await;
+                match &result {
+                    Ok((paths, _)) => tracing::info!("Screenshot capture succeeded with {} images", paths.len()),
+                    Err(e) => tracing::error!("Screenshot capture failed: {}", e),
+                }
+                let _ = tx.send(result);
+            });
+            
+            // Wait for screenshot capture (with timeout)
+            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(Ok((screenshot_paths, url))) => {
+                    tracing::info!("Captured {} browser screenshot(s)", screenshot_paths.len());
+                    browser_screenshot_count = screenshot_paths.len();
+                    let screenshot_url = url.clone();
+                    browser_url = url;
+                    // Add browser screenshots directly to items (ephemeral - not stored in image_paths for history)
+                    for path in screenshot_paths {
+                        tracing::info!("Browser screenshot attached: {}", path.display());
+                        // Check if the file actually exists
+                        if path.exists() {
+                            tracing::info!("Screenshot file exists at: {}", path.display());
+                            // Add as EphemeralImage with metadata for identification
+                            let timestamp = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            let metadata = format!("screenshot:{}:{}", timestamp, screenshot_url.as_deref().unwrap_or("unknown"));
+                            items.push(InputItem::EphemeralImage { 
+                                path,
+                                metadata: Some(metadata),
+                            });
+                        } else {
+                            tracing::error!("Screenshot file does not exist at: {}", path.display());
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("Failed to capture browser screenshot: {}", e);
+                }
+                Err(_) => {
+                    tracing::error!("Browser screenshot capture timed out");
+                }
+            }
+        } else {
+            tracing::info!("Browser is not enabled, skipping screenshot capture");
+        }
 
         if !actual_text.is_empty() {
             items.push(InputItem::Text { text: actual_text.clone() });
         }
 
+        // Add user-provided images (these are persistent in history)
         for path in image_paths {
             items.push(InputItem::LocalImage { path });
         }
 
         if items.is_empty() {
             return;
+        }
+
+        // Debug logging for what we're sending
+        let ephemeral_count = items.iter().filter(|item| {
+            matches!(item, InputItem::EphemeralImage { .. })
+        }).count();
+        let total_items = items.len();
+        if ephemeral_count > 0 {
+            tracing::info!("Sending {} items to model (including {} ephemeral images)", total_items, ephemeral_count);
         }
 
         self.codex_op_tx
@@ -471,9 +590,25 @@ impl ChatWidget<'_> {
                 });
         }
 
-        // Show the original text (slash command) in conversation history, not the expanded version
+        // Show text in conversation history, with a note about browser screenshots
         if !original_text.is_empty() {
-            self.add_to_history(HistoryCell::new_user_prompt(original_text));
+            let display_text = if browser_screenshot_count > 0 {
+                if let Some(url) = browser_url {
+                    format!("{}\n\n[Browser: {}]", original_text, url)
+                } else {
+                    format!("{}\n\n[Browser screenshot attached]", original_text)
+                }
+            } else {
+                original_text.clone()
+            };
+            self.add_to_history(HistoryCell::new_user_prompt(display_text));
+        } else if browser_screenshot_count > 0 {
+            let prompt_text = if let Some(url) = browser_url {
+                format!("[Browser: {}]", url)
+            } else {
+                "[Browser screenshot attached]".to_string()
+            };
+            self.add_to_history(HistoryCell::new_user_prompt(prompt_text));
         }
     }
 
@@ -856,6 +991,136 @@ impl ChatWidget<'_> {
         if let Err(e) = self.codex_op_tx.send(op) {
             tracing::error!("failed to submit op: {e}");
         }
+    }
+
+    pub(crate) fn handle_browser_command(&mut self, command_text: String) {
+        // Parse the browser subcommand
+        let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
+        
+        let browser_manager = self.browser_manager.clone();
+        let response = if parts.len() > 1 {
+            let first_arg = parts[1];
+            
+            // Check if the first argument looks like a URL (has a dot or protocol)
+            let is_url = first_arg.contains("://") || first_arg.contains(".");
+            
+            if is_url {
+                // It's a URL - enable browser mode and navigate to it
+                let url = parts[1..].join(" ");
+                
+                // Ensure URL has protocol
+                let full_url = if !url.contains("://") {
+                    format!("https://{}", url)
+                } else {
+                    url.clone()
+                };
+                
+                // Enable browser mode
+                browser_manager.set_enabled_sync(true);
+                
+                // Navigate to URL and wait for it to load
+                let browser_manager_open = browser_manager.clone();
+                let url_for_goto = full_url.clone();
+                tokio::spawn(async move {
+                    match browser_manager_open.goto(&url_for_goto).await {
+                        Ok(result) => {
+                            tracing::info!("Browser opened to: {} (title: {:?})", result.url, result.title);
+                            // Add a small delay to ensure page is fully rendered
+                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                            tracing::info!("Page should be loaded now");
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to open browser: {}", e);
+                        }
+                    }
+                });
+                
+                format!("Browser mode enabled. Opening: {}\nScreenshots will be attached to model requests.", full_url)
+            } else {
+                // It's a subcommand
+                match first_arg {
+                    "off" => {
+                        // Disable browser mode
+                        browser_manager.set_enabled_sync(false);
+                        // Close any open browser
+                        let browser_manager_close = browser_manager.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = browser_manager_close.close().await {
+                                tracing::error!("Failed to close browser: {}", e);
+                            }
+                        });
+                        "Browser mode disabled.".to_string()
+                    }
+                    "status" => {
+                        // Get status from BrowserManager
+                        browser_manager.get_status_sync()
+                    }
+                "fullpage" => {
+                    if parts.len() > 2 {
+                        match parts[2] {
+                            "on" => {
+                                // Enable full-page mode
+                                browser_manager.set_fullpage_sync(true);
+                                "Full-page screenshot mode enabled (max 8 segments).".to_string()
+                            }
+                            "off" => {
+                                // Disable full-page mode
+                                browser_manager.set_fullpage_sync(false);
+                                "Full-page screenshot mode disabled.".to_string()
+                            }
+                            _ => "Usage: /browser fullpage [on|off]".to_string()
+                        }
+                    } else {
+                        "Usage: /browser fullpage [on|off]".to_string()
+                    }
+                }
+                "config" => {
+                    if parts.len() > 3 {
+                        let key = parts[2];
+                        let value = parts[3..].join(" ");
+                        // Update browser config
+                        match key {
+                            "viewport" => {
+                                // Parse viewport dimensions like "1920x1080"
+                                if let Some((width_str, height_str)) = value.split_once('x') {
+                                    if let (Ok(width), Ok(height)) = (width_str.parse::<u32>(), height_str.parse::<u32>()) {
+                                        browser_manager.set_viewport_sync(width, height);
+                                        format!("Browser viewport updated: {}x{}", width, height)
+                                    } else {
+                                        "Invalid viewport format. Use: /browser config viewport 1920x1080".to_string()
+                                    }
+                                } else {
+                                    "Invalid viewport format. Use: /browser config viewport 1920x1080".to_string()
+                                }
+                            }
+                            "segments_max" => {
+                                if let Ok(max) = value.parse::<usize>() {
+                                    browser_manager.set_segments_max_sync(max);
+                                    format!("Browser segments_max updated: {}", max)
+                                } else {
+                                    "Invalid segments_max value. Use a number.".to_string()
+                                }
+                            }
+                            _ => format!("Unknown config key: {}. Available: viewport, segments_max", key)
+                        }
+                    } else {
+                        "Usage: /browser config <key> <value>\nAvailable keys: viewport, segments_max".to_string()
+                    }
+                }
+                    _ => {
+                        format!("Unknown browser command: '{}'\nUsage: /browser <url> | off | status | fullpage | config", first_arg)
+                    }
+                }
+            }
+        } else {
+            "Browser commands:\n• /browser <url> - Open URL and enable browser mode\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration".to_string()
+        };
+        
+        // Add the response to the UI as a background event
+        let lines = response.lines().map(|line| Line::from(line.to_string())).collect();
+        self.add_to_history(HistoryCell::BackgroundEvent {
+            view: TextBlock::new(lines),
+        });
     }
 
     /// Programmatically submit a user text message as if typed in the
