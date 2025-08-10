@@ -1,5 +1,8 @@
 name: Simple Release
 
+# This is the main release workflow for @just-every/code
+# It builds native Linux binaries only (no cross-compilation)
+# The complex release.yml is disabled and only runs manually
 on:
   push:
     branches: [ code-release ]
