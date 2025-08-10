@@ -1,9 +1,33 @@
-// Default models to use for slash commands
-const DEFAULT_MODELS: &[&str] = &["claude", "gemini", "codex"];
+use crate::config_types::AgentConfig;
+
+/// Get the list of enabled agent names from the configuration
+pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
+    agents
+        .iter()
+        .filter(|agent| agent.enabled)
+        .map(|agent| agent.name.clone())
+        .collect()
+}
+
+/// Get default models if no agents are configured
+fn get_default_models() -> Vec<String> {
+    vec!["claude".to_string(), "gemini".to_string(), "codex".to_string()]
+}
 
 /// Format the /plan command into a prompt for the LLM
-pub fn format_plan_command(task: &str, models: Option<Vec<String>>) -> String {
-    let models_list = models.unwrap_or_else(|| DEFAULT_MODELS.iter().map(|s| s.to_string()).collect());
+pub fn format_plan_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+    let models_list = models.unwrap_or_else(|| {
+        if let Some(agents) = agents {
+            let enabled = get_enabled_agents(agents);
+            if !enabled.is_empty() {
+                enabled
+            } else {
+                get_default_models()
+            }
+        } else {
+            get_default_models()
+        }
+    });
     let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
     
     format!(
@@ -30,8 +54,19 @@ Task to plan:
 }
 
 /// Format the /solve command into a prompt for the LLM
-pub fn format_solve_command(task: &str, models: Option<Vec<String>>) -> String {
-    let models_list = models.unwrap_or_else(|| DEFAULT_MODELS.iter().map(|s| s.to_string()).collect());
+pub fn format_solve_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+    let models_list = models.unwrap_or_else(|| {
+        if let Some(agents) = agents {
+            let enabled = get_enabled_agents(agents);
+            if !enabled.is_empty() {
+                enabled
+            } else {
+                get_default_models()
+            }
+        } else {
+            get_default_models()
+        }
+    });
     let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
     
     format!(
@@ -77,8 +112,19 @@ Remember: DO NOT cancel any running agents until you have 100% confirmed the pro
 }
 
 /// Format the /code command into a prompt for the LLM
-pub fn format_code_command(task: &str, models: Option<Vec<String>>) -> String {
-    let models_list = models.unwrap_or_else(|| DEFAULT_MODELS.iter().map(|s| s.to_string()).collect());
+pub fn format_code_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+    let models_list = models.unwrap_or_else(|| {
+        if let Some(agents) = agents {
+            let enabled = get_enabled_agents(agents);
+            if !enabled.is_empty() {
+                enabled
+            } else {
+                get_default_models()
+            }
+        } else {
+            get_default_models()
+        }
+    });
     let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
     
     format!(
@@ -115,7 +161,7 @@ Coding task to perform:
 }
 
 /// Parse a slash command and return the formatted prompt
-pub fn handle_slash_command(input: &str) -> Option<String> {
+pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Option<String> {
     let input = input.trim();
     
     // Check if it starts with a slash
@@ -133,21 +179,21 @@ pub fn handle_slash_command(input: &str) -> Option<String> {
             if args.is_empty() {
                 Some("Error: /plan requires a task description. Usage: /plan <task>".to_string())
             } else {
-                Some(format_plan_command(&args, None))
+                Some(format_plan_command(&args, None, agents))
             }
         }
         "/solve" => {
             if args.is_empty() {
                 Some("Error: /solve requires a problem description. Usage: /solve <problem>".to_string())
             } else {
-                Some(format_solve_command(&args, None))
+                Some(format_solve_command(&args, None, agents))
             }
         }
         "/code" => {
             if args.is_empty() {
                 Some("Error: /code requires a task description. Usage: /code <task>".to_string())
             } else {
-                Some(format_code_command(&args, None))
+                Some(format_code_command(&args, None, agents))
             }
         }
         _ => None,
@@ -161,31 +207,63 @@ mod tests {
     #[test]
     fn test_slash_command_parsing() {
         // Test /plan command
-        let result = handle_slash_command("/plan implement a new feature");
+        let result = handle_slash_command("/plan implement a new feature", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Create a comprehensive plan"));
         
         // Test /solve command
-        let result = handle_slash_command("/solve fix the bug in authentication");
+        let result = handle_slash_command("/solve fix the bug in authentication", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Solve a complicated problem"));
         
         // Test /code command
-        let result = handle_slash_command("/code refactor the database module");
+        let result = handle_slash_command("/code refactor the database module", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Perform a coding task"));
         
         // Test invalid command
-        let result = handle_slash_command("/invalid test");
+        let result = handle_slash_command("/invalid test", None);
         assert!(result.is_none());
         
         // Test non-slash command
-        let result = handle_slash_command("regular message");
+        let result = handle_slash_command("regular message", None);
         assert!(result.is_none());
         
         // Test empty arguments
-        let result = handle_slash_command("/plan");
+        let result = handle_slash_command("/plan", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Error"));
+    }
+    
+    #[test]
+    fn test_slash_commands_with_agents() {
+        // Create test agent configurations
+        let agents = vec![
+            AgentConfig {
+                name: "test-claude".to_string(),
+                command: "claude".to_string(),
+                args: vec![],
+                read_only: false,
+                enabled: true,
+                description: None,
+                env: None,
+            },
+            AgentConfig {
+                name: "test-gemini".to_string(),
+                command: "gemini".to_string(),
+                args: vec![],
+                read_only: false,
+                enabled: false, // disabled
+                description: None,
+                env: None,
+            },
+        ];
+        
+        // Test that only enabled agents are included
+        let result = handle_slash_command("/plan test task", Some(&agents));
+        assert!(result.is_some());
+        let prompt = result.unwrap();
+        assert!(prompt.contains("test-claude"));
+        assert!(!prompt.contains("test-gemini")); // Should not include disabled agent
     }
 }
