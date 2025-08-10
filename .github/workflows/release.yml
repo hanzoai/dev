@@ -1,16 +1,14 @@
 name: Release
 
 on:
-  workflow_dispatch:  # Only run manually, not on push
-  # Disabled automatic triggers - use release-simple.yml instead
-  # push:
-  #   branches: [ code-release ]
-  #   paths-ignore:
-  #     - '.github/workflows/test.yml'
-  #     - 'examples/**'
-  #     - '**/*.test.ts'
-  #     - 'test/**'
-  #     - '*.md'
+  push:
+    branches: [ code-release ]
+    paths-ignore:
+      - '.github/workflows/test.yml'
+      - 'examples/**'
+      - '**/*.test.ts'
+      - 'test/**'
+      - '*.md'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -208,4 +206,4 @@ jobs:
         files: |
           artifacts/binaries-*/*
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
