@@ -11,8 +11,6 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
-#[cfg(debug_assertions)]
-use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
@@ -20,9 +18,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::terminal::supports_keyboard_enhancement;
-use ratatui::prelude::Backend;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -61,8 +57,6 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed.
     pending_redraw: Arc<AtomicBool>,
-
-    pending_history_lines: Vec<Line<'static>>,
 
     enhanced_keys_supported: bool,
 }
@@ -121,6 +115,9 @@ impl App<'_> {
                                     let pasted = pasted.replace("\r", "\n");
                                     app_event_tx.send(AppEvent::Paste(pasted));
                                 }
+                                crossterm::event::Event::Mouse(mouse_event) => {
+                                    app_event_tx.send(AppEvent::MouseEvent(mouse_event));
+                                }
                                 _ => {
                                     // Ignore any other events.
                                 }
@@ -167,7 +164,6 @@ impl App<'_> {
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         Self {
             app_event_tx,
-            pending_history_lines: Vec::new(),
             app_event_rx,
             app_state,
             config,
@@ -294,6 +290,9 @@ impl App<'_> {
                             // Ignore Release key events for now.
                         }
                     };
+                }
+                AppEvent::MouseEvent(mouse_event) => {
+                    self.dispatch_mouse_event(mouse_event);
                 }
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
@@ -575,6 +574,13 @@ impl App<'_> {
     fn dispatch_paste_event(&mut self, pasted: String) {
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_paste(pasted),
+            AppState::Onboarding { .. } => {}
+        }
+    }
+
+    fn dispatch_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
+        match &mut self.app_state {
+            AppState::Chat { widget } => widget.handle_mouse_event(mouse_event),
             AppState::Onboarding { .. } => {}
         }
     }
