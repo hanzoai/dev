@@ -6,6 +6,8 @@ use codex_core::config::Config;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::EnableBracketedPaste;
+use crossterm::event::DisableMouseCapture;
+use crossterm::event::EnableMouseCapture;
 use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
@@ -28,6 +30,7 @@ pub fn init(config: &Config) -> Result<Tui> {
     crate::theme::init_theme(&config.tui.theme);
     
     execute!(stdout(), EnableBracketedPaste)?;
+    execute!(stdout(), EnableMouseCapture)?;
     
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
@@ -77,6 +80,7 @@ pub fn restore() -> Result<()> {
     // Pop may fail on platforms that didn't support the push; ignore errors.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     execute!(stdout(), DisableBracketedPaste)?;
+    execute!(stdout(), DisableMouseCapture)?;
     disable_raw_mode()?;
     // Leave alternate screen mode
     execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
