@@ -21,6 +21,7 @@ use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
 
 /// Submission Queue Entry - requests from user
@@ -338,6 +339,14 @@ pub enum InputItem {
     LocalImage {
         path: std::path::PathBuf,
     },
+    
+    /// Ephemeral image (like browser screenshots) that should not be persisted in history.
+    /// This will be converted to an `Image` variant but marked as ephemeral.
+    EphemeralImage {
+        path: std::path::PathBuf,
+        /// Optional metadata to help identify the image (e.g., "screenshot:1234567890:https://example.com")
+        metadata: Option<String>,
+    },
 }
 
 /// Event Queue Entry - events from agent
@@ -419,6 +428,9 @@ pub enum EventMsg {
     GetHistoryEntryResponse(GetHistoryEntryResponseEvent),
 
     PlanUpdate(UpdatePlanArgs),
+
+    /// Browser screenshot has been captured and is ready for display
+    BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent),
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
@@ -580,6 +592,7 @@ pub struct ExecCommandBeginEvent {
     pub command: Vec<String>,
     /// The command's working directory if not the default cwd for the agent.
     pub cwd: PathBuf,
+    pub parsed_cmd: Vec<ParsedCommand>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -694,6 +707,14 @@ pub struct SessionConfiguredEvent {
 
     /// Current number of entries in the history log.
     pub history_entry_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BrowserScreenshotUpdateEvent {
+    /// Path to the screenshot file
+    pub screenshot_path: PathBuf,
+    /// Current URL of the browser
+    pub url: String,
 }
 
 /// User's decision in response to an ExecApprovalRequest.

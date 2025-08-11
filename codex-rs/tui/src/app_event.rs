@@ -1,7 +1,7 @@
-use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::{ReasoningEffort, ThemeName};
 use codex_core::protocol::Event;
 use codex_file_search::FileMatch;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::text::Line;
 
 use crate::app::ChatWidgetArgs;
@@ -18,6 +18,8 @@ pub(crate) enum AppEvent {
     Redraw,
 
     KeyEvent(KeyEvent),
+
+    MouseEvent(MouseEvent),
 
     /// Text pasted from the terminal clipboard.
     Paste(String),
@@ -38,6 +40,9 @@ pub(crate) enum AppEvent {
     
     /// Update the reasoning effort level
     UpdateReasoningEffort(ReasoningEffort),
+    
+    /// Update the theme
+    UpdateTheme(ThemeName),
 
     /// Kick off an asynchronous file search for the given query (text after
     /// the `@`). Previous searches may be cancelled by the app layer so there
