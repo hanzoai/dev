@@ -207,6 +207,11 @@ impl BottomPane<'_> {
         }
     }
 
+    pub(crate) fn insert_str(&mut self, text: &str) {
+        self.composer.insert_str(text);
+        self.request_redraw();
+    }
+
     /// Update the status indicator text. Shows status as overlay above composer
     /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
