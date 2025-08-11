@@ -5,6 +5,10 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use crate::agent_tool::{
+    create_run_agent_tool, create_check_agent_status_tool, create_get_agent_result_tool,
+    create_cancel_agent_tool, create_wait_for_agent_tool, create_list_agents_tool,
+};
 use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
@@ -454,6 +458,23 @@ pub(crate) fn get_openai_tools(
     if config.plan_tool {
         tools.push(PLAN_TOOL.clone());
     }
+    
+    // Add browser tools
+    tools.push(create_browser_open_tool());
+    tools.push(create_browser_close_tool());
+    tools.push(create_browser_status_tool());
+    tools.push(create_browser_click_tool());
+    tools.push(create_browser_type_tool());
+    tools.push(create_browser_key_tool());
+    tools.push(create_browser_javascript_tool());
+
+    // Add agent management tools for calling external LLMs asynchronously
+    tools.push(create_run_agent_tool());
+    tools.push(create_check_agent_status_tool());
+    tools.push(create_get_agent_result_tool());
+    tools.push(create_cancel_agent_tool());
+    tools.push(create_wait_for_agent_tool());
+    tools.push(create_list_agents_tool());
 
     if let Some(mcp_tools) = mcp_tools {
         for (name, tool) in mcp_tools {
@@ -829,4 +850,145 @@ mod tests {
             })
         );
     }
+}
+
+fn create_browser_open_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "url".to_string(),
+        JsonSchema::String { 
+            description: Some("The URL to navigate to (e.g., https://example.com)".to_string()),
+        },
+    );
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_open".to_string(),
+        description: "Opens a browser window and navigates to the specified URL. Screenshots will be automatically attached to subsequent messages.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["url".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_close_tool() -> OpenAiTool {
+    let properties = BTreeMap::new();
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_close".to_string(),
+        description: "Closes the browser window and disables screenshot capture.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_status_tool() -> OpenAiTool {
+    let properties = BTreeMap::new();
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_status".to_string(),
+        description: "Gets the current browser status including whether it's enabled, current URL, and viewport settings.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_click_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "x".to_string(),
+        JsonSchema::Number { 
+            description: Some("The X coordinate to click at".to_string()),
+        },
+    );
+    properties.insert(
+        "y".to_string(),
+        JsonSchema::Number { 
+            description: Some("The Y coordinate to click at".to_string()),
+        },
+    );
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_click".to_string(),
+        description: "Clicks at the specified coordinates in the browser window.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["x".to_string(), "y".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_type_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "text".to_string(),
+        JsonSchema::String { 
+            description: Some("The text to type into the currently focused element".to_string()),
+        },
+    );
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_type".to_string(),
+        description: "Types text into the currently focused element in the browser.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["text".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_key_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "key".to_string(),
+        JsonSchema::String { 
+            description: Some("The key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete')".to_string()),
+        },
+    );
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_key".to_string(),
+        description: "Presses a keyboard key in the browser (e.g., Enter, Tab, Escape, arrow keys).".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["key".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_javascript_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "code".to_string(),
+        JsonSchema::String { 
+            description: Some("The JavaScript code to execute in the browser context".to_string()),
+        },
+    );
+    
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_javascript".to_string(),
+        description: "Executes JavaScript code in the browser and returns the result. The code is wrapped to automatically capture return values and console.log output.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["code".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
 }

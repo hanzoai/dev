@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use crate::colors;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -87,7 +88,7 @@ impl StatusIndicatorWidget {
     }
 
     pub fn desired_height(&self, _width: u16) -> u16 {
-        1
+        3  // 1 line for status + 1 line padding above + 1 line padding below
     }
 
     /// Update the line that is displayed in the widget.
@@ -170,11 +171,21 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
+        // Center the status line within the 3-line area (line 2 of 3)
+        // If we have less than 3 lines, render on the middle line if possible
+        let render_line = if area.height >= 3 {
+            1  // Render on line 2 (0-indexed) for padding above and below
+        } else if area.height == 2 {
+            0  // Render on first line if only 2 lines available
+        } else {
+            0  // Single line - render on it
+        };
+
         let idx = self.frame_idx.load(std::sync::atomic::Ordering::Relaxed);
         let elapsed = self.start_time.elapsed().as_secs();
         let shown_now = self.current_shown_len(idx);
         let status_prefix: String = self.text.chars().take(shown_now).collect();
-        let animated_text = "Working";
+        let animated_text = "Coding";
         let header_chars: Vec<char> = animated_text.chars().collect();
         let padding = 4usize; // virtual padding around the animated segment for smoother loop
         let period = header_chars.len() + padding * 2;
@@ -214,15 +225,15 @@ impl WidgetRef for StatusIndicatorWidget {
         let inner_width = area.width as usize;
 
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled("▌ ", Style::default().fg(Color::Cyan)));
+        spans.push(Span::styled("▌ ", Style::default().fg(colors::info())));
 
-        // Simple dim spinner to the left of the header.
-        let spinner_frames = ['·', '•', '●', '•'];
+        // Moon phase spinner animation
+        let spinner_frames = ['◯', '◔', '◑', '◕', '●', '◕', '◑', '◔'];
         const SPINNER_SLOWDOWN: usize = 2;
         let spinner_ch = spinner_frames[(idx / SPINNER_SLOWDOWN) % spinner_frames.len()];
         spans.push(Span::styled(
             spinner_ch.to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(colors::spinner()),
         ));
         spans.push(Span::raw(" "));
 
@@ -235,27 +246,27 @@ impl WidgetRef for StatusIndicatorWidget {
         let bracket_prefix = format!("({elapsed}s • ");
         spans.push(Span::styled(
             bracket_prefix,
-            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+            Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
         ));
         spans.push(Span::styled(
             "Esc",
             Style::default()
-                .fg(Color::Gray)
+                .fg(colors::text_dim())
                 .add_modifier(Modifier::DIM | Modifier::BOLD),
         ));
         spans.push(Span::styled(
             " to interrupt)",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+            Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
         ));
         // Add a space and then the log text (not animated by the gradient)
         if !status_prefix.is_empty() {
             spans.push(Span::styled(
                 " ",
-                Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+                Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
             ));
             spans.push(Span::styled(
                 status_prefix,
-                Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+                Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
             ));
         }
 
@@ -275,18 +286,25 @@ impl WidgetRef for StatusIndicatorWidget {
 
         // No-op once full text is revealed; the app no longer reacts to a completion event.
 
+        // Render the paragraph on the calculated line for padding
+        let render_area = Rect {
+            x: area.x,
+            y: area.y + render_line,
+            width: area.width,
+            height: 1,  // Always render just the one line
+        };
         let paragraph = Paragraph::new(lines);
-        paragraph.render_ref(area, buf);
+        paragraph.render_ref(render_area, buf);
     }
 }
 
 fn color_for_level(level: u8) -> Color {
     if level < 128 {
-        Color::DarkGray
+        colors::spinner()
     } else if level < 192 {
-        Color::Gray
+        colors::text_dim()
     } else {
-        Color::White
+        colors::text_bright()
     }
 }
 
@@ -333,7 +351,7 @@ mod tests {
         for x in 0..area.width {
             row.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
-        assert!(row.contains("Working"), "expected Working header: {row:?}");
+        assert!(row.contains("Coding"), "expected Coding header: {row:?}");
     }
 
     #[test]
@@ -350,7 +368,7 @@ mod tests {
 
         let ch = buf[(2, 0)].symbol().chars().next().unwrap_or(' ');
         assert!(
-            matches!(ch, '·' | '•' | '●'),
+            matches!(ch, '◯' | '◔' | '◑' | '◕' | '●'),
             "expected spinner char at col 2: {ch:?}"
         );
     }

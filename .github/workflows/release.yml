@@ -1,16 +1,14 @@
 name: Release
 
 on:
-  workflow_dispatch:  # Only run manually, not on push
-  # Disabled automatic triggers - use release-simple.yml instead
-  # push:
-  #   branches: [ code-release ]
-  #   paths-ignore:
-  #     - '.github/workflows/test.yml'
-  #     - 'examples/**'
-  #     - '**/*.test.ts'
-  #     - 'test/**'
-  #     - '*.md'
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '.github/workflows/test.yml'
+      - 'examples/**'
+      - '**/*.test.ts'
+      - 'test/**'
+      - '*.md'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -23,64 +21,62 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # Linux builds
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
-          - os: ubuntu-latest
+            artifact: coder-x86_64-unknown-linux-musl
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: coder-x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
-          - os: macos-13  # Use Intel Mac for x86_64 builds
+            artifact: coder-aarch64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: coder-aarch64-unknown-linux-gnu
+          # macOS builds
+          - os: macos-14  # ARM Mac for both targets
             target: x86_64-apple-darwin
-            artifact: code-x86_64-apple-darwin
-          - os: macos-latest  # Use ARM Mac for aarch64 builds
+            artifact: coder-x86_64-apple-darwin
+          - os: macos-14
             target: aarch64-apple-darwin
-            artifact: code-aarch64-apple-darwin
+            artifact: coder-aarch64-apple-darwin
+          # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: code-x86_64-pc-windows-msvc.exe
+            artifact: coder-x86_64-pc-windows-msvc.exe
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      
-    - name: Add Rust target
-      run: rustup target add ${{ matrix.target }}
+      uses: dtolnay/rust-toolchain@1.88
+      with:
+        targets: ${{ matrix.target }}
         
-    - name: Install musl tools (Linux x86_64)
-      if: matrix.target == 'x86_64-unknown-linux-musl'
+    - name: Install musl tools (Linux)
+      if: contains(matrix.target, 'musl')
       run: |
         sudo apt-get update
-        sudo apt-get install -y musl-tools
-        
-    - name: Install musl tools (Linux aarch64)
-      if: matrix.target == 'aarch64-unknown-linux-musl'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
-        # Set up cross compilation
-        echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-        echo "AR_aarch64_unknown_linux_musl=aarch64-linux-gnu-ar" >> $GITHUB_ENV
-        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+        sudo apt-get install -y musl-tools pkg-config
         
     - name: Build binaries
       run: |
         cd codex-rs
-        cargo build --release --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+        cargo build --release --target ${{ matrix.target }} --bin coder --bin coder-tui --bin coder-exec
         
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/coder.exe artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-tui.exe artifacts/coder-tui-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/coder-exec.exe artifacts/coder-exec-${{ matrix.target }}.exe
         else
-          cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-tui artifacts/coder-tui-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-exec artifacts/coder-exec-${{ matrix.target }}
         fi
       shell: bash
       
@@ -116,21 +112,21 @@ jobs:
       with:
         path: artifacts/
         
-    - name: Prepare binaries for npm
+    - name: Prepare release assets
       run: |
-        # Create bin directory in codex-cli
-        mkdir -p codex-cli/bin
+        # Create a directory for all release assets
+        mkdir -p release-assets
         
-        # Copy all binaries to the bin directory
+        # Copy all binaries to release-assets for GitHub Release
         for dir in artifacts/binaries-*; do
-          cp $dir/* codex-cli/bin/
+          cp $dir/* release-assets/
         done
         
         # Make binaries executable
-        chmod +x codex-cli/bin/*
+        chmod +x release-assets/*
         
-        # List binaries for verification
-        ls -la codex-cli/bin/
+        # List assets for verification
+        ls -la release-assets/
         
     - name: Bump version
       id: version
@@ -142,10 +138,23 @@ jobs:
         
         # Get current version
         CURRENT_VERSION=$(node -p "require('./package.json').version")
-        echo "Current version: $CURRENT_VERSION"
+        echo "Current version in package.json: $CURRENT_VERSION"
         
-        # Bump version
-        npm version patch --no-git-tag-version
+        # Check latest published version
+        PUBLISHED_VERSION=$(npm view @just-every/coder version 2>/dev/null || echo "0.0.0")
+        echo "Latest published version: $PUBLISHED_VERSION"
+        
+        # Compare versions and bump appropriately
+        if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
+          # Need to bump from published version
+          echo "Bumping from published version $PUBLISHED_VERSION"
+          # Set to published version first, then bump
+          npm version $PUBLISHED_VERSION --no-git-tag-version --allow-same-version
+          npm version patch --no-git-tag-version
+        else
+          echo "Current version $CURRENT_VERSION is already ahead of published $PUBLISHED_VERSION"
+        fi
+        
         NEW_VERSION=$(node -p "require('./package.json').version")
         echo "New version: $NEW_VERSION"
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
@@ -157,7 +166,12 @@ jobs:
           echo "skip_push=true" >> $GITHUB_OUTPUT
         else
           git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
-          git tag "v${NEW_VERSION}"
+          # Only create tag if it doesn't exist
+          if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
+            git tag "v${NEW_VERSION}"
+          else
+            echo "Tag v${NEW_VERSION} already exists, skipping tag creation"
+          fi
           echo "skip_push=false" >> $GITHUB_OUTPUT
         fi
       
@@ -181,7 +195,7 @@ jobs:
         
     - name: Push changes
       run: |
-        git push origin code-release
+        git push origin main
         git push origin --tags
       if: steps.version.outputs.skip_push != 'true'
       
@@ -192,7 +206,7 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}
         name: Release v${{ steps.version.outputs.version }}
         body: |
-          ## @just-every/code v${{ steps.version.outputs.version }}
+          ## @just-every/coder v${{ steps.version.outputs.version }}
           
           Fork of OpenAI Codex with additional features:
           - Enhanced image handling (drag-and-drop, paste, file path detection)
@@ -200,14 +214,14 @@ jobs:
           
           ### Installation
           ```bash
-          npm install -g @just-every/code
+          npm install -g @just-every/coder
           ```
           
           ### Usage
           ```bash
-          code
+          coder
           ```
         files: |
-          artifacts/binaries-*/*
+          release-assets/*
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}

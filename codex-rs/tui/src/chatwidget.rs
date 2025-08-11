@@ -5,7 +5,7 @@ use std::sync::Arc;
 use codex_core::codex_wrapper::CodexConversation;
 use codex_core::codex_wrapper::init_codex;
 use codex_core::config::Config;
-use codex_core::config_types::ReasoningEffort;
+use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
@@ -47,6 +47,7 @@ use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
 use crate::history_cell::CommandOutput;
+use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
 use crate::live_wrap::RowBuilder;
@@ -58,13 +59,14 @@ struct RunningCommand {
     command: Vec<String>,
     #[allow(dead_code)]
     cwd: PathBuf,
+    parsed_cmd: Vec<ParsedCommand>,
 }
 
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
-    active_history_cell: Option<HistoryCell>,
+    active_exec_cell: Option<HistoryCell>,
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -80,9 +82,6 @@ pub(crate) struct ChatWidget<'a> {
     current_stream: Option<StreamKind>,
     stream_header_emitted: bool,
     live_max_rows: u16,
-    // Store pending image paths keyed by their placeholder text
-    pending_images: HashMap<String, PathBuf>,
-    welcome_shown: bool,
 }
 
 struct UserMessage {
@@ -114,79 +113,9 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
-    fn parse_message_with_images(&mut self, text: String) -> UserMessage {
-        use std::path::Path;
-        
-        // Common image extensions
-        const IMAGE_EXTENSIONS: &[&str] = &[
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif"
-        ];
-        
-        let mut image_paths = Vec::new();
-        let mut cleaned_text = text.clone();
-        
-        // First, handle [image: ...] placeholders from drag-and-drop
-        let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]").unwrap();
-        for mat in placeholder_regex.find_iter(&text) {
-            let placeholder = mat.as_str();
-            if let Some(path) = self.pending_images.remove(placeholder) {
-                image_paths.push(path);
-                // Remove the placeholder from the text
-                cleaned_text = cleaned_text.replace(placeholder, "");
-            }
-        }
-        
-        // Then check for direct file paths in the text
-        let words: Vec<String> = text.split_whitespace().map(String::from).collect();
-        
-        for word in &words {
-            // Skip placeholders we already handled
-            if word.starts_with("[image:") {
-                continue;
-            }
-            
-            // Check if this looks like an image path
-            let is_image_path = IMAGE_EXTENSIONS.iter().any(|ext| word.to_lowercase().ends_with(ext));
-            
-            if is_image_path {
-                let path = Path::new(word);
-                
-                // Check if it's a relative or absolute path that exists
-                if path.exists() {
-                    image_paths.push(path.to_path_buf());
-                    // Remove the path from the text
-                    cleaned_text = cleaned_text.replace(word, "");
-                } else {
-                    // Try with common relative paths
-                    let potential_paths = vec![
-                        PathBuf::from(word),
-                        PathBuf::from("./").join(word),
-                        std::env::current_dir().ok().map(|d| d.join(word)).unwrap_or_default(),
-                    ];
-                    
-                    for potential_path in potential_paths {
-                        if potential_path.exists() {
-                            image_paths.push(potential_path);
-                            cleaned_text = cleaned_text.replace(word, "");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Clean up extra whitespace
-        cleaned_text = cleaned_text.split_whitespace().collect::<Vec<_>>().join(" ");
-        
-        UserMessage {
-            text: cleaned_text,
-            image_paths,
-        }
-    }
-    
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
-            self.active_history_cell = None;
+            self.active_exec_cell = None;
             self.bottom_pane.clear_ctrl_c_quit_hint();
             self.submit_op(Op::Interrupt);
             self.bottom_pane.set_task_running(false);
@@ -203,7 +132,7 @@ impl ChatWidget<'_> {
     fn layout_areas(&self, area: Rect) -> [Rect; 2] {
         Layout::vertical([
             Constraint::Max(
-                self.active_history_cell
+                self.active_exec_cell
                     .as_ref()
                     .map_or(0, |c| c.desired_height(area.width)),
             ),
@@ -282,7 +211,7 @@ impl ChatWidget<'_> {
                 has_input_focus: true,
                 enhanced_keys_supported,
             }),
-            active_history_cell: None,
+            active_exec_cell: None,
             config,
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -298,15 +227,13 @@ impl ChatWidget<'_> {
             current_stream: None,
             stream_header_emitted: false,
             live_max_rows: 3,
-            pending_images: HashMap::new(),
-            welcome_shown: false,
         }
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
         self.bottom_pane.desired_height(width)
             + self
-                .active_history_cell
+                .active_exec_cell
                 .as_ref()
                 .map_or(0, |c| c.desired_height(width))
     }
@@ -318,97 +245,18 @@ impl ChatWidget<'_> {
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
-                let user_message = self.parse_message_with_images(text);
-                self.submit_user_message(user_message);
+                self.submit_user_message(text.into());
             }
             InputResult::None => {}
         }
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {
-        // Check if the pasted text is a file path to an image
-        let trimmed = text.trim();
-        
-        tracing::info!("Paste received: {:?}", trimmed);
-        
-        const IMAGE_EXTENSIONS: &[&str] = &[
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif"
-        ];
-        
-        // Check if it looks like a file path
-        let is_likely_path = trimmed.starts_with("file://") 
-            || trimmed.starts_with("/") 
-            || trimmed.starts_with("~/")
-            || trimmed.starts_with("./");
-            
-        if is_likely_path {
-            // Remove escape backslashes that terminals add for special characters
-            let unescaped = trimmed
-                .replace("\\ ", " ")
-                .replace("\\(", "(")
-                .replace("\\)", ")");
-            
-            // Handle file:// URLs (common when dragging from Finder)
-            let path_str = if unescaped.starts_with("file://") {
-                // URL decode to handle spaces and special characters
-                // Simple decoding for common cases (spaces as %20, etc.)
-                unescaped.strip_prefix("file://")
-                    .map(|s| s.replace("%20", " ")
-                             .replace("%28", "(")
-                             .replace("%29", ")")
-                             .replace("%5B", "[")
-                             .replace("%5D", "]")
-                             .replace("%2C", ",")
-                             .replace("%27", "'")
-                             .replace("%26", "&")
-                             .replace("%23", "#")
-                             .replace("%40", "@")
-                             .replace("%2B", "+")
-                             .replace("%3D", "=")
-                             .replace("%24", "$")
-                             .replace("%21", "!")
-                             .replace("%2D", "-")
-                             .replace("%2E", "."))
-                    .unwrap_or_else(|| unescaped.clone())
-            } else {
-                unescaped
-            };
-            
-            tracing::info!("Decoded path: {:?}", path_str);
-            
-            // Check if it has an image extension
-            let is_image = IMAGE_EXTENSIONS.iter().any(|ext| path_str.to_lowercase().ends_with(ext));
-            
-            if is_image {
-                let path = PathBuf::from(&path_str);
-                tracing::info!("Checking if path exists: {:?}", path);
-                if path.exists() {
-                    tracing::info!("Image file dropped/pasted: {:?}", path);
-                    // Get just the filename for display
-                    let filename = path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("image");
-                    
-                    // Add a placeholder to the compose field instead of submitting
-                    let placeholder = format!("[image: {}]", filename);
-                    
-                    // Store the image path for later submission
-                    self.pending_images.insert(placeholder.clone(), path);
-                    
-                    // Add the placeholder text to the compose field
-                    self.bottom_pane.handle_paste(placeholder);
-                    return;
-                } else {
-                    tracing::warn!("Image path does not exist: {:?}", path);
-                }
-            }
-        }
-        
-        // Otherwise handle as regular text paste
         self.bottom_pane.handle_paste(text);
     }
 
     fn add_to_history(&mut self, cell: HistoryCell) {
+        self.flush_active_exec_cell();
         self.app_event_tx
             .send(AppEvent::InsertHistory(cell.plain_lines()));
     }
@@ -452,17 +300,22 @@ impl ChatWidget<'_> {
 
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
         let Event { id, msg } = event;
+
+        match msg {
+            EventMsg::AgentMessageDelta(_)
+            | EventMsg::AgentReasoningDelta(_)
+            | EventMsg::ExecCommandOutputDelta(_) => {}
+            _ => {
+                tracing::info!("handle_codex_event: {:?}", msg);
+            }
+        }
+
         match msg {
             EventMsg::SessionConfigured(event) => {
                 self.bottom_pane
                     .set_history_metadata(event.history_log_id, event.history_entry_count);
                 // Record session information at the top of the conversation.
-                // Only show welcome message on first SessionConfigured event
-                let is_first = !self.welcome_shown;
-                if is_first {
-                    self.welcome_shown = true;
-                }
-                self.add_to_history(HistoryCell::new_session_info(&self.config, event, is_first));
+                self.add_to_history(HistoryCell::new_session_info(&self.config, event, true));
 
                 if let Some(user_message) = self.initial_user_message.take() {
                     // If the user provided an initial message, add it to the
@@ -472,10 +325,12 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
-            EventMsg::AgentMessage(AgentMessageEvent { message: _ }) => {
-                // Final assistant answer: commit all remaining rows and close with
-                // a blank line. Use the final text if provided, otherwise rely on
-                // streamed deltas already in the builder.
+            EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                // AgentMessage: if no deltas were streamed, render the final text.
+                if self.current_stream != Some(StreamKind::Answer) && !message.is_empty() {
+                    self.begin_stream(StreamKind::Answer);
+                    self.stream_push_and_maybe_commit(&message);
+                }
                 self.finalize_stream(StreamKind::Answer);
                 self.request_redraw();
             }
@@ -493,8 +348,12 @@ impl ChatWidget<'_> {
                 self.stream_push_and_maybe_commit(&delta);
                 self.request_redraw();
             }
-            EventMsg::AgentReasoning(AgentReasoningEvent { text: _ }) => {
-                // Final reasoning: commit remaining rows and close with a blank.
+            EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                // Final reasoning: if no deltas were streamed, render the final text.
+                if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
+                    self.begin_stream(StreamKind::Reasoning);
+                    self.stream_push_and_maybe_commit(&text);
+                }
                 self.finalize_stream(StreamKind::Reasoning);
                 self.request_redraw();
             }
@@ -507,8 +366,12 @@ impl ChatWidget<'_> {
                 self.stream_push_and_maybe_commit(&delta);
                 self.request_redraw();
             }
-            EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text: _ }) => {
-                // Finalize the raw reasoning stream just like the summarized reasoning event.
+            EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
+                // Final raw reasoning content: if no deltas were streamed, render the final text.
+                if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
+                    self.begin_stream(StreamKind::Reasoning);
+                    self.stream_push_and_maybe_commit(&text);
+                }
                 self.finalize_stream(StreamKind::Reasoning);
                 self.request_redraw();
             }
@@ -603,6 +466,7 @@ impl ChatWidget<'_> {
                 call_id,
                 command,
                 cwd,
+                parsed_cmd,
             }) => {
                 self.finalize_active_stream();
                 // Ensure the status indicator is visible while the command runs.
@@ -613,9 +477,54 @@ impl ChatWidget<'_> {
                     RunningCommand {
                         command: command.clone(),
                         cwd: cwd.clone(),
+                        parsed_cmd: parsed_cmd.clone(),
                     },
                 );
-                self.active_history_cell = Some(HistoryCell::new_active_exec_command(command));
+                let active_exec_cell = self.active_exec_cell.take();
+                let merge_result = merge_cells(&command, &parsed_cmd, &active_exec_cell);
+                self.active_exec_cell = match merge_result {
+                    MergeResult::Merge(cell) => Some(cell),
+                    MergeResult::Drop => active_exec_cell,
+                    MergeResult::NewCell(cell) => {
+                        if let Some(active) = active_exec_cell {
+                            self.app_event_tx
+                                .send(AppEvent::InsertHistory(active.plain_lines()));
+                        }
+                        Some(cell)
+                    }
+                }
+            }
+            EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                call_id,
+                exit_code,
+                duration: _,
+                stdout,
+                stderr,
+            }) => {
+                // Compute summary before moving stdout into the history cell.
+                let cmd = self.running_commands.remove(&call_id);
+                if let Some(cmd) = cmd {
+                    // Preserve any merged parsed commands already present on the
+                    // active cell; otherwise, fall back to this command's parsed.
+                    let parsed_cmd = match &self.active_exec_cell {
+                        Some(HistoryCell::Exec(ExecCell { parsed, .. })) if !parsed.is_empty() => {
+                            parsed.clone()
+                        }
+                        _ => cmd.parsed_cmd.clone(),
+                    };
+                    // Replace the active running cell with the finalized result,
+                    // but keep it as the active cell so it can be merged with
+                    // subsequent commands before being committed.
+                    self.active_exec_cell = Some(HistoryCell::new_completed_exec_command(
+                        cmd.command,
+                        parsed_cmd,
+                        CommandOutput {
+                            exit_code,
+                            stdout,
+                            stderr,
+                        },
+                    ));
+                }
             }
             EventMsg::ExecCommandOutputDelta(_) => {
                 // TODO
@@ -635,31 +544,12 @@ impl ChatWidget<'_> {
                     self.add_to_history(HistoryCell::new_patch_apply_failure(event.stderr));
                 }
             }
-            EventMsg::ExecCommandEnd(ExecCommandEndEvent {
-                call_id,
-                exit_code,
-                duration: _,
-                stdout,
-                stderr,
-            }) => {
-                // Compute summary before moving stdout into the history cell.
-                let cmd = self.running_commands.remove(&call_id);
-                self.active_history_cell = None;
-                self.add_to_history(HistoryCell::new_completed_exec_command(
-                    cmd.map(|cmd| cmd.command).unwrap_or_else(|| vec![call_id]),
-                    CommandOutput {
-                        exit_code,
-                        stdout,
-                        stderr,
-                    },
-                ));
-            }
             EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
                 call_id: _,
                 invocation,
             }) => {
                 self.finalize_active_stream();
-                self.add_to_history(HistoryCell::new_active_mcp_tool_call(invocation));
+                self.active_exec_cell = Some(HistoryCell::new_active_mcp_tool_call(invocation));
             }
             EventMsg::McpToolCallEnd(McpToolCallEndEvent {
                 call_id: _,
@@ -667,7 +557,7 @@ impl ChatWidget<'_> {
                 invocation,
                 result,
             }) => {
-                self.add_to_history(HistoryCell::new_completed_mcp_tool_call(
+                let completed = HistoryCell::new_completed_mcp_tool_call(
                     80,
                     invocation,
                     duration,
@@ -676,7 +566,8 @@ impl ChatWidget<'_> {
                         .map(|r| r.is_error.unwrap_or(false))
                         .unwrap_or(false),
                     result,
-                ));
+                );
+                self.active_exec_cell = Some(completed);
             }
             EventMsg::GetHistoryEntryResponse(event) => {
                 let codex_core::protocol::GetHistoryEntryResponseEvent {
@@ -697,6 +588,9 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
+            }
+            EventMsg::BrowserScreenshotUpdate(_) => {
+                // Browser screenshot updates are handled elsewhere
             }
         }
     }
@@ -725,62 +619,6 @@ impl ChatWidget<'_> {
 
     pub(crate) fn add_prompts_output(&mut self) {
         self.add_to_history(HistoryCell::new_prompts_output());
-    }
-
-    pub(crate) fn handle_reasoning_command(&mut self, command_text: String) {
-        // Parse the command to extract the parameter
-        let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
-        
-        if parts.len() > 1 {
-            // User specified a level: /reasoning high
-            let new_effort = match parts[1].to_lowercase().as_str() {
-                "low" => ReasoningEffort::Low,
-                "medium" | "med" => ReasoningEffort::Medium,
-                "high" => ReasoningEffort::High,
-                "none" | "off" => ReasoningEffort::None,
-                _ => {
-                    // Invalid parameter, show error and return
-                    let message = format!(
-                        "Invalid reasoning level: '{}'. Use: low, medium, high, or none",
-                        parts[1]
-                    );
-                    self.add_to_history(HistoryCell::new_error_event(message));
-                    return;
-                }
-            };
-            self.set_reasoning_effort(new_effort);
-        } else {
-            // No parameter - show interactive selection UI
-            self.bottom_pane.show_reasoning_selection(self.config.model_reasoning_effort);
-            return;
-        }
-    }
-    
-    pub(crate) fn set_reasoning_effort(&mut self, new_effort: ReasoningEffort) {
-        
-        // Update the config
-        self.config.model_reasoning_effort = new_effort;
-        
-        // Send ConfigureSession op to update the backend
-        let op = Op::ConfigureSession {
-            provider: self.config.model_provider.clone(),
-            model: self.config.model.clone(),
-            model_reasoning_effort: new_effort,
-            model_reasoning_summary: self.config.model_reasoning_summary,
-            user_instructions: self.config.user_instructions.clone(),
-            base_instructions: self.config.base_instructions.clone(),
-            approval_policy: self.config.approval_policy.clone(),
-            sandbox_policy: self.config.sandbox_policy.clone(),
-            disable_response_storage: self.config.disable_response_storage,
-            notify: self.config.notify.clone(),
-            cwd: self.config.cwd.clone(),
-            resume_path: None,
-        };
-        
-        self.submit_op(op);
-        
-        // Add status message to history
-        self.add_to_history(HistoryCell::new_reasoning_output(new_effort));
     }
 
     /// Forward file-search results to the bottom pane.
@@ -841,6 +679,10 @@ impl ChatWidget<'_> {
         self.submit_user_message(text.into());
     }
 
+    pub(crate) fn insert_str(&mut self, text: &str) {
+        self.bottom_pane.insert_str(text);
+    }
+
     pub(crate) fn token_usage(&self) -> &TokenUsage {
         &self.total_token_usage
     }
@@ -876,11 +718,21 @@ impl ChatWidget<'_> {
             // Ensure the waiting status is visible (composer replaced).
             self.bottom_pane
                 .update_status_text("waiting for model".to_string());
+            self.flush_active_exec_cell();
             self.emit_stream_header(kind);
         }
     }
 
+    fn flush_active_exec_cell(&mut self) {
+        if let Some(active) = self.active_exec_cell.take() {
+            self.app_event_tx
+                .send(AppEvent::InsertHistory(active.plain_lines()));
+        }
+    }
+
     fn stream_push_and_maybe_commit(&mut self, delta: &str) {
+        self.flush_active_exec_cell();
+
         self.live_builder.push_fragment(delta);
 
         // Commit overflow rows (small batches) while keeping the last N rows visible.
@@ -962,7 +814,7 @@ impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let [active_cell_area, bottom_pane_area] = self.layout_areas(area);
         (&self.bottom_pane).render(bottom_pane_area, buf);
-        if let Some(cell) = &self.active_history_cell {
+        if let Some(cell) = &self.active_exec_cell {
             cell.render_ref(active_cell_area, buf);
         }
     }
@@ -993,5 +845,276 @@ fn add_token_usage(current_usage: &TokenUsage, new_usage: &TokenUsage) -> TokenU
         output_tokens: current_usage.output_tokens + new_usage.output_tokens,
         reasoning_output_tokens,
         total_tokens: current_usage.total_tokens + new_usage.total_tokens,
+    }
+}
+
+enum MergeResult {
+    Merge(HistoryCell),
+    Drop,
+    NewCell(HistoryCell),
+}
+
+// Determine whether to and how to merge two consecutive exec cells.
+fn merge_cells(
+    new_command: &[String],
+    new_parsed: &[ParsedCommand],
+    active_exec_cell: &Option<HistoryCell>,
+) -> MergeResult {
+    let ExecCell {
+        command: _existing_command,
+        parsed: existing_parsed,
+        output: existing_output,
+    } = match active_exec_cell {
+        Some(HistoryCell::Exec(cell)) => cell,
+        _ => {
+            // There is no existing exec cell.
+            return MergeResult::NewCell(HistoryCell::new_active_exec_command(
+                new_command.to_vec(),
+                new_parsed.to_vec(),
+            ));
+        }
+    };
+    let existing_last = existing_parsed.last();
+    let new_last = new_parsed.last();
+
+    // Drop the first command if it is a read and matches the last command.
+    // This is a common pattern the model does and it simplifies the output to dedupe.
+    let drop_first = if let (
+        Some(ParsedCommand::Read {
+            name: existing_name,
+            ..
+        }),
+        Some(ParsedCommand::Read { name: new_name, .. }),
+    ) = (existing_last, new_last)
+    {
+        existing_name == new_name
+    } else {
+        false
+    };
+
+    if drop_first && new_parsed.len() == 1 {
+        // There is only one command and it was deduped.
+        return MergeResult::Drop;
+    }
+    let existing_exit_code = existing_output.as_ref().map(|o| o.exit_code);
+    if let Some(code) = existing_exit_code {
+        if code != 0 {
+            // If the previous command failed, don't merge so the user can see stderr.
+            // Start a fresh cell for the new command instead of duplicating the old one.
+            return MergeResult::NewCell(HistoryCell::new_active_exec_command(
+                new_command.to_vec(),
+                new_parsed.to_vec(),
+            ));
+        }
+    }
+
+    let mut merged_parsed = existing_parsed.to_vec();
+    if drop_first {
+        merged_parsed.extend(new_parsed[1..].to_vec());
+    } else {
+        merged_parsed.extend(new_parsed.to_vec());
+    }
+
+    MergeResult::Merge(HistoryCell::new_active_exec_command(
+        new_command.to_vec(),
+        merged_parsed,
+    ))
+}
+
+impl<'a> ChatWidget<'a> {
+    pub(crate) fn handle_reasoning_command(&mut self, command_text: &str) {
+        // Handle reasoning command - this is a fork-specific feature
+        // The actual implementation would parse the command and update reasoning effort
+        info!("Reasoning command: {}", command_text);
+    }
+
+    pub(crate) fn show_theme_selection(&mut self) {
+        // Show theme selection popup - this is a fork-specific feature
+        info!("Theme selection requested");
+    }
+
+    pub(crate) fn handle_browser_command(&mut self, command_text: &str) {
+        // Handle browser command - this is a fork-specific feature
+        info!("Browser command: {}", command_text);
+    }
+
+    pub(crate) fn set_reasoning_effort(&mut self, effort: codex_core::config_types::ReasoningEffort) {
+        // Set reasoning effort - this is a fork-specific feature
+        info!("Setting reasoning effort to: {:?}", effort);
+    }
+
+    pub(crate) fn set_theme(&mut self, theme_name: codex_core::config_types::ThemeName) {
+        // Set theme - this is a fork-specific feature
+        info!("Setting theme to: {:?}", theme_name);
+    }
+
+    pub(crate) fn handle_mouse_event(&mut self, _mouse_event: crossterm::event::MouseEvent) -> bool {
+        // Mouse events are handled elsewhere in the application
+        // This is a placeholder for fork-specific mouse handling
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history_cell::CommandOutput;
+
+    fn read_cmd(name: &str) -> ParsedCommand {
+        ParsedCommand::Read {
+            cmd: vec!["cat".to_string(), name.to_string()],
+            name: name.to_string(),
+        }
+    }
+
+    fn unknown_cmd(cmd: &str) -> ParsedCommand {
+        ParsedCommand::Unknown {
+            cmd: cmd.split_whitespace().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn when_no_active_exec_cell_creates_new_cell() {
+        let new_command = vec!["echo".to_string(), "hi".to_string()];
+        let new_parsed = vec![read_cmd("a")];
+
+        let result = merge_cells(&new_command, &new_parsed, &None);
+
+        match result {
+            MergeResult::NewCell(cell) => match cell {
+                HistoryCell::Exec(ExecCell {
+                    command,
+                    parsed,
+                    output,
+                }) => {
+                    assert_eq!(command, new_command);
+                    assert_eq!(parsed, new_parsed);
+                    assert!(output.is_none());
+                }
+                _ => panic!("expected Exec cell"),
+            },
+            _ => panic!("expected NewCell"),
+        }
+    }
+
+    #[test]
+    fn drops_duplicate_trailing_read_when_new_has_only_one_read() {
+        // existing last = Read("foo"), new last = Read("foo"), new_parsed.len() == 1
+        let active = Some(HistoryCell::new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "cat foo".into()],
+            vec![read_cmd("foo")],
+        ));
+        let new_command = vec!["cat".into(), "foo".into()];
+        let new_parsed = vec![read_cmd("foo")];
+
+        let result = merge_cells(&new_command, &new_parsed, &active);
+        match result {
+            MergeResult::Drop => {}
+            _ => panic!("expected Drop"),
+        }
+    }
+
+    #[test]
+    fn does_not_merge_when_previous_command_failed() {
+        // existing exit_code != 0 forces starting a fresh cell
+        let active = Some(HistoryCell::new_completed_exec_command(
+            vec!["bash".into(), "-lc".into(), "cat bar".into()],
+            vec![read_cmd("bar")],
+            CommandOutput {
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: "err".into(),
+            },
+        ));
+        // Ensure drop_first condition is false (different name)
+        let new_command = vec!["cat".into(), "baz".into()];
+        let new_parsed = vec![read_cmd("baz")];
+
+        let result = merge_cells(&new_command, &new_parsed, &active);
+        match result {
+            MergeResult::NewCell(cell) => match cell {
+                HistoryCell::Exec(ExecCell {
+                    command, parsed, ..
+                }) => {
+                    assert_eq!(command, new_command);
+                    assert_eq!(parsed, new_parsed);
+                }
+                _ => panic!("expected Exec cell"),
+            },
+            _ => panic!("expected NewCell"),
+        }
+    }
+
+    #[test]
+    fn merges_with_drop_first_true_when_new_len_gt_one() {
+        // existing last Read("file.txt"), new starts with same Read then more
+        let active = Some(HistoryCell::new_active_exec_command(
+            vec!["cat".into(), "file.txt".into()],
+            vec![read_cmd("file.txt")],
+        ));
+        let new_command = vec!["bash".into(), "-lc".into(), "sed -n 1,20p file.txt".into()];
+        // Place the duplicate Read as the LAST element to satisfy drop_first condition
+        let leading = unknown_cmd("tail -n 20");
+        let new_parsed = vec![leading.clone(), read_cmd("file.txt")];
+
+        let result = merge_cells(&new_command, &new_parsed, &active);
+        match result {
+            MergeResult::Merge(cell) => match cell {
+                HistoryCell::Exec(ExecCell {
+                    command, parsed, ..
+                }) => {
+                    assert_eq!(command, new_command);
+                    // Expect existing parsed + new_parsed[1..]
+                    assert_eq!(parsed.len(), 2);
+                    match (&parsed[0], &parsed[1]) {
+                        (
+                            ParsedCommand::Read { name, .. },
+                            ParsedCommand::Read { name: n2, .. },
+                        ) => {
+                            assert_eq!(name, "file.txt");
+                            assert_eq!(n2, "file.txt");
+                        }
+                        _ => panic!("unexpected parsed commands"),
+                    }
+                }
+                _ => panic!("expected Exec cell"),
+            },
+            _ => panic!("expected Merge"),
+        }
+    }
+
+    #[test]
+    fn merges_without_drop_first_when_last_commands_differ() {
+        // existing last Read("file1.txt"), new last Read("file2.txt"); should concatenate
+        let active = Some(HistoryCell::new_active_exec_command(
+            vec!["cat".into(), "file1.txt".into()],
+            vec![read_cmd("file1.txt")],
+        ));
+        let new_command = vec!["bash".into(), "-lc".into(), "cat file2.txt".into()];
+        let t2 = read_cmd("file2.txt");
+        let extra = unknown_cmd("echo done");
+        let new_parsed = vec![t2.clone(), extra.clone()];
+
+        let result = merge_cells(&new_command, &new_parsed, &active);
+        match result {
+            MergeResult::Merge(cell) => match cell {
+                HistoryCell::Exec(ExecCell {
+                    command, parsed, ..
+                }) => {
+                    assert_eq!(command, new_command);
+                    assert_eq!(parsed.len(), 3);
+                    match (&parsed[0], &parsed[1], &parsed[2]) {
+                        (ParsedCommand::Read { name: n1, .. }, p2, p3) => {
+                            assert_eq!(n1, "file1.txt");
+                            assert_eq!(p2, &t2);
+                            assert_eq!(p3, &extra);
+                        }
+                        _ => panic!("unexpected parsed commands"),
+                    }
+                }
+                _ => panic!("expected Exec cell"),
+            },
+            _ => panic!("expected Merge"),
+        }
     }
 }
