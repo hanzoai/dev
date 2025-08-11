@@ -405,6 +405,8 @@ async fn process_sse<S>(
             }
         };
 
+        trace!("SSE event: {}", sse.data);
+
         let event: SseEvent = match serde_json::from_str(&sse.data) {
             Ok(event) => event,
             Err(e) => {
@@ -413,7 +415,6 @@ async fn process_sse<S>(
             }
         };
 
-        trace!(?event, "SSE event");
         match event.kind.as_str() {
             // Individual output item finalised. Forward immediately so the
             // rest of the agent can stream assistant text/functions *live*
