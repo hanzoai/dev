@@ -112,21 +112,21 @@ jobs:
       with:
         path: artifacts/
         
-    - name: Prepare binaries for npm
+    - name: Prepare release assets
       run: |
-        # Create bin directory in codex-cli
-        mkdir -p codex-cli/bin
+        # Create a directory for all release assets
+        mkdir -p release-assets
         
-        # Copy all binaries to the bin directory
+        # Copy all binaries to release-assets for GitHub Release
         for dir in artifacts/binaries-*; do
-          cp $dir/* codex-cli/bin/
+          cp $dir/* release-assets/
         done
         
         # Make binaries executable
-        chmod +x codex-cli/bin/*
+        chmod +x release-assets/*
         
-        # List binaries for verification
-        ls -la codex-cli/bin/
+        # List assets for verification
+        ls -la release-assets/
         
     - name: Bump version
       id: version
@@ -222,6 +222,6 @@ jobs:
           coder
           ```
         files: |
-          artifacts/binaries-*/*
+          release-assets/*
       env:
         GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}

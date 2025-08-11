@@ -11,9 +11,14 @@
     "node": ">=20"
   },
   "files": [
-    "bin",
+    "bin/coder.js",
+    "bin/codex.js",
+    "postinstall.js",
     "dist"
   ],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/just-every/coder.git"
