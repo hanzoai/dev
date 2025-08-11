@@ -428,6 +428,9 @@ pub enum EventMsg {
 
     PlanUpdate(UpdatePlanArgs),
 
+    /// Browser screenshot has been captured and is ready for display
+    BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent),
+
     /// Notification that the agent is shutting down.
     ShutdownComplete,
 }
@@ -702,6 +705,14 @@ pub struct SessionConfiguredEvent {
 
     /// Current number of entries in the history log.
     pub history_entry_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BrowserScreenshotUpdateEvent {
+    /// Path to the screenshot file
+    pub screenshot_path: PathBuf,
+    /// Current URL of the browser
+    pub url: String,
 }
 
 /// User's decision in response to an ExecApprovalRequest.

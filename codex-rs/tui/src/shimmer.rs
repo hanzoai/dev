@@ -74,11 +74,13 @@ pub(crate) fn shimmer_spans(text: &str, frame_idx: usize) -> Vec<Span<'static>> 
 }
 
 fn color_for_level(level: u8) -> Color {
+    // For shimmer effect, we need to use grayscale colors
+    // Theme colors wouldn't work well here as they're not grayscale
     if level < 128 {
         Color::DarkGray
     } else if level < 192 {
         Color::Gray
     } else {
-        Color::White
+        crate::colors::text_bright()
     }
 }

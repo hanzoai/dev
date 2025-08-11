@@ -8,6 +8,7 @@ use super::CancellationEvent;
 
 /// Type to use for a method that may require a redraw of the UI.
 pub(crate) enum ConditionalUpdate {
+    #[allow(dead_code)]
     NeedsRedraw,
     NoRedraw,
 }

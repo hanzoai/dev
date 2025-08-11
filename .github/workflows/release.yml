@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [ code-release ]
+    branches: [ coder-release ]
     paths-ignore:
       - '.github/workflows/test.yml'
       - 'examples/**'
@@ -24,27 +24,27 @@ jobs:
           # Linux builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: code-x86_64-unknown-linux-musl
+            artifact: coder-x86_64-unknown-linux-musl
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            artifact: code-x86_64-unknown-linux-gnu
+            artifact: coder-x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: code-aarch64-unknown-linux-musl
+            artifact: coder-aarch64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact: code-aarch64-unknown-linux-gnu
+            artifact: coder-aarch64-unknown-linux-gnu
           # macOS builds
           - os: macos-14  # ARM Mac for both targets
             target: x86_64-apple-darwin
-            artifact: code-x86_64-apple-darwin
+            artifact: coder-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: code-aarch64-apple-darwin
+            artifact: coder-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: code-x86_64-pc-windows-msvc.exe
+            artifact: coder-x86_64-pc-windows-msvc.exe
     
     steps:
     - name: Checkout code
@@ -64,19 +64,19 @@ jobs:
     - name: Build binaries
       run: |
         cd codex-rs
-        cargo build --release --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+        cargo build --release --target ${{ matrix.target }} --bin coder --bin coder-tui --bin coder-exec
         
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/coder.exe artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-tui.exe artifacts/coder-tui-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/coder-exec.exe artifacts/coder-exec-${{ matrix.target }}.exe
         else
-          cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-tui artifacts/coder-tui-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/coder-exec artifacts/coder-exec-${{ matrix.target }}
         fi
       shell: bash
       
@@ -141,7 +141,7 @@ jobs:
         echo "Current version in package.json: $CURRENT_VERSION"
         
         # Check latest published version
-        PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
+        PUBLISHED_VERSION=$(npm view @just-every/coder version 2>/dev/null || echo "0.0.0")
         echo "Latest published version: $PUBLISHED_VERSION"
         
         # Compare versions and bump appropriately
@@ -195,7 +195,7 @@ jobs:
         
     - name: Push changes
       run: |
-        git push origin code-release
+        git push origin coder-release
         git push origin --tags
       if: steps.version.outputs.skip_push != 'true'
       
@@ -206,7 +206,7 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}
         name: Release v${{ steps.version.outputs.version }}
         body: |
-          ## @just-every/code v${{ steps.version.outputs.version }}
+          ## @just-every/coder v${{ steps.version.outputs.version }}
           
           Fork of OpenAI Codex with additional features:
           - Enhanced image handling (drag-and-drop, paste, file path detection)
@@ -214,12 +214,12 @@ jobs:
           
           ### Installation
           ```bash
-          npm install -g @just-every/code
+          npm install -g @just-every/coder
           ```
           
           ### Usage
           ```bash
-          code
+          coder
           ```
         files: |
           artifacts/binaries-*/*

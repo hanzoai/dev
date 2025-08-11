@@ -36,10 +36,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
-use ratatui_image::{picker::Picker, Resize};
+use ratatui_image::picker::Picker;
+use ratatui_image::Image;
 use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
@@ -91,18 +93,13 @@ pub(crate) struct ChatWidget<'a> {
     welcome_shown: bool,
     // Browser manager for screenshot functionality
     browser_manager: Arc<BrowserManager>,
-    // Path to the latest browser screenshot for display
-    latest_browser_screenshot: Arc<Mutex<Option<PathBuf>>>,
-    // Cached image protocol to avoid recreating every frame
+    // Path to the latest browser screenshot and URL for display
+    latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
+    // Cached image protocol to avoid recreating every frame (path, area, protocol)
     cached_image_protocol: std::cell::RefCell<Option<(PathBuf, Rect, ratatui_image::protocol::Protocol)>>,
     // Cached picker to avoid recreating every frame
     cached_picker: std::cell::RefCell<Option<Picker>>,
     
-    // Cached stateful protocol for screenshot (like examples do)
-    cached_stateful_protocol: std::cell::RefCell<Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>>,
-    
-    // Cached cell aspect ratio to avoid querying terminal repeatedly
-    cached_cell_aspect_ratio: std::cell::OnceCell<f32>,
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
     // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
@@ -224,15 +221,36 @@ impl ChatWidget<'_> {
             self.request_redraw();
         }
     }
-    fn layout_areas(&self, area: Rect) -> [Rect; 3] {
-        // Status bar at top (3 lines for box border), history in middle, bottom pane at bottom
+    fn layout_areas(&self, area: Rect) -> Vec<Rect> {
+        // Check if browser is active and has a screenshot
+        let has_browser_screenshot = self.latest_browser_screenshot.lock()
+            .map(|lock| lock.is_some())
+            .unwrap_or(false);
+        
         let bottom_height = 6u16.max(self.bottom_pane.desired_height(area.width)).min(15);
-        Layout::vertical([
-            Constraint::Length(3), // Status bar with box border
-            Constraint::Fill(1), // History takes all remaining space
-            Constraint::Length(bottom_height),
-        ])
-        .areas(area)
+        
+        if has_browser_screenshot {
+            // Status bar, browser HUD, history, bottom pane
+            // Browser HUD takes about 30% of available height for good visibility
+            let hud_height = (area.height.saturating_sub(3 + bottom_height) * 40 / 100).max(10);
+            Layout::vertical([
+                Constraint::Length(3), // Status bar with box border
+                Constraint::Length(hud_height), // Browser HUD
+                Constraint::Fill(1), // History takes remaining space
+                Constraint::Length(bottom_height),
+            ])
+            .areas::<4>(area)
+            .to_vec()
+        } else {
+            // Status bar, history, bottom pane (no HUD)
+            Layout::vertical([
+                Constraint::Length(3), // Status bar with box border
+                Constraint::Fill(1), // History takes all remaining space
+                Constraint::Length(bottom_height),
+            ])
+            .areas::<3>(area)
+            .to_vec()
+        }
     }
     fn emit_stream_header(&mut self, kind: StreamKind) {
         use ratatui::text::Line as RLine;
@@ -302,12 +320,12 @@ impl ChatWidget<'_> {
         let browser_config = BrowserConfig::default();
         let browser_manager = Arc::new(BrowserManager::new(browser_config));
         
-        // Add initial welcome message to history
+        // Add initial animated welcome message to history
         let mut history_cells = Vec::new();
-        history_cells.push(HistoryCell::new_text_line(
-            ratatui::text::Line::from("Welcome to Coder! Type your message below or use /help for commands.")
-                .style(ratatui::style::Style::default().fg(crate::colors::text_dim()))
-        ));
+        history_cells.push(HistoryCell::AnimatedWelcome {
+            start_time: std::time::Instant::now(),
+            completed: std::cell::Cell::new(false),
+        });
 
         // Initialize image protocol for rendering screenshots
         
@@ -342,8 +360,6 @@ impl ChatWidget<'_> {
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(None),
-            cached_stateful_protocol: RefCell::new(None),
-            cached_cell_aspect_ratio: std::cell::OnceCell::new(),
             cached_cell_size: std::cell::OnceCell::new(),
             scroll_offset: 0,
         }
@@ -451,6 +467,11 @@ impl ChatWidget<'_> {
         self.history_cells.push(cell);
         // Auto-scroll to bottom when new content arrives
         self.scroll_offset = 0;
+        // Check if there's actual conversation history (any user prompts submitted)
+        let has_conversation = self.history_cells.iter().any(|cell| {
+            matches!(cell, HistoryCell::UserPrompt { .. })
+        });
+        self.bottom_pane.set_has_chat_history(has_conversation);
         // Request redraw to show new history
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
@@ -551,12 +572,13 @@ impl ChatWidget<'_> {
                     tracing::info!("Captured {} browser screenshot(s)", screenshot_paths.len());
                     browser_screenshot_count = screenshot_paths.len();
                     let screenshot_url = url.clone();
-                    browser_url = url;
+                    browser_url = url.clone();
                     
-                    // Save the first screenshot path for display in the TUI
+                    // Save the first screenshot path and URL for display in the TUI
                     if let Some(first_path) = screenshot_paths.first() {
                         if let Ok(mut latest) = self.latest_browser_screenshot.lock() {
-                            *latest = Some(first_path.clone());
+                            let url_string = url.unwrap_or_else(|| "Browser".to_string());
+                            *latest = Some((first_path.clone(), url_string));
                         }
                     }
                     
@@ -651,8 +673,19 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn set_mouse_status_message(&mut self, message: &str) {
+        self.bottom_pane.update_status_text(message.to_string());
+    }
+    
     pub(crate) fn handle_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
-        use crossterm::event::MouseEventKind;
+        use crossterm::event::{MouseEventKind, KeyModifiers};
+        
+        // Check if Shift is held - if so, let the terminal handle selection
+        if mouse_event.modifiers.contains(KeyModifiers::SHIFT) {
+            // Don't handle any mouse events when Shift is held
+            // This allows the terminal's native text selection to work
+            return;
+        }
         
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
@@ -922,12 +955,12 @@ impl ChatWidget<'_> {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
             }
-            EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path }) => {
-                tracing::info!("Received browser screenshot update: {}", screenshot_path.display());
+            EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path, url }) => {
+                tracing::info!("Received browser screenshot update: {} at URL: {}", screenshot_path.display(), url);
                 
-                // Update the latest screenshot for display
+                // Update the latest screenshot and URL for display
                 if let Ok(mut latest) = self.latest_browser_screenshot.lock() {
-                    *latest = Some(screenshot_path);
+                    *latest = Some((screenshot_path, url));
                 }
                 
                 // Request a redraw to update the display immediately
@@ -1288,7 +1321,12 @@ impl ChatWidget<'_> {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let [_status_bar_area, _history_area, bottom_pane_area] = self.layout_areas(area);
+        let layout_areas = self.layout_areas(area);
+        let bottom_pane_area = if layout_areas.len() == 4 {
+            layout_areas[3]
+        } else {
+            layout_areas[2]
+        };
         self.bottom_pane.cursor_pos(bottom_pane_area)
     }
 
@@ -1299,8 +1337,68 @@ impl ChatWidget<'_> {
             (8, 16)
         };
         *self.cached_cell_size.get_or_init(|| {
-            crate::terminal_info::get_cell_size_pixels().unwrap_or(default_guess)
+            let size = crate::terminal_info::get_cell_size_pixels().unwrap_or(default_guess);
+            
+            // HACK: On macOS Retina displays, terminals often report physical pixels
+            // but ratatui-image expects logical pixels. If we detect suspiciously 
+            // large cell sizes (likely 2x scaled), divide by 2.
+            #[cfg(target_os = "macos")]
+            {
+                if size.0 >= 14 && size.1 >= 28 {
+                    // Likely Retina display reporting physical pixels
+                    tracing::info!("Detected likely Retina display, adjusting cell size from {:?} to {:?}", 
+                        size, (size.0 / 2, size.1 / 2));
+                    return (size.0 / 2, size.1 / 2);
+                }
+            }
+            
+            size
         })
+    }
+    
+    fn get_git_branch(&self) -> Option<String> {
+        use std::process::Command;
+        
+        let output = Command::new("git")
+            .arg("rev-parse")
+            .arg("--abbrev-ref")
+            .arg("HEAD")
+            .current_dir(&self.config.cwd)
+            .output()
+            .ok()?;
+        
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .to_string();
+            if !branch.is_empty() && branch != "HEAD" {
+                Some(branch)
+            } else {
+                // Try to get short commit hash if in detached HEAD state
+                let commit_output = Command::new("git")
+                    .arg("rev-parse")
+                    .arg("--short")
+                    .arg("HEAD")
+                    .current_dir(&self.config.cwd)
+                    .output()
+                    .ok()?;
+                
+                if commit_output.status.success() {
+                    let commit = String::from_utf8_lossy(&commit_output.stdout)
+                        .trim()
+                        .to_string();
+                    if !commit.is_empty() {
+                        Some(format!("detached: {}", commit))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
     
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
@@ -1326,8 +1424,8 @@ impl ChatWidget<'_> {
             None => self.config.cwd.display().to_string(),
         };
         
-        // Create status bar content - more compact single line
-        let status_line = Line::from(vec![
+        // Build status line spans
+        let mut status_spans = vec![
             Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" • "),
             Span::styled("Model: ", Style::default().dim()),
@@ -1338,11 +1436,19 @@ impl ChatWidget<'_> {
             Span::raw(" • "),
             Span::styled("Directory: ", Style::default().dim()),
             Span::styled(cwd_str, Style::default().fg(crate::colors::info())),
-            Span::raw(" • "),
-            Span::raw("Type "),
-            Span::styled("/help", Style::default().fg(crate::colors::light_blue())),
-            Span::raw(" for commands"),
-        ]);
+        ];
+        
+        // Add git branch if available
+        if let Some(branch) = self.get_git_branch() {
+            status_spans.push(Span::raw(" • "));
+            status_spans.push(Span::styled("Branch: ", Style::default().dim()));
+            status_spans.push(Span::styled(
+                branch,
+                Style::default().fg(crate::colors::success_green())
+            ));
+        }
+        
+        let status_line = Line::from(status_spans);
         
         // Create box border similar to Message input
         let status_block = Block::default()
@@ -1360,194 +1466,82 @@ impl ChatWidget<'_> {
         let status_widget = Paragraph::new(vec![status_line]);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
-    
-
-    fn render_screenshot(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui_image::Image;
-        
-        let start_time = std::time::Instant::now();
-        tracing::debug!("render_screenshot called for area: {}x{}", area.width, area.height);
-        
-        // Check if we have a cached protocol for this path and area
-        let cache_check_start = std::time::Instant::now();
-        let needs_recreate = {
-            let cached = self.cached_image_protocol.borrow();
-            match cached.as_ref() {
-                Some((cached_path, cached_area, _)) => {
-                    // Only recreate if path changes or area changes significantly (>2 cells)
-                    let path_changed = cached_path != path;
-                    let area_changed = (cached_area.width.abs_diff(area.width) > 2) || 
-                                      (cached_area.height.abs_diff(area.height) > 2);
-                    let needs = path_changed || area_changed;
-                    tracing::debug!("Cache check: path_changed={}, area_changed={} ({}x{} vs {}x{})", 
-                        path_changed, area_changed,
-                        cached_area.width, cached_area.height,
-                        area.width, area.height);
-                    needs
-                }
-                None => {
-                    tracing::debug!("Cache check: no cached protocol");
-                    true
-                }
-            }
-        };
-        let cache_check_elapsed = cache_check_start.elapsed();
-        if cache_check_elapsed.as_millis() > 1 {
-            tracing::warn!("Cache check took: {:?}", cache_check_elapsed);
-        }
-        
-        if needs_recreate {
-            tracing::info!("Recreating screenshot protocol for new area");
-            
-            // Get or create cached picker
-            let picker_start = std::time::Instant::now();
-            let mut picker = {
-                let mut cached_picker = self.cached_picker.borrow_mut();
-                if cached_picker.is_none() {
-                    // Skip the slow terminal query and use reasonable fallback dimensions
-                    // This avoids the 1+ second delay from Picker::from_query_stdio()
-                    let picker = Picker::from_fontsize(self.measured_font_size());
-                    *cached_picker = Some(picker);
-                } else {
-                    tracing::debug!("Using cached picker");
-                }
-                cached_picker.as_mut().unwrap().clone()
-            };
-            let picker_elapsed = picker_start.elapsed();
-            if picker_elapsed.as_millis() > 10 {
-                tracing::warn!("Picker setup took: {:?}", picker_elapsed);
-            }
-            
-            // Set transparent background since we'll fill it ourselves
-            picker.set_background_color([0, 0, 0, 0]);
-            
-            // Load image and create protocol
-            let image_load_start = std::time::Instant::now();
-            if let Ok(reader) = image::ImageReader::open(path) {
-                tracing::debug!("Image reader created, decoding...");
-                if let Ok(dyn_img) = reader.decode() {
-                    tracing::debug!("Image decoded, creating protocol...");
-                    let protocol_start = std::time::Instant::now();
-                    // Use Resize::Fit with background to properly scale while filling available space
-                    // This maintains aspect ratio and fills the area optimally
-                    match picker.new_protocol(dyn_img, area, Resize::Fit(None)) {
-                        Ok(protocol) => {
-                            let protocol_elapsed = protocol_start.elapsed();
-                            if protocol_elapsed.as_millis() > 50 {
-                                tracing::warn!("Protocol creation took: {:?}", protocol_elapsed);
-                            }
-                            // Cache the protocol
-                            *self.cached_image_protocol.borrow_mut() = 
-                                Some((path.clone(), area, protocol));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to create image protocol: {:?}", e);
-                            self.render_screenshot_placeholder(path, area, buf);
-                            return;
-                        }
-                    }
-                } else {
-                    tracing::error!("Failed to decode image: {:?}", path);
-                    self.render_screenshot_placeholder(path, area, buf);
-                    return;
-                }
-            } else {
-                tracing::error!("Failed to open image file: {:?}", path);
-                self.render_screenshot_placeholder(path, area, buf);
-                return;
-            }
-            let image_load_elapsed = image_load_start.elapsed();
-            if image_load_elapsed.as_millis() > 100 {
-                tracing::warn!("Total image load/decode took: {:?}", image_load_elapsed);
-            }
-        } else {
-            tracing::debug!("No cache recreation needed, using cached protocol");
-        }
-        
-        // Render the cached protocol
-        let render_start = std::time::Instant::now();
-        if let Some((_, _, ref protocol)) = *self.cached_image_protocol.borrow() {
-            // First, fill the background area to ensure complete coverage
-            use ratatui::style::{Style, Color};
-            let bg_style = Style::default().bg(crate::colors::background());
-            for y in area.top()..area.bottom() {
-                for x in area.left()..area.right() {
-                    if let Some(cell) = buf.cell_mut((x, y)) {
-                        cell.set_style(bg_style);
-                        cell.set_char(' '); // Fill with space character
-                    }
-                }
-            }
-            
-            // Then render the image on top
-            let image = Image::new(protocol);
-            image.render(area, buf);
-        }
-        let final_render_elapsed = render_start.elapsed();
-        if final_render_elapsed.as_millis() > 10 {
-            tracing::warn!("Final image render took: {:?}", final_render_elapsed);
-        }
-        
-        let total_elapsed = start_time.elapsed();
-        if total_elapsed.as_millis() > 50 { // Log if total function takes more than 50ms
-            tracing::warn!("Total screenshot render took: {:?}", total_elapsed);
-        }
-    }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui_image::{StatefulImage, Resize};
-        use ratatui::widgets::{Paragraph, Widget, StatefulWidget};
+        use ratatui_image::Resize;
+        use ratatui::widgets::{Paragraph, Widget};
         use ratatui::style::Style;
         
-        // First, render a proper background like in the examples
-        // Create background text pattern (similar to examples)
+        // First, render a proper background for the entire area
         let mut background_lines = Vec::new();
-        for _ in 0..area.height {
+        for _ in 0..(area.height-1) {
             background_lines.push(" ".repeat(area.width as usize));
         }
         let background_text = background_lines.join("\n");
         
         let background = Paragraph::new(background_text)
-            .style(Style::default().bg(crate::colors::background()));
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()));
         background.render(area, buf);
         
-        // Check if we have a cached stateful protocol for this path
+        // Check if we need to recreate the protocol (path or area changed)
         let needs_recreate = {
-            let cached = self.cached_stateful_protocol.borrow();
+            let cached = self.cached_image_protocol.borrow();
             match cached.as_ref() {
-                Some((cached_path, _)) => cached_path != path,
+                Some((cached_path, cached_rect, _)) => cached_path != path || *cached_rect != area,
                 None => true,
             }
         };
         
         if needs_recreate {
-            // Load the image and create new stateful protocol
+            // Load image and create protocol only when needed
             if let Ok(reader) = image::ImageReader::open(path) {
                 if let Ok(dyn_img) = reader.decode() {
-                    // Get or create cached picker
-                    let mut picker = {
-                        let mut cached_picker = self.cached_picker.borrow_mut();
-                        if cached_picker.is_none() {
-                            *cached_picker = Some(Picker::from_fontsize(self.measured_font_size()));
-                        }
-                        cached_picker.as_mut().unwrap().clone()
+                    // Get or create cached picker with 2x scaling workaround
+                    let mut cached_picker = self.cached_picker.borrow_mut();
+                    if cached_picker.is_none() {
+                        // Apply 2x scaling workaround for Retina displays
+                        let (font_w, font_h) = self.measured_font_size();
+                        let scaled_font = (font_w * 2, font_h * 2);
+                        *cached_picker = Some(Picker::from_fontsize(scaled_font));
+                        tracing::info!("Created picker with 2x scaled font size: {:?} -> {:?}", 
+                            (font_w, font_h), scaled_font);
+                    }
+                    let picker = cached_picker.as_ref().unwrap();
+                    
+                    // Debug: Log what the picker detected
+                    tracing::info!("Picker font size: {:?}, protocol: {:?}", 
+                        picker.font_size(), picker.protocol_type());
+                    
+                    // Create simple protocol (not stateful) with the scaled picker
+                    // Add 2 lines to height to compensate for sizing issues
+                    let adjusted_area = Rect {
+                        x: area.x,
+                        y: area.y,
+                        width: area.width,
+                        height: area.height,
                     };
-                    
-                    // Set transparent background (we handle background ourselves)
-                    picker.set_background_color([0, 0, 0, 0]);
-                    
-                    // Create stateful protocol and cache it
-                    let state = picker.new_resize_protocol(dyn_img);
-                    *self.cached_stateful_protocol.borrow_mut() = Some((path.clone(), state));
+                    match picker.new_protocol(dyn_img, adjusted_area, Resize::Fit(None)) {
+                        Ok(protocol) => {
+                            // Cache the protocol (but cache with original area for comparison)
+                            *self.cached_image_protocol.borrow_mut() = 
+                                Some((path.clone(), area, protocol));
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to create image protocol: {:?}", e);
+                        }
+                    }
                 }
             }
         }
         
-        // Now render using the cached stateful protocol
-        if let Some((_, state)) = self.cached_stateful_protocol.borrow_mut().as_mut() {
-            // Render using StatefulImage exactly like the examples
-            let stateful_image = StatefulImage::new().resize(Resize::Fit(None));
-            stateful_image.render(area, buf, state);
+        // Render using cached protocol
+        if let Some((_, _, ref protocol)) = *self.cached_image_protocol.borrow() {
+            // Debug: Log the area we're rendering to
+            tracing::debug!("Rendering image to area: {:?}", area);
+            
+            // Use simple Image widget with the Protocol
+            let image = Image::new(protocol);
+            Widget::render(image, area, buf);
         } else {
             // Fallback to placeholder if image loading fails
             self.render_screenshot_placeholder(path, area, buf);
@@ -1580,58 +1574,78 @@ impl ChatWidget<'_> {
 
 impl ChatWidget<'_> {
     /// Helper function to create a top-right positioned rect with proper aspect ratio
-    fn popup_area_top_right(&self, area: Rect) -> Rect {
-        use ratatui::layout::{Constraint, Direction, Layout};
+    fn render_browser_hud(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::style::Style;
+        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+        use ratatui::text::{Line as RLine, Span};
         
-        // Use 50% of width as requested
-        let popup_width = area.width / 2;
-        tracing::debug!("Popup width calculation: {}px = {}px / 2", popup_width, area.width);
         
-        // Get the cached cell aspect ratio or query once and cache it
-        let cell_aspect_ratio = *self.cached_cell_aspect_ratio.get_or_init(|| {
-            let ratio = crate::terminal_info::get_cell_aspect_ratio()
-                .unwrap_or(crate::terminal_info::DEFAULT_CELL_ASPECT_RATIO);
-            tracing::info!("Cell aspect ratio initialized: {}", ratio);
-            ratio
-        });
-        
-        // For a 1024x768 image (4:3 aspect ratio), calculate proper popup dimensions
-        // considering the actual cell aspect ratio
-        // Visual width = popup_width * cell_width
-        // Visual height = popup_height * cell_height  
-        // For 4:3 image: visual_width/visual_height = 4/3
-        // So: (popup_width * 1) / (popup_height * cell_aspect_ratio) = 4/3
-        // popup_height = (popup_width * 3) / (4 * cell_aspect_ratio)
-        let popup_height = ((popup_width * 3) as f32 / (4.0 * cell_aspect_ratio)) as u16;
-        tracing::debug!("Popup height calculation: {}px = ({} * 3) / (4 * {})", popup_height, popup_width, cell_aspect_ratio);
-        
-        // Make sure it doesn't exceed reasonable screen space - be more generous
-        let max_height = area.height * 2 / 3;  // Max 2/3 of screen height (more generous)
-        let final_height = popup_height.min(max_height);
-        tracing::debug!("Final height: {}px (limited by max {}px)", final_height, max_height);
-        
-        // Position using Layout for proper alignment
-        // First split horizontally to position on the right
-        let horizontal = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Min(0),  // Left space
-                Constraint::Length(popup_width),  // Popup width
-                Constraint::Length(2),  // Right padding
-            ])
-            .split(area);
-        
-        // Then split vertically to position below status bar
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(4),  // Space for status bar
-                Constraint::Length(final_height),  // Popup height
-                Constraint::Min(0),  // Remaining space
-            ])
-            .split(horizontal[1]);  // Split the right column
-        
-        vertical[1]  // Return the popup area
+        // Add same horizontal padding as the Message input (2 chars on each side)
+        let horizontal_padding = 2u16;
+        let padded_area = Rect {
+            x: area.x + horizontal_padding,
+            y: area.y,
+            width: area.width.saturating_sub(horizontal_padding * 2),
+            height: area.height,
+        };
+
+        if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
+            if let Some((screenshot_path, url)) = &*screenshot_lock {
+                // Split the HUD into two parts: left for info, right for screenshot (50% width)
+                let chunks = Layout::horizontal([
+                    Constraint::Percentage(50),
+                    Constraint::Percentage(50),
+                ])
+                .areas::<2>(padded_area);
+                
+                let info_area = chunks[0];
+                let screenshot_area = chunks[1];
+                
+                // Left side: Browser info and URL
+                let info_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Browser ")
+                    .border_style(Style::default().fg(crate::colors::border()));
+                
+                let inner_info = info_block.inner(info_area);
+                info_block.render(info_area, buf);
+                
+                // Display URL and browser status
+                let mut lines = vec![];
+                lines.push(RLine::from(vec![
+                    Span::styled("URL: ", Style::default().fg(crate::colors::text_dim())),
+                    Span::styled(url.clone(), Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD)),
+                ]));
+                
+                // Add browser status information
+                if self.browser_manager.is_enabled_sync() {
+                    lines.push(RLine::from(vec![
+                        Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
+                        Span::styled("Active", Style::default().fg(crate::colors::success())),
+                    ]));
+                } else {
+                    lines.push(RLine::from(vec![
+                        Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
+                        Span::styled("Inactive", Style::default().fg(crate::colors::warning())),
+                    ]));
+                }
+                
+                let info_paragraph = Paragraph::new(lines);
+                info_paragraph.render(inner_info, buf);
+                
+                // Right side: Screenshot with border
+                let screenshot_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Preview ")
+                    .border_style(Style::default().fg(crate::colors::border()));
+                
+                let inner_screenshot = screenshot_block.inner(screenshot_area);
+                screenshot_block.render(screenshot_area, buf);
+                
+                // Render the screenshot
+                self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
+            }
+        }
     }
     
     fn begin_stream(&mut self, kind: StreamKind) {
@@ -1742,7 +1756,6 @@ impl ChatWidget<'_> {
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::widgets::{Clear, Block, Borders};
         
         // Fill entire area with theme background
         let bg_style = Style::default()
@@ -1754,10 +1767,22 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
         
-        let [status_bar_area, history_area, bottom_pane_area] = self.layout_areas(area);
+        let layout_areas = self.layout_areas(area);
+        let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4 {
+            // Browser HUD is present
+            (layout_areas[0], Some(layout_areas[1]), layout_areas[2], layout_areas[3])
+        } else {
+            // No browser HUD
+            (layout_areas[0], None, layout_areas[1], layout_areas[2])
+        };
         
         // Render status bar
         self.render_status_bar(status_bar_area, buf);
+        
+        // Render browser HUD if present
+        if let Some(hud_area) = hud_area {
+            self.render_browser_hud(hud_area, buf);
+        }
         
         // Add horizontal padding to match the bottom pane (3 chars on each side)
         let horizontal_padding = 3u16;
@@ -1822,6 +1847,22 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
         
+        // Check if we have any animation cells that need redrawing
+        let has_active_animation = self.history_cells.iter().any(|cell| {
+            if let HistoryCell::AnimatedWelcome { start_time, completed } = cell {
+                let elapsed = start_time.elapsed();
+                let animation_duration = std::time::Duration::from_secs(2);
+                elapsed < animation_duration && !completed.get()
+            } else {
+                false
+            }
+        });
+        
+        // Request redraw if we have active animations
+        if has_active_animation {
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+        }
+        
         // Render visible history cells
         for (i, cell) in self.history_cells.iter().enumerate().skip(cell_idx) {
             if current_y >= padded_history_area.y + padded_history_area.height {
@@ -1868,39 +1909,6 @@ impl WidgetRef for &ChatWidget<'_> {
         // Render the bottom pane directly without a border for now
         // The composer has its own layout with hints at the bottom
         (&self.bottom_pane).render(bottom_pane_area, buf);
-        
-        // Render browser screenshot as a popup overlay if available
-        if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
-            if let Some(screenshot_path) = &*screenshot_lock {
-                let render_start = std::time::Instant::now();
-                
-                // Calculate popup area - top-right corner with 1024x768 aspect ratio
-                let popup_area = self.popup_area_top_right(area);
-                
-                // Clear the background area for the popup (essential for overlay)
-                Clear.render(popup_area, buf);
-                
-                // Create a border box for the screenshot
-                let border_block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(crate::colors::border()))
-                    .title(" Browser Screenshot ");
-                
-                // Render the border
-                border_block.clone().render(popup_area, buf);
-                
-                // Get the inner area (inside the border)
-                let inner_area = border_block.inner(popup_area);
-                
-                // Render the screenshot using high-level approach like the examples
-                self.render_screenshot_highlevel(screenshot_path, inner_area, buf);
-                
-                let render_elapsed = render_start.elapsed();
-                if render_elapsed.as_millis() > 20 { // Log popup render over 20ms
-                    tracing::warn!("Total popup render took: {:?}", render_elapsed);
-                }
-            }
-        }
     }
 }
 

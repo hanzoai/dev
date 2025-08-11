@@ -10,6 +10,18 @@ pub(crate) fn success_green() -> Color {
     current_theme().success
 }
 
+pub(crate) fn success() -> Color {
+    current_theme().success
+}
+
+pub(crate) fn warning() -> Color {
+    current_theme().warning
+}
+
+pub(crate) fn error() -> Color {
+    current_theme().error
+}
+
 // Convenience functions for common theme colors
 pub(crate) fn primary() -> Color {
     current_theme().primary
@@ -21,10 +33,6 @@ pub(crate) fn secondary() -> Color {
 
 pub(crate) fn border() -> Color {
     current_theme().border
-}
-
-pub(crate) fn border_focused() -> Color {
-    current_theme().border_focused
 }
 
 pub(crate) fn text() -> Color {
@@ -39,24 +47,12 @@ pub(crate) fn text_bright() -> Color {
     current_theme().text_bright
 }
 
-pub(crate) fn error() -> Color {
-    current_theme().error
-}
-
-pub(crate) fn warning() -> Color {
-    current_theme().warning
-}
-
 pub(crate) fn info() -> Color {
     current_theme().info
 }
 
 pub(crate) fn spinner() -> Color {
     current_theme().spinner
-}
-
-pub(crate) fn progress() -> Color {
-    current_theme().progress
 }
 
 // Alias for text_dim
@@ -68,6 +64,3 @@ pub(crate) fn background() -> Color {
     current_theme().background
 }
 
-pub(crate) fn surface() -> Color {
-    current_theme().foreground
-}
