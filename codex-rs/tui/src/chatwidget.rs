@@ -589,6 +589,9 @@ impl ChatWidget<'_> {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
             }
+            EventMsg::BrowserScreenshotUpdate(_) => {
+                // Browser screenshot updates are handled elsewhere
+            }
         }
     }
 
@@ -916,6 +919,40 @@ fn merge_cells(
         new_command.to_vec(),
         merged_parsed,
     ))
+}
+
+impl<'a> ChatWidget<'a> {
+    pub(crate) fn handle_reasoning_command(&mut self, command_text: &str) {
+        // Handle reasoning command - this is a fork-specific feature
+        // The actual implementation would parse the command and update reasoning effort
+        info!("Reasoning command: {}", command_text);
+    }
+
+    pub(crate) fn show_theme_selection(&mut self) {
+        // Show theme selection popup - this is a fork-specific feature
+        info!("Theme selection requested");
+    }
+
+    pub(crate) fn handle_browser_command(&mut self, command_text: &str) {
+        // Handle browser command - this is a fork-specific feature
+        info!("Browser command: {}", command_text);
+    }
+
+    pub(crate) fn set_reasoning_effort(&mut self, effort: codex_core::config_types::ReasoningEffort) {
+        // Set reasoning effort - this is a fork-specific feature
+        info!("Setting reasoning effort to: {:?}", effort);
+    }
+
+    pub(crate) fn set_theme(&mut self, theme_name: codex_core::config_types::ThemeName) {
+        // Set theme - this is a fork-specific feature
+        info!("Setting theme to: {:?}", theme_name);
+    }
+
+    pub(crate) fn handle_mouse_event(&mut self, _mouse_event: crossterm::event::MouseEvent) -> bool {
+        // Mouse events are handled elsewhere in the application
+        // This is a placeholder for fork-specific mouse handling
+        false
+    }
 }
 
 #[cfg(test)]

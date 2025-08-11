@@ -1,4 +1,4 @@
-use crate::colors::LIGHT_BLUE;
+use crate::colors::light_blue;
 use crate::diff_render::create_diff_summary;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
@@ -356,7 +356,7 @@ impl HistoryCell {
             let prefix = if i == 0 { "  L " } else { "    " };
             lines.push(Line::from(vec![
                 Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
-                Span::styled(str, Style::default().fg(LIGHT_BLUE)),
+                Span::styled(str, Style::default().fg(light_blue())),
             ]));
         }
 
