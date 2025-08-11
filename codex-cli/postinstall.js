@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, createWriteStream, chmodSync } from 'fs';
+import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { get } from 'https';
@@ -65,9 +65,9 @@ async function main() {
     mkdirSync(binDir, { recursive: true });
   }
   
-  // Get package version
-  const packageJson = await import('./package.json', { assert: { type: 'json' } });
-  const version = packageJson.default.version;
+  // Get package version - use readFileSync for compatibility
+  const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+  const version = packageJson.version;
   
   // Binary names to download
   const binaries = ['coder', 'coder-tui', 'coder-exec'];
