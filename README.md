@@ -2,6 +2,149 @@
 
 **Code CLI** is an enhanced fork of OpenAI's Codex CLI that brings powerful AI coding assistance directly to your terminal with additional features for improved developer experience.
 
+<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, see <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+
+<p align="center">
+  <img src="./.github/codex-cli-splash.png" alt="Codex CLI splash" width="50%" />
+  </p>
+
+---
+
+<details>
+<summary><strong>Table of contents</strong></summary>
+
+<!-- Begin ToC -->
+
+- [Quickstart](#quickstart)
+  - [Installing and running Codex CLI](#installing-and-running-codex-cli)
+  - [Using Codex with your ChatGPT plan](#using-codex-with-your-chatgpt-plan)
+  - [Connecting on a "Headless" Machine](#connecting-on-a-headless-machine)
+    - [Authenticate locally and copy your credentials to the "headless" machine](#authenticate-locally-and-copy-your-credentials-to-the-headless-machine)
+    - [Connecting through VPS or remote](#connecting-through-vps-or-remote)
+  - [Usage-based billing alternative: Use an OpenAI API key](#usage-based-billing-alternative-use-an-openai-api-key)
+  - [Choosing Codex's level of autonomy](#choosing-codexs-level-of-autonomy)
+    - [**1. Read/write**](#1-readwrite)
+    - [**2. Read-only**](#2-read-only)
+    - [**3. Advanced configuration**](#3-advanced-configuration)
+    - [Can I run without ANY approvals?](#can-i-run-without-any-approvals)
+    - [Fine-tuning in `config.toml`](#fine-tuning-in-configtoml)
+  - [Example prompts](#example-prompts)
+- [Running with a prompt as input](#running-with-a-prompt-as-input)
+- [Using Open Source Models](#using-open-source-models)
+  - [Platform sandboxing details](#platform-sandboxing-details)
+- [Experimental technology disclaimer](#experimental-technology-disclaimer)
+- [System requirements](#system-requirements)
+- [CLI reference](#cli-reference)
+- [Memory & project docs](#memory--project-docs)
+- [Non-interactive / CI mode](#non-interactive--ci-mode)
+- [Model Context Protocol (MCP)](#model-context-protocol-mcp)
+- [Tracing / verbose logging](#tracing--verbose-logging)
+  - [DotSlash](#dotslash)
+- [Configuration](#configuration)
+- [FAQ](#faq)
+- [Zero data retention (ZDR) usage](#zero-data-retention-zdr-usage)
+- [Codex open source fund](#codex-open-source-fund)
+- [Contributing](#contributing)
+  - [Development workflow](#development-workflow)
+  - [Writing high-impact code changes](#writing-high-impact-code-changes)
+  - [Opening a pull request](#opening-a-pull-request)
+  - [Review process](#review-process)
+  - [Community values](#community-values)
+  - [Getting help](#getting-help)
+  - [Contributor license agreement (CLA)](#contributor-license-agreement-cla)
+    - [Quick fixes](#quick-fixes)
+  - [Releasing `codex`](#releasing-codex)
+- [Security & responsible AI](#security--responsible-ai)
+- [License](#license)
+
+<!-- End ToC -->
+
+</details>
+
+---
+
+## Quickstart
+
+### Installing and running Codex CLI
+
+Install globally with your preferred package manager:
+
+```shell
+npm install -g @openai/codex  # Alternatively: `brew install codex`
+```
+
+Then simply run `codex` to get started:
+
+```shell
+codex
+```
+
+<details>
+<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+
+Each GitHub Release contains many executables, but in practice, you likely want one of these:
+
+- macOS
+  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
+  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
+- Linux
+  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
+  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
+
+Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
+
+</details>
+
+### Using Codex with your ChatGPT plan
+
+<p align="center">
+  <img src="./.github/codex-cli-login.png" alt="Codex CLI login" width="50%" />
+  </p>
+
+Run `codex` and select **Sign in with ChatGPT**. You'll need a Plus, Pro, or Team ChatGPT account, and will get access to our latest models, including `gpt-5`, at no extra cost to your plan. (Enterprise is coming soon.)
+
+> Important: If you've used the Codex CLI before, follow these steps to migrate from usage-based billing with your API key:
+>
+> 1. Update the CLI and ensure `codex --version` is `0.20.0` or later
+> 2. Delete `~/.codex/auth.json` (this should be `C:\Users\USERNAME\.codex\auth.json` on Windows)
+> 3. Run `codex login` again
+
+If you encounter problems with the login flow, please comment on [this issue](https://github.com/openai/codex/issues/1243).
+
+### Connecting on a "Headless" Machine
+
+Today, the login process entails running a server on `localhost:1455`. If you are on a "headless" server, such as a Docker container or are `ssh`'d into a remote machine, loading `localhost:1455` in the browser on your local machine will not automatically connect to the webserver running on the _headless_ machine, so you must use one of the following workarounds:
+
+#### Authenticate locally and copy your credentials to the "headless" machine
+
+The easiest solution is likely to run through the `codex login` process on your local machine such that `localhost:1455` _is_ accessible in your web browser. When you complete the authentication process, an `auth.json` file should be available at `$CODEX_HOME/auth.json` (on Mac/Linux, `$CODEX_HOME` defaults to `~/.codex` whereas on Windows, it defaults to `%USERPROFILE%\.codex`).
+
+Because the `auth.json` file is not tied to a specific host, once you complete the authentication flow locally, you can copy the `$CODEX_HOME/auth.json` file to the headless machine and then `codex` should "just work" on that machine. Note to copy a file to a Docker container, you can do:
+
+```shell
+# substitute MY_CONTAINER with the name or id of your Docker container:
+CONTAINER_HOME=$(docker exec MY_CONTAINER printenv HOME)
+docker exec MY_CONTAINER mkdir -p "$CONTAINER_HOME/.codex"
+docker cp auth.json MY_CONTAINER:"$CONTAINER_HOME/.codex/auth.json"
+```
+
+whereas if you are `ssh`'d into a remote machine, you likely want to use [`scp`](https://en.wikipedia.org/wiki/Secure_copy_protocol):
+
+```shell
+ssh user@remote 'mkdir -p ~/.codex'
+scp ~/.codex/auth.json user@remote:~/.codex/auth.json
+```
+
+or try this one-liner:
+
+```shell
+ssh user@remote 'mkdir -p ~/.codex && cat > ~/.codex/auth.json' < ~/.codex/auth.json
+```
+
+#### Connecting through VPS or remote
+
+If you run Codex on a remote machine (VPS/server) without a local browser, the login helper starts a server on `localhost:1455` on the remote host. To complete login in your local browser, forward that port to your machine before starting the login flow:
+
 ## Installation
 
 ```bash
