@@ -20,7 +20,6 @@ jobs:
   general:
     name: Format / etc
     runs-on: ubuntu-24.04
-    if: github.repository == 'openai/codex'
     defaults:
       run:
         working-directory: codex-rs
@@ -37,7 +36,6 @@ jobs:
   lint_build_test:
     name: ${{ matrix.runner }} - ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    if: github.repository == 'openai/codex'
     timeout-minutes: 30
     defaults:
       run:
