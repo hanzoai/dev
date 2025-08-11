@@ -7,7 +7,6 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Styled;
@@ -15,7 +14,6 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
@@ -31,7 +29,7 @@ use crate::bottom_pane::textarea::TextAreaState;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 
-const BASE_PLACEHOLDER_TEXT: &str = "Ask Codex to do anything";
+const BASE_PLACEHOLDER_TEXT: &str = "What are we coding today?";
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
@@ -61,6 +59,7 @@ pub(crate) struct ChatComposer {
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
+    has_chat_history: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -91,31 +90,62 @@ impl ChatComposer {
             pending_pastes: Vec::new(),
             token_usage_info: None,
             has_focus: has_input_focus,
+            has_chat_history: false,
         }
     }
 
+    pub fn set_has_chat_history(&mut self, has_history: bool) {
+        self.has_chat_history = has_history;
+    }
+
     pub fn desired_height(&self, width: u16) -> u16 {
-        self.textarea.desired_height(width - 1)
-            + match &self.active_popup {
-                ActivePopup::None => 1u16,
-                ActivePopup::Command(c) => c.calculate_required_height(),
-                ActivePopup::File(c) => c.calculate_required_height(),
-            }
+        // Calculate hint/popup height
+        let hint_height = match &self.active_popup {
+            ActivePopup::None => 1u16,
+            ActivePopup::Command(c) => c.calculate_required_height(),
+            ActivePopup::File(c) => c.calculate_required_height(),
+        };
+        
+        // Calculate actual content height of textarea
+        // Account for: 2 border + 2 horizontal padding (1 left + 1 right)
+        let content_width = width.saturating_sub(4); // 2 border + 2 horizontal padding
+        let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
+        
+        // Total input height: content + border (2) only, no vertical padding
+        // Minimum of 3 ensures at least 1 visible line with border
+        let input_height = (content_lines + 2).max(3).min(15);
+        
+        input_height + hint_height
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let popup_height = match &self.active_popup {
-            ActivePopup::Command(popup) => popup.calculate_required_height(),
-            ActivePopup::File(popup) => popup.calculate_required_height(),
-            ActivePopup::None => 1,
+        // Split area: textarea with border at top, hints/popup at bottom
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else {
+            match &self.active_popup {
+                ActivePopup::Command(popup) => popup.calculate_required_height(),
+                ActivePopup::File(popup) => popup.calculate_required_height(),
+                ActivePopup::None => 1,
+            }
         };
-        let [textarea_rect, _] =
-            Layout::vertical([Constraint::Min(0), Constraint::Max(popup_height)]).areas(area);
-        let mut textarea_rect = textarea_rect;
-        textarea_rect.width = textarea_rect.width.saturating_sub(1);
-        textarea_rect.x += 1;
+        // Calculate dynamic height based on content  
+        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        
+        // Use desired height but don't exceed available space
+        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
+        let [input_area, _] =
+            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
+        
+        // Get inner area of the bordered input box
+        let input_block = Block::default().borders(Borders::ALL);
+        let textarea_rect = input_block.inner(input_area);
+        
+        // Apply same padding as in render (1 char horizontal only, no vertical padding)
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        
         let state = self.textarea_state.borrow();
-        self.textarea.cursor_pos_with_state(textarea_rect, &state)
+        self.textarea.cursor_pos_with_state(padded_textarea_rect, &state)
     }
 
     /// Returns true if the composer currently contains no user input.
@@ -196,6 +226,12 @@ impl ChatComposer {
     pub fn set_ctrl_c_quit_hint(&mut self, show: bool, has_focus: bool) {
         self.ctrl_c_quit_hint = show;
         self.set_has_focus(has_focus);
+    }
+
+    pub(crate) fn insert_str(&mut self, text: &str) {
+        self.textarea.insert_str(text);
+        self.sync_command_popup();
+        self.sync_file_search_popup();
     }
 
     /// Handle a key event coming from the main UI.
@@ -661,18 +697,28 @@ impl WidgetRef for &ChatComposer {
             ActivePopup::File(popup) => popup.calculate_required_height(),
             ActivePopup::None => 1,
         };
-        let [textarea_rect, popup_rect] =
-            Layout::vertical([Constraint::Min(0), Constraint::Max(popup_height)]).areas(area);
+        // Split area: textarea with border at top, hints/popup at bottom
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else { popup_height };
+        
+        // Calculate dynamic height based on content
+        let content_width = area.width.saturating_sub(4); // Account for border and padding
+        let content_lines = self.textarea.desired_height(content_width).max(1);
+        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        
+        // Use desired height but don't exceed available space
+        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
+        let [input_area, hint_area] =
+            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
         match &self.active_popup {
             ActivePopup::Command(popup) => {
-                popup.render_ref(popup_rect, buf);
+                popup.render_ref(hint_area, buf);
             }
             ActivePopup::File(popup) => {
-                popup.render_ref(popup_rect, buf);
+                popup.render_ref(hint_area, buf);
             }
             ActivePopup::None => {
-                let bottom_line_rect = popup_rect;
-                let key_hint_style = Style::default().fg(Color::Cyan);
+                let bottom_line_rect = hint_area;
+                let key_hint_style = Style::default().fg(crate::colors::light_blue());
                 let mut hint = if self.ctrl_c_quit_hint {
                     vec![
                         Span::from(" "),
@@ -701,14 +747,15 @@ impl WidgetRef for &ChatComposer {
                     let token_usage = &token_usage_info.total_token_usage;
                     hint.push(Span::from("   "));
                     hint.push(
-                        Span::from(format!("{} tokens used", token_usage.total_tokens))
+                        Span::from(format!("{} tokens used", token_usage.blended_total()))
                             .style(Style::default().add_modifier(Modifier::DIM)),
                     );
                     let last_token_usage = &token_usage_info.last_token_usage;
                     if let Some(context_window) = token_usage_info.model_context_window {
                         let percent_remaining: u8 = if context_window > 0 {
                             let percent = 100.0
-                                - (last_token_usage.total_tokens as f32 / context_window as f32
+                                - (last_token_usage.tokens_in_context_window() as f32
+                                    / context_window as f32
                                     * 100.0);
                             percent.clamp(0.0, 100.0) as u8
                         } else {
@@ -727,29 +774,24 @@ impl WidgetRef for &ChatComposer {
                     .render_ref(bottom_line_rect, buf);
             }
         }
-        Block::default()
-            .border_style(Style::default().dim())
-            .borders(Borders::LEFT)
-            .border_type(BorderType::QuadrantOutside)
-            .border_style(Style::default().fg(if self.has_focus {
-                Color::Cyan
-            } else {
-                Color::Gray
-            }))
-            .render_ref(
-                Rect::new(textarea_rect.x, textarea_rect.y, 1, textarea_rect.height),
-                buf,
-            );
-        let mut textarea_rect = textarea_rect;
-        textarea_rect.width = textarea_rect.width.saturating_sub(1);
-        textarea_rect.x += 1;
+        // Draw border around input area (no title) - use lighter border color
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()));
+        
+        let textarea_rect = input_block.inner(input_area);
+        input_block.render_ref(input_area, buf);
 
+        // Add padding inside the text area (1 char horizontal only, no vertical padding)
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        
         let mut state = self.textarea_state.borrow_mut();
-        StatefulWidgetRef::render_ref(&(&self.textarea), textarea_rect, buf, &mut state);
-        if self.textarea.text().is_empty() {
+        StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
+        // Only show placeholder if there's no chat history AND no text typed
+        if !self.has_chat_history && self.textarea.text().is_empty() {
             Line::from(BASE_PLACEHOLDER_TEXT)
                 .style(Style::default().dim())
-                .render_ref(textarea_rect.inner(Margin::new(1, 0)), buf);
+                .render_ref(padded_textarea_rect, buf);
         }
     }
 }
@@ -1079,6 +1121,46 @@ mod tests {
             Err(TryRecvError::Empty) => panic!("expected a DispatchCommand event for '/init'"),
             Err(TryRecvError::Disconnected) => panic!("app event channel disconnected"),
         }
+    }
+
+    #[test]
+    fn slash_mention_dispatches_command_and_inserts_at() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+        use std::sync::mpsc::TryRecvError;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false);
+
+        for ch in ['/', 'm', 'e', 'n', 't', 'i', 'o', 'n'] {
+            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        match result {
+            InputResult::None => {}
+            InputResult::Submitted(text) => {
+                panic!("expected command dispatch, but composer submitted literal text: {text}")
+            }
+        }
+        assert!(composer.textarea.is_empty(), "composer should be cleared");
+
+        match rx.try_recv() {
+            Ok(AppEvent::DispatchCommand(cmd)) => {
+                assert_eq!(cmd.command(), "mention");
+                composer.insert_str("@");
+            }
+            Ok(_other) => panic!("unexpected app event"),
+            Err(TryRecvError::Empty) => panic!("expected a DispatchCommand event for '/mention'"),
+            Err(TryRecvError::Disconnected) => {
+                panic!("app event channel disconnected")
+            }
+        }
+        assert_eq!(composer.textarea.text(), "@");
     }
 
     #[test]

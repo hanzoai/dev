@@ -1,22 +1,27 @@
 {
-  "name": "@just-every/code",
-  "version": "0.1.1",
+  "name": "@just-every/coder",
+  "version": "0.1.2",
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
   "bin": {
-    "code": "bin/code.js"
+    "coder": "bin/coder.js"
   },
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "files": [
-    "bin",
+    "bin/coder.js",
+    "bin/codex.js",
+    "postinstall.js",
     "dist"
   ],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/just-every/code.git"
+    "url": "git+https://github.com/just-every/coder.git"
   },
   "publishConfig": {
     "access": "public"

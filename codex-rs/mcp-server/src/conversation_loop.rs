@@ -106,6 +106,7 @@ pub async fn run_conversation_loop(
                     | EventMsg::PatchApplyEnd(_)
                     | EventMsg::GetHistoryEntryResponse(_)
                     | EventMsg::PlanUpdate(_)
+                    | EventMsg::BrowserScreenshotUpdate(_)
                     | EventMsg::ShutdownComplete => {
                         // For now, we do not do anything extra for these
                         // events. Note that

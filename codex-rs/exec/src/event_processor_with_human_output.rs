@@ -255,6 +255,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 call_id,
                 command,
                 cwd,
+                parsed_cmd: _,
             }) => {
                 self.call_id_to_command.insert(
                     call_id.clone(),
@@ -511,6 +512,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 ts_println!(self, "plan: {plan:?}");
             }
             EventMsg::GetHistoryEntryResponse(_) => {
+                // Currently ignored in exec output.
+            }
+            EventMsg::BrowserScreenshotUpdate(_) => {
                 // Currently ignored in exec output.
             }
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,

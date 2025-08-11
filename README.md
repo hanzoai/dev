@@ -1,6 +1,6 @@
-# Code CLI - Enhanced Terminal Coding Agent
+# Coder CLI - Enhanced Terminal Coding Agent
 
-**Code CLI** is an enhanced fork of OpenAI's Codex CLI that brings powerful AI coding assistance directly to your terminal with additional features for improved developer experience.
+**Coder CLI** is an enhanced fork of OpenAI's Codex CLI that brings powerful AI coding assistance directly to your terminal with additional features for improved developer experience.
 
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, see <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
 
@@ -148,12 +148,12 @@ If you run Codex on a remote machine (VPS/server) without a local browser, the l
 ## Installation
 
 ```bash
-npm install -g @just-every/code
+npm install -g @just-every/coder
 ```
 
 Then run:
 ```bash
-code
+coderr
 ```
 
 ## Key Features
@@ -167,18 +167,18 @@ code
 ### ✨ Enhanced Features (Fork Additions)
 - **Image Support**: Drag-and-drop, paste, or reference images directly in the terminal
 - **Dynamic Reasoning**: Adjust AI reasoning effort mid-conversation with `/reasoning` command
-- **Flexible Configuration**: Uses `~/.code` directory (or `~/.codex` for compatibility)
+- **Flexible Configuration**: Uses `~/.coder` directory (or `~/.codex` for compatibility)
 
 ## Quick Start
 
 ### 1. Install and Launch
 ```bash
-npm install -g @just-every/code
-code
+npm install -g @just-every/coder
+coder
 ```
 
 ### 2. Authenticate
-You can use Code CLI with:
+You can use Coder CLI with:
 - **ChatGPT Plus/Pro subscription** (recommended)
 - **OpenAI API key** (usage-based billing)
 
@@ -186,12 +186,12 @@ You can use Code CLI with:
 
 **Read/Write Mode** (default - full capabilities):
 ```bash
-code
+coderr
 ```
 
 **Read-Only Mode** (safer, no file modifications):
 ```bash
-code --read-only
+coder --read-only
 ```
 
 ## Example Usage
@@ -260,6 +260,21 @@ Dynamically adjust the AI's reasoning effort:
 /reasoning low    # Quick responses
 ```
 
+## Terminal Interface Tips
+
+### Text Selection
+- **Press Ctrl+M** to toggle between mouse modes:
+  - **Scrolling mode** (default): Mouse wheel scrolls chat history
+  - **Selection mode**: Allows text selection and copying
+- The status bar shows current mouse mode
+
+### Keyboard Shortcuts
+- **Enter**: Submit your message
+- **Up/Down arrows**: Navigate command history
+- **Ctrl+M**: Toggle mouse capture (scrolling vs text selection)
+- **Ctrl+C**: Cancel current operation
+- **Ctrl+D**: Exit the application
+
 ## System Requirements
 
 - **Operating Systems**: macOS, Linux, Windows (WSL recommended)
@@ -270,7 +285,7 @@ Dynamically adjust the AI's reasoning effort:
 ## Command Line Options
 
 ```bash
-code [options] [prompt]
+coder [options] [prompt]
 
 Options:
   --model <name>     Override the model (e.g., gpt-5, claude-opus)
@@ -285,7 +300,7 @@ Options:
 
 ### Model Context Protocol (MCP)
 
-Code CLI supports MCP for extended capabilities:
+Coder CLI supports MCP for extended capabilities:
 - File system operations
 - Web browsing
 - Database connections
@@ -309,7 +324,7 @@ This is a React application using TypeScript...
 For CI/CD pipelines:
 
 ```bash
-code --non-interactive "update all dependencies"
+coder --non-interactive "update all dependencies"
 ```
 
 ## Troubleshooting
@@ -323,12 +338,12 @@ node --version  # Should be v20.0.0 or higher
 
 **Authentication issues**: Re-run the login flow
 ```bash
-code --login
+coder --login
 ```
 
 **Performance problems**: Adjust model or reasoning level
 ```bash
-code --model gpt-5-turbo
+coder --model gpt-5-turbo
 # or use /reasoning low during conversation
 ```
 
@@ -350,7 +365,7 @@ npm install
 npm run build
 
 # Run locally
-./codex-rs/target/release/code
+./codex-rs/target/release/coder
 ```
 
 ### Submitting Changes
@@ -362,11 +377,11 @@ npm run build
 
 ## Differences from Original Codex
 
-| Feature | Code CLI (Fork) | Original Codex |
+| Feature | Coder CLI (Fork) | Original Codex |
 |---------|----------------|----------------|
 | Command | `code` | `codex` |
 | Config Directory | `~/.code` | `~/.codex` |
-| NPM Package | `@just-every/code` | `@openai/codex` |
+| NPM Package | `@just-every/coder` | `@openai/codex` |
 | Image Support | ✅ Enhanced | Basic |
 | /reasoning Command | ✅ Available | Not available |
 | Environment Variables | CODE_HOME + CODEX_HOME | CODEX_HOME only |

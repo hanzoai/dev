@@ -11,7 +11,6 @@ use crate::slash_command::SlashCommand;
 use crate::tui;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
-use codex_core::protocol::EventMsg;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
@@ -19,9 +18,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::terminal::supports_keyboard_enhancement;
-use ratatui::layout::Offset;
-use ratatui::prelude::Backend;
-use ratatui::text::Line;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -60,8 +56,6 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed.
     pending_redraw: Arc<AtomicBool>,
-
-    pending_history_lines: Vec<Line<'static>>,
 
     enhanced_keys_supported: bool,
 }
@@ -120,6 +114,9 @@ impl App<'_> {
                                     let pasted = pasted.replace("\r", "\n");
                                     app_event_tx.send(AppEvent::Paste(pasted));
                                 }
+                                crossterm::event::Event::Mouse(mouse_event) => {
+                                    app_event_tx.send(AppEvent::MouseEvent(mouse_event));
+                                }
                                 _ => {
                                     // Ignore any other events.
                                 }
@@ -166,7 +163,6 @@ impl App<'_> {
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         Self {
             app_event_tx,
-            pending_history_lines: Vec::new(),
             app_event_rx,
             app_state,
             config,
@@ -211,8 +207,9 @@ impl App<'_> {
 
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
-                AppEvent::InsertHistory(lines) => {
-                    self.pending_history_lines.extend(lines);
+                AppEvent::InsertHistory(_lines) => {
+                    // No longer using scrollback, history is managed in ChatWidget
+                    // Just trigger a redraw
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::RequestRedraw => {
@@ -223,6 +220,29 @@ impl App<'_> {
                 }
                 AppEvent::KeyEvent(key_event) => {
                     match key_event {
+                        KeyEvent {
+                            code: KeyCode::Char('m'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press,
+                            ..
+                        } => {
+                            // Toggle mouse capture to allow text selection
+                            use crossterm::{execute, event::{DisableMouseCapture, EnableMouseCapture}};
+                            use std::io::stdout;
+                            
+                            // Static variable to track mouse capture state
+                            static mut MOUSE_CAPTURE_ENABLED: bool = true;
+                            
+                            unsafe {
+                                MOUSE_CAPTURE_ENABLED = !MOUSE_CAPTURE_ENABLED;
+                                if MOUSE_CAPTURE_ENABLED {
+                                    let _ = execute!(stdout(), EnableMouseCapture);
+                                } else {
+                                    let _ = execute!(stdout(), DisableMouseCapture);
+                                }
+                            }
+                            self.app_event_tx.send(AppEvent::RequestRedraw);
+                        }
                         KeyEvent {
                             code: KeyCode::Char('c'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
@@ -292,6 +312,9 @@ impl App<'_> {
                             // Ignore Release key events for now.
                         }
                     };
+                }
+                AppEvent::MouseEvent(mouse_event) => {
+                    self.dispatch_mouse_event(mouse_event);
                 }
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
@@ -366,6 +389,11 @@ impl App<'_> {
                             widget.add_diff_output(text);
                         }
                     }
+                    SlashCommand::Mention => {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.insert_str("@");
+                        }
+                    }
                     SlashCommand::Status => {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.add_status_output();
@@ -373,7 +401,14 @@ impl App<'_> {
                     }
                     SlashCommand::Reasoning => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_reasoning_command(command_text);
+                            widget.handle_reasoning_command(&command_text);
+                        }
+                    }
+                    SlashCommand::Theme => {
+                        // Theme selection is handled in submit_user_message
+                        // This case is here for completeness
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.show_theme_selection();
                         }
                     }
                     SlashCommand::Prompts => {
@@ -381,11 +416,28 @@ impl App<'_> {
                             widget.add_prompts_output();
                         }
                     }
+                    // Prompt-expanding commands should have been handled in submit_user_message
+                    // but add a fallback just in case
+                    SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {
+                        // These should have been expanded already, but handle them anyway
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            let expanded = command.expand_prompt(&command_text);
+                            if let Some(prompt) = expanded {
+                                widget.submit_text_message(prompt);
+                            }
+                        }
+                    }
+                    SlashCommand::Browser => {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.handle_browser_command(&command_text);
+                        }
+                    }
                     #[cfg(debug_assertions)]
                     SlashCommand::TestApproval => {
                         use std::collections::HashMap;
 
                         use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+                        use codex_core::protocol::EventMsg;
                         use codex_core::protocol::FileChange;
 
                         self.app_event_tx.send(AppEvent::CodexEvent(Event {
@@ -425,6 +477,30 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_reasoning_effort(new_effort);
                     }
+                }
+                AppEvent::UpdateTheme(new_theme) => {
+                    // Switch the theme immediately
+                    crate::theme::switch_theme(new_theme);
+                    
+                    // Clear terminal with new theme colors
+                    let theme_bg = crate::colors::background();
+                    let theme_fg = crate::colors::text();
+                    let _ = crossterm::execute!(
+                        std::io::stdout(),
+                        crossterm::style::SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+                        crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                        crossterm::cursor::MoveTo(0, 0),
+                        crossterm::terminal::SetTitle("Coder"),
+                        crossterm::terminal::EnableLineWrap
+                    );
+                    
+                    // Update config and save to file
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_theme(new_theme);
+                    }
+                    
+                    // Request a redraw to apply the new theme
+                    self.schedule_redraw();
                 }
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
@@ -472,60 +548,28 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
-        let screen_size = terminal.size()?;
-        let last_known_screen_size = terminal.last_known_screen_size;
-        if screen_size != last_known_screen_size {
-            let cursor_pos = terminal.get_cursor_position()?;
-            let last_known_cursor_pos = terminal.last_known_cursor_pos;
-            if cursor_pos.y != last_known_cursor_pos.y {
-                // The terminal was resized. The only point of reference we have for where our viewport
-                // was moved is the cursor position.
-                // NB this assumes that the cursor was not wrapped as part of the resize.
-                let cursor_delta = cursor_pos.y as i32 - last_known_cursor_pos.y as i32;
-
-                let new_viewport_area = terminal.viewport_area.offset(Offset {
-                    x: 0,
-                    y: cursor_delta,
-                });
-                terminal.set_viewport_area(new_viewport_area);
-                terminal.clear()?;
-            }
-        }
-
-        let size = terminal.size()?;
-        let desired_height = match &self.app_state {
-            AppState::Chat { widget } => widget.desired_height(size.width),
-            AppState::Onboarding { .. } => size.height,
-        };
-
-        let mut area = terminal.viewport_area;
-        area.height = desired_height.min(size.height);
-        area.width = size.width;
-        if area.bottom() > size.height {
-            terminal
-                .backend_mut()
-                .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
-            area.y = size.height - area.height;
-        }
-        if area != terminal.viewport_area {
-            terminal.clear()?;
-            terminal.set_viewport_area(area);
-        }
-        if !self.pending_history_lines.is_empty() {
-            crate::insert_history::insert_history_lines(
-                terminal,
-                self.pending_history_lines.clone(),
-            );
-            self.pending_history_lines.clear();
-        }
-        terminal.draw(|frame| match &mut self.app_state {
-            AppState::Chat { widget } => {
-                if let Some((x, y)) = widget.cursor_pos(frame.area()) {
-                    frame.set_cursor_position((x, y));
+        // Draw to the full terminal (Terminal handles autoresizing internally)
+        terminal.draw(|frame| {
+            // Fill entire frame with theme background
+            let bg_style = ratatui::style::Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
+            let area = frame.area();
+            for y in area.top()..area.bottom() {
+                for x in area.left()..area.right() {
+                    frame.buffer_mut()[(x, y)].set_style(bg_style);
                 }
-                frame.render_widget_ref(&**widget, frame.area())
             }
-            AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
+            
+            match &mut self.app_state {
+                AppState::Chat { widget } => {
+                    if let Some((x, y)) = widget.cursor_pos(frame.area()) {
+                        frame.set_cursor_position((x, y));
+                    }
+                    frame.render_widget_ref(&**widget, frame.area())
+                }
+                AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
+            }
         })?;
         Ok(())
     }
@@ -549,6 +593,15 @@ impl App<'_> {
     fn dispatch_paste_event(&mut self, pasted: String) {
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_paste(pasted),
+            AppState::Onboarding { .. } => {}
+        }
+    }
+
+    fn dispatch_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
+        match &mut self.app_state {
+            AppState::Chat { widget } => {
+                widget.handle_mouse_event(mouse_event);
+            }
             AppState::Onboarding { .. } => {}
         }
     }

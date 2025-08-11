@@ -3,6 +3,7 @@ members = [
     "ansi-escape",
     "apply-patch",
     "arg0",
+    "browser",
     "cli",
     "common",
     "core",
@@ -34,14 +35,29 @@ rust = {}
 expect_used = "deny"
 unwrap_used = "deny"
 
+# Fast development profile - optimized for quick iteration
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 1
+incremental = true
+codegen-units = 256
+lto = "off"
+
+# Release profile with incremental compilation for faster local builds
 [profile.release]
-lto = "fat"
+incremental = true  # Enable for faster rebuilds during local development
+codegen-units = 256  # More parallelism for faster builds
+lto = "thin"  # Changed from "fat" to "thin" for faster builds (still good optimization)
 # Because we bundle some of these executables with the TypeScript CLI, we
 # remove everything to make the binary as small as possible.
 strip = "symbols"
 
-# See https://github.com/openai/codex/issues/1411 for details.
-codegen-units = 1
+# Production release profile (for CI/distribution)
+[profile.release-prod]
+inherits = "release"
+incremental = false  # Disable for production builds
+codegen-units = 1  # Single codegen unit for best optimization
+lto = "fat"  # Maximum link-time optimization
 
 [patch.crates-io]
 # ratatui = { path = "../../ratatui" }

@@ -31,6 +31,11 @@ result
 CLAUDE.md
 .claude/
 
+# Binary symlinks in codex-cli/bin
+codex-cli/bin/*-darwin
+codex-cli/bin/*-linux-*
+codex-cli/bin/*-windows-*
+
 # caches
 .cache/
 .turbo/
