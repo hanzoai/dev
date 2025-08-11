@@ -5,7 +5,7 @@ name: Simple Release
 # The complex release.yml is disabled and only runs manually
 on:
   push:
-    branches: [ code-release ]
+    branches: [ main ]
     paths-ignore:
       - '.github/workflows/release.yml'
       - '.github/workflows/test.yml'
