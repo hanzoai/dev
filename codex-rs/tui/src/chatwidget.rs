@@ -67,6 +67,8 @@ pub(crate) struct ChatWidget<'a> {
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
     active_exec_cell: Option<HistoryCell>,
+    history_cells: Vec<HistoryCell>,  // Store all history in memory for rendering
+    scroll_offset: usize,  // For scrolling through history
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -129,14 +131,13 @@ impl ChatWidget<'_> {
             self.request_redraw();
         }
     }
-    fn layout_areas(&self, area: Rect) -> [Rect; 2] {
+    fn layout_areas(&self, area: Rect) -> [Rect; 3] {
+        // Status bar at top (2 lines), history in middle, bottom pane at bottom
+        let bottom_pane_height = self.bottom_pane.desired_height(area.width);
         Layout::vertical([
-            Constraint::Max(
-                self.active_exec_cell
-                    .as_ref()
-                    .map_or(0, |c| c.desired_height(area.width)),
-            ),
-            Constraint::Min(self.bottom_pane.desired_height(area.width)),
+            Constraint::Length(2),  // Status bar
+            Constraint::Min(0),     // History area (takes remaining space)
+            Constraint::Length(bottom_pane_height),  // Bottom pane
         ])
         .areas(area)
     }
@@ -212,6 +213,8 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
             }),
             active_exec_cell: None,
+            history_cells: Vec::new(),
+            scroll_offset: 0,
             config,
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -257,8 +260,22 @@ impl ChatWidget<'_> {
 
     fn add_to_history(&mut self, cell: HistoryCell) {
         self.flush_active_exec_cell();
+        // Get plain lines before moving the cell
+        let plain_lines = cell.plain_lines();
+        // Store in memory for rendering
+        self.history_cells.push(cell);
+        // Auto-scroll to bottom when new content arrives
+        self.scroll_offset = 0;
+        // Check if there's actual conversation history (any user prompts submitted)
+        let has_conversation = self.history_cells.iter().any(|cell| {
+            matches!(cell, HistoryCell::UserPrompt { .. })
+        });
+        self.bottom_pane.set_has_chat_history(has_conversation);
+        // Also send to scrollback for terminal history
         self.app_event_tx
-            .send(AppEvent::InsertHistory(cell.plain_lines()));
+            .send(AppEvent::InsertHistory(plain_lines));
+        // Request redraw to show new history
+        self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
@@ -697,7 +714,7 @@ impl ChatWidget<'_> {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let [_, bottom_pane_area] = self.layout_areas(area);
+        let [_, _, bottom_pane_area] = self.layout_areas(area);
         self.bottom_pane.cursor_pos(bottom_pane_area)
     }
 }
@@ -808,15 +825,130 @@ impl ChatWidget<'_> {
         self.current_stream = None;
         self.stream_header_emitted = false;
     }
+    
+    fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::Paragraph;
+        use ratatui::style::{Style, Modifier};
+        use crate::exec_command::relativize_to_home;
+        
+        // Add same horizontal padding as the Message input (2 chars on each side)
+        let horizontal_padding = 2u16;
+        let padded_area = Rect {
+            x: area.x + horizontal_padding,
+            y: area.y,
+            width: area.width.saturating_sub(horizontal_padding * 2),
+            height: area.height,
+        };
+        
+        // Get current working directory string
+        let cwd_str = match relativize_to_home(&self.config.cwd) {
+            Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
+            Some(_) => "~".to_string(),
+            None => self.config.cwd.display().to_string(),
+        };
+        
+        // Create status bar content - more compact single line
+        let status_line = Line::from(vec![
+            Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" • "),
+            Span::styled("Model: ", Style::default().dim()),
+            Span::styled(
+                format!("{}", self.config.model),
+                Style::default().fg(crate::colors::info())
+            ),
+            Span::raw(" • "),
+            Span::styled("Dir: ", Style::default().dim()),
+            Span::styled(cwd_str, Style::default().fg(crate::colors::info())),
+        ]);
+        
+        // Render the status bar
+        Paragraph::new(vec![status_line, Line::from("")])
+            .render(padded_area, buf);
+    }
 }
 
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let [active_cell_area, bottom_pane_area] = self.layout_areas(area);
-        (&self.bottom_pane).render(bottom_pane_area, buf);
-        if let Some(cell) = &self.active_exec_cell {
-            cell.render_ref(active_cell_area, buf);
+        use ratatui::style::Style;
+        
+        // Fill entire area with theme background
+        let bg_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_style(bg_style);
+            }
         }
+        
+        let [status_bar_area, history_area, bottom_pane_area] = self.layout_areas(area);
+        
+        // Render status bar
+        self.render_status_bar(status_bar_area, buf);
+        
+        // Render history with padding
+        let horizontal_padding = 3u16;
+        let padded_history_area = Rect {
+            x: history_area.x + horizontal_padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(horizontal_padding * 2),
+            height: history_area.height,
+        };
+        
+        // Calculate visible history based on scroll
+        let mut y_offset = 0u16;
+        let mut visible_cells = Vec::new();
+        
+        // Calculate heights for history cells and active exec cell
+        let total_cells = self.history_cells.len() + if self.active_exec_cell.is_some() { 1 } else { 0 };
+        
+        // Render visible cells from bottom up
+        // First check active exec cell
+        if let Some(cell) = &self.active_exec_cell {
+            let cell_height = cell.desired_height(padded_history_area.width);
+            if y_offset + cell_height <= padded_history_area.height {
+                visible_cells.push((total_cells - 1, y_offset, cell_height, true));
+                y_offset += cell_height;
+            }
+        }
+        
+        // Then history cells from newest to oldest
+        for (idx, cell) in self.history_cells.iter().enumerate().rev() {
+            if y_offset >= padded_history_area.height {
+                break;
+            }
+            let cell_height = cell.desired_height(padded_history_area.width);
+            if y_offset + cell_height <= padded_history_area.height {
+                visible_cells.push((idx, y_offset, cell_height, false));
+                y_offset += cell_height;
+            }
+        }
+        
+        // Render cells in correct order (oldest to newest)
+        for (idx, _, height, is_active) in visible_cells.iter().rev() {
+            let cell_area = Rect {
+                x: padded_history_area.x,
+                y: padded_history_area.y + padded_history_area.height - y_offset,
+                width: padded_history_area.width,
+                height: *height,
+            };
+            if cell_area.height > 0 {
+                if *is_active {
+                    if let Some(cell) = &self.active_exec_cell {
+                        cell.render_ref(cell_area, buf);
+                    }
+                } else {
+                    if let Some(cell) = self.history_cells.get(*idx) {
+                        cell.render_ref(cell_area, buf);
+                    }
+                }
+            }
+            y_offset = y_offset.saturating_sub(*height);
+        }
+        
+        // Render bottom pane
+        (&self.bottom_pane).render(bottom_pane_area, buf);
     }
 }
 
@@ -930,7 +1062,9 @@ impl<'a> ChatWidget<'a> {
 
     pub(crate) fn show_theme_selection(&mut self) {
         // Show theme selection popup - this is a fork-specific feature
-        info!("Theme selection requested");
+        // TODO: Track current theme name properly
+        let current_theme = codex_core::config_types::ThemeName::LightPhoton;
+        self.bottom_pane.show_theme_selection(current_theme);
     }
 
     pub(crate) fn handle_browser_command(&mut self, command_text: &str) {
