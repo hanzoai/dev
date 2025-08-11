@@ -237,14 +237,8 @@ impl App<'_> {
                                 MOUSE_CAPTURE_ENABLED = !MOUSE_CAPTURE_ENABLED;
                                 if MOUSE_CAPTURE_ENABLED {
                                     let _ = execute!(stdout(), EnableMouseCapture);
-                                    if let AppState::Chat { widget } = &mut self.app_state {
-                                        widget.set_mouse_status_message("Mouse: Scrolling enabled (Ctrl+M to toggle)");
-                                    }
                                 } else {
                                     let _ = execute!(stdout(), DisableMouseCapture);
-                                    if let AppState::Chat { widget } = &mut self.app_state {
-                                        widget.set_mouse_status_message("Mouse: Text selection enabled (Ctrl+M to toggle)");
-                                    }
                                 }
                             }
                             self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -407,7 +401,7 @@ impl App<'_> {
                     }
                     SlashCommand::Reasoning => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_reasoning_command(command_text);
+                            widget.handle_reasoning_command(&command_text);
                         }
                     }
                     SlashCommand::Theme => {
@@ -435,7 +429,7 @@ impl App<'_> {
                     }
                     SlashCommand::Browser => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_browser_command(command_text);
+                            widget.handle_browser_command(&command_text);
                         }
                     }
                     #[cfg(debug_assertions)]
@@ -605,7 +599,9 @@ impl App<'_> {
 
     fn dispatch_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
         match &mut self.app_state {
-            AppState::Chat { widget } => widget.handle_mouse_event(mouse_event),
+            AppState::Chat { widget } => {
+                widget.handle_mouse_event(mouse_event);
+            }
             AppState::Onboarding { .. } => {}
         }
     }
