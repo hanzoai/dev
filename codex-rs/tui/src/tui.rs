@@ -18,8 +18,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
-
-use crate::custom_terminal::Terminal;
+use ratatui::Terminal;
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -59,11 +58,13 @@ pub fn init(config: &Config) -> Result<Tui> {
         stdout(), 
         SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
         Clear(ClearType::All), 
-        MoveTo(0, 0)
+        MoveTo(0, 0),
+        crossterm::terminal::SetTitle("Coder"),
+        crossterm::terminal::EnableLineWrap
     )?;
 
     let backend = CrosstermBackend::new(stdout());
-    let tui = Terminal::with_options(backend)?;
+    let tui = Terminal::new(backend)?;
     Ok(tui)
 }
 

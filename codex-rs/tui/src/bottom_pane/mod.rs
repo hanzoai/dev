@@ -23,7 +23,6 @@ mod popup_consts;
 mod reasoning_selection_view;
 mod scroll_state;
 mod selection_popup_common;
-mod status_indicator_view;
 mod textarea;
 mod theme_selection_view;
 
@@ -40,7 +39,6 @@ use crate::status_indicator_widget::StatusIndicatorWidget;
 use approval_modal_view::ApprovalModalView;
 use reasoning_selection_view::ReasoningSelectionView;
 use theme_selection_view::ThemeSelectionView;
-use status_indicator_view::StatusIndicatorView;
 use codex_core::config_types::{ReasoningEffort, ThemeName};
 
 /// Pane displayed in the lower half of the chat UI.
@@ -96,6 +94,10 @@ impl BottomPane<'_> {
             live_ring: None,
             status_view_active: false,
         }
+    }
+
+    pub fn set_has_chat_history(&mut self, has_history: bool) {
+        self.composer.set_has_chat_history(has_history);
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {

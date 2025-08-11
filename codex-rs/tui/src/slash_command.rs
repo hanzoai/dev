@@ -12,12 +12,12 @@ use strum_macros::IntoStaticStr;
 pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
+    Browser,
     New,
     Init,
     Compact,
     Diff,
     Status,
-    Browser,
     Theme,
     Reasoning,
     Prompts,
@@ -35,19 +35,19 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
+            SlashCommand::Browser => "enable 🌐 browser mode!",
+            SlashCommand::Plan => "create a comprehensive 🚀 plan (multiple agents)",
+            SlashCommand::Solve => "solve a challenging 🧠 problem (multiple agents)",
+            SlashCommand::Code => "perform a </> coding task (multiple agents)",
+            SlashCommand::Reasoning => "change 💭 reasoning effort (high/medium/low/none)",
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Quit => "exit Codex",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Browser => "manage browser mode (on/off/status/config)",
             SlashCommand::Theme => "switch between color themes",
-            SlashCommand::Reasoning => "change reasoning effort (low/medium/high/none)",
             SlashCommand::Prompts => "show example prompts",
-            SlashCommand::Plan => "create a comprehensive plan using multiple LLMs",
-            SlashCommand::Solve => "solve a complex problem with multiple LLMs",
-            SlashCommand::Code => "perform a coding task with multiple LLMs",
             SlashCommand::Logout => "log out of Codex",
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => "test approval request",

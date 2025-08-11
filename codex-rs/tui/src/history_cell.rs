@@ -74,6 +74,12 @@ fn line_to_static(line: &Line) -> Line<'static> {
 /// `Vec<Line<'static>>` representation to make it easier to display in a
 /// scrollable list.
 pub(crate) enum HistoryCell {
+    /// Animated welcome that shows particle animation
+    AnimatedWelcome { 
+        start_time: std::time::Instant,
+        completed: std::cell::Cell<bool>,
+    },
+    
     /// Welcome message.
     WelcomeMessage { view: TextBlock },
 
@@ -166,6 +172,14 @@ impl HistoryCell {
     /// represented with a simple placeholder for now.
     pub(crate) fn plain_lines(&self) -> Vec<Line<'static>> {
         match self {
+            HistoryCell::AnimatedWelcome { .. } => {
+                // For plain lines, just show a simple welcome message
+                vec![
+                    Line::from(""),
+                    Line::from("Welcome to Coder"),
+                    Line::from(""),
+                ]
+            }
             HistoryCell::WelcomeMessage { view }
             | HistoryCell::UserPrompt { view }
             | HistoryCell::BackgroundEvent { view }
@@ -192,11 +206,19 @@ impl HistoryCell {
     }
 
     pub(crate) fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(self.plain_lines()))
-            .wrap(Wrap { trim: false })
-            .line_count(width)
-            .try_into()
-            .unwrap_or(0)
+        match self {
+            HistoryCell::AnimatedWelcome { .. } => {
+                // Fixed height for animation area
+                18u16  // 16 for animation + 2 for borders
+            }
+            _ => {
+                Paragraph::new(Text::from(self.plain_lines()))
+                    .wrap(Wrap { trim: false })
+                    .line_count(width)
+                    .try_into()
+                    .unwrap_or(0)
+            }
+        }
     }
 
     pub(crate) fn new_session_info(
@@ -213,12 +235,13 @@ impl HistoryCell {
         if is_first_event {
             // Since we now have a status bar, just show helpful commands in history
             let lines: Vec<Line<'static>> = vec![
-                Line::from(" To get started, describe a task or try one of these commands:".dim()),
                 Line::from("".dim()),
-                Line::from(format!(" /init - {}", SlashCommand::Init.description()).dim()),
-                Line::from(format!(" /status - {}", SlashCommand::Status.description()).dim()),
-                Line::from(format!(" /diff - {}", SlashCommand::Diff.description()).dim()),
-                Line::from(format!(" /prompts - {}", SlashCommand::Prompts.description()).dim()),
+                Line::from(" Popular commands:".dim()),
+                Line::from(format!(" /browser <url> - {}", SlashCommand::Browser.description()).dim()),
+                Line::from(format!(" /plan - {}", SlashCommand::Plan.description()).dim()),
+                Line::from(format!(" /solve - {}", SlashCommand::Solve.description()).dim()),
+                Line::from(format!(" /code - {}", SlashCommand::Code.description()).dim()),
+                Line::from(format!(" /reasoning - {}", SlashCommand::Reasoning.description()).dim()),
                 Line::from("".dim()),
             ];
             HistoryCell::WelcomeMessage {
@@ -848,13 +871,47 @@ impl HistoryCell {
 
 impl WidgetRef for &HistoryCell {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        // Apply theme background and text color to the paragraph
-        Paragraph::new(Text::from(self.plain_lines()))
-            .wrap(Wrap { trim: false })
-            .style(Style::default()
-                .fg(crate::colors::text())
-                .bg(crate::colors::background()))
-            .render(area, buf);
+        match self {
+            HistoryCell::AnimatedWelcome { start_time, completed } => {
+                let elapsed = start_time.elapsed();
+                let animation_duration = std::time::Duration::from_secs(2);  // 2 seconds total
+                
+                if elapsed < animation_duration && !completed.get() {
+                    // Calculate animation progress
+                    let progress = elapsed.as_secs_f32() / animation_duration.as_secs_f32();
+                    
+                    // Render the animation (randomly chooses between neon and bracket build)
+                    crate::glitch_animation::render_intro_animation(
+                        area,
+                        buf,
+                        progress
+                    );
+                    
+                    // Request redraw for animation
+                    // Note: We can't send events from here directly, but the ChatWidget
+                    // will check for animation cells and request redraws
+                } else {
+                    // Animation complete - mark it and render final static state
+                    completed.set(true);
+                    
+                    // Render the final static state
+                    crate::glitch_animation::render_intro_animation(
+                        area,
+                        buf,
+                        1.0  // Full progress = static final state
+                    );
+                }
+            }
+            _ => {
+                // Apply theme background and text color to the paragraph
+                Paragraph::new(Text::from(self.plain_lines()))
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default()
+                        .fg(crate::colors::text())
+                        .bg(crate::colors::background()))
+                    .render(area, buf);
+            }
+        }
     }
 }
 

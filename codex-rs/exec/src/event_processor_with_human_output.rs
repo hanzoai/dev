@@ -513,6 +513,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::GetHistoryEntryResponse(_) => {
                 // Currently ignored in exec output.
             }
+            EventMsg::BrowserScreenshotUpdate(_) => {
+                // Currently ignored in exec output.
+            }
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,
         }
         CodexStatus::Running

@@ -10,20 +10,28 @@ Add theme configuration to your `~/.codex/config.toml` file:
 
 ```toml
 [tui.theme]
-name = "carbon-night"  # Default theme
+name = "light-photon"  # Default theme
 ```
 
 ### Available Predefined Themes
 
-- **carbon-night** (default): Sleek modern dark theme with blue accents - perfect for long coding sessions
-- **photon-light**: Clean professional light theme with confident blue accent - great for bright environments
-- **shinobi-dusk**: Japanese-inspired twilight theme with soothing purple and green tones
-- **oled-black-pro**: True black background for OLED displays with vibrant neon accents
-- **amber-terminal**: Retro amber CRT monitor aesthetic - nostalgic monochrome orange
-- **aurora-flux**: Northern lights inspired with cool blues and greens
-- **charcoal-rainbow**: High-contrast accessible theme with rainbow accents on dark gray
-- **zen-garden**: Calm, peaceful theme with mint and lavender tones
-- **paper-light-pro**: Premium paper-like light theme for comfortable daytime use
+#### Light Themes
+- **light-photon** (default): Clean professional light theme with confident blue accent - great for bright environments
+- **light-prism-rainbow**: Vibrant rainbow accents with blue, violet, and teal highlights
+- **light-vivid-triad**: Striking cyan, pink, and amber color triad for a modern look
+- **light-porcelain**: Refined porcelain tones with sophisticated blue and purple accents
+- **light-sandbar**: Warm sandy beach colors with amber and muted teal highlights
+- **light-glacier**: Cool glacier blues with purple accents for a fresh, crisp appearance
+
+#### Dark Themes
+- **dark-carbon-night**: Sleek modern dark theme with blue accents - perfect for long coding sessions
+- **dark-shinobi-dusk**: Japanese-inspired twilight theme with soothing purple and green tones
+- **dark-oled-black-pro**: True black background for OLED displays with vibrant neon accents
+- **dark-amber-terminal**: Retro amber CRT monitor aesthetic - nostalgic monochrome orange
+- **dark-aurora-flux**: Northern lights inspired with cool blues and greens
+- **dark-charcoal-rainbow**: High-contrast accessible theme with rainbow accents on dark gray
+- **dark-zen-garden**: Calm, peaceful theme with mint and lavender tones
+- **dark-paper-light-pro**: Premium paper-like dark theme for comfortable extended use
 
 ### Custom Color Configuration
 
@@ -108,16 +116,16 @@ Colors can be specified in the following formats:
 
 ## Examples
 
-### Example 1: Shinobi Dusk Theme
+### Example 1: Dark Shinobi Dusk Theme
 ```toml
 [tui.theme]
-name = "shinobi-dusk"
+name = "dark-shinobi-dusk"
 ```
 
-### Example 2: Photon Light with Custom Accent
+### Example 2: Light Photon with Custom Accent
 ```toml
 [tui.theme]
-name = "photon-light"
+name = "light-photon"
 
 [tui.theme.colors]
 primary = "#007acc"      # VS Code blue
@@ -125,10 +133,10 @@ border_focused = "#007acc"
 info = "#007acc"
 ```
 
-### Example 3: Amber Terminal for Retro Feel
+### Example 3: Dark Amber Terminal for Retro Feel
 ```toml
 [tui.theme]
-name = "amber-terminal"
+name = "dark-amber-terminal"
 
 [tui.theme.colors]
 primary = "#ffa500"      # Make it more orange
