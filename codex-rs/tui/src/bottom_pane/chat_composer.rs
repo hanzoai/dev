@@ -7,7 +7,6 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Styled;
@@ -15,7 +14,6 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Block;
-use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
@@ -31,7 +29,7 @@ use crate::bottom_pane::textarea::TextAreaState;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 
-const BASE_PLACEHOLDER_TEXT: &str = "Ask Codex to do anything";
+const BASE_PLACEHOLDER_TEXT: &str = "What are we coding today?";
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
@@ -61,6 +59,7 @@ pub(crate) struct ChatComposer {
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
+    has_chat_history: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -91,7 +90,12 @@ impl ChatComposer {
             pending_pastes: Vec::new(),
             token_usage_info: None,
             has_focus: has_input_focus,
+            has_chat_history: false,
         }
+    }
+
+    pub fn set_has_chat_history(&mut self, has_history: bool) {
+        self.has_chat_history = has_history;
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
@@ -776,7 +780,8 @@ impl WidgetRef for &ChatComposer {
         
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
-        if self.textarea.text().is_empty() {
+        // Only show placeholder if there's no chat history AND no text typed
+        if !self.has_chat_history && self.textarea.text().is_empty() {
             Line::from(BASE_PLACEHOLDER_TEXT)
                 .style(Style::default().dim())
                 .render_ref(padded_textarea_rect, buf);

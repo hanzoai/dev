@@ -40,15 +40,22 @@ impl ThemeSelectionView {
 
     fn get_theme_options() -> Vec<(ThemeName, &'static str, &'static str)> {
         vec![
-            (ThemeName::CarbonNight, "Carbon Night", "Sleek modern dark theme"),
-            (ThemeName::PhotonLight, "Photon Light", "Clean professional light theme"),
-            (ThemeName::ShinobiDusk, "Shinobi Dusk", "Japanese-inspired twilight"),
-            (ThemeName::OledBlackPro, "OLED Black Pro", "True black for OLED displays"),
-            (ThemeName::AmberTerminal, "Amber Terminal", "Retro amber CRT aesthetic"),
-            (ThemeName::AuroraFlux, "Aurora Flux", "Northern lights inspired"),
-            (ThemeName::CharcoalRainbow, "Charcoal Rainbow", "High-contrast accessible"),
-            (ThemeName::ZenGarden, "Zen Garden", "Calm and peaceful"),
-            (ThemeName::PaperLightPro, "Paper Light Pro", "Premium paper-like light"),
+            // Light themes (at top)
+            (ThemeName::LightPhoton, "Light - Photon", "Clean professional light theme"),
+            (ThemeName::LightPrismRainbow, "Light - Prism Rainbow", "Vibrant rainbow accents"),
+            (ThemeName::LightVividTriad, "Light - Vivid Triad", "Cyan, pink, amber triad"),
+            (ThemeName::LightPorcelain, "Light - Porcelain", "Refined porcelain tones"),
+            (ThemeName::LightSandbar, "Light - Sandbar", "Warm sandy beach colors"),
+            (ThemeName::LightGlacier, "Light - Glacier", "Cool glacier blues"),
+            // Dark themes (below)
+            (ThemeName::DarkCarbonNight, "Dark - Carbon Night", "Sleek modern dark theme"),
+            (ThemeName::DarkShinobiDusk, "Dark - Shinobi Dusk", "Japanese-inspired twilight"),
+            (ThemeName::DarkOledBlackPro, "Dark - OLED Black Pro", "True black for OLED displays"),
+            (ThemeName::DarkAmberTerminal, "Dark - Amber Terminal", "Retro amber CRT aesthetic"),
+            (ThemeName::DarkAuroraFlux, "Dark - Aurora Flux", "Northern lights inspired"),
+            (ThemeName::DarkCharcoalRainbow, "Dark - Charcoal Rainbow", "High-contrast accessible"),
+            (ThemeName::DarkZenGarden, "Dark - Zen Garden", "Calm and peaceful"),
+            (ThemeName::DarkPaperLightPro, "Dark - Paper Light Pro", "Premium paper-like"),
         ]
     }
 

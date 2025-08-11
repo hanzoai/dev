@@ -13,6 +13,7 @@ pub struct BrowserManager {
     last_activity: Arc<Mutex<Instant>>,
     idle_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     assets: Arc<Mutex<Option<Arc<crate::assets::AssetManager>>>>,
+    user_data_dir: Arc<Mutex<Option<String>>>,
 }
 
 impl BrowserManager {
@@ -24,6 +25,7 @@ impl BrowserManager {
             last_activity: Arc::new(Mutex::new(Instant::now())),
             idle_monitor_handle: Arc::new(Mutex::new(None)),
             assets: Arc::new(Mutex::new(None)),
+            user_data_dir: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -35,9 +37,29 @@ impl BrowserManager {
 
         info!("Starting browser");
         
+        // Use timestamp to ensure unique directory for each browser instance
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let user_data_path = format!("/tmp/coder-browser-{}-{}", std::process::id(), timestamp);
+        
+        // Ensure the directory doesn't exist before starting
+        if tokio::fs::metadata(&user_data_path).await.is_ok() {
+            if let Err(e) = tokio::fs::remove_dir_all(&user_data_path).await {
+                warn!("Failed to cleanup existing browser directory {}: {}", user_data_path, e);
+            }
+        }
+        
         let (browser, mut handler) = Browser::launch(
             CdpConfig::builder()
                 .window_size(1024, 768)
+                .user_data_dir(&user_data_path)
+                .arg("--disable-web-security")
+                .arg("--disable-features=VizDisplayCompositor")
+                .arg("--disable-dev-shm-usage")
+                .arg("--no-sandbox")
+                .arg("--disable-gpu")
                 .build()
                 .map_err(|e| BrowserError::CdpError(e.to_string()))?
         )
@@ -50,6 +72,12 @@ impl BrowserManager {
         });
 
         *browser_guard = Some(browser);
+        
+        // Store the user data directory path for cleanup
+        {
+            let mut user_data_guard = self.user_data_dir.lock().await;
+            *user_data_guard = Some(user_data_path);
+        }
         
         self.start_idle_monitor().await;
         self.update_activity().await;
@@ -67,6 +95,26 @@ impl BrowserManager {
         if let Some(mut browser) = browser_guard.take() {
             info!("Stopping browser");
             browser.close().await?;
+        }
+        
+        // Cleanup user data directory synchronously to ensure it completes
+        let mut user_data_guard = self.user_data_dir.lock().await;
+        if let Some(user_data_path) = user_data_guard.take() {
+            // Give Chrome a moment to fully release the profile
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            
+            if let Err(e) = tokio::fs::remove_dir_all(&user_data_path).await {
+                warn!("Failed to cleanup browser user data directory {}: {}", user_data_path, e);
+                // Try a more aggressive cleanup on macOS
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = tokio::process::Command::new("rm")
+                        .arg("-rf")
+                        .arg(&user_data_path)
+                        .output()
+                        .await;
+                }
+            }
         }
         
         Ok(())
@@ -118,6 +166,10 @@ impl BrowserManager {
     pub async fn is_enabled(&self) -> bool {
         self.config.read().await.enabled
     }
+    
+    pub fn is_enabled_sync(&self) -> bool {
+        self.config.try_read().map(|c| c.enabled).unwrap_or(false)
+    }
 
     pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
         let mut config = self.config.write().await;
@@ -147,15 +199,19 @@ impl BrowserManager {
         self.config.read().await.clone()
     }
 
-    pub async fn get_status(&self) -> BrowserStatus {
-        let config = self.config.read().await;
-        let browser_active = self.browser.lock().await.is_some();
+    pub async fn get_current_url(&self) -> Option<String> {
         let page_guard = self.page.lock().await;
-        let current_url = if let Some(page) = page_guard.as_ref() {
+        if let Some(page) = page_guard.as_ref() {
             page.get_url().await.ok()
         } else {
             None
-        };
+        }
+    }
+
+    pub async fn get_status(&self) -> BrowserStatus {
+        let config = self.config.read().await;
+        let browser_active = self.browser.lock().await.is_some();
+        let current_url = self.get_current_url().await;
 
         BrowserStatus {
             enabled: config.enabled,
@@ -265,6 +321,7 @@ impl BrowserManager {
 
         let browser = Arc::clone(&self.browser);
         let last_activity = Arc::clone(&self.last_activity);
+        let user_data_dir = Arc::clone(&self.user_data_dir);
 
         let handle = tokio::spawn(async move {
             loop {
@@ -277,6 +334,15 @@ impl BrowserManager {
                     if let Some(mut browser) = browser_guard.take() {
                         let _ = browser.close().await;
                     }
+                    
+                    // Cleanup user data directory on idle timeout
+                    let mut user_data_guard = user_data_dir.lock().await;
+                    if let Some(user_data_path) = user_data_guard.take() {
+                        if let Err(e) = tokio::fs::remove_dir_all(&user_data_path).await {
+                            warn!("Failed to cleanup browser user data directory {}: {}", user_data_path, e);
+                        }
+                    }
+                    
                     break;
                 }
             }
@@ -362,19 +428,8 @@ impl BrowserManager {
     }
 
     pub async fn close(&self) -> Result<()> {
-        self.stop_idle_monitor().await;
-        
-        let mut page_guard = self.page.lock().await;
-        if let Some(page) = page_guard.take() {
-            page.close().await?;
-        }
-        
-        let mut browser_guard = self.browser.lock().await;
-        if let Some(mut browser) = browser_guard.take() {
-            browser.close().await?;
-        }
-        
-        Ok(())
+        // Just delegate to stop() which handles cleanup properly
+        self.stop().await
     }
 
     /// Click at the specified coordinates

@@ -84,6 +84,7 @@ use crate::protocol::AgentReasoningRawContentEvent;
 use crate::protocol::ApplyPatchApprovalRequestEvent;
 use crate::protocol::AskForApproval;
 use crate::protocol::BackgroundEventEvent;
+use crate::protocol::BrowserScreenshotUpdateEvent;
 use crate::protocol::ErrorEvent;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
@@ -2867,15 +2868,19 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
 }
 
 /// Capture a screenshot from the browser and store it for the next model request
-async fn capture_browser_screenshot(sess: &Session) -> Option<PathBuf> {
+async fn capture_browser_screenshot(sess: &Session) -> Option<(PathBuf, String)> {
     let browser_manager = sess.browser_manager.lock().unwrap().clone();
     if let Some(browser_manager) = browser_manager {
         if browser_manager.is_enabled().await {
+            // Get current URL first
+            let url = browser_manager.get_current_url().await
+                .unwrap_or_else(|| "Browser".to_string());
+            
             match browser_manager.capture_screenshot().await {
                 Ok(screenshots) => {
                     if let Some(first_screenshot) = screenshots.first() {
-                        tracing::info!("Captured browser screenshot: {}", first_screenshot.display());
-                        return Some(first_screenshot.clone());
+                        tracing::info!("Captured browser screenshot: {} at URL: {}", first_screenshot.display(), url);
+                        return Some((first_screenshot.clone(), url));
                     }
                 }
                 Err(e) => {
@@ -2888,10 +2893,27 @@ async fn capture_browser_screenshot(sess: &Session) -> Option<PathBuf> {
 }
 
 /// Add a screenshot to pending screenshots for the next model request
-fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf) {
+fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String) {
     let mut pending = sess.pending_browser_screenshots.lock().unwrap();
-    pending.push(screenshot_path);
+    pending.push(screenshot_path.clone());
     tracing::info!("Added pending screenshot for next model request");
+    
+    // Also send an immediate event to update the TUI display
+    let event = Event {
+        id: "browser_screenshot".to_string(),
+        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+            screenshot_path,
+            url,
+        }),
+    };
+    
+    // Send event asynchronously to avoid blocking
+    let tx_event = sess.tx_event.clone();
+    tokio::spawn(async move {
+        if let Err(e) = tx_event.send(event).await {
+            tracing::error!("Failed to send browser screenshot update event: {}", e);
+        }
+    });
 }
 
 /// Consume pending screenshots and return them as ResponseInputItems
@@ -2967,8 +2989,8 @@ async fn handle_browser_open(
                 match browser_manager.goto(url).await {
                     Ok(_) => {
                         // Capture screenshot after navigation
-                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
-                            add_pending_screenshot(sess, screenshot_path);
+                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path, url);
                         }
                         
                         ResponseInputItem::FunctionCallOutput {
@@ -3103,8 +3125,8 @@ async fn handle_browser_click(
                 match browser_manager.click(x, y).await {
                     Ok(_) => {
                         // Capture screenshot after clicking
-                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
-                            add_pending_screenshot(sess, screenshot_path);
+                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path, url);
                         }
                         
                         ResponseInputItem::FunctionCallOutput {
@@ -3161,8 +3183,8 @@ async fn handle_browser_type(
                 match browser_manager.type_text(text).await {
                     Ok(_) => {
                         // Capture screenshot after typing
-                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
-                            add_pending_screenshot(sess, screenshot_path);
+                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path, url);
                         }
                         
                         ResponseInputItem::FunctionCallOutput {
@@ -3219,8 +3241,8 @@ async fn handle_browser_key(
                 match browser_manager.press_key(key).await {
                     Ok(_) => {
                         // Capture screenshot after pressing key
-                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
-                            add_pending_screenshot(sess, screenshot_path);
+                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path, url);
                         }
                         
                         ResponseInputItem::FunctionCallOutput {
@@ -3319,8 +3341,8 @@ async fn handle_browser_javascript(
                         tracing::info!("Returning to LLM: {}", formatted_result);
                         
                         // Capture screenshot after executing JavaScript
-                        if let Some(screenshot_path) = capture_browser_screenshot(sess).await {
-                            add_pending_screenshot(sess, screenshot_path);
+                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                            add_pending_screenshot(sess, screenshot_path, url);
                         }
                         
                         ResponseInputItem::FunctionCallOutput {
