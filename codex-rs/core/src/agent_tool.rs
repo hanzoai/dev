@@ -43,6 +43,7 @@ pub struct Agent {
     pub worktree_path: Option<String>,
     pub branch_name: Option<String>,
     #[serde(skip)]
+    #[allow(dead_code)]
     pub config: Option<AgentConfig>,
 }
 

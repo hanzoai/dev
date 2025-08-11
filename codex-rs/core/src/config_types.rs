@@ -142,16 +142,23 @@ impl Default for ThemeConfig {
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeName {
-    CarbonNight,
+    // Light themes (at top)
     #[default]
-    PhotonLight,
-    ShinobiDusk,
-    OledBlackPro,
-    AmberTerminal,
-    AuroraFlux,
-    CharcoalRainbow,
-    ZenGarden,
-    PaperLightPro,
+    LightPhoton,
+    LightPrismRainbow,
+    LightVividTriad,
+    LightPorcelain,
+    LightSandbar,
+    LightGlacier,
+    // Dark themes (below)
+    DarkCarbonNight,
+    DarkShinobiDusk,
+    DarkOledBlackPro,
+    DarkAmberTerminal,
+    DarkAuroraFlux,
+    DarkCharcoalRainbow,
+    DarkZenGarden,
+    DarkPaperLightPro,
     Custom,
 }
 

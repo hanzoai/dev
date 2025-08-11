@@ -3,7 +3,6 @@ use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -16,7 +15,7 @@ use codex_login::AuthMode;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::colors::{light_blue, success_green};
+use crate::colors::{light_blue, success_green, error, text_bright, info};
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::shimmer::FrameTicker;
@@ -169,7 +168,7 @@ impl AuthModeWidget {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 err.as_str(),
-                Style::default().fg(Color::Red),
+                Style::default().fg(error()),
             )));
         }
 
@@ -230,7 +229,7 @@ impl AuthModeWidget {
             .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
             Line::from("  Codex can make mistakes")
-                .style(Style::default().fg(Color::White)),
+                .style(Style::default().fg(text_bright())),
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
@@ -277,7 +276,7 @@ impl AuthModeWidget {
             Line::from(
                 "  To use Codex with the OpenAI API, set OPENAI_API_KEY in your environment",
             )
-            .style(Style::default().fg(Color::Blue)),
+            .style(Style::default().fg(info())),
             Line::from(""),
             Line::from("  Press Enter to return")
                 .style(Style::default().add_modifier(Modifier::DIM)),

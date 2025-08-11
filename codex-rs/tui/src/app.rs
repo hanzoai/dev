@@ -18,7 +18,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::terminal::supports_keyboard_enhancement;
-use ratatui::layout::Rect;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -221,6 +220,35 @@ impl App<'_> {
                 }
                 AppEvent::KeyEvent(key_event) => {
                     match key_event {
+                        KeyEvent {
+                            code: KeyCode::Char('m'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press,
+                            ..
+                        } => {
+                            // Toggle mouse capture to allow text selection
+                            use crossterm::{execute, event::{DisableMouseCapture, EnableMouseCapture}};
+                            use std::io::stdout;
+                            
+                            // Static variable to track mouse capture state
+                            static mut MOUSE_CAPTURE_ENABLED: bool = true;
+                            
+                            unsafe {
+                                MOUSE_CAPTURE_ENABLED = !MOUSE_CAPTURE_ENABLED;
+                                if MOUSE_CAPTURE_ENABLED {
+                                    let _ = execute!(stdout(), EnableMouseCapture);
+                                    if let AppState::Chat { widget } = &mut self.app_state {
+                                        widget.set_mouse_status_message("Mouse: Scrolling enabled (Ctrl+M to toggle)");
+                                    }
+                                } else {
+                                    let _ = execute!(stdout(), DisableMouseCapture);
+                                    if let AppState::Chat { widget } = &mut self.app_state {
+                                        widget.set_mouse_status_message("Mouse: Text selection enabled (Ctrl+M to toggle)");
+                                    }
+                                }
+                            }
+                            self.app_event_tx.send(AppEvent::RequestRedraw);
+                        }
                         KeyEvent {
                             code: KeyCode::Char('c'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
@@ -462,7 +490,9 @@ impl App<'_> {
                         std::io::stdout(),
                         crossterm::style::SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-                        crossterm::cursor::MoveTo(0, 0)
+                        crossterm::cursor::MoveTo(0, 0),
+                        crossterm::terminal::SetTitle("Coder"),
+                        crossterm::terminal::EnableLineWrap
                     );
                     
                     // Update config and save to file
@@ -519,17 +549,7 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
-        // In alternate screen mode, we use the full terminal
-        let size = terminal.size()?;
-        
-        // Update viewport to full terminal size if it changed
-        if size != terminal.last_known_screen_size {
-            let full_area = Rect::new(0, 0, size.width, size.height);
-            terminal.set_viewport_area(full_area);
-            terminal.resize(size)?;
-        }
-        
-        // Draw to the full terminal
+        // Draw to the full terminal (Terminal handles autoresizing internally)
         terminal.draw(|frame| {
             // Fill entire frame with theme background
             let bg_style = ratatui::style::Style::default()

@@ -30,12 +30,14 @@ mod chatwidget;
 mod citation_regex;
 mod cli;
 mod colors;
-pub mod custom_terminal;
 mod exec_command;
+mod glitch_animation;
 mod file_search;
 mod get_git_diff;
 mod history_cell;
-pub mod insert_history;
+// Currently unused module - preserved for potential future use
+#[allow(dead_code)]
+mod insert_history;
 pub mod live_wrap;
 mod log_layer;
 mod markdown;
@@ -43,6 +45,7 @@ pub mod onboarding;
 mod shimmer;
 mod slash_command;
 mod status_indicator_widget;
+mod terminal_info;
 mod text_block;
 mod text_formatting;
 mod theme;

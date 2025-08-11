@@ -95,12 +95,12 @@ cd codex-rs
 cargo build --release --bin code
 
 # Test the CLI
-./target/release/code --version
+./target/release/coder --version
 
 # Test npm package locally
 cd ../codex-cli
 npm link
-code --version
+coder --version
 ```
 
 ## npm Publishing Setup
