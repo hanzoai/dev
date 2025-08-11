@@ -71,6 +71,13 @@ impl Command for SetScrollRegion {
         // 1-based line numbers
         write!(f, "\x1b[{};{}r", self.0.start, self.0.end)
     }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        // Windows doesn't support scroll regions in the same way
+        // This is a no-op on Windows
+        Ok(())
+    }
 }
 
 struct ResetScrollRegion;
@@ -79,6 +86,13 @@ impl Command for ResetScrollRegion {
         // CSI r  (DECSTBM)
         // Reset Scrolling Region to full screen
         write!(f, "\x1b[r")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        // Windows doesn't support scroll regions in the same way
+        // This is a no-op on Windows
+        Ok(())
     }
 }
 
@@ -136,6 +150,13 @@ impl Command for SetUnderlineColor {
         // Set underline color using SGR 58
         // Always try to write it, terminals that don't support it will ignore
         write!(f, "\x1b[58:5:{}m", ansi_color_code_from_ratatui_color(self.0))
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        // Windows terminal may not support underline colors
+        // This is a no-op on Windows
+        Ok(())
     }
 }
 
