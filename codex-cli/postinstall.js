@@ -78,9 +78,19 @@ async function main() {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
     const localPath = join(binDir, binaryName);
     
-    // Skip if already exists
+    // Skip if already exists and has correct permissions
     if (existsSync(localPath)) {
-      console.log(`✓ ${binaryName} already exists`);
+      // Always try to fix permissions on Unix-like systems
+      if (!isWindows) {
+        try {
+          chmodSync(localPath, 0o755);
+          console.log(`✓ ${binaryName} already exists (permissions fixed)`);
+        } catch (e) {
+          console.log(`✓ ${binaryName} already exists`);
+        }
+      } else {
+        console.log(`✓ ${binaryName} already exists`);
+      }
       continue;
     }
     
@@ -92,7 +102,7 @@ async function main() {
       
       // Make executable on Unix-like systems
       if (!isWindows) {
-        chmodSync(localPath, '755');
+        chmodSync(localPath, 0o755);
       }
       
       console.log(`✓ Downloaded ${binaryName}`);

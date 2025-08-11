@@ -58,6 +58,25 @@ if (!targetTriple) {
 
 const binaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
 
+// Check if binary exists and try to fix permissions if needed
+import { existsSync, chmodSync } from "fs";
+if (existsSync(binaryPath)) {
+  try {
+    // Ensure binary is executable on Unix-like systems
+    if (platform !== "win32") {
+      chmodSync(binaryPath, 0o755);
+    }
+  } catch (e) {
+    // Ignore permission errors, will be caught below if it's a real problem
+  }
+} else {
+  console.error(`Binary not found: ${binaryPath}`);
+  console.error(`Please try reinstalling the package:`);
+  console.error(`  npm uninstall -g @just-every/coder`);
+  console.error(`  npm install -g @just-every/coder`);
+  process.exit(1);
+}
+
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
 // executing. This allows us to forward those signals to the child process
@@ -72,10 +91,13 @@ const child = spawn(binaryPath, process.argv.slice(2), {
 
 child.on("error", (err) => {
   // Typically triggered when the binary is missing or not executable.
-  // Re-throwing here will terminate the parent with a non-zero exit code
-  // while still printing a helpful stack trace.
-  // eslint-disable-next-line no-console
-  console.error(err);
+  if (err.code === 'EACCES') {
+    console.error(`Permission denied: ${binaryPath}`);
+    console.error(`Try running: chmod +x "${binaryPath}"`);
+    console.error(`Or reinstall the package with: npm install -g @just-every/coder`);
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });
 
