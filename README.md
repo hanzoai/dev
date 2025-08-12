@@ -1,6 +1,10 @@
 # JustEvery Coder
 
-**Coder** is a fast, local-first coding agent for your terminal. It's a community-driven fork focused on real developer ergonomics: Chrome DevTools automation, multi-agent flows, live theming, and on-the-fly reasoning control - all while staying compatible with upstream.
+<p align="center">
+  <img src="docs/logo.png" alt="Coder Logo" width="400">
+</p>
+
+**Coder** is a fast, local coding agent for your terminal. It's a community-driven fork  of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control - all while staying compatible with upstream.
 
 ## Why Coder
 
@@ -77,9 +81,6 @@ gemini
 
 # Change reasoning level
 /reasoning low|medium|high
-
-# Change model
-/model gpt-5-mini
 
 # Start new conversation
 /new
