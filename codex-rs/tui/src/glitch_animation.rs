@@ -143,7 +143,8 @@ fn mask_to_outline_fill_lines(
                 let shine =
                     (1.0 - (dx as f32 / (shine_band as f32 + 0.001)).clamp(0.0, 1.0)).powf(1.6);
                 let bright = bump_rgb(base, shine * 0.30);
-                color = mix_rgb(bright, Color::Rgb(145, 150, 160), fade);
+                // Make final state very light (almost invisible)
+                color = mix_rgb(bright, Color::Rgb(230, 232, 235), fade);
                 ch = '█';
             }
             // Outline (▓) for border pixels
@@ -153,7 +154,8 @@ fn mask_to_outline_fill_lines(
                 let period = (2 * scale_or(scale, 4)) as usize; // ~scale-based speed/size
                 let on = ((x + y + (frame as usize)) % period) < (period / 2);
                 let c = if on { bump_rgb(base, 0.22) } else { base };
-                color = mix_rgb(c, Color::Rgb(160, 165, 172), fade * 0.8);
+                // Make outline very light in final state
+                color = mix_rgb(c, Color::Rgb(235, 237, 240), fade * 0.8);
                 ch = '▓';
             }
 
@@ -199,7 +201,8 @@ fn mask_to_outline_fill_lines_with_alpha(
                 let shine =
                     (1.0 - (dx as f32 / (shine_band as f32 + 0.001)).clamp(0.0, 1.0)).powf(1.6);
                 let bright = bump_rgb(base, shine * 0.30);
-                let mut final_color = mix_rgb(bright, Color::Rgb(145, 150, 160), fade);
+                // Make final state very light (almost invisible)
+                let mut final_color = mix_rgb(bright, Color::Rgb(230, 232, 235), fade);
 
                 // Apply alpha blending to background color
                 final_color = blend_to_background(final_color, alpha);
@@ -213,7 +216,8 @@ fn mask_to_outline_fill_lines_with_alpha(
                 let period = (2 * scale_or(scale, 4)) as usize; // ~scale-based speed/size
                 let on = ((x + y + (frame as usize)) % period) < (period / 2);
                 let c = if on { bump_rgb(base, 0.22) } else { base };
-                let mut final_color = mix_rgb(c, Color::Rgb(160, 165, 172), fade * 0.8);
+                // Make outline very light in final state
+                let mut final_color = mix_rgb(c, Color::Rgb(235, 237, 240), fade * 0.8);
 
                 // Apply alpha blending to background color
                 final_color = blend_to_background(final_color, alpha);
