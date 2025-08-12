@@ -207,11 +207,10 @@ impl App<'_> {
 
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
-                AppEvent::InsertHistory(_lines) => {
-                    // No longer using scrollback, history is managed in ChatWidget
-                    // Just trigger a redraw
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                }
+                AppEvent::InsertHistory(lines) => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.insert_history_lines(lines),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
