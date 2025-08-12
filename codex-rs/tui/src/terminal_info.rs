@@ -6,7 +6,7 @@ fn read_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
     let start = Instant::now();
     let mut buf = [0u8; 256];
     let mut s = String::new();
-    
+
     // Set non-blocking mode
     #[cfg(unix)]
     {
@@ -17,14 +17,14 @@ fn read_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
             unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
         }
     }
-    
+
     while start.elapsed() < timeout {
         match tty.read(&mut buf) {
             Ok(n) if n > 0 => {
                 s.push_str(&String::from_utf8_lossy(&buf[..n]));
                 // Check if we got a complete response (ends with 't')
-                if s.contains('t') && s.contains("\x1b[") { 
-                    break; 
+                if s.contains('t') && s.contains("\x1b[") {
+                    break;
                 }
             }
             _ => {
@@ -33,7 +33,7 @@ fn read_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
             }
         }
     }
-    
+
     (!s.is_empty()).then_some(s)
 }
 
@@ -49,7 +49,7 @@ fn parse_three_nums(s: &str) -> Option<(u32, u32, u32)> {
                 if let (Ok(a), Ok(b), Ok(c)) = (
                     parts[0].parse::<u32>(),
                     parts[1].parse::<u32>(),
-                    parts[2].parse::<u32>()
+                    parts[2].parse::<u32>(),
                 ) {
                     return Some((a, b, c));
                 }

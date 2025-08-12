@@ -1,8 +1,8 @@
 use crate::{
+    Result,
     assets::{AssetManager, ImageRef},
     manager::BrowserManager,
     page::ScreenshotMode,
-    Result,
 };
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -26,7 +26,7 @@ impl BrowserInjector {
         }
 
         debug!("Browser enabled, capturing pre-LLM screenshot");
-        
+
         let page = match self.manager.get_or_create_page().await {
             Ok(p) => p,
             Err(_) => {
@@ -48,17 +48,23 @@ impl BrowserInjector {
 
         let screenshots = page.screenshot(mode).await?;
         let ttl_ms = 300000;
-        let images = self.asset_manager.store_screenshots(screenshots, ttl_ms).await?;
+        let images = self
+            .asset_manager
+            .store_screenshots(screenshots, ttl_ms)
+            .await?;
 
-        let current_url = page.get_current_url().await.unwrap_or_else(|_| "about:blank".to_string());
-        
+        let current_url = page
+            .get_current_url()
+            .await
+            .unwrap_or_else(|_| "about:blank".to_string());
+
         let system_hint = format!(
             "A fresh screenshot of the active page ({}) is attached; use browser.* tools to navigate or capture more.",
             current_url
         );
 
         let segments_captured = images.len();
-        
+
         Ok(Some(InjectionResult {
             images,
             system_hint,

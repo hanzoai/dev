@@ -5,20 +5,19 @@ use std::io::stdout;
 use codex_core::config::Config;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
-use crossterm::event::EnableBracketedPaste;
 use crossterm::event::DisableMouseCapture;
-use crossterm::event::EnableMouseCapture;
+use crossterm::event::EnableBracketedPaste;
 use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
+use crossterm::style::SetColors;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
-use crossterm::style::SetColors;
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
-use ratatui::Terminal;
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -27,10 +26,9 @@ pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 pub fn init(config: &Config) -> Result<Tui> {
     // Initialize the theme based on config
     crate::theme::init_theme(&config.tui.theme);
-    
+
     execute!(stdout(), EnableBracketedPaste)?;
-    execute!(stdout(), EnableMouseCapture)?;
-    
+
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
 
@@ -55,9 +53,12 @@ pub fn init(config: &Config) -> Result<Tui> {
     let theme_bg = crate::colors::background();
     let theme_fg = crate::colors::text();
     execute!(
-        stdout(), 
-        SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
-        Clear(ClearType::All), 
+        stdout(),
+        SetColors(crossterm::style::Colors::new(
+            theme_fg.into(),
+            theme_bg.into()
+        )),
+        Clear(ClearType::All),
         MoveTo(0, 0),
         crossterm::terminal::SetTitle("Coder"),
         crossterm::terminal::EnableLineWrap

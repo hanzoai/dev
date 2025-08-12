@@ -36,9 +36,9 @@ pub(crate) use chat_composer::InputResult;
 
 use crate::status_indicator_widget::StatusIndicatorWidget;
 use approval_modal_view::ApprovalModalView;
+use codex_core::config_types::{ReasoningEffort, ThemeName};
 use reasoning_selection_view::ReasoningSelectionView;
 use theme_selection_view::ThemeSelectionView;
-use codex_core::config_types::{ReasoningEffort, ThemeName};
 
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
@@ -140,15 +140,16 @@ impl BottomPane<'_> {
             if let Some(status) = &self.live_status {
                 y_offset = status.desired_height(area.width).min(area.height);
             }
-            
+
             // Adjust composer area to account for status overlay and padding
-            let horizontal_padding = 2u16;  // Message input uses 2 chars padding
+            let horizontal_padding = 2u16; // Message input uses 2 chars padding
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
                 width: area.width.saturating_sub(horizontal_padding * 2),
                 height: (area.height.saturating_sub(y_offset))
-                    - BottomPane::BOTTOM_PAD_LINES.min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
+                    - BottomPane::BOTTOM_PAD_LINES
+                        .min((area.height.saturating_sub(y_offset)).saturating_sub(1)),
             };
             self.composer.cursor_pos(composer_rect)
         }
@@ -328,7 +329,7 @@ impl BottomPane<'_> {
         self.status_view_active = false;
         self.request_redraw()
     }
-    
+
     /// Show the reasoning selection UI
     pub fn show_reasoning_selection(&mut self, current_effort: ReasoningEffort) {
         let view = ReasoningSelectionView::new(current_effort, self.app_event_tx.clone());
@@ -337,7 +338,7 @@ impl BottomPane<'_> {
         self.status_view_active = false;
         self.request_redraw()
     }
-    
+
     /// Show the theme selection UI
     pub fn show_theme_selection(&mut self, current_theme: ThemeName) {
         let view = ThemeSelectionView::new(current_theme, self.app_event_tx.clone());
@@ -378,7 +379,6 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-
     pub(crate) fn clear_live_ring(&mut self) {
         self.live_ring = None;
     }
@@ -394,7 +394,8 @@ impl BottomPane<'_> {
                 self.live_status = None;
             }
             // Ensure composer knows it has focus
-            self.composer.set_ctrl_c_quit_hint(self.ctrl_c_quit_hint, self.has_input_focus);
+            self.composer
+                .set_ctrl_c_quit_hint(self.ctrl_c_quit_hint, self.has_input_focus);
         }
     }
 
@@ -714,10 +715,7 @@ mod tests {
         for x in 0..area.width {
             row0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
-        assert!(
-            row0.contains("Coding"),
-            "expected Coding header: {row0:?}"
-        );
+        assert!(row0.contains("Coding"), "expected Coding header: {row0:?}");
     }
 
     #[test]

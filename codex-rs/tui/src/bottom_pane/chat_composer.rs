@@ -107,47 +107,53 @@ impl ChatComposer {
             ActivePopup::Command(c) => c.calculate_required_height(),
             ActivePopup::File(c) => c.calculate_required_height(),
         };
-        
+
         // Calculate actual content height of textarea
         // Account for: 2 border + 2 horizontal padding (1 left + 1 right)
         let content_width = width.saturating_sub(4); // 2 border + 2 horizontal padding
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
-        
+
         // Total input height: content + border (2) only, no vertical padding
         // Minimum of 3 ensures at least 1 visible line with border
         let input_height = (content_lines + 2).max(3).min(15);
-        
+
         input_height + hint_height
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else {
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
+            1
+        } else {
             match &self.active_popup {
                 ActivePopup::Command(popup) => popup.calculate_required_height(),
                 ActivePopup::File(popup) => popup.calculate_required_height(),
                 ActivePopup::None => 1,
             }
         };
-        // Calculate dynamic height based on content  
+        // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
-        
+
         // Use desired height but don't exceed available space
         let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
-        let [input_area, _] =
-            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
-        
+        let [input_area, _] = Layout::vertical([
+            Constraint::Length(input_height),
+            Constraint::Length(hint_height),
+        ])
+        .areas(area);
+
         // Get inner area of the bordered input box
         let input_block = Block::default().borders(Borders::ALL);
         let textarea_rect = input_block.inner(input_area);
-        
+
         // Apply same padding as in render (1 char horizontal only, no vertical padding)
         let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
-        
+
         let state = self.textarea_state.borrow();
-        self.textarea.cursor_pos_with_state(padded_textarea_rect, &state)
+        self.textarea
+            .cursor_pos_with_state(padded_textarea_rect, &state)
     }
 
     /// Returns true if the composer currently contains no user input.
@@ -299,12 +305,13 @@ impl ChatComposer {
                 if let Some(cmd) = popup.selected_command() {
                     // Get the full command text before clearing
                     let command_text = self.textarea.text().to_string();
-                    
+
                     // Record the exact slash command that was typed
                     self.history.record_local_submission(&command_text);
-                    
+
                     // Send command to the app layer with full text.
-                    self.app_event_tx.send(AppEvent::DispatchCommand(*cmd, command_text.clone()));
+                    self.app_event_tx
+                        .send(AppEvent::DispatchCommand(*cmd, command_text.clone()));
 
                     // Clear textarea so no residual text remains.
                     self.textarea.set_text("");
@@ -522,11 +529,14 @@ impl ChatComposer {
                 code: KeyCode::Esc, ..
             } => {
                 // Check if this is a double-Esc press
-                const DOUBLE_ESC_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(500);
+                const DOUBLE_ESC_THRESHOLD: std::time::Duration =
+                    std::time::Duration::from_millis(500);
                 let now = std::time::Instant::now();
-                
+
                 if let Some(last_time) = self.last_esc_time {
-                    if now.duration_since(last_time) < DOUBLE_ESC_THRESHOLD && !self.textarea.is_empty() {
+                    if now.duration_since(last_time) < DOUBLE_ESC_THRESHOLD
+                        && !self.textarea.is_empty()
+                    {
                         // Double-Esc detected, clear the input field
                         self.textarea.set_text("");
                         self.pending_pastes.clear();
@@ -535,7 +545,7 @@ impl ChatComposer {
                         return (InputResult::None, true);
                     }
                 }
-                
+
                 // Single Esc - just record the time
                 self.last_esc_time = Some(now);
                 (InputResult::None, false)
@@ -554,7 +564,9 @@ impl ChatComposer {
                     .should_handle_navigation(self.textarea.text(), self.textarea.cursor())
                 {
                     let replace_text = match key_event.code {
-                        KeyCode::Up => self.history.navigate_up(self.textarea.text(), &self.app_event_tx),
+                        KeyCode::Up => self
+                            .history
+                            .navigate_up(self.textarea.text(), &self.app_event_tx),
                         KeyCode::Down => self.history.navigate_down(&self.app_event_tx),
                         _ => unreachable!(),
                     };
@@ -573,7 +585,7 @@ impl ChatComposer {
             } => {
                 // Record the exact text that was typed (before replacement)
                 let original_text = self.textarea.text().to_string();
-                
+
                 let mut text = self.textarea.text().to_string();
                 self.textarea.set_text("");
 
@@ -599,7 +611,7 @@ impl ChatComposer {
     /// Handle generic Input events that modify the textarea content.
     fn handle_input_basic(&mut self, input: KeyEvent) -> (InputResult, bool) {
         let text_before = self.textarea.text().to_string();
-        
+
         // Special handling for backspace on placeholders
         if let KeyEvent {
             code: KeyCode::Backspace,
@@ -740,17 +752,24 @@ impl WidgetRef for &ChatComposer {
             ActivePopup::None => 1,
         };
         // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) { 1 } else { popup_height };
-        
+        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
+            1
+        } else {
+            popup_height
+        };
+
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
-        
+
         // Use desired height but don't exceed available space
         let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
-        let [input_area, hint_area] =
-            Layout::vertical([Constraint::Length(input_height), Constraint::Length(hint_height)]).areas(area);
+        let [input_area, hint_area] = Layout::vertical([
+            Constraint::Length(input_height),
+            Constraint::Length(hint_height),
+        ])
+        .areas(area);
         match &self.active_popup {
             ActivePopup::Command(popup) => {
                 popup.render_ref(hint_area, buf);
@@ -820,13 +839,13 @@ impl WidgetRef for &ChatComposer {
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()));
-        
+
         let textarea_rect = input_block.inner(input_area);
         input_block.render_ref(input_area, buf);
 
         // Add padding inside the text area (1 char horizontal only, no vertical padding)
         let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
-        
+
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
         // Only show placeholder if there's no chat history AND no text typed
