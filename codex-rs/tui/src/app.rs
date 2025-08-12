@@ -439,6 +439,18 @@ impl App<'_> {
                             widget.handle_browser_command(command_text);
                         }
                     }
+                    SlashCommand::Chrome => {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            // For /chrome, just pass "chrome" plus any arguments
+                            // handle_browser_command expects everything after "/browser"
+                            let chrome_command = if command_text.trim().is_empty() {
+                                "chrome".to_string()
+                            } else {
+                                format!("chrome {}", command_text)
+                            };
+                            widget.handle_browser_command(chrome_command);
+                        }
+                    }
                     #[cfg(debug_assertions)]
                     SlashCommand::TestApproval => {
                         use codex_core::protocol::EventMsg;

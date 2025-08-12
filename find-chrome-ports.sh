@@ -28,7 +28,8 @@ for port in $ports; do
         [ ! -z "$ws_url" ] && echo "  WebSocket: $ws_url"
         
         echo ""
-        echo "To connect in codex, use: /browser local $port"
+        echo "To connect in codex, use: /browser chrome $port"
+        echo "                      or: /chrome $port"
     else
         echo "✗ Port is not accessible (Chrome might be restricted)"
     fi
