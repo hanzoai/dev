@@ -64,4 +64,3 @@ pub(crate) fn dim() -> Color {
 pub(crate) fn background() -> Color {
     current_theme().background
 }
-

@@ -61,37 +61,43 @@ impl SlashCommand {
     pub fn command(self) -> &'static str {
         self.into()
     }
-    
+
     /// Returns true if this command should expand into a prompt for the LLM.
     pub fn is_prompt_expanding(self) -> bool {
-        matches!(self, SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code)
+        matches!(
+            self,
+            SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code
+        )
     }
-    
+
     /// Returns true if this command requires additional arguments after the command.
     pub fn requires_arguments(self) -> bool {
-        matches!(self, SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code)
+        matches!(
+            self,
+            SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code
+        )
     }
-    
+
     /// Expands a prompt-expanding command into a full prompt for the LLM.
     /// Returns None if the command is not a prompt-expanding command.
     pub fn expand_prompt(self, args: &str) -> Option<String> {
         if !self.is_prompt_expanding() {
             return None;
         }
-        
+
         // Use the slash_commands module from core to generate the prompts
         // Note: We pass None for agents here as the TUI doesn't have access to the session config
         // The actual agents will be determined when the agent tool is invoked
         match self {
-            SlashCommand::Plan => {
-                Some(codex_core::slash_commands::format_plan_command(args, None, None))
-            }
-            SlashCommand::Solve => {
-                Some(codex_core::slash_commands::format_solve_command(args, None, None))
-            }
-            SlashCommand::Code => {
-                Some(codex_core::slash_commands::format_code_command(args, None, None))
-            }
+            SlashCommand::Plan => Some(codex_core::slash_commands::format_plan_command(
+                args, None, None,
+            )),
+            SlashCommand::Solve => Some(codex_core::slash_commands::format_solve_command(
+                args, None, None,
+            )),
+            SlashCommand::Code => Some(codex_core::slash_commands::format_code_command(
+                args, None, None,
+            )),
             _ => None,
         }
     }
@@ -106,17 +112,17 @@ pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
 /// Returns either the expanded prompt (for prompt-expanding commands) or the original message.
 pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
     let trimmed = message.trim();
-    
+
     // Check if it starts with a slash
     if !trimmed.starts_with('/') {
         return ProcessedCommand::NotCommand(message.to_string());
     }
-    
+
     // Parse the command and arguments
     let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
     let command_str = &parts[0][1..]; // Remove the leading '/'
     let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-    
+
     // Try to parse the command
     if let Ok(command) = command_str.parse::<SlashCommand>() {
         // Check if it's a prompt-expanding command
@@ -128,12 +134,12 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
                     command.command()
                 ));
             }
-            
+
             if let Some(expanded) = command.expand_prompt(&args) {
                 return ProcessedCommand::ExpandedPrompt(expanded);
             }
         }
-        
+
         // It's a regular command, return it as-is
         ProcessedCommand::RegularCommand(command, args)
     } else {

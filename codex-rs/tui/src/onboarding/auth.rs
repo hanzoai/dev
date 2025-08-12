@@ -15,7 +15,7 @@ use codex_login::AuthMode;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::colors::{light_blue, success_green, error, text_bright, info};
+use crate::colors::{error, info, light_blue, success_green, text_bright};
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::shimmer::FrameTicker;
@@ -128,7 +128,9 @@ impl AuthModeWidget {
                 Line::from(vec![
                     Span::styled(
                         format!("{} {}. ", caret, idx + 1),
-                        Style::default().fg(light_blue()).add_modifier(Modifier::DIM),
+                        Style::default()
+                            .fg(light_blue())
+                            .add_modifier(Modifier::DIM),
                     ),
                     Span::styled(text.to_owned(), Style::default().fg(light_blue())),
                 ])
@@ -137,8 +139,11 @@ impl AuthModeWidget {
             };
 
             let line2 = if is_selected {
-                Line::from(format!("     {description}"))
-                    .style(Style::default().fg(light_blue()).add_modifier(Modifier::DIM))
+                Line::from(format!("     {description}")).style(
+                    Style::default()
+                        .fg(light_blue())
+                        .add_modifier(Modifier::DIM),
+                )
             } else {
                 Line::from(format!("     {description}"))
                     .style(Style::default().add_modifier(Modifier::DIM))

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use ratatui::style::Modifier;
+
 use codex_core::codex_wrapper::CodexConversation;
 use codex_core::codex_wrapper::init_codex;
 use codex_core::config::Config;
@@ -14,10 +16,10 @@ use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
 use codex_core::protocol::AgentReasoningRawContentDeltaEvent;
 use codex_core::protocol::AgentReasoningRawContentEvent;
+use codex_core::protocol::AgentStatusUpdateEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::BackgroundEventEvent;
 use codex_core::protocol::BrowserScreenshotUpdateEvent;
-use codex_core::protocol::AgentStatusUpdateEvent;
 use codex_core::protocol::ErrorEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
@@ -75,7 +77,7 @@ pub(crate) struct ChatWidget<'a> {
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
     active_history_cell: Option<HistoryCell>,
-    history_cells: Vec<HistoryCell>,  // Store all history in memory
+    history_cells: Vec<HistoryCell>, // Store all history in memory
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -99,10 +101,11 @@ pub(crate) struct ChatWidget<'a> {
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
     // Cached image protocol to avoid recreating every frame (path, area, protocol)
-    cached_image_protocol: std::cell::RefCell<Option<(PathBuf, Rect, ratatui_image::protocol::Protocol)>>,
+    cached_image_protocol:
+        std::cell::RefCell<Option<(PathBuf, Rect, ratatui_image::protocol::Protocol)>>,
     // Cached picker to avoid recreating every frame
     cached_picker: std::cell::RefCell<Option<Picker>>,
-    
+
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
     // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
@@ -159,18 +162,18 @@ impl ChatWidget<'_> {
     pub(crate) fn insert_str(&mut self, s: &str) {
         self.bottom_pane.insert_str(s);
     }
-    
+
     fn parse_message_with_images(&mut self, text: String) -> UserMessage {
         use std::path::Path;
-        
+
         // Common image extensions
         const IMAGE_EXTENSIONS: &[&str] = &[
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif"
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif",
         ];
-        
+
         let mut image_paths = Vec::new();
         let mut cleaned_text = text.clone();
-        
+
         // First, handle [image: ...] placeholders from drag-and-drop
         let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]").unwrap();
         for mat in placeholder_regex.find_iter(&text) {
@@ -181,22 +184,24 @@ impl ChatWidget<'_> {
                 cleaned_text = cleaned_text.replace(placeholder, "");
             }
         }
-        
+
         // Then check for direct file paths in the text
         let words: Vec<String> = text.split_whitespace().map(String::from).collect();
-        
+
         for word in &words {
             // Skip placeholders we already handled
             if word.starts_with("[image:") {
                 continue;
             }
-            
+
             // Check if this looks like an image path
-            let is_image_path = IMAGE_EXTENSIONS.iter().any(|ext| word.to_lowercase().ends_with(ext));
-            
+            let is_image_path = IMAGE_EXTENSIONS
+                .iter()
+                .any(|ext| word.to_lowercase().ends_with(ext));
+
             if is_image_path {
                 let path = Path::new(word);
-                
+
                 // Check if it's a relative or absolute path that exists
                 if path.exists() {
                     image_paths.push(path.to_path_buf());
@@ -207,9 +212,12 @@ impl ChatWidget<'_> {
                     let potential_paths = vec![
                         PathBuf::from(word),
                         PathBuf::from("./").join(word),
-                        std::env::current_dir().ok().map(|d| d.join(word)).unwrap_or_default(),
+                        std::env::current_dir()
+                            .ok()
+                            .map(|d| d.join(word))
+                            .unwrap_or_default(),
                     ];
-                    
+
                     for potential_path in potential_paths {
                         if potential_path.exists() {
                             image_paths.push(potential_path);
@@ -220,16 +228,19 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        
+
         // Clean up extra whitespace
-        cleaned_text = cleaned_text.split_whitespace().collect::<Vec<_>>().join(" ");
-        
+        cleaned_text = cleaned_text
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
         UserMessage {
             text: cleaned_text,
             image_paths,
         }
     }
-    
+
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
             self.active_history_cell = None;
@@ -248,14 +259,18 @@ impl ChatWidget<'_> {
     }
     fn layout_areas(&self, area: Rect) -> Vec<Rect> {
         // Check if browser is active and has a screenshot
-        let has_browser_screenshot = self.latest_browser_screenshot.lock()
+        let has_browser_screenshot = self
+            .latest_browser_screenshot
+            .lock()
             .map(|lock| lock.is_some())
             .unwrap_or(false);
-        
+
         // Check if there are active agents or if agents are ready to start
         let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
-        
-        let bottom_height = 6u16.max(self.bottom_pane.desired_height(area.width)).min(15);
+
+        let bottom_height = 6u16
+            .max(self.bottom_pane.desired_height(area.width))
+            .min(15);
 
         if has_browser_screenshot || has_active_agents {
             // match HUD padding used in render_browser_hud()
@@ -268,10 +283,9 @@ impl ChatWidget<'_> {
             };
 
             // use the actual 50/50 split
-            let [_left, right] = Layout::horizontal([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ]).areas::<2>(padded_area);
+            let [_left, right] =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas::<2>(padded_area);
 
             // inner width of the Preview block (remove 1-char borders)
             let inner_cols = right.width.saturating_sub(2);
@@ -299,12 +313,14 @@ impl ChatWidget<'_> {
                 Constraint::Length(hud_height),
                 Constraint::Fill(1),
                 Constraint::Length(bottom_height),
-            ]).areas::<4>(area).to_vec();
+            ])
+            .areas::<4>(area)
+            .to_vec();
         } else {
             // Status bar, history, bottom pane (no HUD)
             Layout::vertical([
                 Constraint::Length(3), // Status bar with box border
-                Constraint::Fill(1), // History takes all remaining space
+                Constraint::Fill(1),   // History takes all remaining space
                 Constraint::Length(bottom_height),
             ])
             .areas::<3>(area)
@@ -379,7 +395,7 @@ impl ChatWidget<'_> {
         // The core session will use the same global manager when browser tools are invoked
         let browser_config = codex_browser::config::BrowserConfig::default();
         let browser_manager = Arc::new(BrowserManager::new(browser_config));
-        
+
         // Add initial animated welcome message to history
         let mut history_cells = Vec::new();
         history_cells.push(HistoryCell::AnimatedWelcome {
@@ -390,7 +406,7 @@ impl ChatWidget<'_> {
         });
 
         // Initialize image protocol for rendering screenshots
-        
+
         Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -447,73 +463,76 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_paste(&mut self, text: String) {
         // Check if the pasted text is a file path to an image
         let trimmed = text.trim();
-        
+
         tracing::info!("Paste received: {:?}", trimmed);
-        
+
         const IMAGE_EXTENSIONS: &[&str] = &[
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif"
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif",
         ];
-        
+
         // Check if it looks like a file path
-        let is_likely_path = trimmed.starts_with("file://") 
-            || trimmed.starts_with("/") 
+        let is_likely_path = trimmed.starts_with("file://")
+            || trimmed.starts_with("/")
             || trimmed.starts_with("~/")
             || trimmed.starts_with("./");
-            
+
         if is_likely_path {
             // Remove escape backslashes that terminals add for special characters
             let unescaped = trimmed
                 .replace("\\ ", " ")
                 .replace("\\(", "(")
                 .replace("\\)", ")");
-            
+
             // Handle file:// URLs (common when dragging from Finder)
             let path_str = if unescaped.starts_with("file://") {
                 // URL decode to handle spaces and special characters
                 // Simple decoding for common cases (spaces as %20, etc.)
-                unescaped.strip_prefix("file://")
-                    .map(|s| s.replace("%20", " ")
-                             .replace("%28", "(")
-                             .replace("%29", ")")
-                             .replace("%5B", "[")
-                             .replace("%5D", "]")
-                             .replace("%2C", ",")
-                             .replace("%27", "'")
-                             .replace("%26", "&")
-                             .replace("%23", "#")
-                             .replace("%40", "@")
-                             .replace("%2B", "+")
-                             .replace("%3D", "=")
-                             .replace("%24", "$")
-                             .replace("%21", "!")
-                             .replace("%2D", "-")
-                             .replace("%2E", "."))
+                unescaped
+                    .strip_prefix("file://")
+                    .map(|s| {
+                        s.replace("%20", " ")
+                            .replace("%28", "(")
+                            .replace("%29", ")")
+                            .replace("%5B", "[")
+                            .replace("%5D", "]")
+                            .replace("%2C", ",")
+                            .replace("%27", "'")
+                            .replace("%26", "&")
+                            .replace("%23", "#")
+                            .replace("%40", "@")
+                            .replace("%2B", "+")
+                            .replace("%3D", "=")
+                            .replace("%24", "$")
+                            .replace("%21", "!")
+                            .replace("%2D", "-")
+                            .replace("%2E", ".")
+                    })
                     .unwrap_or_else(|| unescaped.clone())
             } else {
                 unescaped
             };
-            
+
             tracing::info!("Decoded path: {:?}", path_str);
-            
+
             // Check if it has an image extension
-            let is_image = IMAGE_EXTENSIONS.iter().any(|ext| path_str.to_lowercase().ends_with(ext));
-            
+            let is_image = IMAGE_EXTENSIONS
+                .iter()
+                .any(|ext| path_str.to_lowercase().ends_with(ext));
+
             if is_image {
                 let path = PathBuf::from(&path_str);
                 tracing::info!("Checking if path exists: {:?}", path);
                 if path.exists() {
                     tracing::info!("Image file dropped/pasted: {:?}", path);
                     // Get just the filename for display
-                    let filename = path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("image");
-                    
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+
                     // Add a placeholder to the compose field instead of submitting
                     let placeholder = format!("[image: {}]", filename);
-                    
+
                     // Store the image path for later submission
                     self.pending_images.insert(placeholder.clone(), path);
-                    
+
                     // Add the placeholder text to the compose field
                     self.bottom_pane.handle_paste(placeholder);
                     return;
@@ -522,7 +541,7 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        
+
         // Otherwise handle as regular text paste
         self.bottom_pane.handle_paste(text);
     }
@@ -530,10 +549,11 @@ impl ChatWidget<'_> {
     fn add_to_history(&mut self, cell: HistoryCell) {
         // If this is the first user prompt, start fade-out animation for AnimatedWelcome
         if matches!(cell, HistoryCell::UserPrompt { .. }) {
-            let has_existing_user_prompts = self.history_cells.iter().any(|cell| {
-                matches!(cell, HistoryCell::UserPrompt { .. })
-            });
-            
+            let has_existing_user_prompts = self
+                .history_cells
+                .iter()
+                .any(|cell| matches!(cell, HistoryCell::UserPrompt { .. }));
+
             if !has_existing_user_prompts {
                 // This is the first user prompt - start fade-out
                 for history_cell in &mut self.history_cells {
@@ -543,15 +563,16 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        
+
         // Store in memory instead of sending to scrollback
         self.history_cells.push(cell);
         // Auto-scroll to bottom when new content arrives
         self.scroll_offset = 0;
         // Check if there's actual conversation history (any user prompts submitted)
-        let has_conversation = self.history_cells.iter().any(|cell| {
-            matches!(cell, HistoryCell::UserPrompt { .. })
-        });
+        let has_conversation = self
+            .history_cells
+            .iter()
+            .any(|cell| matches!(cell, HistoryCell::UserPrompt { .. }));
         self.bottom_pane.set_has_chat_history(has_conversation);
         // Ensure input focus is maintained when new content arrives
         self.bottom_pane.ensure_input_focus();
@@ -572,17 +593,19 @@ impl ChatWidget<'_> {
         });
     }
 
-
     fn submit_user_message(&mut self, user_message: UserMessage) {
         let UserMessage { text, image_paths } = user_message;
-        
+
         // Keep the original text for display purposes
         let original_text = text.clone();
         let mut actual_text = text;
-        
+
         // Check for multi-agent commands first (before processing slash commands)
         let original_trimmed = original_text.trim();
-        if original_trimmed.starts_with("/plan ") || original_trimmed.starts_with("/solve ") || original_trimmed.starts_with("/code ") {
+        if original_trimmed.starts_with("/plan ")
+            || original_trimmed.starts_with("/solve ")
+            || original_trimmed.starts_with("/code ")
+        {
             self.agents_ready_to_start = true;
             self.last_agent_prompt = Some(original_text.clone());
             self.request_redraw();
@@ -597,7 +620,8 @@ impl ChatWidget<'_> {
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
                 // This is a regular slash command, dispatch it normally
-                self.app_event_tx.send(AppEvent::DispatchCommand(cmd, actual_text.clone()));
+                self.app_event_tx
+                    .send(AppEvent::DispatchCommand(cmd, actual_text.clone()));
                 return;
             }
             crate::slash_command::ProcessedCommand::Error(error_msg) => {
@@ -609,19 +633,21 @@ impl ChatWidget<'_> {
                 // Not a slash command, process normally
             }
         }
-        
+
         let mut items: Vec<InputItem> = Vec::new();
         let mut browser_screenshot_count = 0;
 
         // Check if browser mode is enabled and capture screenshot
         // Always check both local and global browser managers
         let local_browser_manager = self.browser_manager.clone();
-        
+
         // Check if either local or global browser is enabled
-        let local_enabled = local_browser_manager.config.try_read()
+        let local_enabled = local_browser_manager
+            .config
+            .try_read()
             .map(|c| c.enabled)
             .unwrap_or(false);
-        
+
         // Check global browser manager async
         let (tx_global, rx_global) = std::sync::mpsc::channel();
         tokio::spawn(async move {
@@ -633,11 +659,12 @@ impl ChatWidget<'_> {
             };
             let _ = tx_global.send((global_manager, enabled));
         });
-        
+
         // Get global browser state
-        let (global_manager, global_enabled) = rx_global.recv_timeout(std::time::Duration::from_millis(100))
+        let (global_manager, global_enabled) = rx_global
+            .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap_or((None, false));
-        
+
         // Use global manager if it exists and is enabled, otherwise use local
         let (browser_manager, browser_enabled) = if global_enabled && global_manager.is_some() {
             (global_manager.unwrap(), true)
@@ -649,28 +676,30 @@ impl ChatWidget<'_> {
         } else {
             (local_browser_manager, false)
         };
-        
+
         // Get current browser URL for display
         let mut browser_url = None;
-        
+
         if browser_enabled {
             tracing::info!("Browser is enabled, attempting to capture screenshot...");
-            
+
             // We need to capture screenshots synchronously before sending the message
             // Use a channel to get the result from the async task
             let (tx, rx) = std::sync::mpsc::channel();
             let browser_manager_capture = browser_manager.clone();
-            
+
             tokio::spawn(async move {
                 tracing::info!("Starting async screenshot capture...");
                 let result = browser_manager_capture.capture_screenshot_with_url().await;
                 match &result {
-                    Ok((paths, _)) => tracing::info!("Screenshot capture succeeded with {} images", paths.len()),
+                    Ok((paths, _)) => {
+                        tracing::info!("Screenshot capture succeeded with {} images", paths.len())
+                    }
                     Err(e) => tracing::error!("Screenshot capture failed: {}", e),
                 }
                 let _ = tx.send(result);
             });
-            
+
             // Wait for screenshot capture (with timeout)
             match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(Ok((screenshot_paths, url))) => {
@@ -678,7 +707,7 @@ impl ChatWidget<'_> {
                     browser_screenshot_count = screenshot_paths.len();
                     let screenshot_url = url.clone();
                     browser_url = url.clone();
-                    
+
                     // Save the first screenshot path and URL for display in the TUI
                     if let Some(first_path) = screenshot_paths.first() {
                         if let Ok(mut latest) = self.latest_browser_screenshot.lock() {
@@ -686,7 +715,7 @@ impl ChatWidget<'_> {
                             *latest = Some((first_path.clone(), url_string));
                         }
                     }
-                    
+
                     // Add browser screenshots directly to items (ephemeral - not stored in image_paths for history)
                     for path in screenshot_paths {
                         tracing::info!("Browser screenshot attached: {}", path.display());
@@ -698,13 +727,20 @@ impl ChatWidget<'_> {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
                                 .as_secs();
-                            let metadata = format!("screenshot:{}:{}", timestamp, screenshot_url.as_deref().unwrap_or("unknown"));
-                            items.push(InputItem::EphemeralImage { 
+                            let metadata = format!(
+                                "screenshot:{}:{}",
+                                timestamp,
+                                screenshot_url.as_deref().unwrap_or("unknown")
+                            );
+                            items.push(InputItem::EphemeralImage {
                                 path,
                                 metadata: Some(metadata),
                             });
                         } else {
-                            tracing::error!("Screenshot file does not exist at: {}", path.display());
+                            tracing::error!(
+                                "Screenshot file does not exist at: {}",
+                                path.display()
+                            );
                         }
                     }
                 }
@@ -720,7 +756,9 @@ impl ChatWidget<'_> {
         }
 
         if !actual_text.is_empty() {
-            items.push(InputItem::Text { text: actual_text.clone() });
+            items.push(InputItem::Text {
+                text: actual_text.clone(),
+            });
         }
 
         // Add user-provided images (these are persistent in history)
@@ -733,12 +771,17 @@ impl ChatWidget<'_> {
         }
 
         // Debug logging for what we're sending
-        let ephemeral_count = items.iter().filter(|item| {
-            matches!(item, InputItem::EphemeralImage { .. })
-        }).count();
+        let ephemeral_count = items
+            .iter()
+            .filter(|item| matches!(item, InputItem::EphemeralImage { .. }))
+            .count();
         let total_items = items.len();
         if ephemeral_count > 0 {
-            tracing::info!("Sending {} items to model (including {} ephemeral images)", total_items, ephemeral_count);
+            tracing::info!(
+                "Sending {} items to model (including {} ephemeral images)",
+                total_items,
+                ephemeral_count
+            );
         }
 
         self.codex_op_tx
@@ -750,7 +793,9 @@ impl ChatWidget<'_> {
         // Persist the original text to cross-session message history.
         if !original_text.is_empty() {
             self.codex_op_tx
-                .send(Op::AddToHistory { text: original_text.clone() })
+                .send(Op::AddToHistory {
+                    text: original_text.clone(),
+                })
                 .unwrap_or_else(|e| {
                     tracing::error!("failed to send AddHistory op: {e}");
                 });
@@ -782,17 +827,17 @@ impl ChatWidget<'_> {
     pub(crate) fn set_mouse_status_message(&mut self, message: &str) {
         self.bottom_pane.update_status_text(message.to_string());
     }
-    
+
     pub(crate) fn handle_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
-        use crossterm::event::{MouseEventKind, KeyModifiers};
-        
+        use crossterm::event::{KeyModifiers, MouseEventKind};
+
         // Check if Shift is held - if so, let the terminal handle selection
         if mouse_event.modifiers.contains(KeyModifiers::SHIFT) {
             // Don't handle any mouse events when Shift is held
             // This allows the terminal's native text selection to work
             return;
         }
-        
+
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
                 // For now, just scroll up without bounds checking - the render logic will clamp it
@@ -991,7 +1036,8 @@ impl ChatWidget<'_> {
                         parsed: parsed_cmd.clone(),
                     },
                 );
-                self.active_history_cell = Some(HistoryCell::new_active_exec_command(command, parsed_cmd));
+                self.active_history_cell =
+                    Some(HistoryCell::new_active_exec_command(command, parsed_cmd));
             }
             EventMsg::ExecCommandOutputDelta(_) => {
                 // TODO
@@ -1099,9 +1145,16 @@ impl ChatWidget<'_> {
                 }
                 self.request_redraw();
             }
-            EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path, url }) => {
-                tracing::info!("Received browser screenshot update: {} at URL: {}", screenshot_path.display(), url);
-                
+            EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                screenshot_path,
+                url,
+            }) => {
+                tracing::info!(
+                    "Received browser screenshot update: {} at URL: {}",
+                    screenshot_path.display(),
+                    url
+                );
+
                 // Update the latest screenshot and URL for display
                 if let Ok(mut latest) = self.latest_browser_screenshot.lock() {
                     let old_url = latest.as_ref().map(|(_, u)| u.clone());
@@ -1109,11 +1162,15 @@ impl ChatWidget<'_> {
                     if old_url.as_ref() != Some(&url) {
                         tracing::info!("Browser URL changed from {:?} to {}", old_url, url);
                     }
-                    tracing::debug!("Updated browser screenshot display with path: {} and URL: {}", screenshot_path.display(), url);
+                    tracing::debug!(
+                        "Updated browser screenshot display with path: {} and URL: {}",
+                        screenshot_path.display(),
+                        url
+                    );
                 } else {
                     tracing::warn!("Failed to acquire lock for browser screenshot update");
                 }
-                
+
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -1149,7 +1206,7 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_reasoning_command(&mut self, command_text: String) {
         // Parse the command to extract the parameter
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
-        
+
         if parts.len() > 1 {
             // User specified a level: /reasoning high
             let new_effort = match parts[1].to_lowercase().as_str() {
@@ -1170,16 +1227,16 @@ impl ChatWidget<'_> {
             self.set_reasoning_effort(new_effort);
         } else {
             // No parameter - show interactive selection UI
-            self.bottom_pane.show_reasoning_selection(self.config.model_reasoning_effort);
+            self.bottom_pane
+                .show_reasoning_selection(self.config.model_reasoning_effort);
             return;
         }
     }
-    
+
     pub(crate) fn set_reasoning_effort(&mut self, new_effort: ReasoningEffort) {
-        
         // Update the config
         self.config.model_reasoning_effort = new_effort;
-        
+
         // Send ConfigureSession op to update the backend
         let op = Op::ConfigureSession {
             provider: self.config.model_provider.clone(),
@@ -1195,9 +1252,9 @@ impl ChatWidget<'_> {
             cwd: self.config.cwd.clone(),
             resume_path: None,
         };
-        
+
         self.submit_op(op);
-        
+
         // Add status message to history
         self.add_to_history(HistoryCell::new_reasoning_output(new_effort));
     }
@@ -1206,18 +1263,19 @@ impl ChatWidget<'_> {
     pub(crate) fn apply_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
         self.bottom_pane.on_file_search_result(query, matches);
     }
-    
+
     pub(crate) fn show_theme_selection(&mut self) {
-        self.bottom_pane.show_theme_selection(self.config.tui.theme.name);
+        self.bottom_pane
+            .show_theme_selection(self.config.tui.theme.name);
     }
-    
+
     pub(crate) fn set_theme(&mut self, new_theme: codex_core::config_types::ThemeName) {
         // Update the config
         self.config.tui.theme.name = new_theme;
-        
+
         // Save the theme to config file
         self.save_theme_to_config(new_theme);
-        
+
         // Add confirmation message to history
         let theme_name = match new_theme {
             // Light themes
@@ -1241,7 +1299,7 @@ impl ChatWidget<'_> {
         let message = format!("✓ Theme changed to {}", theme_name);
         self.add_to_history(HistoryCell::new_background_event(message));
     }
-    
+
     fn save_theme_to_config(&self, new_theme: codex_core::config_types::ThemeName) {
         // For now, just log the theme change - config saving could be implemented
         // using the core config system in a future update
@@ -1316,40 +1374,41 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
-        
+
         let browser_manager = self.browser_manager.clone();
         let response = if parts.len() > 1 {
             let first_arg = parts[1];
-            
+
             // Check if the first argument looks like a URL (has a dot or protocol)
             let is_url = first_arg.contains("://") || first_arg.contains(".");
-            
+
             if is_url {
                 // It's a URL - enable browser mode and navigate to it
                 let url = parts[1..].join(" ");
-                
+
                 // Ensure URL has protocol
                 let full_url = if !url.contains("://") {
                     format!("https://{}", url)
                 } else {
                     url.clone()
                 };
-                
+
                 // Enable browser mode
                 browser_manager.set_enabled_sync(true);
-                
+
                 // Navigate to URL and wait for it to load
                 let browser_manager_open = browser_manager.clone();
                 let url_for_goto = full_url.clone();
                 tokio::spawn(async move {
                     // Ensure global manager is configured similarly for consistency
-                    let global_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    
+                    let global_manager =
+                        codex_browser::global::get_or_create_browser_manager().await;
+
                     // Copy configuration from TUI manager to global manager
                     {
                         let tui_config = browser_manager_open.get_config().await;
                         let mut global_config = global_manager.config.write().await;
-                        
+
                         // Copy key settings to maintain consistency
                         global_config.connect_port = tui_config.connect_port;
                         global_config.connect_ws = tui_config.connect_ws.clone();
@@ -1357,14 +1416,18 @@ impl ChatWidget<'_> {
                         global_config.persist_profile = tui_config.persist_profile;
                         global_config.enabled = true;
                     }
-                    
+
                     // Start global manager with synced config
                     let _ = global_manager.start().await;
-                    
+
                     // Navigate using TUI manager (for now - could switch to global later)
                     match browser_manager_open.goto(&url_for_goto).await {
                         Ok(result) => {
-                            tracing::info!("Browser opened to: {} (title: {:?})", result.url, result.title);
+                            tracing::info!(
+                                "Browser opened to: {} (title: {:?})",
+                                result.url,
+                                result.title
+                            );
                             // Add a small delay to ensure page is fully rendered
                             tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                             tracing::info!("Page should be loaded now");
@@ -1374,8 +1437,11 @@ impl ChatWidget<'_> {
                         }
                     }
                 });
-                
-                format!("Browser mode enabled. Opening: {}\nScreenshots will be attached to model requests.", full_url)
+
+                format!(
+                    "Browser mode enabled. Opening: {}\nScreenshots will be attached to model requests.",
+                    full_url
+                )
             } else {
                 // It's a subcommand
                 match first_arg {
@@ -1388,17 +1454,19 @@ impl ChatWidget<'_> {
                         } else {
                             None
                         };
-                        
+
                         browser_manager.set_enabled_sync(true);
-                        
+
                         // Update the config to use local Chrome connection
                         let browser_manager_local = browser_manager.clone();
-                        let port_display = port.map_or("auto-detected".to_string(), |p| p.to_string());
-                        
+                        let port_display =
+                            port.map_or("auto-detected".to_string(), |p| p.to_string());
+
                         tokio::spawn(async move {
                             // CRITICAL: Use the global browser manager for everything to avoid dual instances
-                            let global_manager = codex_browser::global::get_or_create_browser_manager().await;
-                            
+                            let global_manager =
+                                codex_browser::global::get_or_create_browser_manager().await;
+
                             // Configure the global manager for local Chrome connection
                             {
                                 let mut global_config = global_manager.config.write().await;
@@ -1407,7 +1475,7 @@ impl ChatWidget<'_> {
                                 global_config.persist_profile = true;
                                 global_config.enabled = true;
                             }
-                            
+
                             // Also sync the TUI manager to the same config to keep UI consistent
                             {
                                 let mut config = browser_manager_local.config.write().await;
@@ -1415,22 +1483,29 @@ impl ChatWidget<'_> {
                                 config.headless = false;
                                 config.persist_profile = true;
                             }
-                            
+
                             // Connect using the global manager (this will be used by LLM tools)
                             match global_manager.start().await {
                                 Ok(_) => {
-                                    tracing::info!("Connected to local Chrome instance via global manager");
-                                    tracing::info!("All browser operations (TUI and LLM tools) will use external Chrome");
-                                    
+                                    tracing::info!(
+                                        "Connected to local Chrome instance via global manager"
+                                    );
+                                    tracing::info!(
+                                        "All browser operations (TUI and LLM tools) will use external Chrome"
+                                    );
+
                                     // Also start the local manager for UI consistency
                                     let _ = browser_manager_local.start().await;
                                 }
                                 Err(e) => {
-                                    tracing::warn!("Failed to connect to local Chrome: {}. Trying to launch Chrome with debug port...", e);
-                                    
+                                    tracing::warn!(
+                                        "Failed to connect to local Chrome: {}. Trying to launch Chrome with debug port...",
+                                        e
+                                    );
+
                                     // Determine which port to use for launching
                                     let launch_port = port.unwrap_or(9222);
-                                    
+
                                     // Try launching Chrome with debug port
                                     #[cfg(target_os = "macos")]
                                     {
@@ -1439,7 +1514,7 @@ impl ChatWidget<'_> {
                                             .arg("--user-data-dir=/tmp/coder-chrome-profile")
                                             .spawn();
                                     }
-                                    
+
                                     #[cfg(target_os = "linux")]
                                     {
                                         let _ = tokio::process::Command::new("google-chrome")
@@ -1447,20 +1522,26 @@ impl ChatWidget<'_> {
                                             .arg("--user-data-dir=/tmp/coder-chrome-profile")
                                             .spawn();
                                     }
-                                    
+
                                     // Wait a bit for Chrome to start
                                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                    
+
                                     // Try connecting again
                                     if let Err(e) = browser_manager_local.start().await {
-                                        tracing::error!("Failed to connect to Chrome after launching: {}", e);
+                                        tracing::error!(
+                                            "Failed to connect to Chrome after launching: {}",
+                                            e
+                                        );
                                     }
                                 }
                             }
                         });
-                        
+
                         if port.is_some() {
-                            format!("Connecting to local Chrome instance on port {}...\nIf Chrome is not running with debug port, it will be launched.", port_display)
+                            format!(
+                                "Connecting to local Chrome instance on port {}...\nIf Chrome is not running with debug port, it will be launched.",
+                                port_display
+                            )
                         } else {
                             "Auto-scanning for local Chrome instance with debug port...\nIf no Chrome found, it will be launched on port 9222.".to_string()
                         }
@@ -1486,69 +1567,84 @@ impl ChatWidget<'_> {
                         // Get status from BrowserManager
                         browser_manager.get_status_sync()
                     }
-                "fullpage" => {
-                    if parts.len() > 2 {
-                        match parts[2] {
-                            "on" => {
-                                // Enable full-page mode
-                                browser_manager.set_fullpage_sync(true);
-                                "Full-page screenshot mode enabled (max 8 segments).".to_string()
+                    "fullpage" => {
+                        if parts.len() > 2 {
+                            match parts[2] {
+                                "on" => {
+                                    // Enable full-page mode
+                                    browser_manager.set_fullpage_sync(true);
+                                    "Full-page screenshot mode enabled (max 8 segments)."
+                                        .to_string()
+                                }
+                                "off" => {
+                                    // Disable full-page mode
+                                    browser_manager.set_fullpage_sync(false);
+                                    "Full-page screenshot mode disabled.".to_string()
+                                }
+                                _ => "Usage: /browser fullpage [on|off]".to_string(),
                             }
-                            "off" => {
-                                // Disable full-page mode
-                                browser_manager.set_fullpage_sync(false);
-                                "Full-page screenshot mode disabled.".to_string()
-                            }
-                            _ => "Usage: /browser fullpage [on|off]".to_string()
+                        } else {
+                            "Usage: /browser fullpage [on|off]".to_string()
                         }
-                    } else {
-                        "Usage: /browser fullpage [on|off]".to_string()
                     }
-                }
-                "config" => {
-                    if parts.len() > 3 {
-                        let key = parts[2];
-                        let value = parts[3..].join(" ");
-                        // Update browser config
-                        match key {
-                            "viewport" => {
-                                // Parse viewport dimensions like "1920x1080"
-                                if let Some((width_str, height_str)) = value.split_once('x') {
-                                    if let (Ok(width), Ok(height)) = (width_str.parse::<u32>(), height_str.parse::<u32>()) {
-                                        browser_manager.set_viewport_sync(width, height);
-                                        format!("Browser viewport updated: {}x{}", width, height)
+                    "config" => {
+                        if parts.len() > 3 {
+                            let key = parts[2];
+                            let value = parts[3..].join(" ");
+                            // Update browser config
+                            match key {
+                                "viewport" => {
+                                    // Parse viewport dimensions like "1920x1080"
+                                    if let Some((width_str, height_str)) = value.split_once('x') {
+                                        if let (Ok(width), Ok(height)) =
+                                            (width_str.parse::<u32>(), height_str.parse::<u32>())
+                                        {
+                                            browser_manager.set_viewport_sync(width, height);
+                                            format!(
+                                                "Browser viewport updated: {}x{}",
+                                                width, height
+                                            )
+                                        } else {
+                                            "Invalid viewport format. Use: /browser config viewport 1920x1080".to_string()
+                                        }
                                     } else {
                                         "Invalid viewport format. Use: /browser config viewport 1920x1080".to_string()
                                     }
-                                } else {
-                                    "Invalid viewport format. Use: /browser config viewport 1920x1080".to_string()
                                 }
-                            }
-                            "segments_max" => {
-                                if let Ok(max) = value.parse::<usize>() {
-                                    browser_manager.set_segments_max_sync(max);
-                                    format!("Browser segments_max updated: {}", max)
-                                } else {
-                                    "Invalid segments_max value. Use a number.".to_string()
+                                "segments_max" => {
+                                    if let Ok(max) = value.parse::<usize>() {
+                                        browser_manager.set_segments_max_sync(max);
+                                        format!("Browser segments_max updated: {}", max)
+                                    } else {
+                                        "Invalid segments_max value. Use a number.".to_string()
+                                    }
                                 }
+                                _ => format!(
+                                    "Unknown config key: {}. Available: viewport, segments_max",
+                                    key
+                                ),
                             }
-                            _ => format!("Unknown config key: {}. Available: viewport, segments_max", key)
+                        } else {
+                            "Usage: /browser config <key> <value>\nAvailable keys: viewport, segments_max".to_string()
                         }
-                    } else {
-                        "Usage: /browser config <key> <value>\nAvailable keys: viewport, segments_max".to_string()
                     }
-                }
                     _ => {
-                        format!("Unknown browser command: '{}'\nUsage: /browser <url> | off | status | fullpage | config", first_arg)
+                        format!(
+                            "Unknown browser command: '{}'\nUsage: /browser <url> | off | status | fullpage | config",
+                            first_arg
+                        )
                     }
                 }
             }
         } else {
             "Browser commands:\n• /browser <url> - Open URL and enable browser mode\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration".to_string()
         };
-        
+
         // Add the response to the UI as a background event
-        let lines = response.lines().map(|line| Line::from(line.to_string())).collect();
+        let lines = response
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect();
         self.add_to_history(HistoryCell::BackgroundEvent {
             view: TextBlock::new(lines),
         });
@@ -1595,27 +1691,30 @@ impl ChatWidget<'_> {
         };
         *self.cached_cell_size.get_or_init(|| {
             let size = crate::terminal_info::get_cell_size_pixels().unwrap_or(default_guess);
-            
+
             // HACK: On macOS Retina displays, terminals often report physical pixels
-            // but ratatui-image expects logical pixels. If we detect suspiciously 
+            // but ratatui-image expects logical pixels. If we detect suspiciously
             // large cell sizes (likely 2x scaled), divide by 2.
             #[cfg(target_os = "macos")]
             {
                 if size.0 >= 14 && size.1 >= 28 {
                     // Likely Retina display reporting physical pixels
-                    tracing::info!("Detected likely Retina display, adjusting cell size from {:?} to {:?}", 
-                        size, (size.0 / 2, size.1 / 2));
+                    tracing::info!(
+                        "Detected likely Retina display, adjusting cell size from {:?} to {:?}",
+                        size,
+                        (size.0 / 2, size.1 / 2)
+                    );
                     return (size.0 / 2, size.1 / 2);
                 }
             }
-            
+
             size
         })
     }
-    
+
     fn get_git_branch(&self) -> Option<String> {
         use std::process::Command;
-        
+
         let output = Command::new("git")
             .arg("rev-parse")
             .arg("--abbrev-ref")
@@ -1623,11 +1722,9 @@ impl ChatWidget<'_> {
             .current_dir(&self.config.cwd)
             .output()
             .ok()?;
-        
+
         if output.status.success() {
-            let branch = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string();
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !branch.is_empty() && branch != "HEAD" {
                 Some(branch)
             } else {
@@ -1639,7 +1736,7 @@ impl ChatWidget<'_> {
                     .current_dir(&self.config.cwd)
                     .output()
                     .ok()?;
-                
+
                 if commit_output.status.success() {
                     let commit = String::from_utf8_lossy(&commit_output.stdout)
                         .trim()
@@ -1657,14 +1754,14 @@ impl ChatWidget<'_> {
             None
         }
     }
-    
+
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Paragraph, Block, Borders};
-        use ratatui::style::{Style, Modifier};
-        use ratatui::layout::Margin;
         use crate::exec_command::relativize_to_home;
-        
+        use ratatui::layout::Margin;
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Paragraph};
+
         // Add same horizontal padding as the Message input (2 chars on each side)
         let horizontal_padding = 2u16;
         let padded_area = Rect {
@@ -1673,14 +1770,14 @@ impl ChatWidget<'_> {
             width: area.width.saturating_sub(horizontal_padding * 2),
             height: area.height,
         };
-        
+
         // Get current working directory string
         let cwd_str = match relativize_to_home(&self.config.cwd) {
             Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
             Some(_) => "~".to_string(),
             None => self.config.cwd.display().to_string(),
         };
-        
+
         // Build status line spans
         let mut status_spans = vec![
             Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
@@ -1688,159 +1785,186 @@ impl ChatWidget<'_> {
             Span::styled("Model: ", Style::default().dim()),
             Span::styled(
                 format!("{}", self.config.model),
-                Style::default().fg(crate::colors::info())
+                Style::default().fg(crate::colors::info()),
             ),
             Span::raw(" • "),
             Span::styled("Directory: ", Style::default().dim()),
             Span::styled(cwd_str, Style::default().fg(crate::colors::info())),
         ];
-        
+
         // Add git branch if available
         if let Some(branch) = self.get_git_branch() {
             status_spans.push(Span::raw(" • "));
             status_spans.push(Span::styled("Branch: ", Style::default().dim()));
             status_spans.push(Span::styled(
                 branch,
-                Style::default().fg(crate::colors::success_green())
+                Style::default().fg(crate::colors::success_green()),
             ));
         }
-        
+
         let status_line = Line::from(status_spans);
-        
+
         // Create box border similar to Message input
         let status_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()));
-        
+
         // Add padding inside the box (1 char horizontal only, like Message input)
         let inner_area = status_block.inner(padded_area);
         let padded_inner = inner_area.inner(Margin::new(1, 0));
-        
+
         // Render the block first
         status_block.render(padded_area, buf);
-        
+
         // Then render the text inside with padding
         let status_widget = Paragraph::new(vec![status_line]);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
-fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-    use image::GenericImageView;                         // for dimensions()
-    use ratatui_image::{Resize, Image};
-    use ratatui_image::picker::{Picker, ProtocolType};
-    use ratatui::widgets::Widget;
+    fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
+        use image::GenericImageView; // for dimensions()
+        use ratatui::widgets::Widget;
+        use ratatui_image::picker::{Picker, ProtocolType};
+        use ratatui_image::{Image, Resize};
 
-    // open + decode
-    let reader = match image::ImageReader::open(path) {
-        Ok(r) => r,
-        Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
-    };
-    let dyn_img = match reader.decode() {
-        Ok(img) => img,
-        Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
-    };
-    let (img_w, img_h) = dyn_img.dimensions();
+        // open + decode
+        let reader = match image::ImageReader::open(path) {
+            Ok(r) => r,
+            Err(_) => {
+                self.render_screenshot_placeholder(path, area, buf);
+                return;
+            }
+        };
+        let dyn_img = match reader.decode() {
+            Ok(img) => img,
+            Err(_) => {
+                self.render_screenshot_placeholder(path, area, buf);
+                return;
+            }
+        };
+        let (img_w, img_h) = dyn_img.dimensions();
 
-    // picker (Retina 2x workaround preserved)
-    let mut cached_picker = self.cached_picker.borrow_mut();
-    if cached_picker.is_none() {
-        let (fw, fh) = self.measured_font_size();
-        *cached_picker = Some(Picker::from_fontsize((fw * 2, fh * 2)));
-    }
-    let picker = cached_picker.as_ref().unwrap();
-
-    // quantize step by protocol to avoid rounding bias
-    let (qx, qy): (u16, u16) = match picker.protocol_type() {
-        ProtocolType::Halfblocks => (1, 2), // half-block cell = 1 col x 2 half-rows
-        _ => (1, 1),                        // pixel protocols (Kitty/iTerm2/Sixel)
-    };
-
-    // terminal cell aspect
-    let (cw, ch) = self.measured_font_size();
-    let cols = area.width as u32;
-    let rows = area.height as u32;
-    let cw = cw as u32;
-    let ch = ch as u32;
-
-    // fit (floor), then choose limiting dimension
-    let mut rows_by_w = (cols * cw * img_h) / (img_w * ch);
-    if rows_by_w == 0 { rows_by_w = 1; }
-    let mut cols_by_h = (rows * ch * img_w) / (img_h * cw);
-    if cols_by_h == 0 { cols_by_h = 1; }
-
-    let (used_cols, used_rows) = if rows_by_w <= rows {
-        (cols, rows_by_w)
-    } else {
-        (cols_by_h, rows)
-    };
-
-    // quantize to protocol grid
-    let mut used_cols_u16 = used_cols as u16;
-    let mut used_rows_u16 = used_rows as u16;
-    if qx > 1 {
-        let rem = used_cols_u16 % qx;
-        if rem != 0 { used_cols_u16 = used_cols_u16.saturating_sub(rem).max(qx); }
-    }
-    if qy > 1 {
-        let rem = used_rows_u16 % qy;
-        if rem != 0 { used_rows_u16 = used_rows_u16.saturating_sub(rem).max(qy); }
-    }
-    used_cols_u16 = used_cols_u16.min(area.width).max(1);
-    used_rows_u16 = used_rows_u16.min(area.height).max(1);
-
-    // center both axes
-    let hpad = (area.width.saturating_sub(used_cols_u16)) / 2;
-    let vpad = (area.height.saturating_sub(used_rows_u16)) / 2;
-    let target = Rect {
-        x: area.x + hpad,
-        y: area.y + vpad,
-        width: used_cols_u16,
-        height: used_rows_u16,
-    };
-
-    // cache by (path, target)
-    let needs_recreate = {
-        let cached = self.cached_image_protocol.borrow();
-        match cached.as_ref() {
-            Some((cached_path, cached_rect, _)) => cached_path != path || *cached_rect != target,
-            None => true,
+        // picker (Retina 2x workaround preserved)
+        let mut cached_picker = self.cached_picker.borrow_mut();
+        if cached_picker.is_none() {
+            let (fw, fh) = self.measured_font_size();
+            *cached_picker = Some(Picker::from_fontsize((fw * 2, fh * 2)));
         }
-    };
-    if needs_recreate {
-        match picker.new_protocol(dyn_img, target, Resize::Fit(None)) {
-            Ok(protocol) => *self.cached_image_protocol.borrow_mut() = Some((path.clone(), target, protocol)),
-            Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
+        let picker = cached_picker.as_ref().unwrap();
+
+        // quantize step by protocol to avoid rounding bias
+        let (qx, qy): (u16, u16) = match picker.protocol_type() {
+            ProtocolType::Halfblocks => (1, 2), // half-block cell = 1 col x 2 half-rows
+            _ => (1, 1),                        // pixel protocols (Kitty/iTerm2/Sixel)
+        };
+
+        // terminal cell aspect
+        let (cw, ch) = self.measured_font_size();
+        let cols = area.width as u32;
+        let rows = area.height as u32;
+        let cw = cw as u32;
+        let ch = ch as u32;
+
+        // fit (floor), then choose limiting dimension
+        let mut rows_by_w = (cols * cw * img_h) / (img_w * ch);
+        if rows_by_w == 0 {
+            rows_by_w = 1;
+        }
+        let mut cols_by_h = (rows * ch * img_w) / (img_h * cw);
+        if cols_by_h == 0 {
+            cols_by_h = 1;
+        }
+
+        let (used_cols, used_rows) = if rows_by_w <= rows {
+            (cols, rows_by_w)
+        } else {
+            (cols_by_h, rows)
+        };
+
+        // quantize to protocol grid
+        let mut used_cols_u16 = used_cols as u16;
+        let mut used_rows_u16 = used_rows as u16;
+        if qx > 1 {
+            let rem = used_cols_u16 % qx;
+            if rem != 0 {
+                used_cols_u16 = used_cols_u16.saturating_sub(rem).max(qx);
+            }
+        }
+        if qy > 1 {
+            let rem = used_rows_u16 % qy;
+            if rem != 0 {
+                used_rows_u16 = used_rows_u16.saturating_sub(rem).max(qy);
+            }
+        }
+        used_cols_u16 = used_cols_u16.min(area.width).max(1);
+        used_rows_u16 = used_rows_u16.min(area.height).max(1);
+
+        // center both axes
+        let hpad = (area.width.saturating_sub(used_cols_u16)) / 2;
+        let vpad = (area.height.saturating_sub(used_rows_u16)) / 2;
+        let target = Rect {
+            x: area.x + hpad,
+            y: area.y + vpad,
+            width: used_cols_u16,
+            height: used_rows_u16,
+        };
+
+        // cache by (path, target)
+        let needs_recreate = {
+            let cached = self.cached_image_protocol.borrow();
+            match cached.as_ref() {
+                Some((cached_path, cached_rect, _)) => {
+                    cached_path != path || *cached_rect != target
+                }
+                None => true,
+            }
+        };
+        if needs_recreate {
+            match picker.new_protocol(dyn_img, target, Resize::Fit(None)) {
+                Ok(protocol) => {
+                    *self.cached_image_protocol.borrow_mut() =
+                        Some((path.clone(), target, protocol))
+                }
+                Err(_) => {
+                    self.render_screenshot_placeholder(path, area, buf);
+                    return;
+                }
+            }
+        }
+
+        if let Some((_, rect, protocol)) = &*self.cached_image_protocol.borrow() {
+            let image = Image::new(protocol);
+            Widget::render(image, *rect, buf);
+        } else {
+            self.render_screenshot_placeholder(path, area, buf);
         }
     }
-
-    if let Some((_, rect, protocol)) = &*self.cached_image_protocol.borrow() {
-        let image = Image::new(protocol);
-        Widget::render(image, *rect, buf);
-    } else {
-        self.render_screenshot_placeholder(path, area, buf);
-    }
-}
 
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui::widgets::{Paragraph, Block, Borders};
-        use ratatui::style::{Style, Modifier};
-        
+        use ratatui::style::{Modifier, Style};
+        use ratatui::widgets::{Block, Borders, Paragraph};
+
         // Show a placeholder box with screenshot info
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("screenshot");
-            
+
         let placeholder_text = format!("[Screenshot]\n{}", filename);
         let placeholder_widget = Paragraph::new(placeholder_text)
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(crate::colors::info()))
-                .title("Browser"))
-            .style(Style::default()
-                .fg(crate::colors::text_dim())
-                .add_modifier(Modifier::ITALIC))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(crate::colors::info()))
+                    .title("Browser"),
+            )
+            .style(
+                Style::default()
+                    .fg(crate::colors::text_dim())
+                    .add_modifier(Modifier::ITALIC),
+            )
             .wrap(ratatui::widgets::Wrap { trim: true });
-        
+
         placeholder_widget.render(area, buf);
     }
 }
@@ -1848,13 +1972,14 @@ fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buff
 impl ChatWidget<'_> {
     /// Render the combined HUD with browser and/or agent panels based on what's active
     fn render_hud(&self, area: Rect, buf: &mut Buffer) {
-        
         // Check what's active
-        let has_browser_screenshot = self.latest_browser_screenshot.lock()
+        let has_browser_screenshot = self
+            .latest_browser_screenshot
+            .lock()
             .map(|lock| lock.is_some())
             .unwrap_or(false);
         let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
-        
+
         // Add same horizontal padding as the Message input (2 chars on each side)
         let horizontal_padding = 2u16;
         let padded_area = Rect {
@@ -1863,16 +1988,14 @@ impl ChatWidget<'_> {
             width: area.width.saturating_sub(horizontal_padding * 2),
             height: area.height,
         };
-        
+
         // Determine layout based on what's active
         if has_browser_screenshot && has_active_agents {
             // Both panels: 50/50 split
-            let chunks = Layout::horizontal([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ])
-            .areas::<2>(padded_area);
-            
+            let chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas::<2>(padded_area);
+
             self.render_browser_panel(chunks[0], buf);
             self.render_agent_panel(chunks[1], buf);
         } else if has_browser_screenshot {
@@ -1883,80 +2006,89 @@ impl ChatWidget<'_> {
             self.render_agent_panel(padded_area, buf);
         }
     }
-    
+
     /// Render the browser panel (left side when both panels are shown)
     fn render_browser_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
         use ratatui::text::{Line as RLine, Span};
-        
+        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+
         if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
             if let Some((screenshot_path, url)) = &*screenshot_lock {
                 // Split the HUD into two parts: left for preview, right for status (50% width)
-                let chunks = Layout::horizontal([
-                    Constraint::Percentage(50),
-                    Constraint::Percentage(50),
-                ])
-                .areas::<2>(padded_area);
-                
-                let screenshot_area = chunks[0];  // Preview on the left
-                let info_area = chunks[1];        // Status on the right
-                
+                let chunks =
+                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .areas::<2>(area);
+
+                let screenshot_area = chunks[0]; // Preview on the left
+                let info_area = chunks[1]; // Status on the right
+
                 // Left side: Screenshot with URL in title
                 let screenshot_block = Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" {} ", url))  // URL in the title
+                    .title(format!(" {} ", url)) // URL in the title
                     .border_style(Style::default().fg(crate::colors::border()));
-                
+
                 let inner_screenshot = screenshot_block.inner(screenshot_area);
                 screenshot_block.render(screenshot_area, buf);
-                
+
                 // Render the screenshot
                 self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
-                
+
                 // Right side: Browser status
                 let info_block = Block::default()
                     .borders(Borders::ALL)
                     .title(" Browser Status ")
                     .border_style(Style::default().fg(crate::colors::border()));
-                
+
                 let inner_info = info_block.inner(info_area);
                 info_block.render(info_area, buf);
-                
+
                 // Display browser status information
                 let mut lines = vec![];
-                
+
                 // Add browser status information
                 if self.browser_manager.is_enabled_sync() {
                     lines.push(RLine::from(vec![
                         Span::styled("URL: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(url.clone(), Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            url.clone(),
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ),
                     ]));
-                    
+
                     if self.browser_manager.is_enabled_sync() {
                         lines.push(RLine::from(vec![
-                            Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
+                            Span::styled(
+                                "Status: ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
                             Span::styled("Active", Style::default().fg(crate::colors::success())),
                         ]));
                     } else {
                         lines.push(RLine::from(vec![
-                            Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
+                            Span::styled(
+                                "Status: ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
                             Span::styled("Inactive", Style::default().fg(crate::colors::warning())),
                         ]));
                     }
-                    
+
                     let info_paragraph = Paragraph::new(lines);
                     info_paragraph.render(inner_info, buf);
-                    
+
                     // Screenshot panel
                     let screenshot_block = Block::default()
                         .borders(Borders::ALL)
                         .title(" Preview ")
                         .border_style(Style::default().fg(crate::colors::border()));
-                    
+
                     let inner_screenshot = screenshot_block.inner(screenshot_area);
                     screenshot_block.render(screenshot_area, buf);
-                    
+
                     // Render the screenshot (using existing method)
                     if let Some((screenshot_path, _)) = &*screenshot_lock {
                         self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
@@ -1967,10 +2099,10 @@ impl ChatWidget<'_> {
                         .borders(Borders::ALL)
                         .title(" Browser ")
                         .border_style(Style::default().fg(crate::colors::border()));
-                    
+
                     let inner_info = info_block.inner(area);
                     info_block.render(area, buf);
-                    
+
                     let mut lines = vec![];
                     // Truncate URL if needed
                     let max_url_len = area.width.saturating_sub(10) as usize;
@@ -1979,63 +2111,68 @@ impl ChatWidget<'_> {
                     } else {
                         url.clone()
                     };
-                    
+
                     lines.push(RLine::from(vec![
                         Span::styled("URL: ", Style::default().fg(crate::colors::text_dim())),
                         Span::styled(display_url, Style::default().fg(crate::colors::text())),
                     ]));
-                    
+
                     let status = if self.browser_manager.is_enabled_sync() {
                         "Active"
                     } else {
                         "Inactive"
                     };
-                    
+
                     lines.push(RLine::from(vec![
                         Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(status, Style::default().fg(
-                            if self.browser_manager.is_enabled_sync() {
+                        Span::styled(
+                            status,
+                            Style::default().fg(if self.browser_manager.is_enabled_sync() {
                                 crate::colors::success()
                             } else {
                                 crate::colors::warning()
-                            }
-                        )),
+                            }),
+                        ),
                     ]));
-                    
+
                     let info_paragraph = Paragraph::new(lines);
                     info_paragraph.render(inner_info, buf);
                 }
             }
         }
     }
-    
+
     /// Render the agent status panel in the HUD
     fn render_agent_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
         use ratatui::text::{Line as RLine, Span};
-        
+        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+
         // Agent status block
         let agent_block = Block::default()
             .borders(Borders::ALL)
             .title(" Agents ")
             .border_style(Style::default().fg(crate::colors::border()));
-        
+
         let inner_agent = agent_block.inner(area);
         agent_block.render(area, buf);
-        
+
         // Display agent statuses
         let mut lines = vec![];
-        
+
         if self.agents_ready_to_start && self.active_agents.is_empty() {
             // Show "Ready to start" message when agents are expected
-            lines.push(RLine::from(vec![
-                Span::styled("Ready to start", Style::default().fg(crate::colors::info()).add_modifier(Modifier::ITALIC)),
-            ]));
+            lines.push(RLine::from(vec![Span::styled(
+                "Ready to start",
+                Style::default()
+                    .fg(crate::colors::info())
+                    .add_modifier(Modifier::ITALIC),
+            )]));
         } else if self.active_agents.is_empty() {
-            lines.push(RLine::from(vec![
-                Span::styled("No active agents", Style::default().fg(crate::colors::text_dim())),
-            ]));
+            lines.push(RLine::from(vec![Span::styled(
+                "No active agents",
+                Style::default().fg(crate::colors::text_dim()),
+            )]));
         } else {
             // Show agent names/models at top
             for agent in &self.active_agents {
@@ -2045,54 +2182,63 @@ impl ChatWidget<'_> {
                     AgentStatus::Completed => crate::colors::success(),
                     AgentStatus::Failed => crate::colors::error(),
                 };
-                
+
                 let status_text = match agent.status {
                     AgentStatus::Pending => "pending",
-                    AgentStatus::Running => "running", 
+                    AgentStatus::Running => "running",
                     AgentStatus::Completed => "completed",
                     AgentStatus::Failed => "failed",
                 };
-                
+
                 // Truncate name to fit nicely
                 let display_name = if agent.name.len() > 30 {
                     format!("{}...", &agent.name[..27])
                 } else {
                     agent.name.clone()
                 };
-                
+
                 lines.push(RLine::from(vec![
-                    Span::styled(display_name, Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        display_name,
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" - ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(status_text, Style::default().fg(status_color)),
                 ]));
             }
         }
-        
+
         // Add prompt display at bottom if available
         if let Some(ref prompt) = self.last_agent_prompt {
             if !lines.is_empty() {
                 lines.push(RLine::from("")); // Empty line separator
             }
-            lines.push(RLine::from(vec![
-                Span::styled("Prompt: ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::ITALIC)),
-            ]));
-            
+            lines.push(RLine::from(vec![Span::styled(
+                "Prompt: ",
+                Style::default()
+                    .fg(crate::colors::text_dim())
+                    .add_modifier(Modifier::ITALIC),
+            )]));
+
             // Wrap long prompts
             let prompt_text = if prompt.len() > 60 {
                 format!("{}...", &prompt[..57])
             } else {
                 prompt.clone()
             };
-            
-            lines.push(RLine::from(vec![
-                Span::styled(prompt_text, Style::default().fg(crate::colors::text_dim())),
-            ]));
+
+            lines.push(RLine::from(vec![Span::styled(
+                prompt_text,
+                Style::default().fg(crate::colors::text_dim()),
+            )]));
         }
-        
+
         let agent_paragraph = Paragraph::new(lines);
         agent_paragraph.render(inner_agent, buf);
     }
-    
+
     fn begin_stream(&mut self, kind: StreamKind) {
         if let Some(current) = self.current_stream {
             if current != kind {
@@ -2198,7 +2344,7 @@ impl ChatWidget<'_> {
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        
+
         // Fill entire area with theme background
         let bg_style = Style::default()
             .bg(crate::colors::background())
@@ -2208,24 +2354,30 @@ impl WidgetRef for &ChatWidget<'_> {
                 buf[(x, y)].set_style(bg_style);
             }
         }
-        
+
         let layout_areas = self.layout_areas(area);
-        let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4 {
+        let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4
+        {
             // Browser HUD is present
-            (layout_areas[0], Some(layout_areas[1]), layout_areas[2], layout_areas[3])
+            (
+                layout_areas[0],
+                Some(layout_areas[1]),
+                layout_areas[2],
+                layout_areas[3],
+            )
         } else {
             // No browser HUD
             (layout_areas[0], None, layout_areas[1], layout_areas[2])
         };
-        
+
         // Render status bar
         self.render_status_bar(status_bar_area, buf);
-        
+
         // Render HUD if present (browser and/or agents)
         if let Some(hud_area) = hud_area {
             self.render_hud(hud_area, buf);
         }
-        
+
         // Create a unified scrollable container for all chat content
         // Use consistent padding throughout
         let padding = 3u16;
@@ -2235,36 +2387,38 @@ impl WidgetRef for &ChatWidget<'_> {
             width: history_area.width.saturating_sub(padding * 2),
             height: history_area.height,
         };
-        
+
         // Collect all content items into a single list
         let mut all_content: Vec<&HistoryCell> = Vec::new();
-        
+
         // Add all history cells
         for cell in &self.history_cells {
             all_content.push(cell);
         }
-        
+
         // Add active/streaming cell if present
         if let Some(cell) = &self.active_history_cell {
             all_content.push(cell);
         }
-        
+
         // Add live streaming content if present
-        let streaming_lines = self.live_builder.display_rows()
+        let streaming_lines = self
+            .live_builder
+            .display_rows()
             .into_iter()
             .map(|r| ratatui::text::Line::from(r.text))
             .collect::<Vec<_>>();
-        
+
         let streaming_cell = if !streaming_lines.is_empty() {
             Some(HistoryCell::new_streaming_content(streaming_lines))
         } else {
             None
         };
-        
+
         if let Some(ref cell) = streaming_cell {
             all_content.push(cell);
         }
-        
+
         // Calculate total content height
         let mut total_height = 0u16;
         let mut item_heights = Vec::new();
@@ -2273,17 +2427,23 @@ impl WidgetRef for &ChatWidget<'_> {
             item_heights.push(h);
             total_height += h;
         }
-        
+
         // Check for active animations and clean up faded-out cells
         let has_active_animation = self.history_cells.iter().any(|cell| {
-            if let HistoryCell::AnimatedWelcome { start_time, completed, fade_start, faded_out } = cell {
+            if let HistoryCell::AnimatedWelcome {
+                start_time,
+                completed,
+                fade_start,
+                faded_out,
+            } = cell
+            {
                 // Check for initial animation
                 if !completed.get() {
                     let elapsed = start_time.elapsed();
                     let animation_duration = std::time::Duration::from_secs(2);
                     return elapsed < animation_duration;
                 }
-                
+
                 // Check for fade animation
                 if let Some(fade_time) = fade_start.get() {
                     if !faded_out.get() {
@@ -2292,19 +2452,19 @@ impl WidgetRef for &ChatWidget<'_> {
                         return fade_elapsed < fade_duration;
                     }
                 }
-                
+
                 false
             } else {
                 false
             }
         });
-        
+
         // Note: Faded-out AnimatedWelcome cells are cleaned up in process_animation_cleanup
-        
+
         if has_active_animation {
             self.app_event_tx.send(AppEvent::RequestRedraw);
         }
-        
+
         // Calculate scroll position and vertical alignment
         let (start_y, scroll_pos) = if total_height <= content_area.height {
             // Content fits - align to bottom of container
@@ -2319,38 +2479,36 @@ impl WidgetRef for &ChatWidget<'_> {
             let clamped_scroll_offset = self.scroll_offset.min(max_scroll);
             (content_area.y, clamped_scroll_offset)
         };
-        
+
         // Render the scrollable content
         let mut content_y = 0u16; // Position within the content
         let mut screen_y = start_y; // Position on screen
-        
+
         for (idx, item) in all_content.iter().enumerate() {
             let item_height = item_heights[idx];
-            
+
             // Skip items that are scrolled off the top
             if content_y + item_height <= scroll_pos {
                 content_y += item_height;
                 continue;
             }
-            
+
             // Stop if we've gone past the bottom of the screen
             if screen_y >= content_area.y + content_area.height {
                 break;
             }
-            
+
             // Calculate how much of this item to skip from the top
             let skip_top = if content_y < scroll_pos {
                 scroll_pos - content_y
             } else {
                 0
             };
-            
+
             // Calculate how much height is available for this item
             let available_height = (content_area.y + content_area.height).saturating_sub(screen_y);
-            let visible_height = item_height
-                .saturating_sub(skip_top)
-                .min(available_height);
-            
+            let visible_height = item_height.saturating_sub(skip_top).min(available_height);
+
             if visible_height > 0 {
                 let item_area = Rect {
                     x: content_area.x,
@@ -2358,15 +2516,15 @@ impl WidgetRef for &ChatWidget<'_> {
                     width: content_area.width,
                     height: visible_height,
                 };
-                
+
                 // Render the item
                 item.render_ref(item_area, buf);
                 screen_y += visible_height;
             }
-            
+
             content_y += item_height;
         }
-        
+
         // Render the bottom pane directly without a border for now
         // The composer has its own layout with hints at the bottom
         (&self.bottom_pane).render(bottom_pane_area, buf);

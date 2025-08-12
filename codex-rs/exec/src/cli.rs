@@ -7,7 +7,12 @@ use std::path::PathBuf;
 #[command(version)]
 pub struct Cli {
     /// Optional image(s) to attach to the initial prompt.
-    #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',')]
+    #[arg(
+        long = "image",
+        short = 'i',
+        value_name = "FILE",
+        value_delimiter = ','
+    )]
     pub images: Vec<PathBuf>,
 
     /// Model the agent should use.

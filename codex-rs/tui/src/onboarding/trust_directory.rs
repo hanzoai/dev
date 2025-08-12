@@ -80,7 +80,9 @@ impl WidgetRef for &TrustDirectoryWidget {
                     Line::from(vec![
                         Span::styled(
                             format!("> {}. ", idx + 1),
-                            Style::default().fg(light_blue()).add_modifier(Modifier::DIM),
+                            Style::default()
+                                .fg(light_blue())
+                                .add_modifier(Modifier::DIM),
                         ),
                         Span::styled(text.to_owned(), Style::default().fg(light_blue())),
                     ])

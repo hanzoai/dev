@@ -28,7 +28,7 @@ pub(crate) struct ChatComposerHistory {
     /// history navigation. Used to decide if further Up/Down presses should be
     /// treated as navigation versus normal cursor movement.
     last_history_text: Option<String>,
-    
+
     /// The original text that was in the composer before starting history navigation.
     /// This allows us to restore it when pressing down past the newest entry.
     original_text: Option<String>,
@@ -68,7 +68,7 @@ impl ChatComposerHistory {
             self.original_text = None;
         }
     }
-    
+
     /// Reset navigation state (used when clearing input with double-Esc or when text is edited)
     pub fn reset_navigation(&mut self) {
         self.history_cursor = None;
@@ -119,7 +119,11 @@ impl ChatComposerHistory {
 
     /// Handle <Up>. Returns true when the key was consumed and the caller
     /// should request a redraw.
-    pub fn navigate_up(&mut self, current_text: &str, app_event_tx: &AppEventSender) -> Option<String> {
+    pub fn navigate_up(
+        &mut self,
+        current_text: &str,
+        app_event_tx: &AppEventSender,
+    ) -> Option<String> {
         let total_entries = self.history_entry_count + self.local_history.len();
         if total_entries == 0 {
             return None;

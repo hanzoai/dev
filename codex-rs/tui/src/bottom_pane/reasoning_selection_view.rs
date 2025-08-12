@@ -9,8 +9,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
-use super::bottom_pane_view::BottomPaneView;
 use super::BottomPane;
+use super::bottom_pane_view::BottomPaneView;
 
 /// Interactive UI for selecting reasoning effort level
 pub(crate) struct ReasoningSelectionView {
@@ -34,7 +34,11 @@ impl ReasoningSelectionView {
         vec![
             (ReasoningEffort::None, "None", "No reasoning (fastest)"),
             (ReasoningEffort::Low, "Low", "Basic reasoning"),
-            (ReasoningEffort::Medium, "Medium", "Balanced reasoning (default)"),
+            (
+                ReasoningEffort::Medium,
+                "Medium",
+                "Balanced reasoning (default)",
+            ),
             (ReasoningEffort::High, "High", "Deep reasoning (slower)"),
         ]
     }
@@ -45,13 +49,13 @@ impl ReasoningSelectionView {
             .iter()
             .position(|(e, _, _)| *e == self.selected_effort)
             .unwrap_or(0);
-        
+
         let new_idx = if current_idx == 0 {
             options.len() - 1
         } else {
             current_idx - 1
         };
-        
+
         self.selected_effort = options[new_idx].0;
     }
 
@@ -61,14 +65,15 @@ impl ReasoningSelectionView {
             .iter()
             .position(|(e, _, _)| *e == self.selected_effort)
             .unwrap_or(0);
-        
+
         let new_idx = (current_idx + 1) % options.len();
         self.selected_effort = options[new_idx].0;
     }
 
     fn confirm_selection(&self) {
         // Send event to update reasoning effort
-        self.app_event_tx.send(AppEvent::UpdateReasoningEffort(self.selected_effort));
+        self.app_event_tx
+            .send(AppEvent::UpdateReasoningEffort(self.selected_effort));
     }
 }
 
@@ -136,7 +141,9 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
                 Span::raw("Current: "),
                 Span::styled(
                     format!("{}", self.current_effort),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(""),
@@ -146,7 +153,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
         for (effort, name, description) in Self::get_effort_options() {
             let is_selected = effort == self.selected_effort;
             let is_current = effort == self.current_effort;
-            
+
             let mut style = Style::default();
             if is_selected {
                 style = style.bg(Color::DarkGray).add_modifier(Modifier::BOLD);
@@ -175,8 +182,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
             Span::raw(" Cancel"),
         ]));
 
-        let paragraph = Paragraph::new(lines)
-            .alignment(Alignment::Left);
+        let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
         paragraph.render(inner_area, buf);
     }
 }

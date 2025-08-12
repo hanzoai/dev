@@ -51,7 +51,6 @@ pub(crate) struct ExecCell {
     pub(crate) output: Option<CommandOutput>,
 }
 
-
 pub(crate) enum PatchEventType {
     ApprovalRequest,
     ApplyBegin { auto_approved: bool },
@@ -77,13 +76,13 @@ fn line_to_static(line: &Line) -> Line<'static> {
 /// scrollable list.
 pub(crate) enum HistoryCell {
     /// Animated welcome that shows particle animation
-    AnimatedWelcome { 
+    AnimatedWelcome {
         start_time: std::time::Instant,
         completed: std::cell::Cell<bool>,
         fade_start: std::cell::Cell<Option<std::time::Instant>>,
         faded_out: std::cell::Cell<bool>,
     },
-    
+
     /// Welcome message.
     WelcomeMessage { view: TextBlock },
 
@@ -115,7 +114,7 @@ pub(crate) enum HistoryCell {
 
     /// Output from the `/diff` command.
     GitDiffOutput { view: TextBlock },
-    
+
     /// Output from the `/reasoning` command.
     ReasoningOutput { view: TextBlock },
 
@@ -286,9 +285,11 @@ impl HistoryCell {
             | HistoryCell::ActiveMcpToolCall { view, .. } => {
                 view.lines.iter().map(line_to_static).collect()
             }
-            HistoryCell::Exec(ExecCell { command, parsed, output }) => {
-                HistoryCell::exec_command_lines(command, parsed, output.as_ref())
-            }
+            HistoryCell::Exec(ExecCell {
+                command,
+                parsed,
+                output,
+            }) => HistoryCell::exec_command_lines(command, parsed, output.as_ref()),
             HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => vec![
                 Line::from("tool result (image output omitted)"),
                 Line::from(""),
@@ -304,7 +305,7 @@ impl HistoryCell {
                     0u16
                 } else {
                     // Fixed height for animation area
-                    18u16  // 16 for animation + 2 for borders
+                    18u16 // 16 for animation + 2 for borders
                 }
             }
             HistoryCell::BackgroundEvent { view: _ } => {
@@ -312,13 +313,11 @@ impl HistoryCell {
                 let processed_lines = self.get_processed_lines(width);
                 processed_lines.len() as u16
             }
-            _ => {
-                Paragraph::new(Text::from(self.plain_lines()))
-                    .wrap(Wrap { trim: false })
-                    .line_count(width)
-                    .try_into()
-                    .unwrap_or(0)
-            }
+            _ => Paragraph::new(Text::from(self.plain_lines()))
+                .wrap(Wrap { trim: false })
+                .line_count(width)
+                .try_into()
+                .unwrap_or(0),
         }
     }
 
@@ -338,11 +337,15 @@ impl HistoryCell {
             let lines: Vec<Line<'static>> = vec![
                 Line::from("".dim()),
                 Line::from(" Popular commands:".dim()),
-                Line::from(format!(" /browser <url> - {}", SlashCommand::Browser.description()).dim()),
+                Line::from(
+                    format!(" /browser <url> - {}", SlashCommand::Browser.description()).dim(),
+                ),
                 Line::from(format!(" /plan - {}", SlashCommand::Plan.description()).dim()),
                 Line::from(format!(" /solve - {}", SlashCommand::Solve.description()).dim()),
                 Line::from(format!(" /code - {}", SlashCommand::Code.description()).dim()),
-                Line::from(format!(" /reasoning - {}", SlashCommand::Reasoning.description()).dim()),
+                Line::from(
+                    format!(" /reasoning - {}", SlashCommand::Reasoning.description()).dim(),
+                ),
                 Line::from("".dim()),
             ];
             HistoryCell::WelcomeMessage {
@@ -367,7 +370,12 @@ impl HistoryCell {
 
     pub(crate) fn new_user_prompt(message: String) -> Self {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(Span::styled("user", Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(Span::styled(
+            "user",
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD),
+        )));
         lines.extend(message.lines().map(|l| Line::from(l.to_string())));
         lines.push(Line::from(""));
 
@@ -376,27 +384,48 @@ impl HistoryCell {
         }
     }
 
-    pub(crate) fn new_active_exec_command(command: Vec<String>, parsed: Vec<ParsedCommand>) -> Self {
+    pub(crate) fn new_active_exec_command(
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+    ) -> Self {
         HistoryCell::new_exec_cell(command, parsed, None)
     }
 
-    pub(crate) fn new_completed_exec_command(command: Vec<String>, parsed: Vec<ParsedCommand>, output: CommandOutput) -> Self {
+    pub(crate) fn new_completed_exec_command(
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+        output: CommandOutput,
+    ) -> Self {
         HistoryCell::new_exec_cell(command, parsed, Some(output))
     }
 
-    fn new_exec_cell(command: Vec<String>, parsed: Vec<ParsedCommand>, output: Option<CommandOutput>) -> Self {
-        HistoryCell::Exec(ExecCell { command, parsed, output })
+    fn new_exec_cell(
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+        output: Option<CommandOutput>,
+    ) -> Self {
+        HistoryCell::Exec(ExecCell {
+            command,
+            parsed,
+            output,
+        })
     }
 
-    fn exec_command_lines(command: &[String], parsed: &[ParsedCommand], output: Option<&CommandOutput>) -> Vec<Line<'static>> {
+    fn exec_command_lines(
+        command: &[String],
+        parsed: &[ParsedCommand],
+        output: Option<&CommandOutput>,
+    ) -> Vec<Line<'static>> {
         match parsed.is_empty() {
             true => HistoryCell::new_exec_command_generic(command, output),
             false => HistoryCell::new_parsed_command(parsed, output),
         }
     }
 
-    fn new_parsed_command(parsed_commands: &[ParsedCommand], output: Option<&CommandOutput>) -> Vec<Line<'static>> {
-        
+    fn new_parsed_command(
+        parsed_commands: &[ParsedCommand],
+        output: Option<&CommandOutput>,
+    ) -> Vec<Line<'static>> {
         let mut lines: Vec<Line> = vec![Line::from("⚙︎ Working")];
 
         for (i, parsed) in parsed_commands.iter().enumerate() {
@@ -423,7 +452,7 @@ impl HistoryCell {
                 let prefix = if j == 0 { first_prefix } else { "    " };
                 lines.push(Line::from(vec![
                     Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
-                    Span::styled(line_text.to_string(), Style::default().fg(LIGHT_BLUE)),
+                    Span::styled(line_text.to_string(), Style::default().fg(Color::LightBlue)),
                 ]));
             }
         }
@@ -434,10 +463,13 @@ impl HistoryCell {
         lines
     }
 
-    fn new_exec_command_generic(command: &[String], output: Option<&CommandOutput>) -> Vec<Line<'static>> {
+    fn new_exec_command_generic(
+        command: &[String],
+        output: Option<&CommandOutput>,
+    ) -> Vec<Line<'static>> {
         let command_escaped = strip_bash_lc_and_escape(command);
         let mut lines: Vec<Line<'static>> = Vec::new();
-        
+
         let mut cmd_lines = command_escaped.lines();
         if let Some(first) = cmd_lines.next() {
             lines.push(Line::from(vec![
@@ -968,7 +1000,7 @@ impl HistoryCell {
             view: TextBlock::new(vec![line]),
         }
     }
-    
+
     /// Create a streaming content cell for live model output
     pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> Self {
         HistoryCell::BackgroundEvent {
@@ -981,15 +1013,18 @@ impl HistoryCell {
         match self {
             HistoryCell::BackgroundEvent { view } => {
                 // Convert the TextBlock lines back to text for processing
-                let text = view.lines.iter()
+                let text = view
+                    .lines
+                    .iter()
                     .map(|line| {
-                        line.spans.iter()
+                        line.spans
+                            .iter()
                             .map(|span| span.content.as_ref())
                             .collect::<String>()
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                
+
                 // Process with markdown support and word wrapping
                 crate::text_processing::process_markdown_text(&text, width)
             }
@@ -1001,22 +1036,26 @@ impl HistoryCell {
 impl WidgetRef for &HistoryCell {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         match self {
-            HistoryCell::AnimatedWelcome { start_time, completed, fade_start, faded_out } => {
+            HistoryCell::AnimatedWelcome {
+                start_time,
+                completed,
+                fade_start,
+                faded_out,
+            } => {
                 let fade_duration = std::time::Duration::from_millis(800); // 0.8 seconds fade
-                
+
                 // Check if we're in fade-out phase
                 if let Some(fade_time) = fade_start.get() {
                     let fade_elapsed = fade_time.elapsed();
                     if fade_elapsed < fade_duration && !faded_out.get() {
                         // Fade-out animation
-                        let fade_progress = fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
+                        let fade_progress =
+                            fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
                         let alpha = 1.0 - fade_progress; // From 1.0 to 0.0
-                        
+
                         crate::glitch_animation::render_intro_animation_with_alpha(
-                            area,
-                            buf,
-                            1.0, // Full animation progress (static state)
-                            alpha
+                            area, buf, 1.0, // Full animation progress (static state)
+                            alpha,
                         );
                     } else {
                         // Fade-out complete - mark as faded out
@@ -1026,31 +1065,25 @@ impl WidgetRef for &HistoryCell {
                 } else {
                     // Normal animation phase
                     let elapsed = start_time.elapsed();
-                    let animation_duration = std::time::Duration::from_secs(2);  // 2 seconds total
-                    
+                    let animation_duration = std::time::Duration::from_secs(2); // 2 seconds total
+
                     if elapsed < animation_duration && !completed.get() {
                         // Calculate animation progress
                         let progress = elapsed.as_secs_f32() / animation_duration.as_secs_f32();
-                        
+
                         // Render the animation (randomly chooses between neon and bracket build)
-                        crate::glitch_animation::render_intro_animation(
-                            area,
-                            buf,
-                            progress
-                        );
-                        
+                        crate::glitch_animation::render_intro_animation(area, buf, progress);
+
                         // Request redraw for animation
                         // Note: We can't send events from here directly, but the ChatWidget
                         // will check for animation cells and request redraws
                     } else {
                         // Animation complete - mark it and render final static state
                         completed.set(true);
-                        
+
                         // Render the final static state
                         crate::glitch_animation::render_intro_animation(
-                            area,
-                            buf,
-                            1.0  // Full progress = static final state
+                            area, buf, 1.0, // Full progress = static final state
                         );
                     }
                 }
@@ -1059,24 +1092,27 @@ impl WidgetRef for &HistoryCell {
                 // Use processed lines with markdown support and proper word wrapping
                 let processed_lines = self.get_processed_lines(area.width);
                 Paragraph::new(Text::from(processed_lines))
-                    .style(Style::default()
-                        .fg(crate::colors::text())
-                        .bg(crate::colors::background()))
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .bg(crate::colors::background()),
+                    )
                     .render(area, buf);
             }
             _ => {
                 // Apply theme background and text color to the paragraph
                 Paragraph::new(Text::from(self.plain_lines()))
                     .wrap(Wrap { trim: false })
-                    .style(Style::default()
-                        .fg(crate::colors::text())
-                        .bg(crate::colors::background()))
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .bg(crate::colors::background()),
+                    )
                     .render(area, buf);
             }
         }
     }
 }
-
 
 fn format_mcp_invocation<'a>(invocation: McpInvocation) -> Line<'a> {
     let args_str = invocation
@@ -1097,13 +1133,6 @@ fn format_mcp_invocation<'a>(invocation: McpInvocation) -> Line<'a> {
         Span::raw(")"),
     ];
     Line::from(invocation_spans)
-}
-
-fn shlex_join_safe(command: &[String]) -> String {
-    match shlex::try_join(command.iter().map(|s| s.as_str())) {
-        Ok(cmd) => cmd,
-        Err(_) => command.join(" "),
-    }
 }
 
 #[cfg(test)]

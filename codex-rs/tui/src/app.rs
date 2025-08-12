@@ -227,12 +227,15 @@ impl App<'_> {
                             ..
                         } => {
                             // Toggle mouse capture to allow text selection
-                            use crossterm::{execute, event::{DisableMouseCapture, EnableMouseCapture}};
+                            use crossterm::{
+                                event::{DisableMouseCapture, EnableMouseCapture},
+                                execute,
+                            };
                             use std::io::stdout;
-                            
+
                             // Static variable to track mouse capture state
                             static mut MOUSE_CAPTURE_ENABLED: bool = true;
-                            
+
                             unsafe {
                                 MOUSE_CAPTURE_ENABLED = !MOUSE_CAPTURE_ENABLED;
                                 if MOUSE_CAPTURE_ENABLED {
@@ -483,43 +486,49 @@ impl App<'_> {
                 AppEvent::UpdateTheme(new_theme) => {
                     // Switch the theme immediately
                     crate::theme::switch_theme(new_theme);
-                    
+
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
                     let theme_fg = crate::colors::text();
                     let _ = crossterm::execute!(
                         std::io::stdout(),
-                        crossterm::style::SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+                        crossterm::style::SetColors(crossterm::style::Colors::new(
+                            theme_fg.into(),
+                            theme_bg.into()
+                        )),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
                         crossterm::cursor::MoveTo(0, 0),
                         crossterm::terminal::SetTitle("Coder"),
                         crossterm::terminal::EnableLineWrap
                     );
-                    
+
                     // Update config and save to file
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_theme(new_theme);
                     }
-                    
+
                     // Request a redraw to apply the new theme
                     self.schedule_redraw();
                 }
                 AppEvent::PreviewTheme(new_theme) => {
                     // Switch the theme immediately for preview (no history event)
                     crate::theme::switch_theme(new_theme);
-                    
+
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
                     let theme_fg = crate::colors::text();
                     let _ = crossterm::execute!(
                         std::io::stdout(),
-                        crossterm::style::SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+                        crossterm::style::SetColors(crossterm::style::Colors::new(
+                            theme_fg.into(),
+                            theme_bg.into()
+                        )),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
                         crossterm::cursor::MoveTo(0, 0),
                         crossterm::terminal::SetTitle("Coder"),
                         crossterm::terminal::EnableLineWrap
                     );
-                    
+
                     // Don't update config or add to history for previews
                     // Request a redraw to apply the new theme
                     self.schedule_redraw();
@@ -582,7 +591,7 @@ impl App<'_> {
                     frame.buffer_mut()[(x, y)].set_style(bg_style);
                 }
             }
-            
+
             match &mut self.app_state {
                 AppState::Chat { widget } => {
                     if let Some((x, y)) = widget.cursor_pos(frame.area()) {

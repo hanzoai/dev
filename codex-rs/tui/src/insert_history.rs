@@ -27,14 +27,15 @@ pub fn insert_history_lines_to_writer<B, W>(
 {
     // In full screen mode, we just write lines at the current position
     // This is mainly used for tests now
-    
+
     // Set theme colors for the newlines and any unstyled content
     let theme_fg = crate::colors::text();
     let theme_bg = crate::colors::background();
     queue!(
         writer,
         SetColors(Colors::new(theme_fg.into(), theme_bg.into()))
-    ).ok();
+    )
+    .ok();
 
     for line in lines {
         // Fill entire line with background before writing content
@@ -48,16 +49,14 @@ pub fn insert_history_lines_to_writer<B, W>(
     if let Ok(pos) = terminal.get_cursor_position() {
         queue!(writer, MoveTo(pos.x, pos.y)).ok();
     }
-    
+
     writer.flush().ok();
 }
 
 /// Insert `lines` above the viewport.
 #[allow(dead_code)]
-pub fn insert_history_lines<B>(
-    terminal: &mut ratatui::Terminal<B>,
-    lines: Vec<Line>,
-) where
+pub fn insert_history_lines<B>(terminal: &mut ratatui::Terminal<B>, lines: Vec<Line>)
+where
     B: ratatui::backend::Backend,
 {
     let mut writer = std::io::stdout();
@@ -109,26 +108,26 @@ fn write_spans<'a, W: io::Write>(
     let mut prev_bg = None;
     let mut prev_underline_color = None;
     let mut prev_modifier = Modifier::empty();
-    
+
     for span in spans {
         let Span { content, style } = span;
         let fg = style.fg;
         let bg = style.bg;
         let underline_color = style.underline_color;
         let modifier = style.add_modifier;
-        
+
         if fg != prev_fg || bg != prev_bg {
             let fg = fg.unwrap_or(crate::colors::text());
             let bg = bg.unwrap_or(crate::colors::background());
             queue!(writer, SetColors(Colors::new(fg.into(), bg.into())))?;
         }
-        
+
         if underline_color != prev_underline_color {
             if let Some(color) = underline_color {
                 queue!(writer, SetUnderlineColor(color.into()))?;
             }
         }
-        
+
         if modifier != prev_modifier {
             ModifierDiff {
                 from: prev_modifier,
@@ -136,15 +135,15 @@ fn write_spans<'a, W: io::Write>(
             }
             .queue(&mut *writer)?;
         }
-        
+
         prev_fg = fg;
         prev_bg = bg;
         prev_underline_color = underline_color;
         prev_modifier = modifier;
-        
+
         queue!(writer, Print(content.as_ref()))?;
     }
-    
+
     Ok(())
 }
 
@@ -154,7 +153,11 @@ impl Command for SetUnderlineColor {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
         // Set underline color using SGR 58
         // Always try to write it, terminals that don't support it will ignore
-        write!(f, "\x1b[58:5:{}m", ansi_color_code_from_ratatui_color(self.0))
+        write!(
+            f,
+            "\x1b[58:5:{}m",
+            ansi_color_code_from_ratatui_color(self.0)
+        )
     }
 
     #[cfg(windows)]

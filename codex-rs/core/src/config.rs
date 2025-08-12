@@ -742,7 +742,7 @@ fn default_model() -> String {
 }
 
 /// Returns the path to the Code/Codex configuration directory, which can be
-/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set, 
+/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set,
 /// defaults to `~/.code` (falling back to `~/.codex` if it exists for compatibility).
 ///
 /// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
@@ -755,7 +755,7 @@ pub fn find_codex_home() -> std::io::Result<PathBuf> {
             return PathBuf::from(val).canonicalize();
         }
     }
-    
+
     // Fall back to CODEX_HOME for compatibility
     if let Ok(val) = std::env::var("CODEX_HOME") {
         if !val.is_empty() {
@@ -769,14 +769,14 @@ pub fn find_codex_home() -> std::io::Result<PathBuf> {
             "Could not find home directory",
         )
     })?;
-    
+
     // Check if ~/.codex exists for backward compatibility
     let mut codex_path = home.clone();
     codex_path.push(".codex");
     if codex_path.exists() {
         return Ok(codex_path);
     }
-    
+
     // Otherwise use ~/.code for the fork
     let mut p = home;
     p.push(".code");

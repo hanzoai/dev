@@ -9,9 +9,9 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use crate::colors;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -88,7 +88,7 @@ impl StatusIndicatorWidget {
     }
 
     pub fn desired_height(&self, _width: u16) -> u16 {
-        3  // 1 line for status + 1 line padding above + 1 line padding below
+        3 // 1 line for status + 1 line padding above + 1 line padding below
     }
 
     /// Update the line that is displayed in the widget.
@@ -174,11 +174,11 @@ impl WidgetRef for StatusIndicatorWidget {
         // Center the status line within the 3-line area (line 2 of 3)
         // If we have less than 3 lines, render on the middle line if possible
         let render_line = if area.height >= 3 {
-            1  // Render on line 2 (0-indexed) for padding above and below
+            1 // Render on line 2 (0-indexed) for padding above and below
         } else if area.height == 2 {
-            0  // Render on first line if only 2 lines available
+            0 // Render on first line if only 2 lines available
         } else {
-            0  // Single line - render on it
+            0 // Single line - render on it
         };
 
         let idx = self.frame_idx.load(std::sync::atomic::Ordering::Relaxed);
@@ -246,7 +246,9 @@ impl WidgetRef for StatusIndicatorWidget {
         let bracket_prefix = format!("({elapsed}s • ");
         spans.push(Span::styled(
             bracket_prefix,
-            Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(colors::text_dim())
+                .add_modifier(Modifier::DIM),
         ));
         spans.push(Span::styled(
             "Esc",
@@ -256,17 +258,23 @@ impl WidgetRef for StatusIndicatorWidget {
         ));
         spans.push(Span::styled(
             " to interrupt)",
-            Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(colors::text_dim())
+                .add_modifier(Modifier::DIM),
         ));
         // Add a space and then the log text (not animated by the gradient)
         if !status_prefix.is_empty() {
             spans.push(Span::styled(
                 " ",
-                Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(colors::text_dim())
+                    .add_modifier(Modifier::DIM),
             ));
             spans.push(Span::styled(
                 status_prefix,
-                Style::default().fg(colors::text_dim()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(colors::text_dim())
+                    .add_modifier(Modifier::DIM),
             ));
         }
 
@@ -291,7 +299,7 @@ impl WidgetRef for StatusIndicatorWidget {
             x: area.x,
             y: area.y + render_line,
             width: area.width,
-            height: 1,  // Always render just the one line
+            height: 1, // Always render just the one line
         };
         let paragraph = Paragraph::new(lines);
         paragraph.render_ref(render_area, buf);

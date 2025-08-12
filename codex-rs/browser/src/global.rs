@@ -1,11 +1,11 @@
-use crate::manager::BrowserManager;
 use crate::config::BrowserConfig;
-use std::sync::Arc;
+use crate::manager::BrowserManager;
 use once_cell::sync::Lazy;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Global browser manager instance shared between TUI and Session
-static GLOBAL_BROWSER_MANAGER: Lazy<Arc<RwLock<Option<Arc<BrowserManager>>>>> = 
+static GLOBAL_BROWSER_MANAGER: Lazy<Arc<RwLock<Option<Arc<BrowserManager>>>>> =
     Lazy::new(|| Arc::new(RwLock::new(None)));
 
 /// Get or create the global browser manager
