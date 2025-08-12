@@ -87,6 +87,8 @@ pub(crate) struct ChatWidget<'a> {
     // We wait for the final AgentMessage event and then emit the full text
     // at once into scrollback so the history contains a single message.
     answer_buffer: String,
+    // Cache of the last finalized assistant message to suppress immediate duplicates
+    last_assistant_message: Option<String>,
     running_commands: HashMap<String, RunningCommand>,
     live_builder: RowBuilder,
     current_stream: Option<StreamKind>,
@@ -492,6 +494,7 @@ impl ChatWidget<'_> {
             reasoning_buffer: String::new(),
             content_buffer: String::new(),
             answer_buffer: String::new(),
+            last_assistant_message: None,
             running_commands: HashMap::new(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -528,6 +531,7 @@ impl ChatWidget<'_> {
     }
 
     /// Calculate the maximum scroll offset based on current content size
+    #[allow(dead_code)]
     fn calculate_max_scroll_offset(&self, content_area_height: u16) -> u16 {
         let mut total_height = 0u16;
 
@@ -982,14 +986,28 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // AgentMessage: if no deltas were streamed, render the final text.
+                // AgentMessage: if no deltas were streamed, render the final text once.
                 if self.current_stream != Some(StreamKind::Answer) && !message.is_empty() {
+                    // Suppress immediate duplicates of the same assistant message
+                    if let Some(prev) = &self.last_assistant_message {
+                        if prev.trim() == message.trim() {
+                            self.request_redraw();
+                            return;
+                        }
+                    }
                     self.begin_stream(StreamKind::Answer);
                     self.stream_push_and_maybe_commit(&message);
                 }
                 // Only finalize if we actually had a stream
                 if self.current_stream == Some(StreamKind::Answer) {
                     self.finalize_stream(StreamKind::Answer);
+                    // Cache the finalized assistant text to dedupe back-to-back repeats
+                    if !self.answer_buffer.is_empty() {
+                        self.last_assistant_message = Some(self.answer_buffer.clone());
+                        self.answer_buffer.clear();
+                    } else if !message.is_empty() {
+                        self.last_assistant_message = Some(message.clone());
+                    }
                 }
                 self.request_redraw();
             }
@@ -2763,7 +2781,7 @@ impl ChatWidget<'_> {
                 // Use the full area for the browser preview
                 let screenshot_block = Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" Browser - {} ", url))
+                    .title(format!(" {} ", url))
                     .border_style(Style::default().fg(crate::colors::border()));
 
                 let inner_screenshot = screenshot_block.inner(area);
