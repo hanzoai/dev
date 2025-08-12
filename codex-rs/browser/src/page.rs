@@ -34,28 +34,29 @@ impl Page {
 
         let wait_strategy = wait.unwrap_or_else(|| self.config.wait.clone());
 
-        // For external Chrome connections, suppress focus changes during navigation
-        let is_external_chrome =
-            self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        if is_external_chrome && self.config.prevent_focus_steal {
-            debug!("Suppressing focus changes during navigation to {}", url);
-        }
-
+        // Navigate to the URL
         self.cdp_page.goto(url).await?;
-
+        
+        // Wait according to the strategy
         match wait_strategy {
             WaitStrategy::Event(event) => match event.as_str() {
                 "domcontentloaded" => {
+                    // Wait for DOMContentLoaded event
                     self.cdp_page.wait_for_navigation().await?;
                 }
                 "networkidle" | "networkidle0" => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Wait for network to be idle
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                 }
                 "networkidle2" => {
+                    // Wait for network to be mostly idle
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
                 "load" => {
+                    // Wait for load event
                     self.cdp_page.wait_for_navigation().await?;
+                    // Add extra delay to ensure page is fully loaded
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
                 _ => {
                     return Err(BrowserError::ConfigError(format!(
@@ -69,12 +70,20 @@ impl Page {
             }
         }
 
+        // Get the final URL and title after navigation completes
         let title = self.cdp_page.get_title().await.ok().flatten();
-        let final_url = self
-            .cdp_page
-            .url()
-            .await?
-            .unwrap_or_else(|| url.to_string());
+        
+        // Try to get the URL multiple times in case it's not immediately available
+        let mut final_url = None;
+        for _ in 0..3 {
+            if let Ok(Some(url)) = self.cdp_page.url().await {
+                final_url = Some(url);
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        
+        let final_url = final_url.unwrap_or_else(|| url.to_string());
 
         let mut current_url = self.current_url.write().await;
         *current_url = Some(final_url.clone());
@@ -99,70 +108,15 @@ impl Page {
     pub async fn screenshot_viewport(&self) -> Result<Vec<Screenshot>> {
         debug!("Taking viewport screenshot");
 
-        // Prevent focus stealing during screenshot for external Chrome connections
-        let is_external_chrome =
-            self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        if is_external_chrome && self.config.prevent_focus_steal {
-            debug!("Taking screenshot with focus prevention measures");
-
-            // Try multiple approaches to prevent focus stealing
-
-            // 1. Disable page lifecycle events
-            use chromiumoxide::cdp::browser_protocol::page::SetLifecycleEventsEnabledParams;
-            let lifecycle_params = SetLifecycleEventsEnabledParams { enabled: false };
-            let _ = self.cdp_page.execute(lifecycle_params).await;
-
-            // 2. Try to set the page to background using JavaScript
-            let background_script = r#"
-                try {
-                    // Override document.hasFocus to return false during screenshot
-                    if (window._originalHasFocus === undefined) {
-                        window._originalHasFocus = document.hasFocus;
-                        document.hasFocus = function() { return false; };
-                    }
-                    
-                    // Dispatch a blur event to signal the page is not focused
-                    window.dispatchEvent(new Event('blur'));
-                    document.dispatchEvent(new Event('blur'));
-                } catch (e) {
-                    console.warn('Focus prevention script failed:', e);
-                }
-            "#;
-            let _ = self.cdp_page.evaluate(background_script).await;
-
-            // 3. On macOS, try to prevent Chrome from stealing focus
-            #[cfg(target_os = "macos")]
-            {
-                // Get the currently active application before screenshot
-                let current_app = tokio::process::Command::new("osascript")
-                    .arg("-e")
-                    .arg("tell application \"System Events\" to get name of first process whose frontmost is true")
-                    .output()
-                    .await;
-
-                if let Ok(output) = current_app {
-                    let app_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !app_name.contains("Chrome") {
-                        // Schedule to re-activate the current app after a brief delay
-                        tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            let _ = tokio::process::Command::new("osascript")
-                                .arg("-e")
-                                .arg(&format!("tell application \"{}\" to activate", app_name))
-                                .output()
-                                .await;
-                        });
-                    }
-                }
-            }
-        }
-
         let format = match self.config.format {
             ImageFormat::Png => CaptureScreenshotFormat::Png,
             ImageFormat::Webp => CaptureScreenshotFormat::Webp,
         };
 
-        let params = CaptureScreenshotParams::builder().format(format).build();
+        let params = CaptureScreenshotParams::builder()
+            .format(format)
+            .capture_beyond_viewport(false)
+            .build();
 
         let data = self.cdp_page.screenshot(params).await?;
 
@@ -175,114 +129,53 @@ impl Page {
     }
 
     pub async fn screenshot_fullpage(&self, segments_max: usize) -> Result<Vec<Screenshot>> {
-        debug!(
-            "Taking full page screenshot with max {} segments",
-            segments_max
-        );
+        let format = match self.config.format {
+            ImageFormat::Png => CaptureScreenshotFormat::Png,
+            ImageFormat::Webp => CaptureScreenshotFormat::Webp,
+        };
 
-        // Prevent focus stealing during full-page screenshot for external Chrome connections
-        let is_external_chrome =
-            self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        if is_external_chrome && self.config.prevent_focus_steal {
-            debug!("Taking full-page screenshot with focus prevention measures");
+        // 1) Get document dimensions (CSS px)
+        let lm = self.cdp_page.layout_metrics().await?;
+        let content = lm.css_content_size; // Rect (not Option)
+        let doc_w = content.width.ceil() as u32;
+        let doc_h = content.height.ceil() as u32;
 
-            // 1. Disable page lifecycle events to minimize focus triggers
-            use chromiumoxide::cdp::browser_protocol::page::SetLifecycleEventsEnabledParams;
-            let lifecycle_params = SetLifecycleEventsEnabledParams { enabled: false };
-            let _ = self.cdp_page.execute(lifecycle_params).await;
+        // Use your configured viewport width, but never exceed doc width
+        let vw = self.config.viewport.width.min(doc_w);
+        let vh = self.config.viewport.height;
 
-            // 2. Set page to background mode for screenshot
-            let background_script = r#"
-                try {
-                    // Override focus methods during full-page screenshot
-                    if (window._originalHasFocus === undefined) {
-                        window._originalHasFocus = document.hasFocus;
-                        document.hasFocus = function() { return false; };
-                    }
-                    
-                    // Signal that this page should not request focus
-                    window.dispatchEvent(new Event('blur'));
-                    document.dispatchEvent(new Event('blur'));
-                } catch (e) {
-                    console.warn('Full-page focus prevention failed:', e);
-                }
-            "#;
-            let _ = self.cdp_page.evaluate(background_script).await;
+        // 2) Slice the page by y-offsets WITHOUT scrolling the page
+        let mut shots = Vec::new();
+        let mut y: u32 = 0;
+        let mut taken = 0usize;
 
-            // 3. On macOS, try to prevent Chrome from stealing focus during full-page screenshot
-            #[cfg(target_os = "macos")]
-            {
-                // Get the currently active application before full-page screenshot
-                let current_app = tokio::process::Command::new("osascript")
-                    .arg("-e")
-                    .arg("tell application \"System Events\" to get name of first process whose frontmost is true")
-                    .output()
-                    .await;
-
-                if let Ok(output) = current_app {
-                    let app_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    if !app_name.contains("Chrome") {
-                        // Schedule to re-activate the current app after full-page screenshot completes
-                        tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                            let _ = tokio::process::Command::new("osascript")
-                                .arg("-e")
-                                .arg(&format!("tell application \"{}\" to activate", app_name))
-                                .output()
-                                .await;
-                        });
-                    }
-                }
-            }
-        }
-
-        let viewport = &self.config.viewport;
-        let overlap = 24;
-        let scroll_height = viewport.height - overlap;
-
-        let mut screenshots = Vec::new();
-        let mut current_y = 0;
-
-        for segment_idx in 0..segments_max {
-            self.cdp_page
-                .evaluate(format!("window.scrollTo(0, {})", current_y))
-                .await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            let format = match self.config.format {
-                ImageFormat::Png => CaptureScreenshotFormat::Png,
-                ImageFormat::Webp => CaptureScreenshotFormat::Webp,
-            };
-
-            let params = CaptureScreenshotParams::builder().format(format).build();
+        while y < doc_h && taken < segments_max {
+            let h = vh.min(doc_h - y); // last slice may be shorter
+            let params = CaptureScreenshotParams::builder()
+                .format(format.clone())
+                .from_surface(true)
+                .capture_beyond_viewport(true) // key to avoid scrolling/flash
+                .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
+                    x: 0.0,
+                    y: y as f64,
+                    width: vw as f64,
+                    height: h as f64,
+                    scale: 1.0,
+                })
+                .build();
 
             let data = self.cdp_page.screenshot(params).await?;
+            shots.push(Screenshot { data, width: vw, height: h, format: self.config.format });
 
-            screenshots.push(Screenshot {
-                data,
-                width: viewport.width,
-                height: viewport.height,
-                format: self.config.format,
-            });
-
-            let eval_result = self.cdp_page.evaluate("document.body.scrollHeight").await?;
-
-            let page_height: i64 = eval_result.value().and_then(|v| v.as_i64()).unwrap_or(0);
-
-            current_y += scroll_height as i64;
-
-            if current_y >= page_height {
-                debug!("Reached end of page after {} segments", segment_idx + 1);
-                break;
-            }
+            y += h;
+            taken += 1;
         }
 
-        if screenshots.len() == segments_max {
+        if taken == segments_max && y < doc_h {
             info!("[full page truncated at {} segments]", segments_max);
         }
 
-        Ok(screenshots)
+        Ok(shots)
     }
 
     pub async fn screenshot_region(&self, region: ScreenshotRegion) -> Result<Vec<Screenshot>> {
