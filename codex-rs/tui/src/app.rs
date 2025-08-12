@@ -440,7 +440,6 @@ impl App<'_> {
                         use std::collections::HashMap;
 
                         use codex_core::protocol::ApplyPatchApprovalRequestEvent;
-                        use codex_core::protocol::EventMsg;
                         use codex_core::protocol::FileChange;
 
                         self.app_event_tx.send(AppEvent::CodexEvent(Event {
