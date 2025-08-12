@@ -11,11 +11,19 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
 
 /// Get default models if no agents are configured
 fn get_default_models() -> Vec<String> {
-    vec!["claude".to_string(), "gemini".to_string(), "codex".to_string()]
+    vec![
+        "claude".to_string(),
+        "gemini".to_string(),
+        "codex".to_string(),
+    ]
 }
 
 /// Format the /plan command into a prompt for the LLM
-pub fn format_plan_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_plan_command(
+    task: &str,
+    models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let models_list = models.unwrap_or_else(|| {
         if let Some(agents) = agents {
             let enabled = get_enabled_agents(agents);
@@ -28,8 +36,12 @@ pub fn format_plan_command(task: &str, models: Option<Vec<String>>, agents: Opti
             get_default_models()
         }
     });
-    let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
-    
+    let models_str = models_list
+        .iter()
+        .map(|m| format!("\"{}\"", m))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     format!(
         r#"Create a comprehensive plan by leveraging multiple state-of-the-art LLMs working in parallel.
 
@@ -50,11 +62,17 @@ Once all models have completed:
 5. Present the final plan with clear steps and rationale
 
 Task to plan:
-{}"#, models_str, task)
+{}"#,
+        models_str, task
+    )
 }
 
 /// Format the /solve command into a prompt for the LLM
-pub fn format_solve_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_solve_command(
+    task: &str,
+    models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let models_list = models.unwrap_or_else(|| {
         if let Some(agents) = agents {
             let enabled = get_enabled_agents(agents);
@@ -67,8 +85,12 @@ pub fn format_solve_command(task: &str, models: Option<Vec<String>>, agents: Opt
             get_default_models()
         }
     });
-    let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
-    
+    let models_str = models_list
+        .iter()
+        .map(|m| format!("\"{}\"", m))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     format!(
         r#"Solve a complicated problem by starting multiple agents with state of the art LLMs.
 
@@ -108,11 +130,17 @@ If you're unsure whether the problem is fully solved, keep the agents running an
 Problem to solve:
 {}
 
-Remember: DO NOT cancel any running agents until you have 100% confirmed the problem is completely solved with a working, tested solution."#, models_str, task)
+Remember: DO NOT cancel any running agents until you have 100% confirmed the problem is completely solved with a working, tested solution."#,
+        models_str, task
+    )
 }
 
 /// Format the /code command into a prompt for the LLM
-pub fn format_code_command(task: &str, models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_code_command(
+    task: &str,
+    models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let models_list = models.unwrap_or_else(|| {
         if let Some(agents) = agents {
             let enabled = get_enabled_agents(agents);
@@ -125,8 +153,12 @@ pub fn format_code_command(task: &str, models: Option<Vec<String>>, agents: Opti
             get_default_models()
         }
     });
-    let models_str = models_list.iter().map(|m| format!("\"{}\"", m)).collect::<Vec<_>>().join(", ");
-    
+    let models_str = models_list
+        .iter()
+        .map(|m| format!("\"{}\"", m))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     format!(
         r#"Perform a coding task with multiple LLMs and compare the results.
 
@@ -157,23 +189,25 @@ Once the agents are complete:
 5. Bring the best parts of each solution into your own final implementation
 
 Coding task to perform:
-{}"#, models_str, task)
+{}"#,
+        models_str, task
+    )
 }
 
 /// Parse a slash command and return the formatted prompt
 pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Option<String> {
     let input = input.trim();
-    
+
     // Check if it starts with a slash
     if !input.starts_with('/') {
         return None;
     }
-    
+
     // Parse the command and arguments
     let parts: Vec<&str> = input.splitn(2, ' ').collect();
     let command = parts[0];
     let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-    
+
     match command {
         "/plan" => {
             if args.is_empty() {
@@ -184,7 +218,10 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
         }
         "/solve" => {
             if args.is_empty() {
-                Some("Error: /solve requires a problem description. Usage: /solve <problem>".to_string())
+                Some(
+                    "Error: /solve requires a problem description. Usage: /solve <problem>"
+                        .to_string(),
+                )
             } else {
                 Some(format_solve_command(&args, None, agents))
             }
@@ -210,31 +247,31 @@ mod tests {
         let result = handle_slash_command("/plan implement a new feature", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Create a comprehensive plan"));
-        
+
         // Test /solve command
         let result = handle_slash_command("/solve fix the bug in authentication", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Solve a complicated problem"));
-        
+
         // Test /code command
         let result = handle_slash_command("/code refactor the database module", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Perform a coding task"));
-        
+
         // Test invalid command
         let result = handle_slash_command("/invalid test", None);
         assert!(result.is_none());
-        
+
         // Test non-slash command
         let result = handle_slash_command("regular message", None);
         assert!(result.is_none());
-        
+
         // Test empty arguments
         let result = handle_slash_command("/plan", None);
         assert!(result.is_some());
         assert!(result.unwrap().contains("Error"));
     }
-    
+
     #[test]
     fn test_slash_commands_with_agents() {
         // Create test agent configurations
@@ -258,7 +295,7 @@ mod tests {
                 env: None,
             },
         ];
-        
+
         // Test that only enabled agents are included
         let result = handle_slash_command("/plan test task", Some(&agents));
         assert!(result.is_some());

@@ -1,12 +1,12 @@
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
 
 use crate::config_types::AgentConfig;
 use crate::openai_tools::{JsonSchema, OpenAiTool, ResponsesApiTool};
@@ -84,9 +84,10 @@ impl AgentManager {
             read_only,
             batch_id,
             None,
-        ).await
+        )
+        .await
     }
-    
+
     pub async fn create_agent_with_config(
         &mut self,
         model: String,
@@ -107,9 +108,10 @@ impl AgentManager {
             read_only,
             batch_id,
             Some(config),
-        ).await
+        )
+        .await
     }
-    
+
     async fn create_agent_internal(
         &mut self,
         model: String,
@@ -122,7 +124,7 @@ impl AgentManager {
         config: Option<AgentConfig>,
     ) -> String {
         let agent_id = Uuid::new_v4().to_string();
-        
+
         let agent = Agent {
             id: agent_id.clone(),
             batch_id,
@@ -143,30 +145,30 @@ impl AgentManager {
             branch_name: None,
             config: config.clone(),
         };
-        
+
         self.agents.insert(agent_id.clone(), agent.clone());
-        
+
         // Spawn async agent
         let agent_id_clone = agent_id.clone();
         let handle = tokio::spawn(async move {
             execute_agent(agent_id_clone, config).await;
         });
-        
+
         self.handles.insert(agent_id.clone(), handle);
-        
+
         agent_id
     }
 
     pub fn get_agent(&self, agent_id: &str) -> Option<Agent> {
         self.agents.get(agent_id).cloned()
     }
-    
+
     pub fn get_all_agents(&self) -> impl Iterator<Item = &Agent> {
         self.agents.values()
     }
 
     pub fn list_agents(
-        &self, 
+        &self,
         status_filter: Option<AgentStatus>,
         batch_id: Option<String>,
         recent_only: bool,
@@ -176,7 +178,7 @@ impl AgentManager {
         } else {
             None
         };
-        
+
         self.agents
             .values()
             .filter(|agent| {
@@ -215,12 +217,13 @@ impl AgentManager {
     }
 
     pub async fn cancel_batch(&mut self, batch_id: &str) -> usize {
-        let agent_ids: Vec<String> = self.agents
+        let agent_ids: Vec<String> = self
+            .agents
             .values()
             .filter(|agent| agent.batch_id.as_ref() == Some(&batch_id.to_string()))
             .map(|agent| agent.id.clone())
             .collect();
-        
+
         let mut count = 0;
         for agent_id in agent_ids {
             if self.cancel_agent(&agent_id).await {
@@ -236,7 +239,10 @@ impl AgentManager {
             if agent.status == AgentStatus::Running && agent.started_at.is_none() {
                 agent.started_at = Some(Utc::now());
             }
-            if matches!(agent.status, AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled) {
+            if matches!(
+                agent.status,
+                AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
+            ) {
                 agent.completed_at = Some(Utc::now());
             }
         }
@@ -260,11 +266,18 @@ impl AgentManager {
 
     pub async fn add_progress(&mut self, agent_id: &str, message: String) {
         if let Some(agent) = self.agents.get_mut(agent_id) {
-            agent.progress.push(format!("{}: {}", Utc::now().format("%H:%M:%S"), message));
+            agent
+                .progress
+                .push(format!("{}: {}", Utc::now().format("%H:%M:%S"), message));
         }
     }
 
-    pub async fn update_worktree_info(&mut self, agent_id: &str, worktree_path: String, branch_name: String) {
+    pub async fn update_worktree_info(
+        &mut self,
+        agent_id: &str,
+        worktree_path: String,
+        branch_name: String,
+    ) {
         if let Some(agent) = self.agents.get_mut(agent_id) {
             agent.worktree_path = Some(worktree_path);
             agent.branch_name = Some(branch_name);
@@ -278,7 +291,7 @@ async fn get_git_root() -> Result<PathBuf, String> {
         .output()
         .await
         .map_err(|e| format!("Git not installed or not in a git repository: {}", e))?;
-    
+
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok(PathBuf::from(path))
@@ -294,13 +307,18 @@ fn generate_branch_id(model: &str, agent: &str) -> String {
         .filter(|w| w.len() > 2 && !["the", "and", "for", "with", "from", "into"].contains(w))
         .take(3)
         .collect();
-    
+
     let agent_suffix = if words.is_empty() {
-        Uuid::new_v4().to_string().split('-').next().unwrap_or("agent").to_string()
+        Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("agent")
+            .to_string()
     } else {
         words.join("-").to_lowercase()
     };
-    
+
     format!("coder-{}-{}", model, agent_suffix)
 }
 
@@ -310,63 +328,75 @@ async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, Str
     tokio::fs::create_dir_all(&coder_dir)
         .await
         .map_err(|e| format!("Failed to create .coder/branches directory: {}", e))?;
-    
+
     // Path for this model's worktree
     let worktree_path = coder_dir.join(branch_id);
-    
+
     // Remove existing worktree if it exists (cleanup from previous runs)
     if worktree_path.exists() {
         Command::new("git")
-            .args(&["worktree", "remove", worktree_path.to_str().unwrap(), "--force"])
+            .args(&[
+                "worktree",
+                "remove",
+                worktree_path.to_str().unwrap(),
+                "--force",
+            ])
             .output()
             .await
             .ok(); // Ignore errors, it might not be a worktree
     }
-    
+
     // Create new worktree
     let output = Command::new("git")
         .current_dir(git_root)
         .args(&[
-            "worktree", 
-            "add", 
-            "-b", 
+            "worktree",
+            "add",
+            "-b",
             branch_id,
-            worktree_path.to_str().unwrap()
+            worktree_path.to_str().unwrap(),
         ])
         .output()
         .await
         .map_err(|e| format!("Failed to create git worktree: {}", e))?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("Failed to create worktree: {}", stderr));
     }
-    
+
     Ok(worktree_path)
 }
 
 async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     let mut manager = AGENT_MANAGER.write().await;
-    
+
     // Get agent details
     let agent = match manager.get_agent(&agent_id) {
         Some(t) => t,
         None => return,
     };
-    
+
     // Update status to running
-    manager.update_agent_status(&agent_id, AgentStatus::Running).await;
-    manager.add_progress(&agent_id, format!("Starting agent with model: {}", agent.model)).await;
-    
+    manager
+        .update_agent_status(&agent_id, AgentStatus::Running)
+        .await;
+    manager
+        .add_progress(
+            &agent_id,
+            format!("Starting agent with model: {}", agent.model),
+        )
+        .await;
+
     let model = agent.model.clone();
     let prompt = agent.prompt.clone();
     let read_only = agent.read_only;
     let context = agent.context.clone();
     let output_goal = agent.output_goal.clone();
     let files = agent.files.clone();
-    
+
     drop(manager); // Release the lock before executing
-    
+
     // Build the full prompt with context
     let mut full_prompt = prompt.clone();
     if let Some(context) = &context {
@@ -378,50 +408,73 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     if !files.is_empty() {
         full_prompt = format!("{}\n\nFiles to consider: {}", full_prompt, files.join(", "));
     }
-    
+
     // Setup working directory and execute
     let result = if !read_only {
         // Check git and setup worktree for non-read-only mode
         match get_git_root().await {
             Ok(git_root) => {
                 let branch_id = generate_branch_id(&model, &prompt);
-                
+
                 let mut manager = AGENT_MANAGER.write().await;
-                manager.add_progress(&agent_id, format!("Creating git worktree: {}", branch_id)).await;
+                manager
+                    .add_progress(&agent_id, format!("Creating git worktree: {}", branch_id))
+                    .await;
                 drop(manager);
-                
+
                 match setup_worktree(&git_root, &branch_id).await {
                     Ok(worktree_path) => {
                         let mut manager = AGENT_MANAGER.write().await;
-                        manager.add_progress(&agent_id, format!("Executing in worktree: {}", worktree_path.display())).await;
-                        manager.update_worktree_info(&agent_id, worktree_path.display().to_string(), branch_id.clone()).await;
+                        manager
+                            .add_progress(
+                                &agent_id,
+                                format!("Executing in worktree: {}", worktree_path.display()),
+                            )
+                            .await;
+                        manager
+                            .update_worktree_info(
+                                &agent_id,
+                                worktree_path.display().to_string(),
+                                branch_id.clone(),
+                            )
+                            .await;
                         drop(manager);
-                        
+
                         // Execute with full permissions in the worktree
-                        execute_model_with_permissions(&model, &full_prompt, false, Some(worktree_path), config.clone()).await
+                        execute_model_with_permissions(
+                            &model,
+                            &full_prompt,
+                            false,
+                            Some(worktree_path),
+                            config.clone(),
+                        )
+                        .await
                     }
-                    Err(e) => Err(format!("Failed to setup worktree: {}", e))
+                    Err(e) => Err(format!("Failed to setup worktree: {}", e)),
                 }
             }
-            Err(e) => Err(format!("Git is required for non-read-only agents: {}", e))
+            Err(e) => Err(format!("Git is required for non-read-only agents: {}", e)),
         }
     } else {
         // Execute in read-only mode
-        full_prompt = format!("{}\n\n[Running in read-only mode - no modifications allowed]", full_prompt);
+        full_prompt = format!(
+            "{}\n\n[Running in read-only mode - no modifications allowed]",
+            full_prompt
+        );
         execute_model_with_permissions(&model, &full_prompt, true, None, config).await
     };
-    
+
     // Update result
     let mut manager = AGENT_MANAGER.write().await;
     manager.update_agent_result(&agent_id, result).await;
 }
 
 async fn execute_model_with_permissions(
-    model: &str, 
-    prompt: &str, 
+    model: &str,
+    prompt: &str,
     read_only: bool,
     working_dir: Option<PathBuf>,
-    config: Option<AgentConfig>
+    config: Option<AgentConfig>,
 ) -> Result<String, String> {
     // Use config command if provided, otherwise use model name
     let command = if let Some(ref cfg) = config {
@@ -429,14 +482,14 @@ async fn execute_model_with_permissions(
     } else {
         model.to_lowercase()
     };
-    
+
     let mut cmd = Command::new(command.clone());
-    
+
     // Set working directory if provided
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
     }
-    
+
     // Add environment variables from config if provided
     if let Some(ref cfg) = config {
         if let Some(ref env) = cfg.env {
@@ -444,13 +497,13 @@ async fn execute_model_with_permissions(
                 cmd.env(key, value);
             }
         }
-        
+
         // Add any configured args first
         for arg in &cfg.args {
             cmd.arg(arg);
         }
     }
-    
+
     // Build command based on model and permissions
     // Use command instead of model for matching if config provided
     let model_lower = model.to_lowercase();
@@ -459,7 +512,7 @@ async fn execute_model_with_permissions(
     } else {
         model_lower.as_str()
     };
-    
+
     match model_name {
         "claude" => {
             if read_only {
@@ -491,12 +544,12 @@ async fn execute_model_with_permissions(
             return Err(format!("Unknown model: {}", model));
         }
     }
-    
+
     let output = cmd
         .output()
         .await
         .map_err(|e| format!("Failed to execute {}: {}", model, e))?;
-    
+
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
@@ -508,47 +561,54 @@ async fn execute_model_with_permissions(
 // Tool creation functions
 pub fn create_run_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "agent".to_string(),
         JsonSchema::String {
             description: Some("The agent prompt - what to perform (required)".to_string()),
         },
     );
-    
+
     properties.insert(
         "model".to_string(),
         JsonSchema::String {
-            description: Some("Model: 'claude', 'gemini', or 'codex' (or array of models for batch execution)".to_string()),
+            description: Some(
+                "Model: 'claude', 'gemini', or 'codex' (or array of models for batch execution)"
+                    .to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "context".to_string(),
         JsonSchema::String {
             description: Some("Optional: Background context for the agent".to_string()),
         },
     );
-    
+
     properties.insert(
         "output".to_string(),
         JsonSchema::String {
             description: Some("Optional: The desired output/success state".to_string()),
         },
     );
-    
+
     properties.insert(
         "files".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String { description: None }),
-            description: Some("Optional: Array of file paths to include in the agent context".to_string()),
+            description: Some(
+                "Optional: Array of file paths to include in the agent context".to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "read_only".to_string(),
         JsonSchema::Boolean {
-            description: Some("Optional: When true, agent runs in read-only mode (default: false)".to_string()),
+            description: Some(
+                "Optional: When true, agent runs in read-only mode (default: false)".to_string(),
+            ),
         },
     );
 
@@ -566,7 +626,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
 
 pub fn create_check_agent_status_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
@@ -588,7 +648,7 @@ pub fn create_check_agent_status_tool() -> OpenAiTool {
 
 pub fn create_get_agent_result_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
@@ -610,18 +670,23 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
 
 pub fn create_cancel_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
-            description: Some("The agent ID to cancel (required if batch_id not provided)".to_string()),
+            description: Some(
+                "The agent ID to cancel (required if batch_id not provided)".to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "batch_id".to_string(),
         JsonSchema::String {
-            description: Some("Cancel all agents with this batch ID (required if agent_id not provided)".to_string()),
+            description: Some(
+                "Cancel all agents with this batch ID (required if agent_id not provided)"
+                    .to_string(),
+            ),
         },
     );
 
@@ -639,28 +704,36 @@ pub fn create_cancel_agent_tool() -> OpenAiTool {
 
 pub fn create_wait_for_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
-            description: Some("Wait for this specific agent to complete (required if batch_id not provided)".to_string()),
+            description: Some(
+                "Wait for this specific agent to complete (required if batch_id not provided)"
+                    .to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "batch_id".to_string(),
         JsonSchema::String {
-            description: Some("Wait for any agent in this batch to complete (required if agent_id not provided)".to_string()),
+            description: Some(
+                "Wait for any agent in this batch to complete (required if agent_id not provided)"
+                    .to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "timeout_seconds".to_string(),
         JsonSchema::Number {
-            description: Some("Maximum seconds to wait before timing out (default: 300, max: 600)".to_string()),
+            description: Some(
+                "Maximum seconds to wait before timing out (default: 300, max: 600)".to_string(),
+            ),
         },
     );
-    
+
     properties.insert(
         "return_all".to_string(),
         JsonSchema::Boolean {
@@ -670,7 +743,8 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "wait_for_agent".to_string(),
-        description: "Wait for a agent or any agent in a batch to complete, fail, or be cancelled.".to_string(),
+        description: "Wait for a agent or any agent in a batch to complete, fail, or be cancelled."
+            .to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -682,25 +756,27 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
 
 pub fn create_list_agents_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
-    
+
     properties.insert(
         "status_filter".to_string(),
         JsonSchema::String {
             description: Some("Optional: Filter agents by status (pending, running, completed, failed, cancelled)".to_string()),
         },
     );
-    
+
     properties.insert(
         "batch_id".to_string(),
         JsonSchema::String {
             description: Some("Optional: Filter agents by batch ID".to_string()),
         },
     );
-    
+
     properties.insert(
         "recent_only".to_string(),
         JsonSchema::Boolean {
-            description: Some("Optional: Only show agents from the last 2 hours (default: false)".to_string()),
+            description: Some(
+                "Optional: Only show agents from the last 2 hours (default: false)".to_string(),
+            ),
         },
     );
 

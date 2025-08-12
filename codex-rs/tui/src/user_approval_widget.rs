@@ -340,7 +340,9 @@ impl WidgetRef for &UserApprovalWidget<'_> {
             .enumerate()
             .map(|(idx, opt)| {
                 let style = if idx == self.selected_option {
-                    Style::new().bg(crate::colors::light_blue()).fg(Color::Black)
+                    Style::new()
+                        .bg(crate::colors::light_blue())
+                        .fg(Color::Black)
                 } else {
                     Style::new().bg(Color::DarkGray)
                 };

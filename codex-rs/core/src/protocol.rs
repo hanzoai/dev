@@ -339,7 +339,7 @@ pub enum InputItem {
     LocalImage {
         path: std::path::PathBuf,
     },
-    
+
     /// Ephemeral image (like browser screenshots) that should not be persisted in history.
     /// This will be converted to an `Image` variant but marked as ephemeral.
     EphemeralImage {
@@ -431,7 +431,7 @@ pub enum EventMsg {
 
     /// Browser screenshot has been captured and is ready for display
     BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent),
-    
+
     /// Agent status has been updated
     AgentStatusUpdate(AgentStatusUpdateEvent),
 

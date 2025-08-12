@@ -1,12 +1,12 @@
-use crate::{config::ImageFormat, Result};
-use std::path::{Path, PathBuf};
-use tokio::fs;
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
+use crate::{Result, config::ImageFormat};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::sync::RwLock;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use serde::{Serialize, Deserialize};
+use tokio::fs;
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageRef {
@@ -29,9 +29,9 @@ impl AssetManager {
     pub async fn new() -> Result<Self> {
         let session_id = Uuid::new_v4().to_string();
         let base_dir = PathBuf::from("/tmp/codex/browser").join(&session_id);
-        
+
         fs::create_dir_all(&base_dir).await?;
-        
+
         Ok(Self {
             base_dir,
             session_id,
@@ -47,19 +47,24 @@ impl AssetManager {
         height: u32,
         ttl_ms: u64,
     ) -> Result<ImageRef> {
-        let filename = format!("{}.{}", Uuid::new_v4(), match format {
-            ImageFormat::Png => "png",
-            ImageFormat::Webp => "webp",
-        });
-        
+        let filename = format!(
+            "{}.{}",
+            Uuid::new_v4(),
+            match format {
+                ImageFormat::Png => "png",
+                ImageFormat::Webp => "webp",
+            }
+        );
+
         let path = self.base_dir.join(&filename);
         fs::write(&path, data).await?;
-        
+
         let mime = match format {
             ImageFormat::Png => "image/png",
             ImageFormat::Webp => "image/webp",
-        }.to_string();
-        
+        }
+        .to_string();
+
         let image_ref = ImageRef {
             path: path.to_string_lossy().to_string(),
             mime,
@@ -68,10 +73,10 @@ impl AssetManager {
             ttl_ms,
             created_at: Utc::now(),
         };
-        
+
         let mut assets = self.assets.write().await;
         assets.insert(filename, image_ref.clone());
-        
+
         Ok(image_ref)
     }
 
@@ -81,18 +86,20 @@ impl AssetManager {
         ttl_ms: u64,
     ) -> Result<Vec<ImageRef>> {
         let mut refs = Vec::new();
-        
+
         for screenshot in screenshots {
-            let image_ref = self.store_screenshot(
-                &screenshot.data,
-                screenshot.format,
-                screenshot.width,
-                screenshot.height,
-                ttl_ms,
-            ).await?;
+            let image_ref = self
+                .store_screenshot(
+                    &screenshot.data,
+                    screenshot.format,
+                    screenshot.width,
+                    screenshot.height,
+                    ttl_ms,
+                )
+                .await?;
             refs.push(image_ref);
         }
-        
+
         Ok(refs)
     }
 
@@ -100,7 +107,7 @@ impl AssetManager {
         let now = Utc::now();
         let mut assets = self.assets.write().await;
         let mut to_remove = Vec::new();
-        
+
         for (key, asset) in assets.iter() {
             let age = now - asset.created_at;
             if age > Duration::milliseconds(asset.ttl_ms as i64) {
@@ -108,11 +115,11 @@ impl AssetManager {
                 let _ = fs::remove_file(&asset.path).await;
             }
         }
-        
+
         for key in to_remove {
             assets.remove(&key);
         }
-        
+
         Ok(())
     }
 

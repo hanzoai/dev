@@ -1,9 +1,9 @@
 use crate::{
+    Result,
     assets::{AssetManager, ImageRef},
+    config::WaitStrategy,
     manager::BrowserManager,
     page::{ScreenshotMode, ScreenshotRegion, SetViewportParams},
-    config::WaitStrategy,
-    Result,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -28,7 +28,7 @@ impl BrowserTools {
                 let result = page.goto(&url, wait).await?;
                 Ok(BrowserToolResult::Goto(result))
             }
-            
+
             BrowserToolCall::Screenshot {
                 mode,
                 segments_max,
@@ -37,11 +37,11 @@ impl BrowserTools {
                 format: _,
             } => {
                 let page = self.manager.get_or_create_page().await?;
-                
+
                 if let Some(script) = inject_js {
                     page.inject_js(&script).await?;
                 }
-                
+
                 let screenshot_mode = match mode.as_deref() {
                     Some("full_page") => ScreenshotMode::FullPage { segments_max },
                     Some("viewport") | None => ScreenshotMode::Viewport,
@@ -58,14 +58,17 @@ impl BrowserTools {
                         }
                     }
                 };
-                
+
                 let screenshots = page.screenshot(screenshot_mode).await?;
                 let ttl_ms = 300000;
-                let images = self.asset_manager.store_screenshots(screenshots, ttl_ms).await?;
-                
+                let images = self
+                    .asset_manager
+                    .store_screenshots(screenshots, ttl_ms)
+                    .await?;
+
                 Ok(BrowserToolResult::Screenshot(ScreenshotResult { images }))
             }
-            
+
             BrowserToolCall::SetViewport {
                 width,
                 height,
@@ -83,27 +86,25 @@ impl BrowserTools {
                     .await?;
                 Ok(BrowserToolResult::SetViewport(result))
             }
-            
-            BrowserToolCall::Close { what } => {
-                match what.as_deref() {
-                    Some("browser") => {
-                        self.manager.stop().await?;
-                        Ok(BrowserToolResult::Close(CloseResult {
-                            closed: "browser".to_string(),
-                        }))
-                    }
-                    Some("page") | None => {
-                        self.manager.close_page().await?;
-                        Ok(BrowserToolResult::Close(CloseResult {
-                            closed: "page".to_string(),
-                        }))
-                    }
-                    Some(other) => Err(crate::BrowserError::ConfigError(format!(
-                        "Unknown close target: {}",
-                        other
-                    ))),
+
+            BrowserToolCall::Close { what } => match what.as_deref() {
+                Some("browser") => {
+                    self.manager.stop().await?;
+                    Ok(BrowserToolResult::Close(CloseResult {
+                        closed: "browser".to_string(),
+                    }))
                 }
-            }
+                Some("page") | None => {
+                    self.manager.close_page().await?;
+                    Ok(BrowserToolResult::Close(CloseResult {
+                        closed: "page".to_string(),
+                    }))
+                }
+                Some(other) => Err(crate::BrowserError::ConfigError(format!(
+                    "Unknown close target: {}",
+                    other
+                ))),
+            },
         }
     }
 }
@@ -116,7 +117,7 @@ pub enum BrowserToolCall {
         url: String,
         wait: Option<WaitStrategy>,
     },
-    
+
     #[serde(rename = "browser.screenshot")]
     Screenshot {
         mode: Option<String>,
@@ -125,7 +126,7 @@ pub enum BrowserToolCall {
         inject_js: Option<String>,
         format: Option<String>,
     },
-    
+
     #[serde(rename = "browser.setViewport")]
     SetViewport {
         width: u32,
@@ -133,11 +134,9 @@ pub enum BrowserToolCall {
         device_scale_factor: Option<f64>,
         mobile: Option<bool>,
     },
-    
+
     #[serde(rename = "browser.close")]
-    Close {
-        what: Option<String>,
-    },
+    Close { what: Option<String> },
 }
 
 #[derive(Debug, Deserialize)]

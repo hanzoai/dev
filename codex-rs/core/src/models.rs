@@ -147,7 +147,7 @@ pub enum ReasoningItemContent {
 impl From<Vec<InputItem>> for ResponseInputItem {
     fn from(items: Vec<InputItem>) -> Self {
         let mut content_items = Vec::new();
-        
+
         for item in items {
             match item {
                 InputItem::Text { text } => {
@@ -156,37 +156,39 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                 InputItem::Image { image_url } => {
                     content_items.push(ContentItem::InputImage { image_url });
                 }
-                InputItem::LocalImage { path } => {
-                    match std::fs::read(&path) {
-                        Ok(bytes) => {
-                            let mime = mime_guess::from_path(&path)
-                                .first()
-                                .map(|m| m.essence_str().to_owned())
-                                .unwrap_or_else(|| "application/octet-stream".to_string());
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            content_items.push(ContentItem::InputImage {
-                                image_url: format!("data:{mime};base64,{encoded}"),
-                            });
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                "Skipping image {} – could not read file: {}",
-                                path.display(),
-                                err
-                            );
-                        }
-                    }
-                }
-                InputItem::EphemeralImage { path, metadata } => {
-                    tracing::info!("Processing ephemeral image: {} with metadata: {:?}", path.display(), metadata);
-                    
-                    // Add metadata text BEFORE the image so the LLM sees context first
-                    if let Some(meta) = metadata {
-                        content_items.push(ContentItem::InputText { 
-                            text: format!("[EPHEMERAL:{}]", meta)
+                InputItem::LocalImage { path } => match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let mime = mime_guess::from_path(&path)
+                            .first()
+                            .map(|m| m.essence_str().to_owned())
+                            .unwrap_or_else(|| "application/octet-stream".to_string());
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        content_items.push(ContentItem::InputImage {
+                            image_url: format!("data:{mime};base64,{encoded}"),
                         });
                     }
-                    
+                    Err(err) => {
+                        tracing::warn!(
+                            "Skipping image {} – could not read file: {}",
+                            path.display(),
+                            err
+                        );
+                    }
+                },
+                InputItem::EphemeralImage { path, metadata } => {
+                    tracing::info!(
+                        "Processing ephemeral image: {} with metadata: {:?}",
+                        path.display(),
+                        metadata
+                    );
+
+                    // Add metadata text BEFORE the image so the LLM sees context first
+                    if let Some(meta) = metadata {
+                        content_items.push(ContentItem::InputText {
+                            text: format!("[EPHEMERAL:{}]", meta),
+                        });
+                    }
+
                     match std::fs::read(&path) {
                         Ok(bytes) => {
                             let mime = mime_guess::from_path(&path)
@@ -210,7 +212,7 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                 }
             }
         }
-        
+
         Self::Message {
             role: "user".to_string(),
             content: content_items,

@@ -11,7 +11,6 @@ pub(crate) struct LiveRingWidget {
 }
 
 impl LiveRingWidget {
-
     pub fn desired_height(&self, _width: u16) -> u16 {
         let len = self.rows.len() as u16;
         len.min(self.max_rows)
