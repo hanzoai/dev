@@ -96,8 +96,6 @@ pub(crate) struct ChatWidget<'a> {
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     welcome_shown: bool,
-    // Browser manager for screenshot functionality
-    browser_manager: Arc<BrowserManager>,
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
     // Cached image protocol to avoid recreating every frame (path, area, protocol)
@@ -166,6 +164,26 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
+    /// Get or create the global browser manager
+    async fn get_browser_manager() -> Arc<BrowserManager> {
+        codex_browser::global::get_or_create_browser_manager().await
+    }
+    
+    /// Check if browser is enabled (synchronous)
+    fn is_browser_enabled_sync() -> bool {
+        // Use tokio's block_in_place to run async code in sync context
+        // This is safe here because we're just checking status, not doing heavy I/O
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                if let Some(manager) = codex_browser::global::get_browser_manager().await {
+                    manager.is_enabled_sync()
+                } else {
+                    false
+                }
+            })
+        })
+    }
+
     pub(crate) fn insert_str(&mut self, s: &str) {
         self.bottom_pane.insert_str(s);
     }
@@ -442,11 +460,8 @@ impl ChatWidget<'_> {
             }
         });
 
-        // Initialize browser manager - will be synced with core session later
-        // We can't use the global async function here because we're in a sync context
+        // Browser manager is now handled through the global state
         // The core session will use the same global manager when browser tools are invoked
-        let browser_config = codex_browser::config::BrowserConfig::default();
-        let browser_manager = Arc::new(BrowserManager::new(browser_config));
 
         // Add initial animated welcome message to history
         let mut history_cells = Vec::new();
@@ -486,7 +501,6 @@ impl ChatWidget<'_> {
             live_max_rows: 3,
             pending_images: HashMap::new(),
             welcome_shown: false,
-            browser_manager,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(None),
@@ -741,122 +755,102 @@ impl ChatWidget<'_> {
         }
 
         let mut items: Vec<InputItem> = Vec::new();
-        let mut browser_screenshot_count = 0;
 
         // Check if browser mode is enabled and capture screenshot
-        // Always check both local and global browser managers
-        let local_browser_manager = self.browser_manager.clone();
-
-        // Check if either local or global browser is enabled
-        let local_enabled = local_browser_manager
-            .config
-            .try_read()
-            .map(|c| c.enabled)
-            .unwrap_or(false);
-
-        // Check global browser manager async
-        let (tx_global, rx_global) = std::sync::mpsc::channel();
+        // IMPORTANT: Always use global browser manager for consistency
+        // The global browser manager ensures both TUI and agent tools use the same instance
+        
+        // We need to check if browser is enabled first
+        // Use a channel to check browser status from async context
+        let (status_tx, status_rx) = std::sync::mpsc::channel();
         tokio::spawn(async move {
-            let global_manager = codex_browser::global::get_browser_manager().await;
-            let enabled = if let Some(ref mgr) = global_manager {
-                mgr.is_enabled().await
-            } else {
-                false
-            };
-            let _ = tx_global.send((global_manager, enabled));
+            let browser_manager = ChatWidget::get_browser_manager().await;
+            let enabled = browser_manager.is_enabled().await;
+            let _ = status_tx.send(enabled);
         });
+        
+        let browser_enabled = status_rx.recv().unwrap_or(false);
 
-        // Get global browser state
-        let (global_manager, global_enabled) = rx_global
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .unwrap_or((None, false));
 
-        // Use global manager if it exists and is enabled, otherwise use local
-        let (browser_manager, browser_enabled) = if global_enabled && global_manager.is_some() {
-            (global_manager.unwrap(), true)
-        } else if local_enabled {
-            (local_browser_manager, true)
-        } else if let Some(global) = global_manager {
-            // Global exists but not enabled, still prefer it over local
-            (global, false)
-        } else {
-            (local_browser_manager, false)
-        };
-
-        // Get current browser URL for display
-        let mut browser_url = None;
-
+        // Start async screenshot capture in background (non-blocking)
         if browser_enabled {
-            tracing::info!("Browser is enabled, attempting to capture screenshot...");
-
-            // We need to capture screenshots synchronously before sending the message
-            // Use a channel to get the result from the async task
-            let (tx, rx) = std::sync::mpsc::channel();
-            let browser_manager_capture = browser_manager.clone();
-
+            tracing::info!("Browser is enabled, starting async screenshot capture...");
+            
+            // Clone necessary data for the async task
+            let codex_op_tx_clone = self.codex_op_tx.clone();
+            let latest_browser_screenshot_clone = Arc::clone(&self.latest_browser_screenshot);
+            
             tokio::spawn(async move {
-                tracing::info!("Starting async screenshot capture...");
-                let result = browser_manager_capture.capture_screenshot_with_url().await;
-                match &result {
-                    Ok((paths, _)) => {
-                        tracing::info!("Screenshot capture succeeded with {} images", paths.len())
+                tracing::info!("Starting background screenshot capture...");
+                
+                // Wait a bit longer before capturing to ensure page is ready
+                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                
+                let browser_manager = ChatWidget::get_browser_manager().await;
+                
+                // Retry screenshot capture with exponential backoff
+                let mut attempts = 0;
+                let max_attempts = 3;
+                
+                loop {
+                    attempts += 1;
+                    tracing::info!("Screenshot capture attempt {} of {}", attempts, max_attempts);
+                    
+                    match browser_manager.capture_screenshot_with_url().await {
+                        Ok((screenshot_paths, url)) => {
+                            tracing::info!("Background screenshot capture succeeded with {} images on attempt {}", screenshot_paths.len(), attempts);
+                            
+                            // Save the first screenshot path and URL for display in the TUI
+                            if let Some(first_path) = screenshot_paths.first() {
+                                if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
+                                    let url_string = url.clone().unwrap_or_else(|| "Browser".to_string());
+                                    *latest = Some((first_path.clone(), url_string));
+                                }
+                            }
+                            
+                            // Create screenshot items
+                            let mut screenshot_items = Vec::new();
+                            for path in screenshot_paths {
+                                if path.exists() {
+                                    tracing::info!("Adding browser screenshot: {}", path.display());
+                                    let timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs();
+                                    let metadata = format!(
+                                        "screenshot:{}:{}",
+                                        timestamp,
+                                        url.as_deref().unwrap_or("unknown")
+                                    );
+                                    screenshot_items.push(InputItem::EphemeralImage {
+                                        path,
+                                        metadata: Some(metadata),
+                                    });
+                                }
+                            }
+                            
+                            // Send a follow-up message with just the screenshots
+                            if !screenshot_items.is_empty() {
+                                let _ = codex_op_tx_clone.send(Op::UserInput {
+                                    items: screenshot_items,
+                                });
+                            }
+                            break; // Success - exit retry loop
+                        }
+                        Err(e) => {
+                            if attempts >= max_attempts {
+                                tracing::error!("Background screenshot capture failed after {} attempts: {}", attempts, e);
+                                break; // Give up after max attempts
+                            } else {
+                                tracing::warn!("Background screenshot capture failed on attempt {} ({}), retrying...", attempts, e);
+                                // Exponential backoff: wait 1s, then 2s, then 4s
+                                let wait_time = std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
+                                tokio::time::sleep(wait_time).await;
+                            }
+                        }
                     }
-                    Err(e) => tracing::error!("Screenshot capture failed: {}", e),
                 }
-                let _ = tx.send(result);
             });
-
-            // Wait for screenshot capture (with timeout)
-            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-                Ok(Ok((screenshot_paths, url))) => {
-                    tracing::info!("Captured {} browser screenshot(s)", screenshot_paths.len());
-                    browser_screenshot_count = screenshot_paths.len();
-                    let screenshot_url = url.clone();
-                    browser_url = url.clone();
-
-                    // Save the first screenshot path and URL for display in the TUI
-                    if let Some(first_path) = screenshot_paths.first() {
-                        if let Ok(mut latest) = self.latest_browser_screenshot.lock() {
-                            let url_string = url.unwrap_or_else(|| "Browser".to_string());
-                            *latest = Some((first_path.clone(), url_string));
-                        }
-                    }
-
-                    // Add browser screenshots directly to items (ephemeral - not stored in image_paths for history)
-                    for path in screenshot_paths {
-                        tracing::info!("Browser screenshot attached: {}", path.display());
-                        // Check if the file actually exists
-                        if path.exists() {
-                            tracing::info!("Screenshot file exists at: {}", path.display());
-                            // Add as EphemeralImage with metadata for identification
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            let metadata = format!(
-                                "screenshot:{}:{}",
-                                timestamp,
-                                screenshot_url.as_deref().unwrap_or("unknown")
-                            );
-                            items.push(InputItem::EphemeralImage {
-                                path,
-                                metadata: Some(metadata),
-                            });
-                        } else {
-                            tracing::error!(
-                                "Screenshot file does not exist at: {}",
-                                path.display()
-                            );
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("Failed to capture browser screenshot: {}", e);
-                }
-                Err(_) => {
-                    tracing::error!("Browser screenshot capture timed out");
-                }
-            }
         } else {
             tracing::info!("Browser is not enabled, skipping screenshot capture");
         }
@@ -907,25 +901,8 @@ impl ChatWidget<'_> {
                 });
         }
 
-        // Show text in conversation history, with a note about browser screenshots
         if !original_text.is_empty() {
-            let display_text = if browser_screenshot_count > 0 {
-                if let Some(url) = browser_url {
-                    format!("{}\n\n[Browser: {}]", original_text, url)
-                } else {
-                    format!("{}\n\n[Browser screenshot attached]", original_text)
-                }
-            } else {
-                original_text.clone()
-            };
-            self.add_to_history(HistoryCell::new_user_prompt(display_text));
-        } else if browser_screenshot_count > 0 {
-            let prompt_text = if let Some(url) = browser_url {
-                format!("[Browser: {}]", url)
-            } else {
-                "[Browser screenshot attached]".to_string()
-            };
-            self.add_to_history(HistoryCell::new_user_prompt(prompt_text));
+            self.add_to_history(HistoryCell::new_user_prompt(original_text.clone()));
         }
     }
 
@@ -1613,7 +1590,6 @@ impl ChatWidget<'_> {
         // Parse the browser subcommand
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
 
-        let browser_manager = self.browser_manager.clone();
         let response = if parts.len() > 1 {
             let first_arg = parts[1];
 
@@ -1631,44 +1607,161 @@ impl ChatWidget<'_> {
                     url.clone()
                 };
 
-                // Enable browser mode
-                browser_manager.set_enabled_sync(true);
-
                 // Navigate to URL and wait for it to load
-                let browser_manager_open = browser_manager.clone();
+                let latest_screenshot = self.latest_browser_screenshot.clone();
+                let app_event_tx = self.app_event_tx.clone();
                 let url_for_goto = full_url.clone();
+                
+                // Connect immediately, don't wait for message send
                 tokio::spawn(async move {
-                    // Ensure global manager is configured similarly for consistency
-                    let global_manager =
-                        codex_browser::global::get_or_create_browser_manager().await;
-
-                    // Copy configuration from TUI manager to global manager
+                    // Get the global browser manager
+                    let browser_manager = ChatWidget::get_browser_manager().await;
+                    
+                    // Enable browser mode and ensure it's visible (not headless) for URL navigation
+                    browser_manager.set_enabled_sync(true);
                     {
-                        let tui_config = browser_manager_open.get_config().await;
-                        let mut global_config = global_manager.config.write().await;
-
-                        // Copy key settings to maintain consistency
-                        global_config.connect_port = tui_config.connect_port;
-                        global_config.connect_ws = tui_config.connect_ws.clone();
-                        global_config.headless = tui_config.headless;
-                        global_config.persist_profile = tui_config.persist_profile;
-                        global_config.enabled = true;
+                        let mut config = browser_manager.config.write().await;
+                        config.headless = false; // Ensure browser is visible when navigating to URL
                     }
-
-                    // Start global manager with synced config
-                    let _ = global_manager.start().await;
-
-                    // Navigate using TUI manager (for now - could switch to global later)
-                    match browser_manager_open.goto(&url_for_goto).await {
+                    
+                    // IMPORTANT: Start the browser manager first before navigating
+                    if let Err(e) = browser_manager.start().await {
+                        tracing::error!("Failed to start TUI browser manager: {}", e);
+                        return;
+                    }
+                    
+                    // Set up navigation callback to auto-capture screenshots
+                    {
+                        let latest_screenshot_callback = latest_screenshot.clone();
+                        let app_event_tx_callback = app_event_tx.clone();
+                        
+                        browser_manager.set_navigation_callback(move |url| {
+                            tracing::info!("Navigation callback triggered for URL: {}", url);
+                            let latest_screenshot_inner = latest_screenshot_callback.clone();
+                            let app_event_tx_inner = app_event_tx_callback.clone();
+                            let url_inner = url.clone();
+                            
+                            tokio::spawn(async move {
+                                // Get browser manager in the inner async block
+                                let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                                // Capture screenshot after navigation
+                                match browser_manager_inner.capture_screenshot_with_url().await {
+                                    Ok((paths, _)) => {
+                                        if let Some(first_path) = paths.first() {
+                                            tracing::info!("Auto-captured screenshot after navigation: {}", first_path.display());
+                                            
+                                            // Update the latest screenshot
+                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                *latest = Some((first_path.clone(), url_inner.clone()));
+                                            }
+                                            
+                                            // Send update event
+                                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                    screenshot_path: first_path.clone(),
+                                                    url: url_inner,
+                                                }),
+                                            }));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to auto-capture screenshot: {}", e);
+                                    }
+                                }
+                            });
+                        }).await;
+                    }
+                    
+                    // Set the browser manager as the global manager so both TUI and Session use the same instance
+                    codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+                    
+                    // Ensure the navigation callback is also set on the global manager
+                    let global_manager = codex_browser::global::get_browser_manager().await;
+                    if let Some(global_manager) = global_manager {
+                        let latest_screenshot_global = latest_screenshot.clone();
+                        let app_event_tx_global = app_event_tx.clone();
+                        
+                        global_manager.set_navigation_callback(move |url| {
+                            tracing::info!("Global manager navigation callback triggered for URL: {}", url);
+                            let latest_screenshot_inner = latest_screenshot_global.clone();
+                            let app_event_tx_inner = app_event_tx_global.clone();
+                            let url_inner = url.clone();
+                            
+                            tokio::spawn(async move {
+                                // Wait a moment for the navigation to complete
+                                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                                
+                                // Capture screenshot after navigation
+                                let browser_manager = codex_browser::global::get_browser_manager().await;
+                                if let Some(browser_manager) = browser_manager {
+                                    match browser_manager.capture_screenshot_with_url().await {
+                                        Ok((paths, url)) => {
+                                            if let Some(first_path) = paths.first() {
+                                                tracing::info!("Auto-captured screenshot after global navigation: {}", first_path.display());
+                                                
+                                                // Update the latest screenshot
+                                                if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                    *latest = Some((first_path.clone(), url_inner.clone()));
+                                                }
+                                                
+                                                // Send update event
+                                                use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                    id: uuid::Uuid::new_v4().to_string(),
+                                                    msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                        screenshot_path: first_path.clone(),
+                                                        url: url_inner,
+                                                    }),
+                                                }));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to auto-capture screenshot after global navigation: {}", e);
+                                        }
+                                    }
+                                }
+                            });
+                        }).await;
+                    }
+                    
+                    // Navigate using global manager
+                    match browser_manager.goto(&url_for_goto).await {
                         Ok(result) => {
                             tracing::info!(
                                 "Browser opened to: {} (title: {:?})",
                                 result.url,
                                 result.title
                             );
-                            // Add a small delay to ensure page is fully rendered
-                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                            tracing::info!("Page should be loaded now");
+                            
+                            // Capture initial screenshot
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            match browser_manager.capture_screenshot_with_url().await {
+                                Ok((paths, url)) => {
+                                    if let Some(first_path) = paths.first() {
+                                        tracing::info!("Initial screenshot captured: {}", first_path.display());
+                                        
+                                        // Update the latest screenshot
+                                        if let Ok(mut latest) = latest_screenshot.lock() {
+                                            *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| result.url.clone())));
+                                        }
+                                        
+                                        // Send update event
+                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                screenshot_path: first_path.clone(),
+                                                url: url.unwrap_or_else(|| result.url.clone()),
+                                            }),
+                                        }));
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to capture initial screenshot: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::error!("Failed to open browser: {}", e);
@@ -1683,9 +1776,9 @@ impl ChatWidget<'_> {
             } else {
                 // It's a subcommand
                 match first_arg {
-                    "local" => {
-                        // Connect to local Chrome instance
-                        // Check if there's a port specified after "local"
+                    "chrome" => {
+                        // Connect to Chrome instance
+                        // Check if there's a port specified after "chrome"
                         let port = if parts.len() > 2 {
                             // Try to parse the port number
                             parts[2].parse::<u16>().ok()
@@ -1693,47 +1786,164 @@ impl ChatWidget<'_> {
                             None
                         };
 
-                        browser_manager.set_enabled_sync(true);
+                        // Update the config to use Chrome connection
+                        let latest_screenshot = self.latest_browser_screenshot.clone();
+                        let app_event_tx = self.app_event_tx.clone();
+                        let port_display =
+                            port.map_or("auto-detected".to_string(), |p| p.to_string());
 
-                        // Update the config to use local Chrome connection
-                        let browser_manager_local = browser_manager.clone();
-                        // Determine which port to use for launching
-                        let launch_port = port.unwrap_or(9222);
-
+                        // Connect immediately, don't wait for message send
                         tokio::spawn(async move {
-                            // CRITICAL: Use the global browser manager for everything to avoid dual instances
-                            let global_manager =
-                                codex_browser::global::get_or_create_browser_manager().await;
-
-                            // Configure the global manager for local Chrome connection
+                            // Get the global browser manager
+                            let browser_manager = ChatWidget::get_browser_manager().await;
+                            browser_manager.set_enabled_sync(true);
+                            
+                            // Configure the manager for local Chrome connection
                             {
-                                let mut global_config = global_manager.config.write().await;
-                                global_config.connect_port = Some(port.unwrap_or(0));
-                                global_config.headless = false;
-                                global_config.persist_profile = true;
-                                global_config.enabled = true;
-                            }
-
-                            // Also sync the TUI manager to the same config to keep UI consistent
-                            {
-                                let mut config = browser_manager_local.config.write().await;
+                                let mut config = browser_manager.config.write().await;
                                 config.connect_port = Some(port.unwrap_or(0));
                                 config.headless = false;
                                 config.persist_profile = true;
+                                config.enabled = true;
                             }
 
-                            // Connect using the global manager (this will be used by LLM tools)
-                            match global_manager.start().await {
+                            // Connect using the global manager
+                            match browser_manager.start().await {
                                 Ok(_) => {
                                     tracing::info!(
-                                        "Connected to local Chrome instance via global manager"
+                                        "Connected to local Chrome instance"
                                     );
+                                    
+                                    // Set up navigation callback to auto-capture screenshots
+                                    {
+                                        let latest_screenshot_callback = latest_screenshot.clone();
+                                        let app_event_tx_callback = app_event_tx.clone();
+                                        
+                                        browser_manager.set_navigation_callback(move |url| {
+                                            tracing::info!("CDP Navigation callback triggered for URL: {}", url);
+                                            let latest_screenshot_inner = latest_screenshot_callback.clone();
+                                            let app_event_tx_inner = app_event_tx_callback.clone();
+                                            let url_inner = url.clone();
+                                            
+                                            tokio::spawn(async move {
+                                                // Wait a bit for page to stabilize
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                
+                                                // Get browser manager in the inner async block
+                                                let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                                                // Capture screenshot after navigation
+                                                match browser_manager_inner.capture_screenshot_with_url().await {
+                                                    Ok((paths, _)) => {
+                                                        if let Some(first_path) = paths.first() {
+                                                            tracing::info!("Auto-captured CDP screenshot: {}", first_path.display());
+                                                            
+                                                            // Update the latest screenshot
+                                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                                *latest = Some((first_path.clone(), url_inner.clone()));
+                                                            }
+                                                            
+                                                            // Send update event
+                                                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                                id: uuid::Uuid::new_v4().to_string(),
+                                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                    screenshot_path: first_path.clone(),
+                                                                    url: url_inner,
+                                                                }),
+                                                            }));
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!("Failed to auto-capture CDP screenshot: {}", e);
+                                                    }
+                                                }
+                                            });
+                                        }).await;
+                                    }
+                                    
+                                    // Set the browser manager as the global manager
+                                    codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+                                    
+                                    // Ensure the navigation callback is also set on the global manager
+                                    let global_manager = codex_browser::global::get_browser_manager().await;
+                                    if let Some(global_manager) = global_manager {
+                                        let latest_screenshot_global = latest_screenshot.clone();
+                                        let app_event_tx_global = app_event_tx.clone();
+                                        
+                                        global_manager.set_navigation_callback(move |url| {
+                                            tracing::info!("Global CDP navigation callback triggered for URL: {}", url);
+                                            let latest_screenshot_inner = latest_screenshot_global.clone();
+                                            let app_event_tx_inner = app_event_tx_global.clone();
+                                            let url_inner = url.clone();
+                                            
+                                            tokio::spawn(async move {
+                                                // Wait a moment for the navigation to complete
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                                                
+                                                // Capture screenshot after navigation
+                                                let browser_manager = codex_browser::global::get_browser_manager().await;
+                                                if let Some(browser_manager) = browser_manager {
+                                                    match browser_manager.capture_screenshot_with_url().await {
+                                                        Ok((paths, url)) => {
+                                                            if let Some(first_path) = paths.first() {
+                                                                tracing::info!("Auto-captured screenshot after global CDP navigation: {}", first_path.display());
+                                                                
+                                                                // Update the latest screenshot
+                                                                if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                                    *latest = Some((first_path.clone(), url_inner.clone()));
+                                                                }
+                                                                
+                                                                // Send update event
+                                                                use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                                    id: uuid::Uuid::new_v4().to_string(),
+                                                                    msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                        screenshot_path: first_path.clone(),
+                                                                        url: url_inner,
+                                                                    }),
+                                                                }));
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::error!("Failed to auto-capture screenshot after global CDP navigation: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                        }).await;
+                                    }
+                                    
                                     tracing::info!(
                                         "All browser operations (TUI and LLM tools) will use external Chrome"
                                     );
-
-                                    // Also start the local manager for UI consistency
-                                    let _ = browser_manager_local.start().await;
+                                    
+                                    // Capture initial screenshot from current tab
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                    match browser_manager.capture_screenshot_with_url().await {
+                                        Ok((paths, url)) => {
+                                            if let Some(first_path) = paths.first() {
+                                                tracing::info!("Initial CDP screenshot captured: {}", first_path.display());
+                                                
+                                                // Update the latest screenshot
+                                                if let Ok(mut latest) = latest_screenshot.lock() {
+                                                    *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| "Chrome".to_string())));
+                                                }
+                                                
+                                                // Send update event
+                                                use codex_core::protocol::BrowserScreenshotUpdateEvent;
+                                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                                    id: uuid::Uuid::new_v4().to_string(),
+                                                    msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                        screenshot_path: first_path.clone(),
+                                                        url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                                    }),
+                                                }));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to capture initial CDP screenshot: {}", e);
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::warn!(
@@ -1763,11 +1973,130 @@ impl ChatWidget<'_> {
                                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                                     // Try connecting again
-                                    if let Err(e) = browser_manager_local.start().await {
-                                        tracing::error!(
-                                            "Failed to connect to Chrome after launching: {}",
-                                            e
-                                        );
+                                    match browser_manager.start().await {
+                                        Ok(_) => {
+                                            tracing::info!("Successfully connected to Chrome after launching");
+                                            
+                                            // Set up navigation callback
+                                            {
+                                                let latest_screenshot_callback = latest_screenshot.clone();
+                                                let app_event_tx_callback = app_event_tx.clone();
+                                                
+                                                browser_manager.set_navigation_callback(move |url| {
+                                                    tracing::info!("CDP Navigation callback (launched) triggered for URL: {}", url);
+                                                    let latest_screenshot_inner = latest_screenshot_callback.clone();
+                                                    let app_event_tx_inner = app_event_tx_callback.clone();
+                                                    let url_inner = url.clone();
+                                                    
+                                                    tokio::spawn(async move {
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                        // Get browser manager in the inner async block
+                                                        let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                                                        match browser_manager_inner.capture_screenshot_with_url().await {
+                                                            Ok((paths, _)) => {
+                                                                if let Some(first_path) = paths.first() {
+                                                                    if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                                        *latest = Some((first_path.clone(), url_inner.clone()));
+                                                                    }
+                                                                    use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                                    let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                                        id: uuid::Uuid::new_v4().to_string(),
+                                                                        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                            screenshot_path: first_path.clone(),
+                                                                            url: url_inner,
+                                                                        }),
+                                                                    }));
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                tracing::error!("Failed to auto-capture launched CDP screenshot: {}", e);
+                                                            }
+                                                        }
+                                                    });
+                                                }).await;
+                                            }
+                                            
+                                            // Set the browser manager as the global manager
+                                            codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+                                            
+                                            // Ensure the navigation callback is also set on the global manager
+                                            let global_manager = codex_browser::global::get_browser_manager().await;
+                                            if let Some(global_manager) = global_manager {
+                                                let latest_screenshot_global = latest_screenshot.clone();
+                                                let app_event_tx_global = app_event_tx.clone();
+                                                
+                                                global_manager.set_navigation_callback(move |url| {
+                                                    tracing::info!("Global CDP (launched) navigation callback triggered for URL: {}", url);
+                                                    let latest_screenshot_inner = latest_screenshot_global.clone();
+                                                    let app_event_tx_inner = app_event_tx_global.clone();
+                                                    let url_inner = url.clone();
+                                                    
+                                                    tokio::spawn(async move {
+                                                        // Wait a moment for the navigation to complete
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                                                        
+                                                        // Capture screenshot after navigation
+                                                        let browser_manager = codex_browser::global::get_browser_manager().await;
+                                                        if let Some(browser_manager) = browser_manager {
+                                                            match browser_manager.capture_screenshot_with_url().await {
+                                                                Ok((paths, url)) => {
+                                                                    if let Some(first_path) = paths.first() {
+                                                                        tracing::info!("Auto-captured screenshot after global CDP (launched) navigation: {}", first_path.display());
+                                                                        
+                                                                        // Update the latest screenshot
+                                                                        if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                                            *latest = Some((first_path.clone(), url_inner.clone()));
+                                                                        }
+                                                                        
+                                                                        // Send update event
+                                                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                                        let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                                            id: uuid::Uuid::new_v4().to_string(),
+                                                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                                screenshot_path: first_path.clone(),
+                                                                                url: url_inner,
+                                                                            }),
+                                                                        }));
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    tracing::error!("Failed to auto-capture screenshot after global CDP (launched) navigation: {}", e);
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                                }).await;
+                                            }
+                                            
+                                            // Capture initial screenshot
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                                            match browser_manager.capture_screenshot_with_url().await {
+                                                Ok((paths, url)) => {
+                                                    if let Some(first_path) = paths.first() {
+                                                        if let Ok(mut latest) = latest_screenshot.lock() {
+                                                            *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| "Chrome".to_string())));
+                                                        }
+                                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                                            id: uuid::Uuid::new_v4().to_string(),
+                                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                                            }),
+                                                        }));
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to capture initial launched CDP screenshot: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to connect to Chrome after launching: {}",
+                                                e
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -1784,15 +2113,15 @@ impl ChatWidget<'_> {
                     }
                     "off" => {
                         // Disable browser mode
-                        browser_manager.set_enabled_sync(false);
                         // Clear the screenshot popup
                         if let Ok(mut screenshot_lock) = self.latest_browser_screenshot.lock() {
                             *screenshot_lock = None;
                         }
                         // Close any open browser
-                        let browser_manager_close = browser_manager.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = browser_manager_close.close().await {
+                            let browser_manager = ChatWidget::get_browser_manager().await;
+                            browser_manager.set_enabled_sync(false);
+                            if let Err(e) = browser_manager.close().await {
                                 tracing::error!("Failed to close browser: {}", e);
                             }
                         });
@@ -1801,20 +2130,33 @@ impl ChatWidget<'_> {
                     }
                     "status" => {
                         // Get status from BrowserManager
-                        browser_manager.get_status_sync()
+                        // Use a channel to get status from async context
+                        let (status_tx, status_rx) = std::sync::mpsc::channel();
+                        tokio::spawn(async move {
+                            let browser_manager = ChatWidget::get_browser_manager().await;
+                            let status = browser_manager.get_status_sync();
+                            let _ = status_tx.send(status);
+                        });
+                        status_rx.recv().unwrap_or_else(|_| "Failed to get browser status.".to_string())
                     }
                     "fullpage" => {
                         if parts.len() > 2 {
                             match parts[2] {
                                 "on" => {
                                     // Enable full-page mode
-                                    browser_manager.set_fullpage_sync(true);
+                                    tokio::spawn(async move {
+                                        let browser_manager = ChatWidget::get_browser_manager().await;
+                                        browser_manager.set_fullpage_sync(true);
+                                    });
                                     "Full-page screenshot mode enabled (max 8 segments)."
                                         .to_string()
                                 }
                                 "off" => {
                                     // Disable full-page mode
-                                    browser_manager.set_fullpage_sync(false);
+                                    tokio::spawn(async move {
+                                        let browser_manager = ChatWidget::get_browser_manager().await;
+                                        browser_manager.set_fullpage_sync(false);
+                                    });
                                     "Full-page screenshot mode disabled.".to_string()
                                 }
                                 _ => "Usage: /browser fullpage [on|off]".to_string(),
@@ -1835,7 +2177,10 @@ impl ChatWidget<'_> {
                                         if let (Ok(width), Ok(height)) =
                                             (width_str.parse::<u32>(), height_str.parse::<u32>())
                                         {
-                                            browser_manager.set_viewport_sync(width, height);
+                                            tokio::spawn(async move {
+                                                let browser_manager = ChatWidget::get_browser_manager().await;
+                                                browser_manager.set_viewport_sync(width, height);
+                                            });
                                             format!(
                                                 "Browser viewport updated: {}x{}",
                                                 width, height
@@ -1849,7 +2194,10 @@ impl ChatWidget<'_> {
                                 }
                                 "segments_max" => {
                                     if let Ok(max) = value.parse::<usize>() {
-                                        browser_manager.set_segments_max_sync(max);
+                                        tokio::spawn(async move {
+                                            let browser_manager = ChatWidget::get_browser_manager().await;
+                                            browser_manager.set_segments_max_sync(max);
+                                        });
                                         format!("Browser segments_max updated: {}", max)
                                     } else {
                                         "Invalid segments_max value. Use a number.".to_string()
@@ -1866,14 +2214,14 @@ impl ChatWidget<'_> {
                     }
                     _ => {
                         format!(
-                            "Unknown browser command: '{}'\nUsage: /browser <url> | off | status | fullpage | config",
+                            "Unknown browser command: '{}'\nUsage: /browser <url> | chrome [port] | off | status | fullpage | config\nAlias: /chrome [port]",
                             first_arg
                         )
                     }
                 }
             }
         } else {
-            "Browser commands:\n• /browser <url> - Open URL and enable browser mode\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration".to_string()
+            "Browser commands:\n• /browser <url> - Open URL and enable browser mode\n• /browser chrome [port] - Connect to Chrome browser (CDP)\n• /chrome [port] - Alias for /browser chrome\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration".to_string()
         };
 
         // Add the response to the UI as a background event

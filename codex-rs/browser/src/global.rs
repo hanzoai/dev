@@ -35,6 +35,11 @@ pub async fn clear_browser_manager() {
 
 /// Set the global browser manager configuration (used by TUI to sync with global state)
 pub async fn set_global_browser_manager(manager: Arc<BrowserManager>) {
+    // Ensure the manager is enabled
+    manager.set_enabled_sync(true);
+    
     let mut guard = GLOBAL_BROWSER_MANAGER.write().await;
     *guard = Some(manager);
+    
+    tracing::info!("Global browser manager set and enabled");
 }
