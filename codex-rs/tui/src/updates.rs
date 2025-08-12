@@ -51,7 +51,7 @@ struct ReleaseInfo {
 }
 
 const VERSION_FILENAME: &str = "version.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/just-every/coder/releases/latest";
 
 fn version_filepath(config: &Config) -> PathBuf {
     config.codex_home.join(VERSION_FILENAME)
@@ -70,7 +70,7 @@ async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
         .header(
             "User-Agent",
             format!(
-                "codex/{} (+https://github.com/openai/codex)",
+                "codex/{} (+https://github.com/just-every/coder)",
                 env!("CARGO_PKG_VERSION")
             ),
         )

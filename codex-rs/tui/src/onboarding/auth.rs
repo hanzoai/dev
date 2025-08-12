@@ -102,7 +102,7 @@ impl AuthModeWidget {
             Line::from(vec![
                 Span::raw("> "),
                 Span::styled(
-                    "Sign in with ChatGPT to use Codex as part of your paid plan",
+                    "Sign in with ChatGPT to use your paid plan",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -223,17 +223,17 @@ impl AuthModeWidget {
             Line::from(""),
             Line::from("> Before you start:"),
             Line::from(""),
-            Line::from("  Decide how much autonomy you want to grant Codex"),
+            Line::from("  Decide how much autonomy you want to grant Coder"),
             Line::from(vec![
                 Span::raw("  For more details see the "),
                 Span::styled(
-                    "\u{1b}]8;;https://github.com/openai/codex\u{7}Codex docs\u{1b}]8;;\u{7}",
+                    "\u{1b}]8;;https://github.com/just-every/coder\u{7}Coder docs\u{1b}]8;;\u{7}",
                     Style::default().add_modifier(Modifier::UNDERLINED),
                 ),
             ])
             .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
-            Line::from("  Codex can make mistakes")
+            Line::from("  Coder can make mistakes")
                 .style(Style::default().fg(text_bright())),
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
@@ -279,7 +279,7 @@ impl AuthModeWidget {
     fn render_env_var_missing(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
             Line::from(
-                "  To use Codex with the OpenAI API, set OPENAI_API_KEY in your environment",
+                "  To use Coder with the OpenAI API, set OPENAI_API_KEY in your environment",
             )
             .style(Style::default().fg(info())),
             Line::from(""),
