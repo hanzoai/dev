@@ -26,6 +26,8 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::{thread, time::Duration};
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 
@@ -37,6 +39,8 @@ const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
 /// Result returned when the user interacts with the text area.
 pub enum InputResult {
     Submitted(String),
+    ScrollUp,
+    ScrollDown,
     None,
 }
 
@@ -61,6 +65,11 @@ pub(crate) struct ChatComposer {
     has_focus: bool,
     has_chat_history: bool,
     last_esc_time: Option<std::time::Instant>,
+    is_task_running: bool,
+    // Current status message to display when task is running
+    status_message: String,
+    // Animation thread for spinning icon when task is running
+    animation_running: Option<Arc<AtomicBool>>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -93,11 +102,83 @@ impl ChatComposer {
             has_focus: has_input_focus,
             has_chat_history: false,
             last_esc_time: None,
+            is_task_running: false,
+            status_message: String::from("coding"),
+            animation_running: None,
         }
     }
 
     pub fn set_has_chat_history(&mut self, has_history: bool) {
         self.has_chat_history = has_history;
+    }
+    
+    pub fn set_task_running(&mut self, running: bool) {
+        self.is_task_running = running;
+        
+        if running {
+            // Start animation thread if not already running
+            if self.animation_running.is_none() {
+                let animation_flag = Arc::new(AtomicBool::new(true));
+                let animation_flag_clone = Arc::clone(&animation_flag);
+                let app_event_tx_clone = self.app_event_tx.clone();
+                
+                thread::spawn(move || {
+                    while animation_flag_clone.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_millis(200)); // Slower animation
+                        app_event_tx_clone.send(AppEvent::RequestRedraw);
+                    }
+                });
+                
+                self.animation_running = Some(animation_flag);
+            }
+        } else {
+            // Stop animation thread
+            if let Some(animation_flag) = self.animation_running.take() {
+                animation_flag.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+    
+    pub fn update_status_message(&mut self, message: String) {
+        self.status_message = Self::map_status_message(&message);
+    }
+    
+    // Map technical status messages to user-friendly ones
+    fn map_status_message(technical_message: &str) -> String {
+        let lower = technical_message.to_lowercase();
+        
+        // Thinking/reasoning patterns
+        if lower.contains("reasoning") || lower.contains("thinking") || lower.contains("planning") 
+           || lower.contains("waiting for model") || lower.contains("model") {
+            "Thinking".to_string()
+        }
+        // Tool/command execution patterns  
+        else if lower.contains("tool") || lower.contains("command") || lower.contains("running command")
+                || lower.contains("executing") || lower.contains("bash") || lower.contains("shell") {
+            "Using tools".to_string()
+        }
+        // Response generation patterns
+        else if lower.contains("generating") || lower.contains("responding") || lower.contains("streaming")
+                || lower.contains("writing response") || lower.contains("assistant") 
+                || lower.contains("chat completions") || lower.contains("completion") {
+            "Responding".to_string()
+        }
+        // File/code editing patterns
+        else if lower.contains("editing") || lower.contains("writing") || lower.contains("modifying")
+                || lower.contains("creating file") || lower.contains("updating") || lower.contains("patch") {
+            "Coding".to_string()
+        }
+        // Catch some common technical terms
+        else if lower.contains("processing") || lower.contains("analyzing") {
+            "Thinking".to_string()
+        }
+        else if lower.contains("reading") || lower.contains("searching") {
+            "Reading".to_string()
+        }
+        else {
+            // Default fallback - use "working" for unknown status
+            "Working".to_string()
+        }
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
@@ -551,32 +632,43 @@ impl ChatComposer {
                 (InputResult::None, false)
             }
             // -------------------------------------------------------------
-            // History navigation (Up / Down) – only when the composer is not
-            // empty or when the cursor is at the correct position, to avoid
-            // interfering with normal cursor movement.
+            // Up/Down key handling - check modifiers to determine action
             // -------------------------------------------------------------
             KeyEvent {
                 code: KeyCode::Up | KeyCode::Down,
+                modifiers,
                 ..
             } => {
-                if self
-                    .history
-                    .should_handle_navigation(self.textarea.text(), self.textarea.cursor())
-                {
-                    let replace_text = match key_event.code {
-                        KeyCode::Up => self
-                            .history
-                            .navigate_up(self.textarea.text(), &self.app_event_tx),
-                        KeyCode::Down => self.history.navigate_down(&self.app_event_tx),
-                        _ => unreachable!(),
-                    };
-                    if let Some(text) = replace_text {
-                        self.textarea.set_text(&text);
-                        self.textarea.set_cursor(0);
-                        return (InputResult::None, true);
+                // Check if Shift is held for history navigation
+                if modifiers.contains(KeyModifiers::SHIFT) {
+                    // History navigation with Shift+Up/Down
+                    if self
+                        .history
+                        .should_handle_navigation(self.textarea.text(), self.textarea.cursor())
+                    {
+                        let replace_text = match key_event.code {
+                            KeyCode::Up => self
+                                .history
+                                .navigate_up(self.textarea.text(), &self.app_event_tx),
+                            KeyCode::Down => self.history.navigate_down(&self.app_event_tx),
+                            _ => None,
+                        };
+                        if let Some(text) = replace_text {
+                            self.textarea.set_text(&text);
+                            self.textarea.set_cursor(0);
+                            return (InputResult::None, true);
+                        }
+                    }
+                    // If history navigation didn't happen, just ignore the key
+                    (InputResult::None, false)
+                } else {
+                    // No Shift modifier - trigger chat scrolling
+                    match key_event.code {
+                        KeyCode::Up => (InputResult::ScrollUp, false),
+                        KeyCode::Down => (InputResult::ScrollDown, false),
+                        _ => (InputResult::None, false),
                     }
                 }
-                self.handle_input_basic(key_event)
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -835,10 +927,62 @@ impl WidgetRef for &ChatComposer {
                     .render_ref(bottom_line_rect, buf);
             }
         }
-        // Draw border around input area (no title) - use lighter border color
-        let input_block = Block::default()
+        // Draw border around input area with optional "Coding" title when task is running
+        let mut input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()));
+            
+        if self.is_task_running {
+            // Randomly select a spinner style
+            use ratatui::text::{Line, Span};
+            use ratatui::style::Style;
+            
+            // Use a hash of the task start time to pick a consistent spinner for this task
+            // (so it doesn't change every frame, but does change between tasks)
+            let spinner_seed = if let Some(ref animation_flag) = self.animation_running {
+                // Use the animation flag's address as a seed for consistency during a task
+                animation_flag.as_ref() as *const _ as usize
+            } else {
+                // Fallback to current time for initial frame
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as usize
+            };
+            
+            // Weighted random spinner selection:
+            // - 1% chance for sparkle ✨
+            // - 49.5% chance for star spinner (✧✦✧)
+            // - 49.5% chance for one of the diamond spinners (✶, ◇, ◆)
+            let selected_spinner = if spinner_seed % 100 == 0 {
+                // Very rare sparkle (1% chance)
+                &['✨'][..]
+            } else if spinner_seed % 2 == 0 {
+                // Star spinner (49.5% chance)
+                &['✧', '✦', '✧'][..]
+            } else {
+                // Diamond spinner (49.5% chance) - randomly pick one
+                match spinner_seed % 3 {
+                    0 => &['✶'][..],
+                    1 => &['◇'][..],
+                    _ => &['◆'][..],
+                }
+            };
+            
+            let frame_idx = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() / 150) as usize; // 150ms per frame for smooth animation
+            let spinner = selected_spinner[frame_idx % selected_spinner.len()];
+            
+            // Create centered title with spinner and spaces
+            let title_line = Line::from(vec![
+                Span::raw(" "), // Space before spinner
+                Span::styled(spinner.to_string(), Style::default().fg(crate::colors::secondary())),
+                Span::styled(format!(" {}... ", self.status_message), Style::default().fg(crate::colors::secondary())), // Space after spinner and after text
+            ]).centered();
+            input_block = input_block.title(title_line);
+        }
 
         let textarea_rect = input_block.inner(input_area);
         input_block.render_ref(input_area, buf);
@@ -1165,7 +1309,7 @@ mod tests {
         // When a slash command is dispatched, the composer should not submit
         // literal text and should clear its textarea.
         match result {
-            InputResult::None => {}
+            InputResult::None | InputResult::ScrollUp | InputResult::ScrollDown => {}
             InputResult::Submitted(text) => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
             }
@@ -1203,7 +1347,7 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         match result {
-            InputResult::None => {}
+            InputResult::None | InputResult::ScrollUp | InputResult::ScrollDown => {}
             InputResult::Submitted(text) => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
             }
