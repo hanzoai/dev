@@ -53,6 +53,7 @@ pub fn insert_history_lines_to_writer<B, W>(
 }
 
 /// Insert `lines` above the viewport.
+#[allow(dead_code)]
 pub fn insert_history_lines<B>(
     terminal: &mut ratatui::Terminal<B>,
     lines: Vec<Line>,
@@ -63,6 +64,7 @@ pub fn insert_history_lines<B>(
     insert_history_lines_to_writer(terminal, &mut writer, lines);
 }
 
+#[allow(dead_code)]
 struct SetScrollRegion(std::ops::Range<u16>);
 impl Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
@@ -80,6 +82,7 @@ impl Command for SetScrollRegion {
     }
 }
 
+#[allow(dead_code)]
 struct ResetScrollRegion;
 impl Command for ResetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
@@ -97,6 +100,7 @@ impl Command for ResetScrollRegion {
 }
 
 /// Write the spans to the writer with the correct styling
+#[allow(dead_code)]
 fn write_spans<'a, W: io::Write>(
     writer: &mut W,
     spans: impl Iterator<Item = &'a Span<'a>>,
@@ -144,6 +148,7 @@ fn write_spans<'a, W: io::Write>(
     Ok(())
 }
 
+#[allow(dead_code)]
 struct SetUnderlineColor(crossterm::style::Color);
 impl Command for SetUnderlineColor {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
@@ -160,6 +165,7 @@ impl Command for SetUnderlineColor {
     }
 }
 
+#[allow(dead_code)]
 struct ModifierDiff {
     pub from: Modifier,
     pub to: Modifier,
@@ -229,6 +235,7 @@ impl ModifierDiff {
 
 /// Count the number of terminal lines required to render these Lines
 /// accounting for line wrapping.
+#[allow(dead_code)]
 fn wrapped_line_count(lines: &[Line], width: u16) -> u16 {
     lines
         .iter()
@@ -244,6 +251,7 @@ fn wrapped_line_count(lines: &[Line], width: u16) -> u16 {
 }
 
 /// Convert ratatui::style::Color to ANSI color code
+#[allow(dead_code)]
 fn ansi_color_code_from_ratatui_color(color: crossterm::style::Color) -> u8 {
     use crossterm::style::Color;
     match color {
