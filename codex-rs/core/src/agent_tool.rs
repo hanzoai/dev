@@ -4,12 +4,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::config_types::AgentConfig;
 use crate::openai_tools::{JsonSchema, OpenAiTool, ResponsesApiTool};
+use crate::protocol::{Event, EventMsg, AgentStatusUpdateEvent, AgentInfo};
 
 // Agent status enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +56,7 @@ lazy_static::lazy_static! {
 pub struct AgentManager {
     agents: HashMap<String, Agent>,
     handles: HashMap<String, JoinHandle<()>>,
+    event_sender: Option<mpsc::UnboundedSender<Event>>,
 }
 
 impl AgentManager {
@@ -62,8 +64,48 @@ impl AgentManager {
         Self {
             agents: HashMap::new(),
             handles: HashMap::new(),
+            event_sender: None,
         }
     }
+
+    pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<Event>) {
+        self.event_sender = Some(sender);
+    }
+
+    async fn send_agent_status_update(&self) {
+        if let Some(ref sender) = self.event_sender {
+            let agents: Vec<AgentInfo> = self.agents.values()
+                .map(|agent| {
+                    // Just show the model name - status provides the useful info
+                    let name = agent.model.clone();
+
+                    AgentInfo {
+                        id: agent.id.clone(),
+                        name,
+                        status: format!("{:?}", agent.status).to_lowercase(),
+                        model: Some(agent.model.clone()),
+                    }
+                })
+                .collect();
+
+            // Get context and task from the first agent (they're all the same)
+            let (context, task) = self.agents.values().next()
+                .map(|agent| (agent.context.clone(), agent.output_goal.clone()))
+                .unwrap_or((None, None));
+
+            let event = Event {
+                id: uuid::Uuid::new_v4().to_string(),
+                msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { 
+                    agents, 
+                    context, 
+                    task 
+                }),
+            };
+
+            let _ = sender.send(event);
+        }
+    }
+
 
     pub async fn create_agent(
         &mut self,
@@ -147,6 +189,9 @@ impl AgentManager {
         };
 
         self.agents.insert(agent_id.clone(), agent.clone());
+
+        // Send initial status update
+        self.send_agent_status_update().await;
 
         // Spawn async agent
         let agent_id_clone = agent_id.clone();
@@ -245,6 +290,8 @@ impl AgentManager {
             ) {
                 agent.completed_at = Some(Utc::now());
             }
+            // Send status update event
+            self.send_agent_status_update().await;
         }
     }
 
@@ -261,6 +308,8 @@ impl AgentManager {
                 }
             }
             agent.completed_at = Some(Utc::now());
+            // Send status update event
+            self.send_agent_status_update().await;
         }
     }
 
@@ -269,6 +318,8 @@ impl AgentManager {
             agent
                 .progress
                 .push(format!("{}: {}", Utc::now().format("%H:%M:%S"), message));
+            // Send updated agent status with the latest progress
+            self.send_agent_status_update().await;
         }
     }
 
