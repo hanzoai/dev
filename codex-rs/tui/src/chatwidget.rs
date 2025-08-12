@@ -339,13 +339,58 @@ impl ChatWidget<'_> {
         if self.stream_header_emitted {
             return;
         }
-        let header = match kind {
-            StreamKind::Reasoning => RLine::from("thinking".magenta().italic()),
-            StreamKind::Answer => RLine::from("codex".magenta().bold()),
-        };
-        self.app_event_tx
-            .send(AppEvent::InsertHistory(vec![header]));
-        self.stream_header_emitted = true;
+        match kind {
+            StreamKind::Reasoning => {
+                // Always add space above reasoning (unless history is completely empty)
+                if !self.history_cells.is_empty() {
+                    self.history_cells.push(HistoryCell::new_text_line(RLine::from("")));
+                }
+                self.stream_header_emitted = true;
+                self.request_redraw();
+            }
+            StreamKind::Answer => {
+                // Add space above GPT-5 header only if the last item isn't already a blank line
+                let needs_space = if self.history_cells.is_empty() {
+                    false
+                } else {
+                    // Check if the last item is a blank line (from any cell type that could be empty)
+                    match self.history_cells.last() {
+                        Some(HistoryCell::BackgroundEvent { view }) 
+                        | Some(HistoryCell::StyledText { view })
+                        | Some(HistoryCell::DimmedReasoning { view }) 
+                            if view.lines.len() == 1 => 
+                        {
+                            // Check if it's an empty line
+                            let line = &view.lines[0];
+                            let is_empty = line.spans.is_empty() || 
+                                          (line.spans.len() == 1 && line.spans[0].content.is_empty());
+                            !is_empty // Need space if the line is NOT empty
+                        }
+                        _ => true // Always need space for other cell types
+                    }
+                };
+                
+                if needs_space {
+                    self.history_cells.push(HistoryCell::new_text_line(RLine::from("")));
+                }
+                
+                // Add GPT-5 header with secondary color
+                let formatted_model = self.format_model_name(&self.config.model);
+                use ratatui::style::{Style, Modifier};
+                use ratatui::text::Span;
+                self.history_cells.push(HistoryCell::new_styled_text_line(
+                    RLine::from(Span::styled(
+                        formatted_model,
+                        Style::default()
+                            .fg(crate::colors::secondary())
+                            .add_modifier(Modifier::BOLD)
+                    ))
+                ));
+                
+                self.stream_header_emitted = true;
+                self.request_redraw();
+            }
+        }
     }
     fn finalize_active_stream(&mut self) {
         if let Some(kind) = self.current_stream {
@@ -458,6 +503,34 @@ impl ChatWidget<'_> {
         }
     }
 
+    /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
+    fn format_model_name(&self, model_name: &str) -> String {
+        if model_name.to_lowercase().starts_with("gpt-") {
+            format!("GPT{}", &model_name[3..])
+        } else {
+            model_name.to_string()
+        }
+    }
+
+    /// Calculate the maximum scroll offset based on current content size
+    fn calculate_max_scroll_offset(&self, content_area_height: u16) -> u16 {
+        let mut total_height = 0u16;
+        
+        // Calculate total content height (same logic as render method)
+        for cell in &self.history_cells {
+            let h = cell.desired_height(80); // Use reasonable width for height calculation
+            total_height = total_height.saturating_add(h);
+        }
+        
+        if let Some(ref cell) = self.active_history_cell {
+            let h = cell.desired_height(80);
+            total_height = total_height.saturating_add(h);
+        }
+        
+        // Max scroll is content height minus available height
+        total_height.saturating_sub(content_area_height)
+    }
+
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
@@ -467,6 +540,24 @@ impl ChatWidget<'_> {
             InputResult::Submitted(text) => {
                 let user_message = self.parse_message_with_images(text);
                 self.submit_user_message(user_message);
+            }
+            InputResult::ScrollUp => {
+                // Scroll up in chat history (increase offset, towards older content)
+                // Estimate max scroll based on content - use reasonable content area height of 30
+                let estimated_max_scroll = self.calculate_max_scroll_offset(30);
+                let new_offset = self.scroll_offset.saturating_add(3).min(estimated_max_scroll);
+                self.scroll_offset = new_offset;
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
+            InputResult::ScrollDown => {
+                // Scroll down in chat history (decrease offset, towards bottom)
+                if self.scroll_offset >= 3 {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                } else if self.scroll_offset > 0 {
+                    self.scroll_offset = 0;
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                }
             }
             InputResult::None => {}
         }
@@ -578,8 +669,13 @@ impl ChatWidget<'_> {
 
         // Store in memory instead of sending to scrollback
         self.history_cells.push(cell);
-        // Auto-scroll to bottom when new content arrives
-        self.scroll_offset = 0;
+        // Auto-scroll to bottom when new content arrives, but only if we're already at the bottom
+        // This preserves the user's scroll position if they've manually scrolled up
+        if self.scroll_offset == 0 {
+            // Already at bottom, stay there
+            self.scroll_offset = 0;
+        }
+        // If user has scrolled up (scroll_offset > 0), don't change their position
         // Check if there's actual conversation history (any user prompts submitted)
         let has_conversation = self
             .history_cells
@@ -850,8 +946,10 @@ impl ChatWidget<'_> {
 
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
-                // For now, just scroll up without bounds checking - the render logic will clamp it
-                self.scroll_offset = self.scroll_offset.saturating_add(3);
+                // Scroll up with proper bounds checking 
+                let estimated_max_scroll = self.calculate_max_scroll_offset(30);
+                let new_offset = self.scroll_offset.saturating_add(3).min(estimated_max_scroll);
+                self.scroll_offset = new_offset;
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             MouseEventKind::ScrollDown => {
@@ -903,6 +1001,10 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 self.begin_stream(StreamKind::Answer);
+                // Update status to show we're generating a response
+                if self.bottom_pane.is_task_running() {
+                    self.bottom_pane.update_status_text("responding".to_string());
+                }
                 self.answer_buffer.push_str(&delta);
                 self.stream_push_and_maybe_commit(&delta);
                 self.request_redraw();
@@ -911,6 +1013,10 @@ impl ChatWidget<'_> {
                 // Stream CoT into the live pane; keep input visible and commit
                 // overflow rows incrementally to scrollback.
                 self.begin_stream(StreamKind::Reasoning);
+                // Update status to show we're thinking/reasoning
+                if self.bottom_pane.is_task_running() {
+                    self.bottom_pane.update_status_text("reasoning".to_string());
+                }
                 self.reasoning_buffer.push_str(&delta);
                 self.stream_push_and_maybe_commit(&delta);
                 self.request_redraw();
@@ -929,6 +1035,10 @@ impl ChatWidget<'_> {
             }) => {
                 // Treat raw reasoning content the same as summarized reasoning for UI flow.
                 self.begin_stream(StreamKind::Reasoning);
+                // Update status to show we're thinking/reasoning
+                if self.bottom_pane.is_task_running() {
+                    self.bottom_pane.update_status_text("reasoning".to_string());
+                }
                 self.reasoning_buffer.push_str(&delta);
                 self.stream_push_and_maybe_commit(&delta);
                 self.request_redraw();
@@ -955,6 +1065,9 @@ impl ChatWidget<'_> {
             }) => {
                 self.bottom_pane.set_task_running(false);
                 self.bottom_pane.clear_live_ring();
+                // Reset stream state for next conversation
+                self.current_stream = None;
+                self.stream_header_emitted = false;
                 self.request_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
@@ -1488,6 +1601,14 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
+        // Insert lines directly into history as text line cells
+        for line in lines {
+            self.history_cells.push(HistoryCell::new_text_line(line));
+        }
+        self.request_redraw();
+    }
+
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
@@ -1897,20 +2018,26 @@ impl ChatWidget<'_> {
         // Build status line spans
         let mut status_spans = vec![
             Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" • "),
+            Span::raw( " •  "),
             Span::styled("Model: ", Style::default().dim()),
             Span::styled(
-                format!("{}", self.config.model),
+                self.format_model_name(&self.config.model),
+                Style::default().fg(crate::colors::secondary()),
+            ),
+            Span::raw("  •  "),
+            Span::styled("Reasoning: ", Style::default().dim()),
+            Span::styled(
+                format!("{}", self.config.model_reasoning_effort),
                 Style::default().fg(crate::colors::info()),
             ),
-            Span::raw(" • "),
+            Span::raw("  •  "),
             Span::styled("Directory: ", Style::default().dim()),
             Span::styled(cwd_str, Style::default().fg(crate::colors::info())),
         ];
 
         // Add git branch if available
         if let Some(branch) = self.get_git_branch() {
-            status_spans.push(Span::raw(" • "));
+            status_spans.push(Span::raw("  •  "));
             status_spans.push(Span::styled("Branch: ", Style::default().dim()));
             status_spans.push(Span::styled(
                 branch,
@@ -1932,8 +2059,9 @@ impl ChatWidget<'_> {
         // Render the block first
         status_block.render(padded_area, buf);
 
-        // Then render the text inside with padding
-        let status_widget = Paragraph::new(vec![status_line]);
+        // Then render the text inside with padding, centered
+        let status_widget = Paragraph::new(vec![status_line])
+            .alignment(ratatui::layout::Alignment::Center);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
@@ -2415,9 +2543,6 @@ impl ChatWidget<'_> {
             self.stream_header_emitted = false;
             // Clear any previous live content; we're starting a new stream.
             self.live_builder = RowBuilder::new(self.live_builder.width());
-            // Ensure the waiting status is visible (composer replaced).
-            self.bottom_pane
-                .update_status_text("waiting for model".to_string());
             self.emit_stream_header(kind);
         }
     }
@@ -2431,24 +2556,26 @@ impl ChatWidget<'_> {
             .drain_commit_ready(self.live_max_rows as usize);
         if !drained.is_empty() {
             let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-            if !self.stream_header_emitted {
-                match self.current_stream {
-                    Some(StreamKind::Reasoning) => {
-                        lines.push(ratatui::text::Line::from("thinking".magenta().italic()));
-                    }
-                    Some(StreamKind::Answer) => {
-                        lines.push(ratatui::text::Line::from("codex".magenta().bold()));
-                    }
-                    None => {}
-                }
-                self.stream_header_emitted = true;
-            }
             for r in drained {
-                lines.push(ratatui::text::Line::from(r.text));
+                let line = match self.current_stream {
+                    Some(StreamKind::Reasoning) => {
+                        // Use dimmer color for reasoning text
+                        use ratatui::text::Span;
+                        use ratatui::style::Style;
+                        ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                    }
+                    _ => ratatui::text::Line::from(r.text)
+                };
+                lines.push(line);
             }
             // Add to in-memory history instead of scrollback
             for line in lines {
-                self.history_cells.push(HistoryCell::new_text_line(line));
+                // Use dimmed reasoning for thinking to get both markdown and dimming
+                if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
+                    self.history_cells.push(HistoryCell::new_dimmed_reasoning_line(line));
+                } else {
+                    self.history_cells.push(HistoryCell::new_text_line(line));
+                }
             }
             // Ensure input focus is maintained when adding streamed content
             self.bottom_pane.ensure_input_focus();
@@ -2470,27 +2597,32 @@ impl ChatWidget<'_> {
         // TODO: Re-add markdown rendering for assistant answers and reasoning.
         // When finalizing, pass the accumulated text through `markdown::append_markdown`
         // to build styled `Line<'static>` entries instead of raw plain text lines.
-        if !remaining.is_empty() || !self.stream_header_emitted {
+        if !remaining.is_empty() {
             let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-            if !self.stream_header_emitted {
-                match kind {
-                    StreamKind::Reasoning => {
-                        lines.push(ratatui::text::Line::from("thinking".magenta().italic()));
-                    }
-                    StreamKind::Answer => {
-                        lines.push(ratatui::text::Line::from("codex".magenta().bold()));
-                    }
-                }
-                self.stream_header_emitted = true;
-            }
             for r in remaining {
-                lines.push(ratatui::text::Line::from(r.text));
+                let line = match kind {
+                    StreamKind::Reasoning => {
+                        // Use dimmer color for reasoning text
+                        use ratatui::text::Span;
+                        use ratatui::style::Style;
+                        ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                    }
+                    _ => ratatui::text::Line::from(r.text)
+                };
+                lines.push(line);
             }
-            // Close the block with a blank line for readability.
-            lines.push(ratatui::text::Line::from(""));
+            // Close the block with a blank line for readability (except for reasoning which already has spacing)
+            if kind != StreamKind::Reasoning {
+                lines.push(ratatui::text::Line::from(""));
+            }
             // Add to in-memory history instead of scrollback
             for line in lines {
-                self.history_cells.push(HistoryCell::new_text_line(line));
+                // Use dimmed reasoning for thinking to get both markdown and dimming
+                if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
+                    self.history_cells.push(HistoryCell::new_dimmed_reasoning_line(line));
+                } else {
+                    self.history_cells.push(HistoryCell::new_text_line(line));
+                }
             }
             // Ensure input focus is maintained when adding streamed content
             self.bottom_pane.ensure_input_focus();
@@ -2570,7 +2702,16 @@ impl WidgetRef for &ChatWidget<'_> {
             .live_builder
             .display_rows()
             .into_iter()
-            .map(|r| ratatui::text::Line::from(r.text))
+            .map(|r| {
+                if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
+                    // Apply dimming to live reasoning content
+                    use ratatui::text::Span;
+                    use ratatui::style::Style;
+                    ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                } else {
+                    ratatui::text::Line::from(r.text)
+                }
+            })
             .collect::<Vec<_>>();
 
         let streaming_cell = if !streaming_lines.is_empty() {

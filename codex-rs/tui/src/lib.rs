@@ -44,7 +44,6 @@ mod markdown;
 pub mod onboarding;
 mod shimmer;
 mod slash_command;
-mod status_indicator_widget;
 mod terminal_info;
 mod text_block;
 mod text_formatting;
