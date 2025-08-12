@@ -353,6 +353,7 @@ pub(crate) struct Session {
     user_shell: shell::Shell,
     show_raw_agent_reasoning: bool,
     /// Pending browser screenshots to include in the next model request
+    #[allow(dead_code)]
     pending_browser_screenshots: Mutex<Vec<PathBuf>>,
 }
 
@@ -3138,6 +3139,7 @@ fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String)
 }
 
 /// Consume pending screenshots and return them as ResponseInputItems
+#[allow(dead_code)]
 fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
     let mut pending = sess.pending_browser_screenshots.lock().unwrap();
     let screenshots = pending.drain(..).collect::<Vec<_>>();
