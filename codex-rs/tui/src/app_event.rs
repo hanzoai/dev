@@ -38,6 +38,9 @@ pub(crate) enum AppEvent {
     /// layer so it can be handled centrally. Includes the full command text.
     DispatchCommand(SlashCommand, String),
 
+    /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
+    PrepareAgents,
+
     /// Update the reasoning effort level
     UpdateReasoningEffort(ReasoningEffort),
 
