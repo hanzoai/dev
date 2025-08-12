@@ -114,6 +114,13 @@ pub(crate) struct ChatWidget<'a> {
     active_agents: Vec<AgentInfo>,
     agents_ready_to_start: bool,
     last_agent_prompt: Option<String>,
+    agent_context: Option<String>,
+    agent_task: Option<String>,
+    overall_task_status: String,
+    // Sparkline data for showing agent activity (using RefCell for interior mutability)
+    // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
+    sparkline_data: std::cell::RefCell<Vec<(u64, bool)>>,
+    last_sparkline_update: std::cell::RefCell<std::time::Instant>,
 }
 
 struct UserMessage {
@@ -443,6 +450,11 @@ impl ChatWidget<'_> {
             active_agents: Vec::new(),
             agents_ready_to_start: false,
             last_agent_prompt: None,
+            agent_context: None,
+            agent_task: None,
+            overall_task_status: "preparing".to_string(),
+            sparkline_data: std::cell::RefCell::new(Vec::new()),
+            last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
         }
     }
 
@@ -600,15 +612,13 @@ impl ChatWidget<'_> {
         let original_text = text.clone();
         let mut actual_text = text;
 
-        // Check for multi-agent commands first (before processing slash commands)
+        // Save the prompt if it's a multi-agent command
         let original_trimmed = original_text.trim();
         if original_trimmed.starts_with("/plan ")
             || original_trimmed.starts_with("/solve ")
             || original_trimmed.starts_with("/code ")
         {
-            self.agents_ready_to_start = true;
             self.last_agent_prompt = Some(original_text.clone());
-            self.request_redraw();
         }
 
         // Process slash commands and expand them if needed
@@ -1124,7 +1134,7 @@ impl ChatWidget<'_> {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
             }
-            EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents }) => {
+            EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents, context, task }) => {
                 // Update the active agents list from the event
                 self.active_agents.clear();
                 for agent in agents {
@@ -1139,6 +1149,34 @@ impl ChatWidget<'_> {
                         },
                     });
                 }
+                
+                // Store shared context and task
+                self.agent_context = context;
+                self.agent_task = task;
+                
+                // Update overall task status based on agent states
+                self.overall_task_status = if self.active_agents.is_empty() {
+                    "preparing".to_string()
+                } else if self.active_agents.iter().any(|a| matches!(a.status, AgentStatus::Running)) {
+                    "running".to_string()
+                } else if self.active_agents.iter().all(|a| matches!(a.status, AgentStatus::Completed)) {
+                    "complete".to_string()
+                } else if self.active_agents.iter().any(|a| matches!(a.status, AgentStatus::Failed)) {
+                    "failed".to_string()
+                } else {
+                    "planning".to_string()
+                };
+                
+                // Clear agents HUD when task is complete or failed
+                if matches!(self.overall_task_status.as_str(), "complete" | "failed") {
+                    self.active_agents.clear();
+                    self.agents_ready_to_start = false;
+                    self.agent_context = None;
+                    self.agent_task = None;
+                    self.last_agent_prompt = None;
+                    self.sparkline_data.borrow_mut().clear();
+                }
+                
                 // Reset ready to start flag when we get actual agent updates
                 if !self.active_agents.is_empty() {
                     self.agents_ready_to_start = false;
@@ -1230,6 +1268,89 @@ impl ChatWidget<'_> {
             self.bottom_pane
                 .show_reasoning_selection(self.config.model_reasoning_effort);
             return;
+        }
+    }
+
+    pub(crate) fn prepare_agents(&mut self) {
+        // Set the flag to show agents are ready to start
+        self.agents_ready_to_start = true;
+        
+        // Initialize sparkline with some data so it shows immediately
+        {
+            let mut sparkline_data = self.sparkline_data.borrow_mut();
+            if sparkline_data.is_empty() {
+                // Add initial low activity data for preparing phase
+                for _ in 0..10 {
+                    sparkline_data.push((2, false));
+                }
+                tracing::info!("Initialized sparkline data with {} points for preparing phase", sparkline_data.len());
+            }
+        } // Drop the borrow here
+        
+        self.request_redraw();
+    }
+
+    /// Update sparkline data with randomized activity based on agent count
+    fn update_sparkline_data(&self) {
+        let now = std::time::Instant::now();
+        
+        // Update every 100ms for smooth animation
+        if now.duration_since(*self.last_sparkline_update.borrow()).as_millis() < 100 {
+            return;
+        }
+        
+        *self.last_sparkline_update.borrow_mut() = now;
+        
+        // Calculate base height based on number of agents and status
+        let agent_count = self.active_agents.len();
+        let is_planning = self.overall_task_status == "planning";
+        let base_height = if agent_count == 0 && self.agents_ready_to_start {
+            2 // Minimal activity when preparing
+        } else if is_planning && agent_count > 0 {
+            3 // Low activity during planning phase
+        } else if agent_count == 1 {
+            5 // Low activity for single agent
+        } else if agent_count == 2 {
+            10 // Medium activity for two agents
+        } else if agent_count >= 3 {
+            15 // High activity for multiple agents
+        } else {
+            0 // No activity when no agents
+        };
+        
+        // Don't generate data if there's no activity
+        if base_height == 0 {
+            return;
+        }
+        
+        // Generate random variation
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        now.elapsed().as_nanos().hash(&mut hasher);
+        let random_seed = hasher.finish();
+        
+        // More variation during planning phase for visibility (+/- 50%)
+        // Less variation during running for stability (+/- 30%)
+        let variation_percent = if self.agents_ready_to_start && self.active_agents.is_empty() {
+            50 // More variation during planning for visibility
+        } else {
+            30 // Standard variation during running
+        };
+        
+        let variation_range = variation_percent * 2; // e.g., 100 for +/- 50%
+        let variation = ((random_seed % variation_range) as i32 - variation_percent as i32) * base_height as i32 / 100;
+        let height = ((base_height as i32 + variation).max(1) as u64).min(20);
+        
+        // Check if any agents are completed
+        let has_completed = self.active_agents.iter()
+            .any(|a| matches!(a.status, AgentStatus::Completed));
+        
+        // Keep a rolling window of 60 data points (about 6 seconds at 100ms intervals)
+        let mut sparkline_data = self.sparkline_data.borrow_mut();
+        sparkline_data.push((height, has_completed));
+        if sparkline_data.len() > 60 {
+            sparkline_data.remove(0);
         }
     }
 
@@ -1669,6 +1790,7 @@ impl ChatWidget<'_> {
         );
     }
 
+
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout_areas = self.layout_areas(area);
         let bottom_pane_area = if layout_areas.len() == 4 {
@@ -1995,154 +2117,57 @@ impl ChatWidget<'_> {
             self.render_browser_panel(chunks[0], buf);
             self.render_agent_panel(chunks[1], buf);
         } else if has_browser_screenshot {
-            // Only browser: use full width
-            self.render_browser_panel(padded_area, buf);
+            // Only browser: 50% width on the left side
+            let chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas::<2>(padded_area);
+            
+            self.render_browser_panel(chunks[0], buf);
+            // Right side remains empty
         } else if has_active_agents {
-            // Only agents: use full width
-            self.render_agent_panel(padded_area, buf);
+            // Only agents: 50% width on the left side
+            let chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .areas::<2>(padded_area);
+            
+            self.render_agent_panel(chunks[0], buf);
+            // Right side remains empty
         }
     }
 
     /// Render the browser panel (left side when both panels are shown)
     fn render_browser_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::text::{Line as RLine, Span};
-        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+        use ratatui::widgets::{Block, Borders, Widget};
 
         if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
             if let Some((screenshot_path, url)) = &*screenshot_lock {
-                // Split the HUD into two parts: left for preview, right for status (50% width)
-                let chunks =
-                    Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                        .areas::<2>(area);
-
-                let screenshot_area = chunks[0]; // Preview on the left
-                let info_area = chunks[1]; // Status on the right
-
-                // Left side: Screenshot with URL in title
+                // Use the full area for the browser preview
                 let screenshot_block = Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" {} ", url)) // URL in the title
+                    .title(format!(" Browser - {} ", url))
                     .border_style(Style::default().fg(crate::colors::border()));
 
-                let inner_screenshot = screenshot_block.inner(screenshot_area);
-                screenshot_block.render(screenshot_area, buf);
+                let inner_screenshot = screenshot_block.inner(area);
+                screenshot_block.render(area, buf);
 
-                // Render the screenshot
+                // Render the screenshot using the full inner area
                 self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
-
-                // Right side: Browser status
-                let info_block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Browser Status ")
-                    .border_style(Style::default().fg(crate::colors::border()));
-
-                let inner_info = info_block.inner(info_area);
-                info_block.render(info_area, buf);
-
-                // Display browser status information
-                let mut lines = vec![];
-
-                // Add browser status information
-                if self.browser_manager.is_enabled_sync() {
-                    lines.push(RLine::from(vec![
-                        Span::styled("URL: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(
-                            url.clone(),
-                            Style::default()
-                                .fg(crate::colors::text())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-
-                    if self.browser_manager.is_enabled_sync() {
-                        lines.push(RLine::from(vec![
-                            Span::styled(
-                                "Status: ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                            Span::styled("Active", Style::default().fg(crate::colors::success())),
-                        ]));
-                    } else {
-                        lines.push(RLine::from(vec![
-                            Span::styled(
-                                "Status: ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                            Span::styled("Inactive", Style::default().fg(crate::colors::warning())),
-                        ]));
-                    }
-
-                    let info_paragraph = Paragraph::new(lines);
-                    info_paragraph.render(inner_info, buf);
-
-                    // Screenshot panel
-                    let screenshot_block = Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Preview ")
-                        .border_style(Style::default().fg(crate::colors::border()));
-
-                    let inner_screenshot = screenshot_block.inner(screenshot_area);
-                    screenshot_block.render(screenshot_area, buf);
-
-                    // Render the screenshot (using existing method)
-                    if let Some((screenshot_path, _)) = &*screenshot_lock {
-                        self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
-                    }
-                } else {
-                    // Just show browser info in limited space
-                    let info_block = Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Browser ")
-                        .border_style(Style::default().fg(crate::colors::border()));
-
-                    let inner_info = info_block.inner(area);
-                    info_block.render(area, buf);
-
-                    let mut lines = vec![];
-                    // Truncate URL if needed
-                    let max_url_len = area.width.saturating_sub(10) as usize;
-                    let display_url = if url.len() > max_url_len {
-                        format!("{}...", &url[..max_url_len.saturating_sub(3)])
-                    } else {
-                        url.clone()
-                    };
-
-                    lines.push(RLine::from(vec![
-                        Span::styled("URL: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(display_url, Style::default().fg(crate::colors::text())),
-                    ]));
-
-                    let status = if self.browser_manager.is_enabled_sync() {
-                        "Active"
-                    } else {
-                        "Inactive"
-                    };
-
-                    lines.push(RLine::from(vec![
-                        Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(
-                            status,
-                            Style::default().fg(if self.browser_manager.is_enabled_sync() {
-                                crate::colors::success()
-                            } else {
-                                crate::colors::warning()
-                            }),
-                        ),
-                    ]));
-
-                    let info_paragraph = Paragraph::new(lines);
-                    info_paragraph.render(inner_info, buf);
-                }
             }
         }
     }
 
+
     /// Render the agent status panel in the HUD
     fn render_agent_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::text::{Line as RLine, Span};
-        use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+        use ratatui::text::{Line as RLine, Span, Text};
+        use ratatui::widgets::{Block, Borders, Paragraph, Sparkline, SparklineBar, Widget, Wrap};
+
+        // Update sparkline data for animation
+        if !self.active_agents.is_empty() || self.agents_ready_to_start {
+            self.update_sparkline_data();
+        }
 
         // Agent status block
         let agent_block = Block::default()
@@ -2153,24 +2178,107 @@ impl ChatWidget<'_> {
         let inner_agent = agent_block.inner(area);
         agent_block.render(area, buf);
 
-        // Display agent statuses
-        let mut lines = vec![];
-
-        if self.agents_ready_to_start && self.active_agents.is_empty() {
-            // Show "Ready to start" message when agents are expected
-            lines.push(RLine::from(vec![Span::styled(
-                "Ready to start",
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::ITALIC),
-            )]));
-        } else if self.active_agents.is_empty() {
-            lines.push(RLine::from(vec![Span::styled(
-                "No active agents",
-                Style::default().fg(crate::colors::text_dim()),
-            )]));
+        // Dynamically calculate sparkline height based on agent activity
+        // More agents = taller sparkline area
+        let agent_count = self.active_agents.len();
+        let sparkline_height = if agent_count == 0 && self.agents_ready_to_start {
+            1u16 // Minimal height when preparing
+        } else if agent_count == 0 {
+            0u16 // No sparkline when no agents
         } else {
-            // Show agent names/models at top
+            (agent_count as u16 + 1).min(4) // 2-4 lines based on agent count
+        };
+        
+        // Ensure we have enough space for both content and sparkline
+        // Reserve at least 3 lines for content (status + blank + message)
+        let min_content_height = 3u16;
+        let available_height = inner_agent.height;
+        
+        let (actual_content_height, actual_sparkline_height) = if sparkline_height > 0 {
+            if available_height > min_content_height + sparkline_height {
+                // Enough space for both
+                (available_height.saturating_sub(sparkline_height), sparkline_height)
+            } else if available_height > min_content_height {
+                // Limited space - give minimum to content, rest to sparkline
+                (min_content_height, available_height.saturating_sub(min_content_height).min(sparkline_height))
+            } else {
+                // Very limited space - content only
+                (available_height, 0)
+            }
+        } else {
+            // No sparkline needed
+            (available_height, 0)
+        };
+        
+        let content_area = Rect {
+            x: inner_agent.x,
+            y: inner_agent.y,
+            width: inner_agent.width,
+            height: actual_content_height,
+        };
+        let sparkline_area = Rect {
+            x: inner_agent.x,
+            y: inner_agent.y + actual_content_height,
+            width: inner_agent.width,
+            height: actual_sparkline_height,
+        };
+
+        // Build all content into a single Text structure for proper wrapping
+        let mut text_content = vec![];
+
+        // Add blank line at the top
+        text_content.push(RLine::from(" "));
+
+        // Add overall task status at the top
+        let status_color = match self.overall_task_status.as_str() {
+            "planning" => crate::colors::warning(),
+            "running" => crate::colors::info(),
+            "consolidating" => crate::colors::warning(),
+            "complete" => crate::colors::success(),
+            "failed" => crate::colors::error(),
+            _ => crate::colors::text_dim(),
+        };
+
+
+        text_content.push(RLine::from(vec![
+            Span::from(" "),
+            Span::styled(
+                "Status: ",
+                Style::default()
+                    .fg(crate::colors::text())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                &self.overall_task_status,
+                Style::default().fg(status_color),
+            ),
+        ]));
+
+        // Add blank line
+        text_content.push(RLine::from(" "));
+
+        // Display agent statuses
+        if self.agents_ready_to_start && self.active_agents.is_empty() {
+            // Show "Building context..." message when agents are expected
+            text_content.push(RLine::from(vec![
+                Span::from(" "),
+                Span::styled(
+                    "Building context...",
+                    Style::default()
+                        .fg(crate::colors::text_dim())
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        } else if self.active_agents.is_empty() {
+            text_content.push(RLine::from(vec![
+                Span::from(" "),
+                Span::styled(
+                    "No active agents",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+            ]));
+        } else {
+            // Show agent names/models
             for agent in &self.active_agents {
                 let status_color = match agent.status {
                     AgentStatus::Pending => crate::colors::warning(),
@@ -2186,53 +2294,115 @@ impl ChatWidget<'_> {
                     AgentStatus::Failed => "failed",
                 };
 
-                // Truncate name to fit nicely
-                let display_name = if agent.name.len() > 30 {
-                    format!("{}...", &agent.name[..27])
-                } else {
-                    agent.name.clone()
-                };
-
-                lines.push(RLine::from(vec![
+                text_content.push(RLine::from(vec![
+                    Span::from(" "),
                     Span::styled(
-                        display_name,
+                        format!("{}: ", agent.name),
                         Style::default()
                             .fg(crate::colors::text())
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" - ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(status_text, Style::default().fg(status_color)),
                 ]));
             }
         }
 
-        // Add prompt display at bottom if available
-        if let Some(ref prompt) = self.last_agent_prompt {
-            if !lines.is_empty() {
-                lines.push(RLine::from("")); // Empty line separator
-            }
-            lines.push(RLine::from(vec![Span::styled(
-                "Prompt: ",
-                Style::default()
-                    .fg(crate::colors::text_dim())
-                    .add_modifier(Modifier::ITALIC),
-            )]));
-
-            // Wrap long prompts
-            let prompt_text = if prompt.len() > 60 {
-                format!("{}...", &prompt[..57])
-            } else {
-                prompt.clone()
+        // Calculate how much vertical space the fixed content takes
+        let fixed_content_height = text_content.len() as u16;
+        
+        // Create the first paragraph for the fixed content (status and agents) without wrapping
+        let fixed_paragraph = Paragraph::new(Text::from(text_content));
+        
+        // Render the fixed content first
+        let fixed_area = Rect {
+            x: content_area.x,
+            y: content_area.y,
+            width: content_area.width,
+            height: fixed_content_height.min(content_area.height),
+        };
+        fixed_paragraph.render(fixed_area, buf);
+        
+        // Calculate remaining area for wrapped content
+        let remaining_height = content_area.height.saturating_sub(fixed_content_height);
+        if remaining_height > 0 {
+            let wrapped_area = Rect {
+                x: content_area.x,
+                y: content_area.y + fixed_content_height,
+                width: content_area.width,
+                height: remaining_height,
             };
+            
+            // Add context and task sections with proper wrapping in the remaining area
+            let mut wrapped_content = vec![];
 
-            lines.push(RLine::from(vec![Span::styled(
-                prompt_text,
-                Style::default().fg(crate::colors::text_dim()),
-            )]));
+            if let Some(ref task) = self.agent_task {
+                wrapped_content.push(RLine::from(" ")); // Empty line separator
+                wrapped_content.push(RLine::from(vec![
+                    Span::from(" "),
+                    Span::styled(
+                        "Task:",
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::from(" "),
+                    Span::styled(
+                        task,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                ]));
+            }
+            
+            if !wrapped_content.is_empty() {
+                // Create paragraph with wrapping enabled for the long text content
+                let wrapped_paragraph = Paragraph::new(Text::from(wrapped_content))
+                    .wrap(Wrap { trim: false });
+                wrapped_paragraph.render(wrapped_area, buf);
+            }
         }
 
-        let agent_paragraph = Paragraph::new(lines);
-        agent_paragraph.render(inner_agent, buf);
+        // Render sparkline at the bottom if we have data and agents are active
+        let sparkline_data = self.sparkline_data.borrow();
+        
+        // Debug logging
+        tracing::debug!("Sparkline render check: data_len={}, agents={}, ready={}, height={}, actual_height={}, area={:?}",
+            sparkline_data.len(),
+            self.active_agents.len(),
+            self.agents_ready_to_start,
+            sparkline_height,
+            actual_sparkline_height,
+            sparkline_area
+        );
+        
+        if !sparkline_data.is_empty() && (!self.active_agents.is_empty() || self.agents_ready_to_start) && actual_sparkline_height > 0 {
+            // Convert data to SparklineBar with colors based on completion status
+            let bars: Vec<SparklineBar> = sparkline_data.iter()
+                .map(|(value, is_completed)| {
+                    let color = if *is_completed {
+                        crate::colors::success() // Green for completed
+                    } else {
+                        crate::colors::border() // Border color for normal activity
+                    };
+                    SparklineBar::from(*value).style(Style::default().fg(color))
+                })
+                .collect();
+            
+            // Use dynamic max based on the actual data for better visibility
+            // During preparing/planning, values are small (2-3), during running they're larger (5-15)
+            // For planning phase with single line, use smaller max for better visibility
+            let max_value = if self.agents_ready_to_start && self.active_agents.is_empty() {
+                // Planning phase - use smaller max for better visibility of 1-3 range
+                sparkline_data.iter().map(|(v, _)| *v).max().unwrap_or(4).max(4)
+            } else {
+                // Running phase - use larger max
+                sparkline_data.iter().map(|(v, _)| *v).max().unwrap_or(10).max(10)
+            };
+            
+            let sparkline = Sparkline::default()
+                .data(bars)
+                .max(max_value); // Dynamic max for better visibility
+            sparkline.render(sparkline_area, buf);
+        }
     }
 
     fn begin_stream(&mut self, kind: StreamKind) {

@@ -309,6 +309,11 @@ impl ChatComposer {
                     // Record the exact slash command that was typed
                     self.history.record_local_submission(&command_text);
 
+                    // Check if this is a prompt-expanding command that will trigger agents
+                    if cmd.is_prompt_expanding() {
+                        self.app_event_tx.send(AppEvent::PrepareAgents);
+                    }
+
                     // Send command to the app layer with full text.
                     self.app_event_tx
                         .send(AppEvent::DispatchCommand(*cmd, command_text.clone()));
@@ -600,6 +605,15 @@ impl ChatComposer {
                 if text.is_empty() {
                     (InputResult::None, true)
                 } else {
+                    // Check if this is a prompt-expanding command that will trigger agents
+                    let trimmed = original_text.trim();
+                    if trimmed.starts_with("/plan ")
+                        || trimmed.starts_with("/solve ")
+                        || trimmed.starts_with("/code ")
+                    {
+                        self.app_event_tx.send(AppEvent::PrepareAgents);
+                    }
+
                     self.history.record_local_submission(&original_text);
                     (InputResult::Submitted(text), true)
                 }
