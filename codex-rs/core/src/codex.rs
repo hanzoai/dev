@@ -110,7 +110,6 @@ use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
-use codex_browser::manager::BrowserManager;
 use serde_json::Value;
 
 /// The high-level interface to the Codex system.
@@ -250,8 +249,6 @@ pub(crate) struct Session {
     codex_linux_sandbox_exe: Option<PathBuf>,
     user_shell: shell::Shell,
     show_raw_agent_reasoning: bool,
-    /// Browser manager for controlling headless browser
-    browser_manager: Mutex<Option<Arc<BrowserManager>>>,
     /// Pending browser screenshots to include in the next model request
     pending_browser_screenshots: Mutex<Vec<PathBuf>>,
 }
@@ -1008,7 +1005,6 @@ async fn submission_loop(
                     disable_response_storage,
                     user_shell: default_shell,
                     show_raw_agent_reasoning: config.show_raw_agent_reasoning,
-                    browser_manager: Mutex::new(None), // Initialize on-demand when browser tools are used
                     pending_browser_screenshots: Mutex::new(Vec::new()),
                 }));
 
@@ -2920,8 +2916,8 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
 }
 
 /// Capture a screenshot from the browser and store it for the next model request
-async fn capture_browser_screenshot(sess: &Session) -> Option<(PathBuf, String)> {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+async fn capture_browser_screenshot(_sess: &Session) -> Option<(PathBuf, String)> {
+    let browser_manager = codex_browser::global::get_browser_manager().await;
     if let Some(browser_manager) = browser_manager {
         if browser_manager.is_enabled().await {
             // Get current URL first
@@ -3084,16 +3080,19 @@ async fn handle_browser_open(
                 .and_then(|v| v.as_str())
                 .unwrap_or("about:blank");
 
-            // Use the global browser manager
-            let needs_init = sess.browser_manager.lock().unwrap().is_none();
-            let browser_manager = if needs_init {
-                let manager = codex_browser::global::get_or_create_browser_manager().await;
-                // Enable the browser
-                manager.set_enabled_sync(true);
-                *sess.browser_manager.lock().unwrap() = Some(manager.clone());
-                Some(manager)
-            } else {
-                sess.browser_manager.lock().unwrap().clone()
+            // Use the global browser manager (create if needed)
+            let browser_manager = {
+                let existing_global = codex_browser::global::get_browser_manager().await;
+                if let Some(existing) = existing_global {
+                    tracing::info!("Using existing global browser manager");
+                    Some(existing)
+                } else {
+                    tracing::info!("Creating new browser manager");
+                    let new_manager = codex_browser::global::get_or_create_browser_manager().await;
+                    // Enable the browser
+                    new_manager.set_enabled_sync(true);
+                    Some(new_manager)
+                }
             };
 
             if let Some(browser_manager) = browser_manager {
@@ -3157,17 +3156,22 @@ async fn handle_browser_open(
     }
 }
 
+/// Get the browser manager for the session (always uses global)
+async fn get_browser_manager_for_session(_sess: &Session) -> Option<Arc<codex_browser::BrowserManager>> {
+    // Always use the global browser manager
+    codex_browser::global::get_browser_manager().await
+}
+
 async fn handle_browser_close(
     sess: &Session,
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
     if let Some(browser_manager) = browser_manager {
         match browser_manager.stop().await {
             Ok(_) => {
-                // Clear the browser manager from the session and global
-                *sess.browser_manager.lock().unwrap() = None;
+                // Clear the browser manager from global
                 codex_browser::global::clear_browser_manager().await;
                 ResponseInputItem::FunctionCallOutput {
                     call_id,
@@ -3201,7 +3205,7 @@ async fn handle_browser_status(
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
     if let Some(browser_manager) = browser_manager {
         let status = browser_manager.get_status().await;
         let status_msg = if status.enabled {
@@ -3239,7 +3243,8 @@ async fn handle_browser_click(
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
+    
     if let Some(browser_manager) = browser_manager {
         let args: Result<Value, _> = serde_json::from_str(&arguments);
         match args {
@@ -3298,7 +3303,7 @@ async fn handle_browser_type(
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
     if let Some(browser_manager) = browser_manager {
         let args: Result<Value, _> = serde_json::from_str(&arguments);
         match args {
@@ -3356,7 +3361,7 @@ async fn handle_browser_key(
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
     if let Some(browser_manager) = browser_manager {
         let args: Result<Value, _> = serde_json::from_str(&arguments);
         match args {
@@ -3414,7 +3419,7 @@ async fn handle_browser_javascript(
     _sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = sess.browser_manager.lock().unwrap().clone();
+    let browser_manager = get_browser_manager_for_session(sess).await;
     if let Some(browser_manager) = browser_manager {
         let args: Result<Value, _> = serde_json::from_str(&arguments);
         match args {
