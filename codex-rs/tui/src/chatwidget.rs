@@ -1575,15 +1575,15 @@ impl ChatWidget<'_> {
         // Parse the browser subcommand
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
 
-        let response = if parts.len() > 1 {
-            let first_arg = parts[1];
+        let response = if !parts.is_empty() {
+            let first_arg = parts[0];
 
             // Check if the first argument looks like a URL (has a dot or protocol)
             let is_url = first_arg.contains("://") || first_arg.contains(".");
 
             if is_url {
                 // It's a URL - enable browser mode and navigate to it
-                let url = parts[1..].join(" ");
+                let url = parts.join(" ");
 
                 // Ensure URL has protocol
                 let full_url = if !url.contains("://") {
@@ -1764,9 +1764,9 @@ impl ChatWidget<'_> {
                     "chrome" => {
                         // Connect to Chrome instance
                         // Check if there's a port specified after "chrome"
-                        let port = if parts.len() > 2 {
+                        let port = if parts.len() > 1 {
                             // Try to parse the port number
-                            parts[2].parse::<u16>().ok()
+                            parts[1].parse::<u16>().ok()
                         } else {
                             None
                         };
@@ -2090,11 +2090,11 @@ impl ChatWidget<'_> {
 
                         if port.is_some() {
                             format!(
-                                "Connecting to local Chrome instance on port {}...\nIf Chrome is not running with debug port, it will be launched.",
+                                "Connecting to local Chrome instance on port {}...\n",
                                 port.unwrap_or(9222)
                             )
                         } else {
-                            "Auto-scanning for local Chrome instance with debug port...\nIf no Chrome found, it will be launched on port 9222.".to_string()
+                            "Scanning for local Chrome instance with debug port...\n".to_string()
                         }
                     }
                     "off" => {
