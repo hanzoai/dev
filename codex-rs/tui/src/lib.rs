@@ -227,17 +227,17 @@ pub async fn run_main(
         );
 
         if managed_by_npm {
-            let npm_cmd = "npm install -g @openai/codex@latest";
+            let npm_cmd = "npm install -g @just-every/coder@latest";
             eprintln!("Run {} to update.", npm_cmd.cyan().on_black());
         } else if cfg!(target_os = "macos")
             && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
         {
-            let brew_cmd = "brew upgrade codex";
+            let brew_cmd = "brew upgrade coder";
             eprintln!("Run {} to update.", brew_cmd.cyan().on_black());
         } else {
             eprintln!(
                 "See {} for the latest releases and installation options.",
-                "https://github.com/openai/codex/releases/latest"
+                "https://github.com/just-every/coder/releases/latest"
                     .cyan()
                     .on_black()
             );

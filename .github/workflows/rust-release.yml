@@ -18,10 +18,13 @@ concurrency:
 jobs:
   tag-check:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate tag matches Cargo.toml version
+      - name: Validate tag format and extract version
+        id: extract
         shell: bash
         run: |
           set -euo pipefail
@@ -33,16 +36,12 @@ jobs:
           [[ "${GITHUB_REF_NAME}" =~ ^rust-v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)(\.[0-9]+)?)?$ ]] \
             || { echo "❌  Tag '${GITHUB_REF_NAME}' doesn't match expected format"; exit 1; }
 
-          # 2. Extract versions
+          # 2. Extract version from tag
           tag_ver="${GITHUB_REF_NAME#rust-v}"
-          cargo_ver="$(grep -m1 '^version' codex-rs/Cargo.toml \
-                        | sed -E 's/version *= *"([^"]+)".*/\1/')"
-
-          # 3. Compare
-          [[ "${tag_ver}" == "${cargo_ver}" ]] \
-            || { echo "❌  Tag ${tag_ver} ≠ Cargo.toml ${cargo_ver}"; exit 1; }
-
-          echo "✅  Tag and Cargo.toml agree (${tag_ver})"
+          echo "version=${tag_ver}" >> $GITHUB_OUTPUT
+          
+          echo "✅  Tag format valid: ${GITHUB_REF_NAME}"
+          echo "📦  Version to build: ${tag_ver}"
           echo "::endgroup::"
 
   build:
@@ -75,6 +74,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Update version in Cargo.toml
+        shell: bash
+        run: |
+          VERSION="${{ needs.tag-check.outputs.version }}"
+          echo "📝 Updating version to ${VERSION} in Cargo.toml"
+          
+          # Update the workspace version
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          
+          # Verify the update
+          echo "Updated Cargo.toml:"
+          grep "^version = " Cargo.toml
+          
+          # Update Cargo.lock to reflect the new version
+          cargo update --workspace
+      
       - uses: dtolnay/rust-toolchain@1.88
         with:
           targets: ${{ matrix.target }}
@@ -95,7 +111,7 @@ jobs:
           sudo apt install -y musl-tools pkg-config
 
       - name: Cargo build
-        run: cargo build --target ${{ matrix.target }} --release --bin codex
+        run: cargo build --target ${{ matrix.target }} --release --bin coder
 
       - name: Stage artifacts
         shell: bash
@@ -104,9 +120,9 @@ jobs:
           mkdir -p "$dest"
 
           if [[ "${{ matrix.runner }}" == windows* ]]; then
-            cp target/${{ matrix.target }}/release/codex.exe "$dest/codex-${{ matrix.target }}.exe"
+            cp target/${{ matrix.target }}/release/coder.exe "$dest/coder-${{ matrix.target }}.exe"
           else
-            cp target/${{ matrix.target }}/release/codex "$dest/codex-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/coder "$dest/coder-${{ matrix.target }}"
           fi
 
       - name: Compress artifacts
@@ -119,8 +135,8 @@ jobs:
           # For compatibility with environments that lack the `zstd` tool we
           # additionally create a `.tar.gz` alongside every single binary that
           # we publish. The end result is:
-          #   codex-<target>.zst          (existing)
-          #   codex-<target>.tar.gz       (new)
+          #   coder-<target>.zst          (existing)
+          #   coder-<target>.tar.gz       (new)
 
           # 1. Produce a .tar.gz for every file in the directory *before* we
           #    run `zstd --rm`, because that flag deletes the original files.

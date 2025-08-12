@@ -305,7 +305,7 @@ impl ChatWidget<'_> {
             hud_height = hud_height.saturating_sub(1);
 
             // keep within vertical budget (status+bottom+≥1 row history)
-            let available = area.height.saturating_sub(3 + bottom_height + 1) / 2;
+            let available = area.height.saturating_sub(5) / 3;
             hud_height = hud_height.clamp(4, available);
 
             return Layout::vertical([
@@ -1435,7 +1435,7 @@ impl ChatWidget<'_> {
                 });
 
                 format!(
-                    "Browser mode enabled. Opening: {}\nScreenshots will be attached to model requests.",
+                    "Browser mode enabled: {}\n",
                     full_url
                 )
             } else {
@@ -1455,8 +1455,8 @@ impl ChatWidget<'_> {
 
                         // Update the config to use local Chrome connection
                         let browser_manager_local = browser_manager.clone();
-                        let port_display =
-                            port.map_or("auto-detected".to_string(), |p| p.to_string());
+                        // Determine which port to use for launching
+                        let launch_port = port.unwrap_or(9222);
 
                         tokio::spawn(async move {
                             // CRITICAL: Use the global browser manager for everything to avoid dual instances
@@ -1499,8 +1499,6 @@ impl ChatWidget<'_> {
                                         e
                                     );
 
-                                    // Determine which port to use for launching
-                                    let launch_port = port.unwrap_or(9222);
 
                                     // Try launching Chrome with debug port
                                     #[cfg(target_os = "macos")]
@@ -1536,7 +1534,7 @@ impl ChatWidget<'_> {
                         if port.is_some() {
                             format!(
                                 "Connecting to local Chrome instance on port {}...\nIf Chrome is not running with debug port, it will be launched.",
-                                port_display
+                                launch_port
                             )
                         } else {
                             "Auto-scanning for local Chrome instance with debug port...\nIf no Chrome found, it will be launched on port 9222.".to_string()

@@ -336,7 +336,7 @@ impl HistoryCell {
             // Since we now have a status bar, just show helpful commands in history
             let lines: Vec<Line<'static>> = vec![
                 Line::from("".dim()),
-                Line::from(" Popular commands:".dim()),
+                Line::from("Popular commands:".dim()),
                 Line::from(
                     format!(" /browser <url> - {}", SlashCommand::Browser.description()).dim(),
                 ),
