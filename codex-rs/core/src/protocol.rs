@@ -724,6 +724,10 @@ pub struct BrowserScreenshotUpdateEvent {
 pub struct AgentStatusUpdateEvent {
     /// List of currently active agents
     pub agents: Vec<AgentInfo>,
+    /// Shared context for all agents (if available)
+    pub context: Option<String>,
+    /// Shared task/output goal for all agents (if available)  
+    pub task: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
