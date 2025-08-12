@@ -825,6 +825,22 @@ async fn submission_loop(
     tx_event: Sender<Event>,
     ctrl_c: Arc<Notify>,
 ) {
+    // Initialize agent manager with event sender
+    {
+        let mut manager = AGENT_MANAGER.write().await;
+        let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel();
+        manager.set_event_sender(agent_tx);
+        drop(manager);
+
+        // Forward agent events to the main event channel
+        let tx_event_clone = tx_event.clone();
+        tokio::spawn(async move {
+            while let Some(event) = agent_rx.recv().await {
+                let _ = tx_event_clone.send(event).await;
+            }
+        });
+    }
+
     let mut sess: Option<Arc<Session>> = None;
     // shorthand - send an event when there is no active session
     let send_no_session_event = |sub_id: String| async {
@@ -2986,7 +3002,11 @@ async fn send_agent_status_update(sess: &Session) {
 
     let event = Event {
         id: "agent_status".to_string(),
-        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents }),
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { 
+            agents, 
+            context: None, 
+            task: None 
+        }),
     };
 
     // Send event asynchronously

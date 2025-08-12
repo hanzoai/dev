@@ -480,6 +480,11 @@ impl App<'_> {
                         }));
                     }
                 },
+                AppEvent::PrepareAgents => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.prepare_agents();
+                    }
+                }
                 AppEvent::UpdateReasoningEffort(new_effort) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_reasoning_effort(new_effort);
