@@ -89,3 +89,6 @@ CHANGELOG.ignore.md
 
 # git worktrees
 branches/
+
+# coder directories
+.coder/
