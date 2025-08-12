@@ -9,7 +9,6 @@ use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
 use ratatui::widgets::WidgetRef;
 
 mod approval_modal_view;
@@ -379,13 +378,6 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    /// Set the rows and cap for the transient live ring overlay.
-    pub(crate) fn set_live_ring_rows(&mut self, max_rows: u16, rows: Vec<Line<'static>>) {
-        let mut w = live_ring_widget::LiveRingWidget::new();
-        w.set_max_rows(max_rows);
-        w.set_rows(rows);
-        self.live_ring = Some(w);
-    }
 
     pub(crate) fn clear_live_ring(&mut self) {
         self.live_ring = None;

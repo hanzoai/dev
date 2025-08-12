@@ -11,20 +11,6 @@ pub(crate) struct LiveRingWidget {
 }
 
 impl LiveRingWidget {
-    pub fn new() -> Self {
-        Self {
-            max_rows: 3,
-            rows: Vec::new(),
-        }
-    }
-
-    pub fn set_max_rows(&mut self, n: u16) {
-        self.max_rows = n.max(1);
-    }
-
-    pub fn set_rows(&mut self, rows: Vec<Line<'static>>) {
-        self.rows = rows;
-    }
 
     pub fn desired_height(&self, _width: u16) -> u16 {
         let len = self.rows.len() as u16;
