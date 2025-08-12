@@ -436,6 +436,7 @@ impl App<'_> {
                     }
                     #[cfg(debug_assertions)]
                     SlashCommand::TestApproval => {
+                        use codex_core::protocol::EventMsg;
                         use std::collections::HashMap;
 
                         use codex_core::protocol::ApplyPatchApprovalRequestEvent;
