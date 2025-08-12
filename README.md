@@ -12,6 +12,42 @@
   - **Safety modes** - Read-only, approvals, and workspace sandboxing.
   - **Backwards compatible** - Supports `~/.codex/*` or default `~/.coder/*`
 
+<details>
+<summary><strong>Table of contents</strong></summary>
+
+<!-- Begin ToC -->
+
+- [Quickstart](#quickstart)
+  - [Install Coder](#install-coder)
+  - [Install Claude & Gemini (optional)](#install-claude--gemini-optional)
+- [Commands](#commands)
+  - [Browser](#browser)
+  - [Agents](#agents)
+  - [General](#general)
+- [CLI reference](#cli-reference)
+- [Memory & project docs](#memory--project-docs)
+- [Non-interactive / CI mode](#non-interactive--ci-mode)
+- [Model Context Protocol (MCP)](#model-context-protocol-mcp)
+- [Configuration](#configuration)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+  - [Development workflow](#development-workflow)
+  - [Opening a pull request](#opening-a-pull-request)
+- [Security & responsible AI](#security--responsible-ai)
+- [Legal & Use](#legal--use)
+  - [License & attribution](#license--attribution)
+  - [Your responsibilities](#your-responsibilities)
+  - [Branding](#branding)
+  - [Privacy](#privacy)
+  - [Subject to change](#subject-to-change)
+- [License](#license)
+
+<!-- End ToC -->
+
+</details>
+
+---
+
 ## Quickstart
 
 ### Install Coder
