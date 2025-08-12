@@ -1151,6 +1151,7 @@ impl WidgetRef for &HistoryCell {
                 // Use processed lines with markdown support and proper word wrapping
                 let processed_lines = self.get_processed_lines(area.width);
                 Paragraph::new(Text::from(processed_lines))
+                    .wrap(Wrap { trim: false })
                     .style(
                         Style::default()
                             .fg(crate::colors::text())
@@ -1159,14 +1160,18 @@ impl WidgetRef for &HistoryCell {
                     .render(area, buf);
             }
             HistoryCell::StyledText { .. } => {
-                // Use processed lines as-is to preserve styling
+                // Use processed lines as-is to preserve styling, with wrapping
                 let processed_lines = self.get_processed_lines(area.width);
-                Paragraph::new(Text::from(processed_lines)).render(area, buf);
+                Paragraph::new(Text::from(processed_lines))
+                    .wrap(Wrap { trim: false })
+                    .render(area, buf);
             }
             HistoryCell::DimmedReasoning { .. } => {
-                // Use processed lines with dimmed markdown support
+                // Use processed lines with dimmed markdown support, with wrapping
                 let processed_lines = self.get_processed_lines(area.width);
-                Paragraph::new(Text::from(processed_lines)).render(area, buf);
+                Paragraph::new(Text::from(processed_lines))
+                    .wrap(Wrap { trim: false })
+                    .render(area, buf);
             }
             HistoryCell::UserPrompt { view } => {
                 // Special rendering for user prompts with left border

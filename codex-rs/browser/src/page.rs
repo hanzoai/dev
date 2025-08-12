@@ -11,6 +11,7 @@ use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventParams;
 use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventType;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams;
+use base64::Engine as _;
 use chromiumoxide::page::Page as CdpPage;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -172,24 +173,44 @@ impl Page {
     }
 
     pub async fn screenshot_viewport(&self) -> Result<Vec<Screenshot>> {
-        debug!("Taking viewport screenshot (clipped, no resize)");
+        // Safe viewport capture: do not change device metrics or viewport.
+        // Measure CSS viewport size via JS and capture a clipped image
+        // using the compositor without affecting focus.
+        debug!("Taking viewport screenshot (safe clip, no resize)");
 
         let format = match self.config.format {
             ImageFormat::Png => CaptureScreenshotFormat::Png,
             ImageFormat::Webp => CaptureScreenshotFormat::Webp,
         };
 
-        // Compute a stable clip based on document size to avoid resizing/focus
-        let lm = self.cdp_page.layout_metrics().await?;
-        let content = lm.css_content_size;
-        let doc_w = content.width.ceil() as u32;
-        let doc_h = content.height.ceil() as u32;
-        let target_w = self.config.viewport.width.min(doc_w);
-        let target_h = self.config.viewport.height.min(doc_h);
+        // Probe CSS viewport using Runtime.evaluate to avoid layout_metrics
+        let probe = self
+            .inject_js(
+                "(() => ({ w: (document.documentElement.clientWidth|0), h: (document.documentElement.clientHeight|0) }))()",
+            )
+            .await
+            .unwrap_or(serde_json::Value::Null);
+
+        let doc_w = probe
+            .get("w")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+        let doc_h = probe
+            .get("h")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        // Fall back to configured viewport if probe failed
+        let vw = if doc_w > 0 { doc_w } else { self.config.viewport.width };
+        let vh = if doc_h > 0 { doc_h } else { self.config.viewport.height };
+
+        // Clamp to configured maximums to keep images small for the LLM
+        let target_w = vw.min(self.config.viewport.width);
+        let target_h = vh.min(self.config.viewport.height);
 
         let params = CaptureScreenshotParams::builder()
             .format(format)
-            .from_surface(true)
+            .from_surface(false)
             .capture_beyond_viewport(true)
             .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                 x: 0.0,
@@ -200,7 +221,12 @@ impl Page {
             })
             .build();
 
-        let data = self.cdp_page.screenshot(params).await?;
+        // Use raw execute to avoid any helper that might front the tab
+        let resp = self.cdp_page.execute(params).await?;
+        let data_b64: &str = resp.data.as_ref();
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(data_b64.as_bytes())
+            .map_err(|e| BrowserError::ScreenshotError(format!("base64 decode failed: {}", e)))?;
 
         Ok(vec![Screenshot {
             data,
@@ -235,7 +261,7 @@ impl Page {
             let h = vh.min(doc_h - y); // last slice may be shorter
             let params = CaptureScreenshotParams::builder()
                 .format(format.clone())
-                .from_surface(true)
+                .from_surface(false)
                 .capture_beyond_viewport(true) // key to avoid scrolling/flash
                 .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                     x: 0.0,
@@ -246,7 +272,11 @@ impl Page {
                 })
                 .build();
 
-            let data = self.cdp_page.screenshot(params).await?;
+            let resp = self.cdp_page.execute(params).await?;
+            let data_b64: &str = resp.data.as_ref();
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(data_b64.as_bytes())
+                .map_err(|e| BrowserError::ScreenshotError(format!("base64 decode failed: {}", e)))?;
             shots.push(Screenshot {
                 data,
                 width: vw,
@@ -278,6 +308,7 @@ impl Page {
 
         let params = CaptureScreenshotParams::builder()
             .format(format)
+            .from_surface(false)
             .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                 x: region.x as f64,
                 y: region.y as f64,
@@ -287,7 +318,11 @@ impl Page {
             })
             .build();
 
-        let data = self.cdp_page.screenshot(params).await?;
+        let resp = self.cdp_page.execute(params).await?;
+        let data_b64: &str = resp.data.as_ref();
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(data_b64.as_bytes())
+            .map_err(|e| BrowserError::ScreenshotError(format!("base64 decode failed: {}", e)))?;
 
         let final_width = if region.width > 1024 {
             1024
@@ -312,7 +347,7 @@ impl Page {
             .build()
             .map_err(|e| BrowserError::CdpError(e))?;
 
-        self.cdp_page.execute(params).await?;
+        //self.cdp_page.execute(params).await?;
 
         Ok(ViewportResult {
             width: viewport.width,
@@ -354,7 +389,7 @@ impl Page {
             .build()
             .map_err(|e| BrowserError::CdpError(e))?;
 
-        self.cdp_page.execute(params).await?;
+        //self.cdp_page.execute(params).await?;
         Ok(())
     }
 

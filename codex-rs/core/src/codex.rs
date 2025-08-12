@@ -1369,10 +1369,9 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
 
-        // On the first iteration, add the initial input to pending_input
-        // This ensures ephemeral images are included in the current turn
+        // Do not duplicate the initial input in `pending_input`.
+        // It is already recorded to history above; ephemeral items are appended separately.
         if first_iteration {
-            pending_input.insert(0, initial_response_item.clone());
             first_iteration = false;
         } else {
             // Only record pending input to history on subsequent iterations
