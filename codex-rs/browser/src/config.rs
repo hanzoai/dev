@@ -5,59 +5,59 @@ use std::path::PathBuf;
 pub struct BrowserConfig {
     #[serde(default)]
     pub enabled: bool,
-    
+
     #[serde(default = "default_viewport")]
     pub viewport: ViewportConfig,
-    
+
     #[serde(default = "default_wait")]
     pub wait: WaitStrategy,
-    
+
     #[serde(default)]
     pub fullpage: bool,
-    
+
     #[serde(default = "default_segments_max")]
     pub segments_max: usize,
-    
+
     #[serde(default = "default_idle_timeout_ms")]
     pub idle_timeout_ms: u64,
-    
+
     #[serde(default = "default_format")]
     pub format: ImageFormat,
-    
+
     /// Launch Chrome in headless mode. Prefer headed for fewer false positives.
     #[serde(default)]
     pub headless: bool,
-    
+
     /// Connect to an already-running Chrome DevTools WS endpoint
     /// e.g. ws://127.0.0.1:9222/devtools/browser/XXXXXXXX
     #[serde(default)]
     pub connect_ws: Option<String>,
-    
+
     /// Or discover the WS endpoint from a --remote-debugging-port (e.g. 9222).
     #[serde(default)]
     pub connect_port: Option<u16>,
-    
+
     /// Use a persistent profile instead of temp. If set, we won't delete it.
     #[serde(default)]
     pub user_data_dir: Option<PathBuf>,
-    
+
     /// If true and `user_data_dir` is Some, never delete on drop.
     #[serde(default = "default_persist_profile")]
     pub persist_profile: bool,
-    
+
     /// "Human" env hints applied via CDP immediately after page creation.
     #[serde(default)]
-    pub locale: Option<String>,          // e.g. Some("en-AU".into())
-    
+    pub locale: Option<String>, // e.g. Some("en-AU".into())
+
     #[serde(default)]
-    pub timezone: Option<String>,        // e.g. Some("Australia/Brisbane".into())
-    
+    pub timezone: Option<String>, // e.g. Some("Australia/Brisbane".into())
+
     #[serde(default)]
     pub accept_language: Option<String>, // e.g. Some("en-AU,en;q=0.9".into())
-    
+
     #[serde(default)]
-    pub user_agent: Option<String>,      // leave None to let Chrome decide
-    
+    pub user_agent: Option<String>, // leave None to let Chrome decide
+
     /// Prevent external Chrome from stealing focus when connecting via CDP (default: true)
     #[serde(default = "default_prevent_focus_steal")]
     pub prevent_focus_steal: bool,
@@ -73,7 +73,7 @@ impl Default for BrowserConfig {
             segments_max: default_segments_max(),
             idle_timeout_ms: default_idle_timeout_ms(),
             format: default_format(),
-            headless: false,  // Prefer headed for fewer false positives
+            headless: false, // Prefer headed for fewer false positives
             connect_ws: None,
             connect_port: None,
             user_data_dir: None,
@@ -91,10 +91,10 @@ impl Default for BrowserConfig {
 pub struct ViewportConfig {
     pub width: u32,
     pub height: u32,
-    
+
     #[serde(default = "default_device_scale_factor")]
     pub device_scale_factor: f64,
-    
+
     #[serde(default)]
     pub mobile: bool,
 }

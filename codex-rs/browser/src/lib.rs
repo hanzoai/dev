@@ -16,22 +16,22 @@ use thiserror::Error;
 pub enum BrowserError {
     #[error("Browser not initialized")]
     NotInitialized,
-    
+
     #[error("Page not loaded")]
     PageNotLoaded,
-    
+
     #[error("CDP error: {0}")]
     CdpError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Screenshot failed: {0}")]
     ScreenshotError(String),
-    
+
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
-    
+
     #[error("Asset storage error: {0}")]
     AssetError(String),
 }

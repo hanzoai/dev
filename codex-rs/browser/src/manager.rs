@@ -1,12 +1,12 @@
-use crate::{config::BrowserConfig, page::Page, BrowserError, Result};
-use chromiumoxide::{Browser, BrowserConfig as CdpConfig};
+use crate::{BrowserError, Result, config::BrowserConfig, page::Page};
 use chromiumoxide::cdp::browser_protocol::{emulation, network};
+use chromiumoxide::{Browser, BrowserConfig as CdpConfig};
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{Duration, Instant, sleep};
 use tracing::{debug, info, warn};
 
 #[derive(Deserialize)]
@@ -17,43 +17,45 @@ struct JsonVersion {
 
 async fn discover_ws_via_port(port: u16) -> Result<String> {
     let url = format!("http://127.0.0.1:{}/json/version", port);
-    let resp = Client::new().get(&url).send().await
-        .map_err(|e| BrowserError::CdpError(format!("Failed to connect to Chrome debug port: {}", e)))?;
-    
+    let resp = Client::new().get(&url).send().await.map_err(|e| {
+        BrowserError::CdpError(format!("Failed to connect to Chrome debug port: {}", e))
+    })?;
+
     if !resp.status().is_success() {
-        return Err(BrowserError::CdpError(format!("Chrome /json/version returned {}", resp.status())));
+        return Err(BrowserError::CdpError(format!(
+            "Chrome /json/version returned {}",
+            resp.status()
+        )));
     }
-    
-    let body: JsonVersion = resp.json().await
-        .map_err(|e| BrowserError::CdpError(format!("Failed to parse Chrome debug response: {}", e)))?;
-    
+
+    let body: JsonVersion = resp.json().await.map_err(|e| {
+        BrowserError::CdpError(format!("Failed to parse Chrome debug response: {}", e))
+    })?;
+
     Ok(body.web_socket_debugger_url)
 }
 
 /// Scan for Chrome processes with debug ports and verify accessibility
 async fn scan_for_chrome_debug_port() -> Option<u16> {
     use std::process::Command;
-    
+
     // Use ps to find Chrome processes with remote-debugging-port
-    let output = Command::new("ps")
-        .args(&["aux"])
-        .output()
-        .ok()?;
-    
+    let output = Command::new("ps").args(&["aux"]).output().ok()?;
+
     let ps_output = String::from_utf8_lossy(&output.stdout);
-    
+
     // Find all Chrome processes with debug ports
     let mut found_ports = Vec::new();
     for line in ps_output.lines() {
         // Look for Chrome/Chromium processes with remote-debugging-port
-        if (line.contains("chrome") || line.contains("Chrome") || line.contains("chromium")) 
-            && line.contains("--remote-debugging-port=") {
-            
+        if (line.contains("chrome") || line.contains("Chrome") || line.contains("chromium"))
+            && line.contains("--remote-debugging-port=")
+        {
             // Extract the port number
             if let Some(port_str) = line.split("--remote-debugging-port=").nth(1) {
                 // Take everything up to the next space or end of line
                 let port_str = port_str.split_whitespace().next().unwrap_or(port_str);
-                
+
                 // Parse the port number
                 if let Ok(port) = port_str.parse::<u16>() {
                     // Skip port 0 (means random port, not accessible)
@@ -64,13 +66,17 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
             }
         }
     }
-    
+
     // Remove duplicates
     found_ports.sort_unstable();
     found_ports.dedup();
-    
-    info!("Found {} Chrome process(es) with debug ports: {:?}", found_ports.len(), found_ports);
-    
+
+    info!(
+        "Found {} Chrome process(es) with debug ports: {:?}",
+        found_ports.len(),
+        found_ports
+    );
+
     // Test each found port to see if it's accessible
     for port in found_ports {
         let url = format!("http://127.0.0.1:{}/json/version", port);
@@ -78,7 +84,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
             .timeout(Duration::from_millis(500))
             .build()
             .ok()?;
-            
+
         if let Ok(resp) = client.get(&url).send().await {
             if resp.status().is_success() {
                 info!("Verified Chrome debug port at {} is accessible", port);
@@ -90,7 +96,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
             debug!("Could not connect to Chrome port {}", port);
         }
     }
-    
+
     warn!("No accessible Chrome debug ports found");
     None
 }
@@ -127,17 +133,15 @@ impl BrowserManager {
         }
 
         let config = self.config.read().await.clone();
-        
+
         // 1) Attach to a live Chrome, if requested
         if let Some(ws) = config.connect_ws.clone() {
             info!("Connecting to Chrome via WebSocket: {}", ws);
             let (browser, mut handler) = Browser::connect(ws).await?;
-            tokio::spawn(async move {
-                while let Some(_evt) = handler.next().await {}
-            });
+            tokio::spawn(async move { while let Some(_evt) = handler.next().await {} });
             *browser_guard = Some(browser);
             *self.cleanup_profile_on_drop.lock().await = false;
-            
+
             self.start_idle_monitor().await;
             self.update_activity().await;
             return Ok(());
@@ -153,32 +157,35 @@ impl BrowserManager {
                         found_port
                     }
                     None => {
-                        warn!("No Chrome debug ports found during auto-scan. Will launch new instance.");
-                        0  // Signal to fall through to launch
+                        warn!(
+                            "No Chrome debug ports found during auto-scan. Will launch new instance."
+                        );
+                        0 // Signal to fall through to launch
                     }
                 }
             } else {
                 port
             };
-            
+
             if actual_port > 0 {
                 info!("Discovering Chrome via debug port: {}", actual_port);
                 match discover_ws_via_port(actual_port).await {
                     Ok(ws) => {
                         info!("Connecting to Chrome via discovered WebSocket: {}", ws);
                         let (browser, mut handler) = Browser::connect(ws).await?;
-                        tokio::spawn(async move {
-                            while let Some(_evt) = handler.next().await {}
-                        });
+                        tokio::spawn(async move { while let Some(_evt) = handler.next().await {} });
                         *browser_guard = Some(browser);
                         *self.cleanup_profile_on_drop.lock().await = false;
-                        
+
                         self.start_idle_monitor().await;
                         self.update_activity().await;
                         return Ok(());
                     }
                     Err(e) => {
-                        warn!("Failed to connect to Chrome on port {}: {}. Will launch new instance.", actual_port, e);
+                        warn!(
+                            "Failed to connect to Chrome on port {}: {}. Will launch new instance.",
+                            actual_port, e
+                        );
                         // Fall through to launch
                     }
                 }
@@ -187,9 +194,9 @@ impl BrowserManager {
 
         // 2) Otherwise: launch a browser
         info!("Launching new browser instance");
-        
+
         let mut builder = CdpConfig::builder();
-        
+
         // Use persistent profile if specified, otherwise temp
         let user_data_path = if let Some(dir) = &config.user_data_dir {
             builder = builder.user_data_dir(dir.clone());
@@ -201,37 +208,40 @@ impl BrowserManager {
                 .unwrap_or_default()
                 .as_millis();
             let temp_path = format!("/tmp/coder-browser-{}-{}", std::process::id(), timestamp);
-            
+
             // Ensure the directory doesn't exist before starting
             if tokio::fs::metadata(&temp_path).await.is_ok() {
                 if let Err(e) = tokio::fs::remove_dir_all(&temp_path).await {
-                    warn!("Failed to cleanup existing browser directory {}: {}", temp_path, e);
+                    warn!(
+                        "Failed to cleanup existing browser directory {}: {}",
+                        temp_path, e
+                    );
                 }
             }
-            
+
             builder = builder.user_data_dir(&temp_path);
             temp_path
         };
-        
+
         // Configure viewport
-        builder = builder
-            .window_size(config.viewport.width, config.viewport.height);
-        
+        builder = builder.window_size(config.viewport.width, config.viewport.height);
+
         // Set headless mode based on config
         if config.headless {
             builder = builder.headless_mode(chromiumoxide::browser::HeadlessMode::New);
         }
-        
+
         // Add less automation-screamy flags
         builder = builder
             .arg("--disable-blink-features=AutomationControlled")
             .arg("--disable-features=VizDisplayCompositor");
-        
-        let browser_config = builder.build()
+
+        let browser_config = builder
+            .build()
             .map_err(|e| BrowserError::CdpError(e.to_string()))?;
-            
+
         let (browser, mut handler) = Browser::launch(browser_config).await?;
-        
+
         tokio::spawn(async move {
             while let Some(event) = handler.next().await {
                 debug!("Browser event: {:?}", event);
@@ -239,33 +249,33 @@ impl BrowserManager {
         });
 
         *browser_guard = Some(browser);
-        
+
         // Store the user data directory path for cleanup
         {
             let mut user_data_guard = self.user_data_dir.lock().await;
             *user_data_guard = Some(user_data_path.clone());
         }
-        
+
         // Determine if we should cleanup on drop
         let should_cleanup = config.user_data_dir.is_none() || !config.persist_profile;
         *self.cleanup_profile_on_drop.lock().await = should_cleanup;
-        
+
         self.start_idle_monitor().await;
         self.update_activity().await;
-        
+
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
         self.stop_idle_monitor().await;
-        
+
         let mut page_guard = self.page.lock().await;
         *page_guard = None;
-        
+
         let config = self.config.read().await;
         let is_external_chrome = config.connect_port.is_some() || config.connect_ws.is_some();
         drop(config);
-        
+
         let mut browser_guard = self.browser.lock().await;
         if let Some(mut browser) = browser_guard.take() {
             if is_external_chrome {
@@ -276,7 +286,7 @@ impl BrowserManager {
                 browser.close().await?;
             }
         }
-        
+
         // Only cleanup user data directory if we should
         let should_cleanup = *self.cleanup_profile_on_drop.lock().await;
         if should_cleanup {
@@ -284,9 +294,12 @@ impl BrowserManager {
             if let Some(user_data_path) = user_data_guard.take() {
                 // Give Chrome a moment to fully release the profile
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                
+
                 if let Err(e) = tokio::fs::remove_dir_all(&user_data_path).await {
-                    warn!("Failed to cleanup browser user data directory {}: {}", user_data_path, e);
+                    warn!(
+                        "Failed to cleanup browser user data directory {}: {}",
+                        user_data_path, e
+                    );
                     // Try a more aggressive cleanup on macOS
                     #[cfg(target_os = "macos")]
                     {
@@ -299,7 +312,7 @@ impl BrowserManager {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -313,44 +326,53 @@ impl BrowserManager {
         }
 
         let browser_guard = self.browser.lock().await;
-        let browser = browser_guard
-            .as_ref()
-            .ok_or(BrowserError::NotInitialized)?;
+        let browser = browser_guard.as_ref().ok_or(BrowserError::NotInitialized)?;
 
         let config = self.config.read().await;
-        
+
         // If we're connected to an existing Chrome (via connect_port or connect_ws),
         // try to use the current active tab instead of creating a new one
         let cdp_page = if config.connect_port.is_some() || config.connect_ws.is_some() {
             // Try to get existing pages
             let mut pages = browser.pages().await?;
-            
+
             if !pages.is_empty() {
                 // Try to find the active/visible tab
                 // We'll check each page to see if it's visible/focused
                 let mut active_page = None;
-                
+
                 for page in &pages {
                     // Check if this page is visible by evaluating document.visibilityState
                     // and document.hasFocus()
-                    let is_visible = page.evaluate(
-                        "(() => { 
+                    let is_visible = page
+                        .evaluate(
+                            "(() => { 
                             return {
                                 visible: document.visibilityState === 'visible',
                                 focused: document.hasFocus(),
                                 url: window.location.href
                             };
-                        })()"
-                    ).await;
-                    
+                        })()",
+                        )
+                        .await;
+
                     if let Ok(result) = is_visible {
                         if let Ok(obj) = result.into_value::<serde_json::Value>() {
-                            let visible = obj.get("visible").and_then(|v| v.as_bool()).unwrap_or(false);
-                            let focused = obj.get("focused").and_then(|v| v.as_bool()).unwrap_or(false);
+                            let visible = obj
+                                .get("visible")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let focused = obj
+                                .get("focused")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
                             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("unknown");
-                            
-                            debug!("Tab check - URL: {}, Visible: {}, Focused: {}", url, visible, focused);
-                            
+
+                            debug!(
+                                "Tab check - URL: {}, Visible: {}, Focused: {}",
+                                url, visible, focused
+                            );
+
                             // Prefer focused tab, then visible tab
                             if focused {
                                 info!("Found focused tab: {}", url);
@@ -363,7 +385,7 @@ impl BrowserManager {
                         }
                     }
                 }
-                
+
                 // Use the active page if found, otherwise fall back to the last page
                 // (which is often the most recently used)
                 if let Some(page) = active_page {
@@ -383,10 +405,10 @@ impl BrowserManager {
             // We launched Chrome ourselves, create a new page
             browser.new_page("about:blank").await?
         };
-        
+
         // Apply page overrides (UA, locale, timezone, viewport, etc.)
         self.apply_page_overrides(&cdp_page).await?;
-        
+
         let page = Arc::new(Page::new(cdp_page, config.clone()));
         *page_guard = Some(Arc::clone(&page));
 
@@ -404,7 +426,7 @@ impl BrowserManager {
     pub async fn is_enabled(&self) -> bool {
         self.config.read().await.enabled
     }
-    
+
     pub fn is_enabled_sync(&self) -> bool {
         self.config.try_read().map(|c| c.enabled).unwrap_or(false)
     }
@@ -412,24 +434,24 @@ impl BrowserManager {
     pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
         let mut config = self.config.write().await;
         config.enabled = enabled;
-        
+
         if enabled {
             self.start().await?;
         } else {
             self.stop().await?;
         }
-        
+
         Ok(())
     }
 
     pub async fn update_config(&self, updates: impl FnOnce(&mut BrowserConfig)) -> Result<()> {
         let mut config = self.config.write().await;
         updates(&mut config);
-        
+
         if let Some(page) = self.page.lock().await.as_ref() {
             page.update_viewport(config.viewport.clone()).await?;
         }
-        
+
         Ok(())
     }
 
@@ -461,25 +483,21 @@ impl BrowserManager {
     }
 
     /// Apply "human" environment: UA / Accept-Language / Timezone / Locale / DPR+Viewport
-    pub async fn apply_page_overrides(
-        &self,
-        page: &chromiumoxide::Page,
-    ) -> Result<()> {
+    pub async fn apply_page_overrides(&self, page: &chromiumoxide::Page) -> Result<()> {
         let config = self.config.read().await;
-        
+
         // Enable Network domain before setting headers
         page.execute(network::EnableParams::default()).await?;
 
         // SetUserAgentOverrideParams requires user_agent to be set
         // Only call it if we have a user_agent (accept_language is optional)
         if let Some(ua) = &config.user_agent {
-            let mut params_builder = network::SetUserAgentOverrideParams::builder()
-                .user_agent(ua);
-            
+            let mut params_builder = network::SetUserAgentOverrideParams::builder().user_agent(ua);
+
             if let Some(al) = &config.accept_language {
                 params_builder = params_builder.accept_language(al);
             }
-            
+
             let params = params_builder
                 .build()
                 .map_err(|e| BrowserError::CdpError(e))?;
@@ -489,7 +507,8 @@ impl BrowserManager {
         if let Some(tz) = &config.timezone {
             page.execute(emulation::SetTimezoneOverrideParams {
                 timezone_id: tz.clone(),
-            }).await?;
+            })
+            .await?;
         }
 
         if let Some(locale) = &config.locale {
@@ -512,7 +531,7 @@ impl BrowserManager {
         let is_external_chrome = config.connect_port.is_some() || config.connect_ws.is_some();
         if is_external_chrome && config.prevent_focus_steal {
             debug!("Configuring external Chrome to reduce focus stealing");
-            
+
             // Try to inject JavaScript that prevents focus events from bubbling
             // This helps reduce the likelihood of the browser taking focus
             let focus_prevention_script = r#"
@@ -536,7 +555,7 @@ impl BrowserManager {
                     console.warn('Could not install focus prevention:', e);
                 }
             "#;
-            
+
             if let Err(e) = page.evaluate(focus_prevention_script).await {
                 debug!("Could not install focus prevention script: {}", e);
             }
@@ -612,28 +631,36 @@ impl BrowserManager {
 
     pub fn get_status_sync(&self) -> String {
         // Use try operations to avoid blocking - return cached/default values if locks are held
-        let cfg = self.config.try_read().map(|c| {
-            let enabled = c.enabled;
-            let viewport_width = c.viewport.width;
-            let viewport_height = c.viewport.height;
-            let fullpage = c.fullpage;
-            (enabled, viewport_width, viewport_height, fullpage)
-        }).unwrap_or((false, 1024, 768, false));
-        
-        let browser_active = self.browser.try_lock().map(|b| b.is_some()).unwrap_or(false);
-        
+        let cfg = self
+            .config
+            .try_read()
+            .map(|c| {
+                let enabled = c.enabled;
+                let viewport_width = c.viewport.width;
+                let viewport_height = c.viewport.height;
+                let fullpage = c.fullpage;
+                (enabled, viewport_width, viewport_height, fullpage)
+            })
+            .unwrap_or((false, 1024, 768, false));
+
+        let browser_active = self
+            .browser
+            .try_lock()
+            .map(|b| b.is_some())
+            .unwrap_or(false);
+
         let mode = if cfg.0 { "enabled" } else { "disabled" };
         let fullpage = if cfg.3 { "on" } else { "off" };
-        
+
         let mut status = format!(
             "Browser status:\n• Mode: {}\n• Viewport: {}×{}\n• Full-page: {}",
             mode, cfg.1, cfg.2, fullpage
         );
-        
+
         if browser_active {
             status.push_str("\n• Browser: active");
         }
-        
+
         status
     }
 
@@ -642,7 +669,7 @@ impl BrowserManager {
         let idle_timeout = Duration::from_millis(config.idle_timeout_ms);
         let is_external_chrome = config.connect_port.is_some() || config.connect_ws.is_some();
         drop(config);
-        
+
         // Don't start idle monitor for external Chrome connections
         if is_external_chrome {
             info!("Skipping idle monitor for external Chrome connection");
@@ -656,7 +683,7 @@ impl BrowserManager {
         let handle = tokio::spawn(async move {
             loop {
                 sleep(Duration::from_secs(10)).await;
-                
+
                 let last = *last_activity.lock().await;
                 if last.elapsed() > idle_timeout {
                     warn!("Browser idle timeout reached, closing");
@@ -664,15 +691,18 @@ impl BrowserManager {
                     if let Some(mut browser) = browser_guard.take() {
                         let _ = browser.close().await;
                     }
-                    
+
                     // Cleanup user data directory on idle timeout
                     let mut user_data_guard = user_data_dir.lock().await;
                     if let Some(user_data_path) = user_data_guard.take() {
                         if let Err(e) = tokio::fs::remove_dir_all(&user_data_path).await {
-                            warn!("Failed to cleanup browser user data directory {}: {}", user_data_path, e);
+                            warn!(
+                                "Failed to cleanup browser user data directory {}: {}",
+                                user_data_path, e
+                            );
                         }
                     }
-                    
+
                     break;
                 }
             }
@@ -692,15 +722,17 @@ impl BrowserManager {
     pub async fn goto(&self, url: &str) -> Result<crate::page::GotoResult> {
         // Get or create page
         let page = self.get_or_create_page().await?;
-        
+
         let config = self.config.read().await;
         let result = page.goto(url, Some(config.wait.clone())).await?;
-        
+
         self.update_activity().await;
         Ok(result)
     }
 
-    pub async fn capture_screenshot_with_url(&self) -> Result<(Vec<std::path::PathBuf>, Option<String>)> {
+    pub async fn capture_screenshot_with_url(
+        &self,
+    ) -> Result<(Vec<std::path::PathBuf>, Option<String>)> {
         let (paths, url) = self.capture_screenshot_internal().await?;
         Ok((paths, Some(url)))
     }
@@ -713,7 +745,7 @@ impl BrowserManager {
     async fn capture_screenshot_internal(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
         // Ensure we have a browser and page
         let page = self.get_or_create_page().await?;
-        
+
         // Initialize assets manager if needed
         let mut assets_guard = self.assets.lock().await;
         if assets_guard.is_none() {
@@ -721,38 +753,43 @@ impl BrowserManager {
         }
         let assets = assets_guard.as_ref().unwrap().clone();
         drop(assets_guard);
-        
+
         // Get current config
         let config = self.config.read().await;
-        
+
         // Determine screenshot mode
         let mode = if config.fullpage {
-            crate::page::ScreenshotMode::FullPage { 
-                segments_max: Some(config.segments_max) 
+            crate::page::ScreenshotMode::FullPage {
+                segments_max: Some(config.segments_max),
             }
         } else {
             crate::page::ScreenshotMode::Viewport
         };
-        
+
         // Get current URL directly from the browser (not cached)
-        let current_url = page.get_current_url().await.unwrap_or_else(|_| "about:blank".to_string());
-        
+        let current_url = page
+            .get_current_url()
+            .await
+            .unwrap_or_else(|_| "about:blank".to_string());
+
         // Capture screenshots
         let screenshots = page.screenshot(mode).await?;
-        
+
         // Store screenshots and get paths
         let mut paths = Vec::new();
         for screenshot in screenshots {
-            let image_ref = assets.store_screenshot(
-                &screenshot.data,
-                screenshot.format,
-                screenshot.width,
-                screenshot.height,
-                300000, // 5 minute TTL
-            ).await?;
+            let image_ref = assets
+                .store_screenshot(
+                    &screenshot.data,
+                    screenshot.format,
+                    screenshot.width,
+                    screenshot.height,
+                    300000, // 5 minute TTL
+                )
+                .await?;
             paths.push(std::path::PathBuf::from(image_ref.path));
         }
-        
+
         self.update_activity().await;
         Ok((paths, current_url))
     }

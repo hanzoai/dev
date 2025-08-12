@@ -17,26 +17,26 @@ use serde::Serialize;
 pub struct AgentConfig {
     /// Name of the agent (e.g., "claude", "gemini", "gpt-4")
     pub name: String,
-    
+
     /// Command to execute the agent (e.g., "claude", "gemini")
     pub command: String,
-    
+
     /// Optional arguments to pass to the agent command
     #[serde(default)]
     pub args: Vec<String>,
-    
+
     /// Whether this agent can only run in read-only mode
     #[serde(default)]
     pub read_only: bool,
-    
+
     /// Whether this agent is enabled
     #[serde(default = "default_true")]
     pub enabled: bool,
-    
+
     /// Optional description of the agent
     #[serde(default)]
     pub description: Option<String>,
-    
+
     /// Optional environment variables for the agent
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
@@ -123,7 +123,7 @@ pub struct ThemeConfig {
     /// Name of the predefined theme to use
     #[serde(default)]
     pub name: ThemeName,
-    
+
     /// Custom color overrides (optional)
     #[serde(default)]
     pub colors: ThemeColors,
@@ -170,30 +170,30 @@ pub struct ThemeColors {
     pub secondary: Option<String>,
     pub background: Option<String>,
     pub foreground: Option<String>,
-    
+
     // UI elements
     pub border: Option<String>,
     pub border_focused: Option<String>,
     pub selection: Option<String>,
     pub cursor: Option<String>,
-    
+
     // Status colors
     pub success: Option<String>,
     pub warning: Option<String>,
     pub error: Option<String>,
     pub info: Option<String>,
-    
+
     // Text colors
     pub text: Option<String>,
     pub text_dim: Option<String>,
     pub text_bright: Option<String>,
-    
+
     // Syntax/special colors
     pub keyword: Option<String>,
     pub string: Option<String>,
     pub comment: Option<String>,
     pub function: Option<String>,
-    
+
     // Animation colors
     pub spinner: Option<String>,
     pub progress: Option<String>,
@@ -204,22 +204,22 @@ pub struct ThemeColors {
 pub struct BrowserConfig {
     #[serde(default)]
     pub enabled: bool,
-    
+
     #[serde(default)]
     pub viewport: Option<BrowserViewportConfig>,
-    
+
     #[serde(default)]
     pub wait: Option<BrowserWaitStrategy>,
-    
+
     #[serde(default)]
     pub fullpage: bool,
-    
+
     #[serde(default)]
     pub segments_max: Option<usize>,
-    
+
     #[serde(default)]
     pub idle_timeout_ms: Option<u64>,
-    
+
     #[serde(default)]
     pub format: Option<BrowserImageFormat>,
 }
@@ -228,10 +228,10 @@ pub struct BrowserConfig {
 pub struct BrowserViewportConfig {
     pub width: u32,
     pub height: u32,
-    
+
     #[serde(default)]
     pub device_scale_factor: Option<f64>,
-    
+
     #[serde(default)]
     pub mobile: bool,
 }
