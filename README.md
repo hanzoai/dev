@@ -4,13 +4,13 @@
 
 ## Why Coder
 
-  - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
-  - 🤖 **Multi-Agent Commands** - /plan, /solve, /code with agent panels
-  - 🎨 **Theme System** - /themes with live preview and accessibility
-  - 🧠 **Reasoning Control** - /reasoning for dynamic effort adjustment
-  - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
-  - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
-  - 🔁 **Backwards compatible** – Supports `~/.codex/*` or default `~/.coder/*`
+  - **Browser Integration** - CDP support, headless browsing, screenshots
+  - **Multi-Agent Commands** - /plan, /solve, /code with agent panels
+  - **Theme System** - /themes with live preview and accessibility
+  - **Reasoning Control** - /reasoning for dynamic effort adjustment
+  - **MCP support** - Extend with filesystem, DBs, APIs, or your own tools.
+  - **Safety modes** - Read-only, approvals, and workspace sandboxing.
+  - **Backwards compatible** - Supports `~/.codex/*` or default `~/.coder/*`
 
 ## Quickstart
 
