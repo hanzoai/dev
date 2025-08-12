@@ -168,21 +168,6 @@ impl ChatWidget<'_> {
     async fn get_browser_manager() -> Arc<BrowserManager> {
         codex_browser::global::get_or_create_browser_manager().await
     }
-    
-    /// Check if browser is enabled (synchronous)
-    fn is_browser_enabled_sync() -> bool {
-        // Use tokio's block_in_place to run async code in sync context
-        // This is safe here because we're just checking status, not doing heavy I/O
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                if let Some(manager) = codex_browser::global::get_browser_manager().await {
-                    manager.is_enabled_sync()
-                } else {
-                    false
-                }
-            })
-        })
-    }
 
     pub(crate) fn insert_str(&mut self, s: &str) {
         self.bottom_pane.insert_str(s);
@@ -1697,7 +1682,7 @@ impl ChatWidget<'_> {
                                 let browser_manager = codex_browser::global::get_browser_manager().await;
                                 if let Some(browser_manager) = browser_manager {
                                     match browser_manager.capture_screenshot_with_url().await {
-                                        Ok((paths, url)) => {
+                                        Ok((paths, _url)) => {
                                             if let Some(first_path) = paths.first() {
                                                 tracing::info!("Auto-captured screenshot after global navigation: {}", first_path.display());
                                                 
@@ -1789,8 +1774,9 @@ impl ChatWidget<'_> {
                         // Update the config to use Chrome connection
                         let latest_screenshot = self.latest_browser_screenshot.clone();
                         let app_event_tx = self.app_event_tx.clone();
-                        let port_display =
+                        let _port_display =
                             port.map_or("auto-detected".to_string(), |p| p.to_string());
+                        let launch_port = port.unwrap_or(9222);
 
                         // Connect immediately, don't wait for message send
                         tokio::spawn(async move {
@@ -1884,7 +1870,7 @@ impl ChatWidget<'_> {
                                                 let browser_manager = codex_browser::global::get_browser_manager().await;
                                                 if let Some(browser_manager) = browser_manager {
                                                     match browser_manager.capture_screenshot_with_url().await {
-                                                        Ok((paths, url)) => {
+                                                        Ok((paths, _url)) => {
                                                             if let Some(first_path) = paths.first() {
                                                                 tracing::info!("Auto-captured screenshot after global CDP navigation: {}", first_path.display());
                                                                 
@@ -2039,7 +2025,7 @@ impl ChatWidget<'_> {
                                                         let browser_manager = codex_browser::global::get_browser_manager().await;
                                                         if let Some(browser_manager) = browser_manager {
                                                             match browser_manager.capture_screenshot_with_url().await {
-                                                                Ok((paths, url)) => {
+                                                                Ok((paths, _url)) => {
                                                                     if let Some(first_path) = paths.first() {
                                                                         tracing::info!("Auto-captured screenshot after global CDP (launched) navigation: {}", first_path.display());
                                                                         
@@ -2105,7 +2091,7 @@ impl ChatWidget<'_> {
                         if port.is_some() {
                             format!(
                                 "Connecting to local Chrome instance on port {}...\nIf Chrome is not running with debug port, it will be launched.",
-                                launch_port
+                                port.unwrap_or(9222)
                             )
                         } else {
                             "Auto-scanning for local Chrome instance with debug port...\nIf no Chrome found, it will be launched on port 9222.".to_string()
