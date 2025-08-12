@@ -508,6 +508,8 @@ impl ChatWidget<'_> {
             matches!(cell, HistoryCell::UserPrompt { .. })
         });
         self.bottom_pane.set_has_chat_history(has_conversation);
+        // Ensure input focus is maintained when new content arrives
+        self.bottom_pane.ensure_input_focus();
         // Request redraw to show new history
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
@@ -1767,6 +1769,8 @@ impl ChatWidget<'_> {
             for line in lines {
                 self.history_cells.push(HistoryCell::new_text_line(line));
             }
+            // Ensure input focus is maintained when adding streamed content
+            self.bottom_pane.ensure_input_focus();
             self.app_event_tx.send(AppEvent::RequestRedraw);
         }
 
@@ -1814,6 +1818,8 @@ impl ChatWidget<'_> {
             for line in lines {
                 self.history_cells.push(HistoryCell::new_text_line(line));
             }
+            // Ensure input focus is maintained when adding streamed content
+            self.bottom_pane.ensure_input_focus();
             self.app_event_tx.send(AppEvent::RequestRedraw);
         }
 
