@@ -111,6 +111,12 @@ pub(crate) enum HistoryCell {
 
     /// Background event.
     BackgroundEvent { view: TextBlock },
+    
+    /// Styled text that bypasses markdown processing to preserve styling
+    StyledText { view: TextBlock },
+    
+    /// Dimmed reasoning text with markdown support
+    DimmedReasoning { view: TextBlock },
 
     /// Output from the `/diff` command.
     GitDiffOutput { view: TextBlock },
@@ -272,6 +278,8 @@ impl HistoryCell {
             HistoryCell::WelcomeMessage { view }
             | HistoryCell::UserPrompt { view }
             | HistoryCell::BackgroundEvent { view }
+            | HistoryCell::StyledText { view }
+            | HistoryCell::DimmedReasoning { view }
             | HistoryCell::GitDiffOutput { view }
             | HistoryCell::ReasoningOutput { view }
             | HistoryCell::StatusOutput { view }
@@ -310,6 +318,15 @@ impl HistoryCell {
             }
             HistoryCell::BackgroundEvent { view: _ } => {
                 // For background events (LLM responses), use proper word wrapping
+                let processed_lines = self.get_processed_lines(width);
+                processed_lines.len() as u16
+            }
+            HistoryCell::StyledText { view } => {
+                // For styled text, use the lines as-is without markdown processing
+                view.lines.len() as u16
+            }
+            HistoryCell::DimmedReasoning { view: _ } => {
+                // For dimmed reasoning, use dimmed markdown processing
                 let processed_lines = self.get_processed_lines(width);
                 processed_lines.len() as u16
             }
@@ -370,14 +387,11 @@ impl HistoryCell {
 
     pub(crate) fn new_user_prompt(message: String) -> Self {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(Span::styled(
-            "user",
-            Style::default()
-                .fg(crate::colors::primary())
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.extend(message.lines().map(|l| Line::from(l.to_string())));
-        lines.push(Line::from(""));
+        // Style message text with primary color
+        lines.extend(message.lines().map(|l| Line::from(Span::styled(
+            l.to_string(),
+            Style::default().fg(crate::colors::primary())
+        ))));
 
         HistoryCell::UserPrompt {
             view: TextBlock::new(lines),
@@ -744,9 +758,15 @@ impl HistoryCell {
 
         // 🧠 Model
         lines.push(Line::from(vec!["🧠 ".into(), "Model".bold()]));
+        // Format model name with proper capitalization
+        let formatted_model = if config.model.to_lowercase().starts_with("gpt-") {
+            format!("GPT{}", &config.model[3..])
+        } else {
+            config.model.clone()
+        };
         lines.push(Line::from(vec![
             "  • Name: ".into(),
-            config.model.clone().into(),
+            formatted_model.into(),
         ]));
         let provider_disp = pretty_provider_name(&config.model_provider_id);
         lines.push(Line::from(vec![
@@ -1000,6 +1020,20 @@ impl HistoryCell {
             view: TextBlock::new(vec![line]),
         }
     }
+    
+    /// Create a text line that preserves styling and bypasses markdown processing
+    pub(crate) fn new_styled_text_line(line: Line<'static>) -> Self {
+        HistoryCell::StyledText {
+            view: TextBlock::new(vec![line]),
+        }
+    }
+    
+    /// Create a text line for dimmed reasoning content with markdown support
+    pub(crate) fn new_dimmed_reasoning_line(line: Line<'static>) -> Self {
+        HistoryCell::DimmedReasoning {
+            view: TextBlock::new(vec![line]),
+        }
+    }
 
     /// Create a streaming content cell for live model output
     pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> Self {
@@ -1027,6 +1061,27 @@ impl HistoryCell {
 
                 // Process with markdown support and word wrapping
                 crate::text_processing::process_markdown_text(&text, width)
+            }
+            HistoryCell::StyledText { view } => {
+                // For styled text, return lines as-is to preserve styling
+                view.lines.clone()
+            }
+            HistoryCell::DimmedReasoning { view } => {
+                // Convert TextBlock to text and apply dimmed markdown processing
+                let text = view
+                    .lines
+                    .iter()
+                    .map(|line| {
+                        line.spans
+                            .iter()
+                            .map(|span| span.content.as_ref())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Process with dimmed markdown support
+                crate::text_processing::process_dimmed_markdown_text(&text, width)
             }
             _ => self.plain_lines(),
         }
@@ -1098,6 +1153,44 @@ impl WidgetRef for &HistoryCell {
                             .bg(crate::colors::background()),
                     )
                     .render(area, buf);
+            }
+            HistoryCell::StyledText { .. } => {
+                // Use processed lines as-is to preserve styling
+                let processed_lines = self.get_processed_lines(area.width);
+                Paragraph::new(Text::from(processed_lines))
+                    .render(area, buf);
+            }
+            HistoryCell::DimmedReasoning { .. } => {
+                // Use processed lines with dimmed markdown support
+                let processed_lines = self.get_processed_lines(area.width);
+                Paragraph::new(Text::from(processed_lines))
+                    .render(area, buf);
+            }
+            HistoryCell::UserPrompt { view } => {
+                // Special rendering for user prompts with left border
+                // Draw left border in active border color
+                for y in area.top()..area.bottom() {
+                    if area.left() < area.right() {
+                        buf[(area.left(), y)].set_char('│')
+                            .set_fg(crate::colors::border_focused());
+                    }
+                }
+                
+                // Render text with 2-char left margin for the border
+                let text_area = Rect {
+                    x: area.x + 2,
+                    y: area.y,
+                    width: area.width.saturating_sub(2),
+                    height: area.height,
+                };
+                
+                Paragraph::new(Text::from(view.lines.iter().map(line_to_static).collect::<Vec<_>>()))
+                    .wrap(Wrap { trim: false })
+                    .style(
+                        Style::default()
+                            .bg(crate::colors::background()),
+                    )
+                    .render(text_area, buf);
             }
             _ => {
                 // Apply theme background and text color to the paragraph
