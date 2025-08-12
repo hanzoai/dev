@@ -47,7 +47,9 @@ gemini
 ### Browser
 ```bash
 # Connect coder to your Chrome browser (running CDP)
-/browser local
+/browser chrome
+# or simply:
+/chrome
 
 # Use a headless browser (Agent can also enable)
 /browser https://example.com
