@@ -499,168 +499,6 @@ impl BrowserManager {
         Ok(())
     }
 
-    /// Get or create a dedicated background page for screenshots to prevent focus stealing
-    pub async fn get_or_create_background_page(&self) -> Result<Arc<Page>> {
-        self.ensure_browser().await?;
-        self.update_activity().await;
-
-        let mut background_page_guard = self.background_page.lock().await;
-        if let Some(page) = background_page_guard.as_ref() {
-            return Ok(Arc::clone(page));
-        }
-
-        let browser_guard = self.browser.lock().await;
-        let browser = browser_guard.as_ref().ok_or(BrowserError::NotInitialized)?;
-        let config = self.config.read().await;
-
-        // For external Chrome connections, create a minimal new tab for screenshots
-        let cdp_page = if config.connect_port.is_some() || config.connect_ws.is_some() {
-            info!("Creating screenshot tab for focus-free captures");
-
-            // Try background tab creation first, fallback to regular tab if it fails
-            let background_page = {
-                // Attempt 1: Try creating true background tab
-                let background_attempt = async {
-                    use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
-                    let create_params = CreateTargetParams::builder()
-                        .url("about:blank")
-                        .background(true)
-                        .build()
-                        .map_err(|e| BrowserError::CdpError(e))?;
-
-                    let result = browser.execute(create_params).await?;
-                    browser
-                        .get_page(result.target_id.clone())
-                        .await
-                        .map_err(|e| BrowserError::CdpError(e.to_string()))
-                }
-                .await;
-
-                match background_attempt {
-                    Ok(page) => {
-                        info!("Successfully created true background tab");
-                        page
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Background tab creation failed ({}), using regular tab with enhanced focus prevention",
-                            e
-                        );
-
-                        // Fallback: Create a regular new tab but with immediate focus prevention
-                        let new_page = browser.new_page("about:blank").await?;
-
-                        // Immediately minimize focus impact by making it as hidden as possible
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-                        new_page
-                    }
-                }
-            };
-
-            // Apply aggressive focus prevention to any tab we created
-            {
-                use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
-
-                // Enhanced focus prevention script
-                let focus_prevention_script = r#"
-                    (function() {
-                        console.log('Initializing focus prevention for screenshot tab');
-                        
-                        // Completely override focus-related methods
-                        const noop = function() { console.log('Focus attempt blocked'); };
-                        window.focus = noop;
-                        if (document.body) document.body.focus = noop;
-                        
-                        // Override visibility and focus state permanently
-                        Object.defineProperty(document, 'visibilityState', {
-                            value: 'hidden',
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        Object.defineProperty(document, 'hasFocus', {
-                            value: () => false,
-                            writable: false,
-                            configurable: false
-                        });
-                        
-                        // Block ALL focus-related events at capture phase
-                        const focusEvents = ['focus', 'focusin', 'focusout', 'blur', 'activate', 'show'];
-                        focusEvents.forEach(eventType => {
-                            window.addEventListener(eventType, function(e) {
-                                e.stopImmediatePropagation();
-                                e.preventDefault();
-                                console.log('Blocked focus event:', eventType);
-                            }, true);
-                            
-                            document.addEventListener(eventType, function(e) {
-                                e.stopImmediatePropagation();
-                                e.preventDefault();
-                            }, true);
-                        });
-                        
-                        // Override window management methods
-                        window.blur = noop;
-                        window.moveBy = noop;
-                        window.moveTo = noop;
-                        window.resizeBy = noop;
-                        window.resizeTo = noop;
-                        
-                        // Block any attempt to make this tab visible
-                        if (window.chrome && window.chrome.tabs) {
-                            window.chrome.tabs.update = noop;
-                            window.chrome.tabs.highlight = noop;
-                        }
-                        
-                        console.log('Screenshot tab focus prevention fully activated');
-                    })();
-                "#;
-
-                let script_params = AddScriptToEvaluateOnNewDocumentParams::builder()
-                    .source(focus_prevention_script)
-                    .build()
-                    .map_err(|e| BrowserError::CdpError(e.to_string()))?;
-
-                if let Err(e) = background_page.execute(script_params).await {
-                    warn!("Focus prevention script injection failed: {}", e);
-                }
-            }
-
-            background_page
-        } else {
-            // For launched Chrome, create a regular new page (it's already isolated)
-            browser.new_page("about:blank").await?
-        };
-
-        // Apply minimal page overrides for screenshots (no user agent spoofing needed)
-        {
-            use chromiumoxide::cdp::browser_protocol::emulation;
-            use chromiumoxide::cdp::browser_protocol::network;
-
-            // Enable Network domain for any required network operations
-            cdp_page.execute(network::EnableParams::default()).await?;
-
-            // For external Chrome connections, avoid setting viewport here to prevent focus/flicker.
-            if config.connect_port.is_none() && config.connect_ws.is_none() {
-                let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
-                    .width(config.viewport.width as i64)
-                    .height(config.viewport.height as i64)
-                    .device_scale_factor(config.viewport.device_scale_factor)
-                    .mobile(config.viewport.mobile)
-                    .build()
-                    .map_err(|e| BrowserError::CdpError(e.to_string()))?;
-                cdp_page.execute(viewport_params).await?;
-            }
-        }
-
-        let background_page = Arc::new(Page::new(cdp_page, config.clone()));
-        *background_page_guard = Some(Arc::clone(&background_page));
-
-        info!("Background screenshot tab created successfully");
-        Ok(background_page)
-    }
-
     pub async fn is_enabled(&self) -> bool {
         self.config.read().await.enabled
     }
@@ -724,50 +562,75 @@ impl BrowserManager {
         }
     }
 
-    /// Apply "human" environment: UA / Accept-Language / Timezone / Locale / DPR+Viewport
+    /// Apply environment overrides on page creation.
+    /// - For external CDP connections: set viewport once on connect; skip humanization (UA, locale, etc.).
+    /// - For internal (launched) Chrome: apply humanization; skip viewport here (kept minimal).
     pub async fn apply_page_overrides(&self, page: &chromiumoxide::Page) -> Result<()> {
         let config = self.config.read().await;
+        let is_external = config.connect_port.is_some() || config.connect_ws.is_some();
 
-        // Network + UA
+        // Always enable Network domain once
         page.execute(network::EnableParams::default()).await?;
-        if let Some(ua) = &config.user_agent {
-            let mut b = network::SetUserAgentOverrideParams::builder().user_agent(ua);
-            if let Some(al) = &config.accept_language {
-                b = b.accept_language(al);
-            }
-            page.execute(b.build().map_err(BrowserError::CdpError)?)
-                .await?;
-        } else if let Some(al) = &config.accept_language {
-            let mut headers_map = std::collections::HashMap::new();
-            headers_map.insert(
-                "Accept-Language".to_string(),
-                serde_json::Value::String(al.clone()),
-            );
-            let headers = network::Headers::new(serde_json::Value::Object(
-                headers_map.into_iter().map(|(k, v)| (k, v)).collect(),
-            ));
-            let p = network::SetExtraHttpHeadersParams::builder()
-                .headers(headers)
+
+        if is_external {
+            // External Chrome: set viewport once on connection; skip humanization.
+            let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
+                .width(config.viewport.width as i64)
+                .height(config.viewport.height as i64)
+                .device_scale_factor(config.viewport.device_scale_factor)
+                .mobile(config.viewport.mobile)
                 .build()
                 .map_err(BrowserError::CdpError)?;
-            page.execute(p).await?;
+            page.execute(viewport_params).await?;
+        } else {
+            // Internal (launched) Chrome: apply human settings; do not touch viewport here.
+            if let Some(ua) = &config.user_agent {
+                let mut b = network::SetUserAgentOverrideParams::builder().user_agent(ua);
+                if let Some(al) = &config.accept_language {
+                    b = b.accept_language(al);
+                }
+                page.execute(b.build().map_err(BrowserError::CdpError)?)
+                    .await?;
+            } else if let Some(al) = &config.accept_language {
+                let mut headers_map = std::collections::HashMap::new();
+                headers_map.insert(
+                    "Accept-Language".to_string(),
+                    serde_json::Value::String(al.clone()),
+                );
+                let headers = network::Headers::new(serde_json::Value::Object(
+                    headers_map.into_iter().map(|(k, v)| (k, v)).collect(),
+                ));
+                let p = network::SetExtraHttpHeadersParams::builder()
+                    .headers(headers)
+                    .build()
+                    .map_err(BrowserError::CdpError)?;
+                page.execute(p).await?;
+            }
+
+            // Set viewport once on connection for internal Chrome as well
+            let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
+                .width(config.viewport.width as i64)
+                .height(config.viewport.height as i64)
+                .device_scale_factor(config.viewport.device_scale_factor)
+                .mobile(config.viewport.mobile)
+                .build()
+                .map_err(BrowserError::CdpError)?;
+            page.execute(viewport_params).await?;
+
+            if let Some(tz) = &config.timezone {
+                page.execute(emulation::SetTimezoneOverrideParams {
+                    timezone_id: tz.clone(),
+                })
+                .await?;
+            }
+            if let Some(locale) = &config.locale {
+                let p = emulation::SetLocaleOverrideParams::builder()
+                    .locale(locale)
+                    .build();
+                page.execute(p).await?;
+            }
         }
 
-        // Timezone / locale
-        if let Some(tz) = &config.timezone {
-            page.execute(emulation::SetTimezoneOverrideParams {
-                timezone_id: tz.clone(),
-            })
-            .await?;
-        }
-        if let Some(locale) = &config.locale {
-            let p = emulation::SetLocaleOverrideParams::builder()
-                .locale(locale)
-                .build();
-            page.execute(p).await?;
-        }
-
-        // NO viewport/DPR here.
         Ok(())
     }
 
@@ -997,56 +860,6 @@ impl BrowserManager {
                     screenshot.width,
                     screenshot.height,
                     300000, // 5 minute TTL
-                )
-                .await?;
-            paths.push(std::path::PathBuf::from(image_ref.path));
-        }
-
-        self.update_activity().await;
-        Ok((paths, current_url))
-    }
-
-    /// Capture using a dedicated background tab when connected to external Chrome.
-    async fn capture_screenshot_background(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
-        let page = self.get_or_create_page().await?;
-        let current_url = page
-            .get_current_url()
-            .await
-            .unwrap_or_else(|_| "about:blank".to_string());
-
-        let bg = self.get_or_create_background_page().await?;
-        // Keep background page in sync with current URL; minimal wait
-        let cfg = self.config.read().await;
-        let _ = bg.goto(&current_url, Some(cfg.wait.clone())).await;
-
-        // Initialize assets manager if needed
-        let mut assets_guard = self.assets.lock().await;
-        if assets_guard.is_none() {
-            *assets_guard = Some(Arc::new(crate::assets::AssetManager::new().await?));
-        }
-        let assets = assets_guard.as_ref().unwrap().clone();
-        drop(assets_guard);
-
-        // Determine screenshot mode
-        let mode = if cfg.fullpage {
-            crate::page::ScreenshotMode::FullPage {
-                segments_max: Some(cfg.segments_max),
-            }
-        } else {
-            crate::page::ScreenshotMode::Viewport
-        };
-
-        let screenshots = bg.screenshot(mode).await?;
-
-        let mut paths = Vec::new();
-        for screenshot in screenshots {
-            let image_ref = assets
-                .store_screenshot(
-                    &screenshot.data,
-                    screenshot.format,
-                    screenshot.width,
-                    screenshot.height,
-                    300000,
                 )
                 .await?;
             paths.push(std::path::PathBuf::from(image_ref.path));
