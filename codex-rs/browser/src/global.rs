@@ -14,10 +14,8 @@ pub async fn get_or_create_browser_manager() -> Arc<BrowserManager> {
     if let Some(manager) = guard.as_ref() {
         manager.clone()
     } else {
-        let mut config = BrowserConfig::default();
-        config.enabled = true;
+        let config = BrowserConfig::default();
         let manager = Arc::new(BrowserManager::new(config));
-        manager.set_enabled_sync(true);
         *guard = Some(manager.clone());
         manager
     }
@@ -35,11 +33,7 @@ pub async fn clear_browser_manager() {
 
 /// Set the global browser manager configuration (used by TUI to sync with global state)
 pub async fn set_global_browser_manager(manager: Arc<BrowserManager>) {
-    // Ensure the manager is enabled
-    manager.set_enabled_sync(true);
-    
     let mut guard = GLOBAL_BROWSER_MANAGER.write().await;
     *guard = Some(manager);
-    
-    tracing::info!("Global browser manager set and enabled");
+    tracing::info!("Global browser manager set");
 }

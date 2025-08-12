@@ -35,7 +35,8 @@ pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 
 use approval_modal_view::ApprovalModalView;
-use codex_core::config_types::{ReasoningEffort, ThemeName};
+use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::ThemeName;
 use reasoning_selection_view::ReasoningSelectionView;
 use theme_selection_view::ThemeSelectionView;
 
@@ -52,7 +53,6 @@ pub(crate) struct BottomPane<'a> {
     has_input_focus: bool,
     is_task_running: bool,
     ctrl_c_quit_hint: bool,
-
 
     /// Optional transient ring shown above the composer. This is a rendering-only
     /// container used during development before we wire it to ChatWidget events.
@@ -416,7 +416,7 @@ impl WidgetRef for &BottomPane<'_> {
         } else if y_offset < area.height {
             // Always add an empty line above the input box
             y_offset = y_offset.saturating_add(1);
-            
+
             // Add horizontal padding (2 chars on each side) for Message input
             let horizontal_padding = 2u16;
             let composer_rect = Rect {

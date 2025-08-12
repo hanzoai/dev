@@ -1,1 +1,1 @@
-pub(crate) const DEFAULT_WRAP_COLS: u16 = 80;
+// DEFAULT_WRAP_COLS removed - streaming content no longer wraps artificially

@@ -31,10 +31,113 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::agent_tool::{
-    AGENT_MANAGER, AgentStatus, CancelAgentParams, CheckAgentStatusParams, GetAgentResultParams,
-    ListAgentsParams, RunAgentParams, WaitForAgentParams,
-};
+/// Gather ephemeral, per-turn context that should not be persisted to history.
+/// Combines environment info and (when enabled) a live browser snapshot and status.
+struct EphemeralJar {
+    items: Vec<ResponseItem>,
+}
+
+impl EphemeralJar {
+    fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    fn into_items(self) -> Vec<ResponseItem> {
+        self.items
+    }
+}
+
+fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
+    let head_path = cwd.join(".git/HEAD");
+    if let Ok(contents) = std::fs::read_to_string(&head_path) {
+        if let Some(rest) = contents.trim().strip_prefix("ref: ") {
+            if let Some(branch) = rest.trim().rsplit('/').next() {
+                return Some(branch.to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
+    let mut jar = EphemeralJar::new();
+
+    // Collect environment context
+    let cwd = sess.cwd.to_string_lossy().to_string();
+    let branch = get_git_branch(&sess.cwd).unwrap_or_else(|| "unknown".to_string());
+
+    // Prepare browser context + optional screenshot
+    let mut browser_text = None::<String>;
+    let mut screenshot_content: Option<ContentItem> = None;
+
+    if let Some(browser_manager) = codex_browser::global::get_browser_manager().await {
+        if browser_manager.is_enabled().await {
+            // Capture screenshot and discover URL
+            if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await {
+                if let Ok(bytes) = std::fs::read(&screenshot_path) {
+                    let mime = mime_guess::from_path(&screenshot_path)
+                        .first()
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| "image/png".to_string());
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    screenshot_content = Some(ContentItem::InputImage {
+                        image_url: format!("data:{mime};base64,{encoded}"),
+                    });
+                }
+
+                // Try to get a tab title if available
+                let title = match browser_manager.get_or_create_page().await {
+                    Ok(page) => page.get_title().await,
+                    Err(_) => None,
+                };
+
+                let status_line = if let Some(t) = title {
+                    format!(
+                        "Browser is open at {} — {}. You can interact with it using browser.* tools.",
+                        url, t
+                    )
+                } else {
+                    format!(
+                        "Browser is open at {}. You can interact with it using browser.* tools.",
+                        url
+                    )
+                };
+                browser_text = Some(status_line);
+            }
+        }
+    }
+
+    // Build a single ephemeral message conveying env + browser context + screenshot
+    let mut content: Vec<ContentItem> = Vec::new();
+    content.push(ContentItem::InputText {
+        text: format!("[EPHEMERAL:turn_context] cwd: {}, branch: {}", cwd, branch),
+    });
+    if let Some(text) = browser_text {
+        content.push(ContentItem::InputText { text });
+    }
+    if let Some(image) = screenshot_content {
+        content.push(image);
+    }
+
+    if !content.is_empty() {
+        jar.items.push(ResponseItem::Message {
+            id: None,
+            // Use "user" for broad compatibility across providers.
+            role: "user".to_string(),
+            content,
+        });
+    }
+
+    jar.into_items()
+}
+use crate::agent_tool::AGENT_MANAGER;
+use crate::agent_tool::AgentStatus;
+use crate::agent_tool::CancelAgentParams;
+use crate::agent_tool::CheckAgentStatusParams;
+use crate::agent_tool::GetAgentResultParams;
+use crate::agent_tool::ListAgentsParams;
+use crate::agent_tool::RunAgentParams;
+use crate::agent_tool::WaitForAgentParams;
 use crate::apply_patch::ApplyPatchExec;
 use crate::apply_patch::CODEX_APPLY_PATCH_ARG1;
 use crate::apply_patch::InternalApplyPatchInvocation;
@@ -1276,6 +1379,10 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             sess.record_conversation_items(&pending_input).await;
         }
 
+        // Append ephemeral per-turn context (env + browser status + optional screenshot)
+        let ephemeral_items = build_turn_ephemeral_items(&sess).await;
+        pending_input.extend(ephemeral_items);
+
         // Construct the input that we will send to the model. When using the
         // Chat completions API (or ZDR clients), the model needs the full
         // conversation history on each turn. The rollout file, however, should
@@ -1386,12 +1493,6 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                 if !items_to_record_in_conversation_history.is_empty() {
                     sess.record_conversation_items(&items_to_record_in_conversation_history)
                         .await;
-                }
-
-                // Add any pending browser screenshots to the responses
-                let screenshot_responses = consume_pending_screenshots(&sess);
-                for screenshot_response in screenshot_responses {
-                    responses.push(screenshot_response);
                 }
 
                 // If there are responses, add them to pending input for the next iteration
@@ -2998,10 +3099,10 @@ async fn send_agent_status_update(sess: &Session) {
 
     let event = Event {
         id: "agent_status".to_string(),
-        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { 
-            agents, 
-            context: None, 
-            task: None 
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents,
+            context: None,
+            task: None,
         }),
     };
 
@@ -3016,9 +3117,8 @@ async fn send_agent_status_update(sess: &Session) {
 
 /// Add a screenshot to pending screenshots for the next model request
 fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String) {
-    let mut pending = sess.pending_browser_screenshots.lock().unwrap();
-    pending.push(screenshot_path.clone());
-    tracing::info!("Added pending screenshot for next model request");
+    // Do not queue screenshots for next turn anymore; we inject fresh per-turn.
+    tracing::info!("Captured screenshot; updating UI and using per-turn injection");
 
     // Also send an immediate event to update the TUI display
     let event = Event {
@@ -3177,7 +3277,9 @@ async fn handle_browser_open(
 }
 
 /// Get the browser manager for the session (always uses global)
-async fn get_browser_manager_for_session(_sess: &Session) -> Option<Arc<codex_browser::BrowserManager>> {
+async fn get_browser_manager_for_session(
+    _sess: &Session,
+) -> Option<Arc<codex_browser::BrowserManager>> {
     // Always use the global browser manager
     codex_browser::global::get_browser_manager().await
 }
@@ -3264,7 +3366,7 @@ async fn handle_browser_click(
     call_id: String,
 ) -> ResponseInputItem {
     let browser_manager = get_browser_manager_for_session(sess).await;
-    
+
     if let Some(browser_manager) = browser_manager {
         let args: Result<Value, _> = serde_json::from_str(&arguments);
         match args {

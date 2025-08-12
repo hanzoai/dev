@@ -26,10 +26,13 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use std::{thread, time::Duration};
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
 
 const BASE_PLACEHOLDER_TEXT: &str = "What are we coding today?";
 /// If the pasted content exceeds this number of characters, replace it with a
@@ -111,24 +114,24 @@ impl ChatComposer {
     pub fn set_has_chat_history(&mut self, has_history: bool) {
         self.has_chat_history = has_history;
     }
-    
+
     pub fn set_task_running(&mut self, running: bool) {
         self.is_task_running = running;
-        
+
         if running {
             // Start animation thread if not already running
             if self.animation_running.is_none() {
                 let animation_flag = Arc::new(AtomicBool::new(true));
                 let animation_flag_clone = Arc::clone(&animation_flag);
                 let app_event_tx_clone = self.app_event_tx.clone();
-                
+
                 thread::spawn(move || {
                     while animation_flag_clone.load(Ordering::Relaxed) {
                         thread::sleep(Duration::from_millis(200)); // Slower animation
                         app_event_tx_clone.send(AppEvent::RequestRedraw);
                     }
                 });
-                
+
                 self.animation_running = Some(animation_flag);
             }
         } else {
@@ -138,44 +141,61 @@ impl ChatComposer {
             }
         }
     }
-    
+
     pub fn update_status_message(&mut self, message: String) {
         self.status_message = Self::map_status_message(&message);
     }
-    
+
     // Map technical status messages to user-friendly ones
     fn map_status_message(technical_message: &str) -> String {
         let lower = technical_message.to_lowercase();
-        
+
         // Thinking/reasoning patterns
-        if lower.contains("reasoning") || lower.contains("thinking") || lower.contains("planning") 
-           || lower.contains("waiting for model") || lower.contains("model") {
+        if lower.contains("reasoning")
+            || lower.contains("thinking")
+            || lower.contains("planning")
+            || lower.contains("waiting for model")
+            || lower.contains("model")
+        {
             "Thinking".to_string()
         }
-        // Tool/command execution patterns  
-        else if lower.contains("tool") || lower.contains("command") || lower.contains("running command")
-                || lower.contains("executing") || lower.contains("bash") || lower.contains("shell") {
+        // Tool/command execution patterns
+        else if lower.contains("tool")
+            || lower.contains("command")
+            || lower.contains("running command")
+            || lower.contains("executing")
+            || lower.contains("bash")
+            || lower.contains("shell")
+        {
             "Using tools".to_string()
         }
         // Response generation patterns
-        else if lower.contains("generating") || lower.contains("responding") || lower.contains("streaming")
-                || lower.contains("writing response") || lower.contains("assistant") 
-                || lower.contains("chat completions") || lower.contains("completion") {
+        else if lower.contains("generating")
+            || lower.contains("responding")
+            || lower.contains("streaming")
+            || lower.contains("writing response")
+            || lower.contains("assistant")
+            || lower.contains("chat completions")
+            || lower.contains("completion")
+        {
             "Responding".to_string()
         }
         // File/code editing patterns
-        else if lower.contains("editing") || lower.contains("writing") || lower.contains("modifying")
-                || lower.contains("creating file") || lower.contains("updating") || lower.contains("patch") {
+        else if lower.contains("editing")
+            || lower.contains("writing")
+            || lower.contains("modifying")
+            || lower.contains("creating file")
+            || lower.contains("updating")
+            || lower.contains("patch")
+        {
             "Coding".to_string()
         }
         // Catch some common technical terms
         else if lower.contains("processing") || lower.contains("analyzing") {
             "Thinking".to_string()
-        }
-        else if lower.contains("reading") || lower.contains("searching") {
+        } else if lower.contains("reading") || lower.contains("searching") {
             "Reading".to_string()
-        }
-        else {
+        } else {
             // Default fallback - use "working" for unknown status
             "Working".to_string()
         }
@@ -945,56 +965,62 @@ impl WidgetRef for &ChatComposer {
         let mut input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()));
-            
+
         if self.is_task_running {
-            // Randomly select a spinner style
-            use ratatui::text::{Line, Span};
-            use ratatui::style::Style;
-            
-            // Use a hash of the task start time to pick a consistent spinner for this task
-            // (so it doesn't change every frame, but does change between tasks)
-            let spinner_seed = if let Some(ref animation_flag) = self.animation_running {
-                // Use the animation flag's address as a seed for consistency during a task
-                animation_flag.as_ref() as *const _ as usize
-            } else {
-                // Fallback to current time for initial frame
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            // Call this when a task starts; store it on self (e.g. self.task_seed)
+            fn make_task_seed() -> u64 {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs() as usize
-            };
-            
-            // Weighted random spinner selection:
-            // - 1% chance for sparkle ✨
-            // - 49.5% chance for star spinner (✧✦✧)
-            // - 49.5% chance for one of the diamond spinners (✶, ◇, ◆)
-            let selected_spinner = if spinner_seed % 100 == 0 {
-                // Very rare sparkle (1% chance)
-                &['✨'][..]
-            } else if spinner_seed % 2 == 0 {
-                // Star spinner (49.5% chance)
-                &['✧', '✦', '✧'][..]
+                    .as_nanos() as u64
+            }
+
+            // Mix bits so low bits aren't parity-biased
+            fn mix(mut x: u64) -> u64 {
+                x ^= x >> 30; x = x.wrapping_mul(0xbf58476d1ce4e5b9);
+                x ^= x >> 27; x = x.wrapping_mul(0x94d049bb133111eb);
+                x ^ (x >> 31)
+            }
+
+            // Generate a per-render seed; good enough for varied spinners
+            let seed = make_task_seed();
+            let r = (mix(seed) % 200) as u64;
+
+            // 1% ✨, 49.5% star, 49.5% diamond-family
+            let selected_spinner: &[char] = if r < 2 {
+                &['✨']
+            } else if r < 101 {
+                &['✧','✦','✧']
             } else {
-                // Diamond spinner (49.5% chance) - randomly pick one
-                match spinner_seed % 3 {
-                    0 => &['✶'][..],
-                    1 => &['◇'][..],
-                    _ => &['◆'][..],
+                match (r % 3) {
+                    0 => &['✶'],
+                    1 => &['◇'],
+                    _ => &['◆'],
                 }
             };
-            
-            let frame_idx = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+
+            let frame_idx = (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis() / 150) as usize; // 150ms per frame for smooth animation
+                .as_millis() / 150) as usize;
+
             let spinner = selected_spinner[frame_idx % selected_spinner.len()];
-            
+
             // Create centered title with spinner and spaces
             let title_line = Line::from(vec![
                 Span::raw(" "), // Space before spinner
-                Span::styled(spinner.to_string(), Style::default().fg(crate::colors::secondary())),
-                Span::styled(format!(" {}... ", self.status_message), Style::default().fg(crate::colors::secondary())), // Space after spinner and after text
-            ]).centered();
+                Span::styled(
+                    spinner.to_string(),
+                    Style::default().fg(crate::colors::secondary()),
+                ),
+                Span::styled(
+                    format!(" {}... ", self.status_message),
+                    Style::default().fg(crate::colors::secondary()),
+                ), // Space after spinner and after text
+            ])
+            .centered();
             input_block = input_block.title(title_line);
         }
 
