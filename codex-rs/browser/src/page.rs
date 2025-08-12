@@ -4,7 +4,6 @@ use crate::config::BrowserConfig;
 use crate::config::ImageFormat;
 use crate::config::ViewportConfig;
 use crate::config::WaitStrategy;
-use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::input::DispatchKeyEventParams;
 use chromiumoxide::cdp::browser_protocol::input::DispatchKeyEventType;
 use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventParams;
@@ -22,9 +21,6 @@ pub struct Page {
     cdp_page: Arc<CdpPage>,
     config: BrowserConfig,
     current_url: Arc<RwLock<Option<String>>>,
-    // Cache of the last viewport metrics we explicitly enforced to avoid
-    // re-applying the same device metrics (which can cause flicker/focus).
-    last_enforced_viewport: Arc<RwLock<Option<(u32, u32, f64, bool)>>>,
 }
 
 impl Page {
@@ -33,7 +29,6 @@ impl Page {
             cdp_page: Arc::new(cdp_page),
             config,
             current_url: Arc::new(RwLock::new(None)),
-            last_enforced_viewport: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -118,59 +113,6 @@ impl Page {
         }
     }
 
-    async fn ensure_viewport_if_needed(&self) -> Result<()> {
-        // Compare the current effective viewport to the desired. Only call
-        // setDeviceMetricsOverride when strictly necessary to avoid flicker
-        // and focus-stealing in headed Chrome.
-        let desired = &self.config.viewport;
-
-        // Use clientWidth/Height for a more stable reading vs inner{Width,Height}
-        let probe = self
-            .inject_js(
-                "(() => ({ w: (document.documentElement.clientWidth|0), h: (document.documentElement.clientHeight|0), dpr: (window.devicePixelRatio||1) }))()",
-            )
-            .await
-            .ok();
-
-        let mut need_resize = false;
-        if let Some(val) = probe {
-            let w = val.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let h = val.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let dpr = val.get("dpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            let dpr_rounded = (dpr * 100.0).round() / 100.0;
-            let desired_dpr_rounded = (desired.device_scale_factor * 100.0).round() / 100.0;
-
-            let dims_mismatch = w != desired.width || h != desired.height;
-            // Be lenient for DPR to avoid churn due to tiny rounding diffs
-            let dpr_mismatch = (dpr_rounded - desired_dpr_rounded).abs() > 0.25;
-
-            need_resize = dims_mismatch || dpr_mismatch;
-        } else {
-            // If probing fails, don't attempt to resize.
-            need_resize = false;
-        }
-
-        if !need_resize {
-            return Ok(());
-        }
-
-        // Skip if we already enforced these exact metrics previously for this page
-        let last = { self.last_enforced_viewport.read().await.clone() };
-        let current_target = (
-            desired.width,
-            desired.height,
-            desired.device_scale_factor,
-            desired.mobile,
-        );
-        if last.as_ref() == Some(&current_target) {
-            return Ok(());
-        }
-
-        self.update_viewport(desired.clone()).await?;
-        let mut guard = self.last_enforced_viewport.write().await;
-        *guard = Some(current_target);
-        Ok(())
-    }
 
     pub async fn screenshot_viewport(&self) -> Result<Vec<Screenshot>> {
         // Safe viewport capture: do not change device metrics or viewport.
@@ -339,16 +281,6 @@ impl Page {
     }
 
     pub async fn set_viewport(&self, viewport: SetViewportParams) -> Result<ViewportResult> {
-        let params = SetDeviceMetricsOverrideParams::builder()
-            .width(viewport.width as i64)
-            .height(viewport.height as i64)
-            .device_scale_factor(viewport.device_scale_factor.unwrap_or(1.0))
-            .mobile(viewport.mobile.unwrap_or(false))
-            .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
-
-        //self.cdp_page.execute(params).await?;
-
         Ok(ViewportResult {
             width: viewport.width,
             height: viewport.height,
@@ -380,18 +312,7 @@ impl Page {
         }
     }
 
-    pub async fn update_viewport(&self, viewport: ViewportConfig) -> Result<()> {
-        let params = SetDeviceMetricsOverrideParams::builder()
-            .width(viewport.width as i64)
-            .height(viewport.height as i64)
-            .device_scale_factor(viewport.device_scale_factor)
-            .mobile(viewport.mobile)
-            .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
-
-        //self.cdp_page.execute(params).await?;
-        Ok(())
-    }
+    pub async fn update_viewport(&self, _viewport: ViewportConfig) -> Result<()> { Ok(()) }
 
     /// Click at the specified coordinates
     pub async fn click(&self, x: f64, y: f64) -> Result<()> {
