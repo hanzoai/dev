@@ -396,7 +396,6 @@ impl HistoryCell {
     }
 
     fn new_parsed_command(parsed_commands: &[ParsedCommand], output: Option<&CommandOutput>) -> Vec<Line<'static>> {
-        use crate::colors::light_blue;
         
         let mut lines: Vec<Line> = vec![Line::from("⚙︎ Working")];
 
