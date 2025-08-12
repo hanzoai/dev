@@ -27,6 +27,7 @@ pub(crate) fn primary() -> Color {
     current_theme().primary
 }
 
+#[allow(dead_code)]
 pub(crate) fn secondary() -> Color {
     current_theme().secondary
 }

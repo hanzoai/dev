@@ -390,6 +390,8 @@ impl App<'_> {
                         }
                     }
                     SlashCommand::Mention => {
+                        // The mention feature is handled differently in our fork
+                        // For now, just add @ to the composer
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.insert_str("@");
                         }
@@ -401,7 +403,7 @@ impl App<'_> {
                     }
                     SlashCommand::Reasoning => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_reasoning_command(&command_text);
+                            widget.handle_reasoning_command(command_text);
                         }
                     }
                     SlashCommand::Theme => {
@@ -429,7 +431,7 @@ impl App<'_> {
                     }
                     SlashCommand::Browser => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_browser_command(&command_text);
+                            widget.handle_browser_command(command_text);
                         }
                     }
                     #[cfg(debug_assertions)]
