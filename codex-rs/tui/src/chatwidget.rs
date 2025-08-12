@@ -42,7 +42,6 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
-use ratatui_image::Image;
 use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
@@ -1522,73 +1521,102 @@ impl ChatWidget<'_> {
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
-    fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui_image::Resize;
-        use ratatui::widgets::Widget;
+fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
+    use image::GenericImageView;                         // for dimensions()
+    use ratatui_image::{Resize, Image};
+    use ratatui_image::picker::{Picker, ProtocolType};
+    use ratatui::widgets::Widget;
 
-        // ---- open -> decode (avoid and_then error-type mismatch) ----
-        let reader = match image::ImageReader::open(path) {
-            Ok(r) => r,
-            Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
-        };
-        let dyn_img = match reader.decode() {
-            Ok(img) => img,
-            Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
-        };
-        let (img_w, img_h) = (dyn_img.width(), dyn_img.height());
+    // open + decode
+    let reader = match image::ImageReader::open(path) {
+        Ok(r) => r,
+        Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
+    };
+    let dyn_img = match reader.decode() {
+        Ok(img) => img,
+        Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
+    };
+    let (img_w, img_h) = dyn_img.dimensions();
 
-        // ---- compute centered target rect (Fit respecting terminal cell aspect) ----
-        let (cw, ch) = self.measured_font_size();
-        let centered_fit = |area: Rect| -> Rect {
-            let cols = area.width as u32;
-            let rows = area.height as u32;
-            let cw = cw as u32;
-            let ch = ch as u32;
+    // picker (Retina 2x workaround preserved)
+    let mut cached_picker = self.cached_picker.borrow_mut();
+    if cached_picker.is_none() {
+        let (fw, fh) = self.measured_font_size();
+        *cached_picker = Some(Picker::from_fontsize((fw * 2, fh * 2)));
+    }
+    let picker = cached_picker.as_ref().unwrap();
 
-            // rows if width limits
-            let rows_by_w = (cols * cw * img_h) / (img_w * ch);
-            if rows_by_w <= rows {
-                let used_rows = rows_by_w.max(1);
-                let vpad = ((rows - used_rows) / 2) as u16;
-                Rect { x: area.x, y: area.y + vpad, width: area.width, height: used_rows as u16 }
-            } else {
-                // width if height limits
-                let cols_by_h = (rows * ch * img_w) / (img_h * cw);
-                let used_cols = cols_by_h.max(1);
-                let hpad = ((cols - used_cols) / 2) as u16;
-                Rect { x: area.x + hpad, y: area.y, width: used_cols as u16, height: area.height }
-            }
-        };
-        let target = centered_fit(area);
+    // quantize step by protocol to avoid rounding bias
+    let (qx, qy): (u16, u16) = match picker.protocol_type() {
+        ProtocolType::Halfblocks => (1, 2), // half-block cell = 1 col x 2 half-rows
+        _ => (1, 1),                        // pixel protocols (Kitty/iTerm2/Sixel)
+    };
 
-        // ---- build / reuse protocol keyed by (path, target) ----
-        let needs_recreate = {
-            let cached = self.cached_image_protocol.borrow();
-            match cached.as_ref() {
-                Some((cached_path, cached_rect, _)) => cached_path != path || *cached_rect != target,
-                None => true,
-            }
-        };
-        if needs_recreate {
-            let mut cached_picker = self.cached_picker.borrow_mut();
-            if cached_picker.is_none() {
-                let (fw, fh) = self.measured_font_size();
-                *cached_picker = Some(Picker::from_fontsize((fw * 2, fh * 2))); // Retina workaround stays
-            }
-            let picker = cached_picker.as_ref().unwrap();
-            match picker.new_protocol(dyn_img, target, Resize::Fit(None)) {
-                Ok(protocol) => *self.cached_image_protocol.borrow_mut() = Some((path.clone(), target, protocol)),
-                Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
-            }
+    // terminal cell aspect
+    let (cw, ch) = self.measured_font_size();
+    let cols = area.width as u32;
+    let rows = area.height as u32;
+    let cw = cw as u32;
+    let ch = ch as u32;
+
+    // fit (floor), then choose limiting dimension
+    let mut rows_by_w = (cols * cw * img_h) / (img_w * ch);
+    if rows_by_w == 0 { rows_by_w = 1; }
+    let mut cols_by_h = (rows * ch * img_w) / (img_h * cw);
+    if cols_by_h == 0 { cols_by_h = 1; }
+
+    let (used_cols, used_rows) = if rows_by_w <= rows {
+        (cols, rows_by_w)
+    } else {
+        (cols_by_h, rows)
+    };
+
+    // quantize to protocol grid
+    let mut used_cols_u16 = used_cols as u16;
+    let mut used_rows_u16 = used_rows as u16;
+    if qx > 1 {
+        let rem = used_cols_u16 % qx;
+        if rem != 0 { used_cols_u16 = used_cols_u16.saturating_sub(rem).max(qx); }
+    }
+    if qy > 1 {
+        let rem = used_rows_u16 % qy;
+        if rem != 0 { used_rows_u16 = used_rows_u16.saturating_sub(rem).max(qy); }
+    }
+    used_cols_u16 = used_cols_u16.min(area.width).max(1);
+    used_rows_u16 = used_rows_u16.min(area.height).max(1);
+
+    // center both axes
+    let hpad = (area.width.saturating_sub(used_cols_u16)) / 2;
+    let vpad = (area.height.saturating_sub(used_rows_u16)) / 2;
+    let target = Rect {
+        x: area.x + hpad,
+        y: area.y + vpad,
+        width: used_cols_u16,
+        height: used_rows_u16,
+    };
+
+    // cache by (path, target)
+    let needs_recreate = {
+        let cached = self.cached_image_protocol.borrow();
+        match cached.as_ref() {
+            Some((cached_path, cached_rect, _)) => cached_path != path || *cached_rect != target,
+            None => true,
         }
-
-        if let Some((_, rect, protocol)) = &*self.cached_image_protocol.borrow() {
-            let image = Image::new(protocol);
-            Widget::render(image, *rect, buf); // centered render
-        } else {
-            self.render_screenshot_placeholder(path, area, buf);
+    };
+    if needs_recreate {
+        match picker.new_protocol(dyn_img, target, Resize::Fit(None)) {
+            Ok(protocol) => *self.cached_image_protocol.borrow_mut() = Some((path.clone(), target, protocol)),
+            Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
         }
     }
+
+    if let Some((_, rect, protocol)) = &*self.cached_image_protocol.borrow() {
+        let image = Image::new(protocol);
+        Widget::render(image, *rect, buf);
+    } else {
+        self.render_screenshot_placeholder(path, area, buf);
+    }
+}
 
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
         use ratatui::widgets::{Paragraph, Block, Borders};
