@@ -17,6 +17,7 @@
 
 <!-- Begin ToC -->
 
+- [Why Coder](#why-coder)
 - [Quickstart](#quickstart)
   - [Install Coder](#install-coder)
   - [Install Claude & Gemini (optional)](#install-claude--gemini-optional)
@@ -29,6 +30,7 @@
 - [Non-interactive / CI mode](#non-interactive--ci-mode)
 - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
 - [Configuration](#configuration)
+  - [Environment variables](#environment-variables)
 - [FAQ](#faq)
 - [Contributing](#contributing)
   - [Development workflow](#development-workflow)
