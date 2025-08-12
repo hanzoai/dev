@@ -226,10 +226,9 @@ impl App<'_> {
                             ..
                         } => {
                             // Toggle mouse capture to allow text selection
-                            use crossterm::{
-                                event::{DisableMouseCapture, EnableMouseCapture},
-                                execute,
-                            };
+                            use crossterm::event::DisableMouseCapture;
+                            use crossterm::event::EnableMouseCapture;
+                            use crossterm::execute;
                             use std::io::stdout;
 
                             // Static variable to track mouse capture state

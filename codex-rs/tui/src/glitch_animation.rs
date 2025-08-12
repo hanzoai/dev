@@ -1,6 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::prelude::*;
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 // Render the outline-fill animation
 pub fn render_intro_animation(area: Rect, buf: &mut Buffer, t: f32) {

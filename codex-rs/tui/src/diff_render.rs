@@ -7,7 +7,6 @@ use ratatui::text::Span as RtSpan;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::common::DEFAULT_WRAP_COLS;
 use codex_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
@@ -167,9 +166,10 @@ pub(crate) fn create_diff_summary(
 
 fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
+    // Use terminal width or a reasonable fallback
     let term_cols: usize = terminal::size()
         .map(|(w, _)| w as usize)
-        .unwrap_or(DEFAULT_WRAP_COLS.into());
+        .unwrap_or(120);
 
     for (index, (path, change)) in changes.iter().enumerate() {
         let is_first_file = index == 0;
@@ -413,10 +413,12 @@ mod tests {
         let long_line = "this is a very long line that should wrap across multiple terminal columns and continue";
 
         // Call the wrapping function directly so we can precisely control the width
+        // Use a fixed width for testing wrapping behavior
+        const TEST_WRAP_WIDTH: usize = 80;
         let lines =
-            push_wrapped_diff_line(1, DiffLineType::Insert, long_line, DEFAULT_WRAP_COLS.into());
+            push_wrapped_diff_line(1, DiffLineType::Insert, long_line, TEST_WRAP_WIDTH);
 
         // Render into a small terminal to capture the visual layout
-        snapshot_lines("wrap_behavior_insert", lines, DEFAULT_WRAP_COLS + 10, 8);
+        snapshot_lines("wrap_behavior_insert", lines, (TEST_WRAP_WIDTH + 10) as u16, 8);
     }
 }

@@ -15,7 +15,11 @@ use codex_login::AuthMode;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::colors::{error, info, light_blue, success_green, text_bright};
+use crate::colors::error;
+use crate::colors::info;
+use crate::colors::light_blue;
+use crate::colors::success_green;
+use crate::colors::text_bright;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::shimmer::FrameTicker;

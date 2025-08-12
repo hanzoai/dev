@@ -1,4 +1,6 @@
-use codex_core::config_types::{ThemeColors, ThemeConfig, ThemeName};
+use codex_core::config_types::ThemeColors;
+use codex_core::config_types::ThemeConfig;
+use codex_core::config_types::ThemeName;
 use lazy_static::lazy_static;
 use ratatui::style::Color;
 use std::sync::RwLock;
