@@ -671,6 +671,16 @@ impl ChatWidget<'_> {
     }
 
     fn add_to_history(&mut self, cell: HistoryCell) {
+        // Check for duplicate text lines to prevent adding the same content twice
+        if let Some(last_cell) = self.history_cells.last() {
+            // If both are text lines with identical content, skip adding the duplicate
+            if let (HistoryCell::StyledText { view: last_view }, HistoryCell::StyledText { view: new_view }) = (last_cell, &cell) {
+                if last_view.lines == new_view.lines {
+                    return; // Skip duplicate
+                }
+            }
+        }
+        
         // If this is the first user prompt, start fade-out animation for AnimatedWelcome
         if matches!(cell, HistoryCell::UserPrompt { .. }) {
             let has_existing_user_prompts = self
@@ -986,28 +996,45 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // AgentMessage: if no deltas were streamed, render the final text once.
-                if self.current_stream != Some(StreamKind::Answer) && !message.is_empty() {
-                    // Suppress immediate duplicates of the same assistant message
+                // Check if we've already processed this message (duplicate detection)
+                let message_trimmed = message.trim();
+                if !message_trimmed.is_empty() {
                     if let Some(prev) = &self.last_assistant_message {
-                        if prev.trim() == message.trim() {
+                        if prev.trim() == message_trimmed {
+                            // Already processed this exact message, skip it
                             self.request_redraw();
                             return;
                         }
                     }
+                    
+                    // Also check against the current answer_buffer
+                    if !self.answer_buffer.is_empty() && self.answer_buffer.trim() == message_trimmed {
+                        // We've already streamed this content via deltas
+                        // Just finalize the stream without adding duplicate content
+                        if self.current_stream == Some(StreamKind::Answer) {
+                            self.finalize_stream(StreamKind::Answer);
+                            self.last_assistant_message = Some(message.clone());
+                            self.answer_buffer.clear();
+                        }
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                
+                // AgentMessage: if no deltas were streamed, render the final text once.
+                if self.current_stream != Some(StreamKind::Answer) && !message.is_empty() {
                     self.begin_stream(StreamKind::Answer);
                     self.stream_push_and_maybe_commit(&message);
+                    self.last_assistant_message = Some(message.clone());
                 }
                 // Only finalize if we actually had a stream
                 if self.current_stream == Some(StreamKind::Answer) {
                     self.finalize_stream(StreamKind::Answer);
-                    // Cache the finalized assistant text to dedupe back-to-back repeats
-                    if !self.answer_buffer.is_empty() {
-                        self.last_assistant_message = Some(self.answer_buffer.clone());
-                        self.answer_buffer.clear();
-                    } else if !message.is_empty() {
+                    // Update cache after finalization
+                    if !message.is_empty() {
                         self.last_assistant_message = Some(message.clone());
                     }
+                    self.answer_buffer.clear();
                 }
                 self.request_redraw();
             }
