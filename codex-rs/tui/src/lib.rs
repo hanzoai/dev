@@ -30,6 +30,7 @@ mod chatwidget;
 mod citation_regex;
 mod cli;
 mod colors;
+mod common;
 mod diff_render;
 mod exec_command;
 mod file_search;
