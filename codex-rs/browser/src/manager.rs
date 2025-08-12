@@ -1,14 +1,24 @@
-use crate::{BrowserError, Result, config::BrowserConfig, page::Page};
-use chromiumoxide::cdp::browser_protocol::{emulation, network};
-use chromiumoxide::{Browser, BrowserConfig as CdpConfig};
+use crate::BrowserError;
+use crate::Result;
+use crate::config::BrowserConfig;
+use crate::page::Page;
+use chromiumoxide::Browser;
+use chromiumoxide::BrowserConfig as CdpConfig;
 use chromiumoxide::browser::HeadlessMode;
+use chromiumoxide::cdp::browser_protocol::emulation;
+use chromiumoxide::cdp::browser_protocol::network;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
-use tokio::time::{Duration, Instant, sleep};
-use tracing::{debug, info, warn};
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
+use tokio::time::Duration;
+use tokio::time::Instant;
+use tokio::time::sleep;
+use tracing::debug;
+use tracing::info;
+use tracing::warn;
 
 #[derive(Deserialize)]
 struct JsonVersion {
@@ -19,19 +29,23 @@ struct JsonVersion {
 async fn discover_ws_via_port(port: u16) -> Result<String> {
     let url = format!("http://127.0.0.1:{}/json/version", port);
     debug!("Requesting Chrome version info from: {}", url);
-    
+
     let client_start = tokio::time::Instant::now();
     let client = Client::builder()
-        .timeout(Duration::from_secs(5))  // Add timeout to prevent hanging
+        .timeout(Duration::from_secs(5)) // Add timeout to prevent hanging
         .build()
         .map_err(|e| BrowserError::CdpError(format!("Failed to build HTTP client: {}", e)))?;
     debug!("HTTP client created in {:?}", client_start.elapsed());
-    
+
     let req_start = tokio::time::Instant::now();
     let resp = client.get(&url).send().await.map_err(|e| {
         BrowserError::CdpError(format!("Failed to connect to Chrome debug port: {}", e))
     })?;
-    debug!("HTTP request completed in {:?}, status: {}", req_start.elapsed(), resp.status());
+    debug!(
+        "HTTP request completed in {:?}, status: {}",
+        req_start.elapsed(),
+        resp.status()
+    );
 
     if !resp.status().is_success() {
         return Err(BrowserError::CdpError(format!(
@@ -95,17 +109,17 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
     if found_ports.is_empty() {
         return None;
     }
-    
+
     debug!("Testing {} port(s) for accessibility...", found_ports.len());
     let test_start = tokio::time::Instant::now();
-    
+
     // Create futures for testing all ports in parallel
     let mut port_tests = Vec::new();
     for port in found_ports {
         let test_future = async move {
             let url = format!("http://127.0.0.1:{}/json/version", port);
             let client = Client::builder()
-                .timeout(Duration::from_millis(200))  // Shorter timeout for parallel tests
+                .timeout(Duration::from_millis(200)) // Shorter timeout for parallel tests
                 .build()
                 .ok()?;
 
@@ -126,11 +140,14 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
         };
         port_tests.push(test_future);
     }
-    
+
     // Test all ports in parallel and return the first accessible one
     let results = futures::future::join_all(port_tests).await;
-    debug!("Port accessibility tests completed in {:?}", test_start.elapsed());
-    
+    debug!(
+        "Port accessibility tests completed in {:?}",
+        test_start.elapsed()
+    );
+
     for port in results.into_iter().flatten() {
         info!("Verified Chrome debug port at {} is accessible", port);
         return Some(port);
@@ -201,7 +218,11 @@ impl BrowserManager {
                 info!("Auto-scanning for Chrome debug ports...");
                 let start = tokio::time::Instant::now();
                 let result = scan_for_chrome_debug_port().await.unwrap_or(0);
-                info!("Auto-scan completed in {:?}, found port: {}", start.elapsed(), result);
+                info!(
+                    "Auto-scan completed in {:?}, found port: {}",
+                    start.elapsed(),
+                    result
+                );
                 result
             } else {
                 info!("Using specified Chrome debug port: {}", port);
@@ -209,19 +230,32 @@ impl BrowserManager {
             };
 
             if actual_port > 0 {
-                info!("Step 1: Discovering Chrome WebSocket URL via port {}...", actual_port);
+                info!(
+                    "Step 1: Discovering Chrome WebSocket URL via port {}...",
+                    actual_port
+                );
                 let discover_start = tokio::time::Instant::now();
                 match discover_ws_via_port(actual_port).await {
                     Ok(ws) => {
-                        info!("Step 2: WebSocket URL discovered in {:?}: {}", discover_start.elapsed(), ws);
-                        
+                        info!(
+                            "Step 2: WebSocket URL discovered in {:?}: {}",
+                            discover_start.elapsed(),
+                            ws
+                        );
+
                         info!("Step 3: Connecting to Chrome via WebSocket...");
                         let connect_start = tokio::time::Instant::now();
                         let (browser, mut handler) = Browser::connect(ws).await?;
-                        info!("Step 4: Connected to Chrome in {:?}", connect_start.elapsed());
-                        
+                        info!(
+                            "Step 4: Connected to Chrome in {:?}",
+                            connect_start.elapsed()
+                        );
+
                         // Don't fetch targets immediately - can interfere with screenshot capture
-                        let task = tokio::spawn(async move { while let Some(_evt) = handler.next().await {} });
+                        let task =
+                            tokio::spawn(
+                                async move { while let Some(_evt) = handler.next().await {} },
+                            );
                         *self.event_task.lock().await = Some(task);
                         *browser_guard = Some(browser);
                         *self.cleanup_profile_on_drop.lock().await = false;
@@ -233,7 +267,11 @@ impl BrowserManager {
                         return Ok(());
                     }
                     Err(e) => {
-                        warn!("Failed to discover WebSocket after {:?}: {}. Will launch new instance.", discover_start.elapsed(), e);
+                        warn!(
+                            "Failed to discover WebSocket after {:?}: {}. Will launch new instance.",
+                            discover_start.elapsed(),
+                            e
+                        );
                     }
                 }
             }
@@ -249,7 +287,9 @@ impl BrowserManager {
             dir.to_string_lossy().to_string()
         } else {
             let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
             let temp_path = format!("/tmp/coder-browser-{}-{}", std::process::id(), timestamp);
             if tokio::fs::metadata(&temp_path).await.is_ok() {
                 let _ = tokio::fs::remove_dir_all(&temp_path).await;
@@ -272,7 +312,9 @@ impl BrowserManager {
             .arg("--no-first-run")
             .arg("--no-default-browser-check");
 
-        let browser_config = builder.build().map_err(|e| BrowserError::CdpError(e.to_string()))?;
+        let browser_config = builder
+            .build()
+            .map_err(|e| BrowserError::CdpError(e.to_string()))?;
         let (browser, mut handler) = Browser::launch(browser_config).await?;
         // Optionally: browser.fetch_targets().await.ok();
 
@@ -334,7 +376,13 @@ impl BrowserManager {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 let _ = tokio::fs::remove_dir_all(&user_data_path).await;
                 #[cfg(target_os = "macos")]
-                { let _ = tokio::process::Command::new("rm").arg("-rf").arg(&user_data_path).output().await; }
+                {
+                    let _ = tokio::process::Command::new("rm")
+                        .arg("-rf")
+                        .arg(&user_data_path)
+                        .output()
+                        .await;
+                }
             }
         }
 
@@ -436,7 +484,7 @@ impl BrowserManager {
 
         let page = Arc::new(Page::new(cdp_page, config.clone()));
         *page_guard = Some(Arc::clone(&page));
-        
+
         // Start navigation monitoring for this page
         self.start_navigation_monitor(Arc::clone(&page)).await;
 
@@ -468,7 +516,7 @@ impl BrowserManager {
         // For external Chrome connections, create a minimal new tab for screenshots
         let cdp_page = if config.connect_port.is_some() || config.connect_ws.is_some() {
             info!("Creating screenshot tab for focus-free captures");
-            
+
             // Try background tab creation first, fallback to regular tab if it fails
             let background_page = {
                 // Attempt 1: Try creating true background tab
@@ -479,11 +527,14 @@ impl BrowserManager {
                         .background(true)
                         .build()
                         .map_err(|e| BrowserError::CdpError(e))?;
-                    
+
                     let result = browser.execute(create_params).await?;
-                    browser.get_page(result.target_id.clone()).await
+                    browser
+                        .get_page(result.target_id.clone())
+                        .await
                         .map_err(|e| BrowserError::CdpError(e.to_string()))
-                }.await;
+                }
+                .await;
 
                 match background_attempt {
                     Ok(page) => {
@@ -491,14 +542,17 @@ impl BrowserManager {
                         page
                     }
                     Err(e) => {
-                        warn!("Background tab creation failed ({}), using regular tab with enhanced focus prevention", e);
-                        
+                        warn!(
+                            "Background tab creation failed ({}), using regular tab with enhanced focus prevention",
+                            e
+                        );
+
                         // Fallback: Create a regular new tab but with immediate focus prevention
                         let new_page = browser.new_page("about:blank").await?;
-                        
+
                         // Immediately minimize focus impact by making it as hidden as possible
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        
+
                         new_page
                     }
                 }
@@ -507,7 +561,7 @@ impl BrowserManager {
             // Apply aggressive focus prevention to any tab we created
             {
                 use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
-                
+
                 // Enhanced focus prevention script
                 let focus_prevention_script = r#"
                     (function() {
@@ -581,20 +635,23 @@ impl BrowserManager {
 
         // Apply minimal page overrides for screenshots (no user agent spoofing needed)
         {
-            use chromiumoxide::cdp::browser_protocol::{network, emulation};
-            
+            use chromiumoxide::cdp::browser_protocol::emulation;
+            use chromiumoxide::cdp::browser_protocol::network;
+
             // Enable Network domain for any required network operations
             cdp_page.execute(network::EnableParams::default()).await?;
-            
-            // Set viewport to match config
-            let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
-                .width(config.viewport.width as i64)
-                .height(config.viewport.height as i64)
-                .device_scale_factor(config.viewport.device_scale_factor)
-                .mobile(config.viewport.mobile)
-                .build()
-                .map_err(|e| BrowserError::CdpError(e.to_string()))?;
-            cdp_page.execute(viewport_params).await?;
+
+            // For external Chrome connections, avoid setting viewport here to prevent focus/flicker.
+            if config.connect_port.is_none() && config.connect_ws.is_none() {
+                let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
+                    .width(config.viewport.width as i64)
+                    .height(config.viewport.height as i64)
+                    .device_scale_factor(config.viewport.device_scale_factor)
+                    .mobile(config.viewport.mobile)
+                    .build()
+                    .map_err(|e| BrowserError::CdpError(e.to_string()))?;
+                cdp_page.execute(viewport_params).await?;
+            }
         }
 
         let background_page = Arc::new(Page::new(cdp_page, config.clone()));
@@ -630,7 +687,11 @@ impl BrowserManager {
         updates(&mut config);
 
         if let Some(page) = self.page.lock().await.as_ref() {
-            page.update_viewport(config.viewport.clone()).await?;
+            // Avoid viewport manipulation for external CDP connections to prevent focus/flicker
+            let is_external = config.connect_port.is_some() || config.connect_ws.is_some();
+            if !is_external {
+                page.update_viewport(config.viewport.clone()).await?;
+            }
         }
 
         Ok(())
@@ -671,12 +732,20 @@ impl BrowserManager {
         page.execute(network::EnableParams::default()).await?;
         if let Some(ua) = &config.user_agent {
             let mut b = network::SetUserAgentOverrideParams::builder().user_agent(ua);
-            if let Some(al) = &config.accept_language { b = b.accept_language(al); }
-            page.execute(b.build().map_err(BrowserError::CdpError)?).await?;
+            if let Some(al) = &config.accept_language {
+                b = b.accept_language(al);
+            }
+            page.execute(b.build().map_err(BrowserError::CdpError)?)
+                .await?;
         } else if let Some(al) = &config.accept_language {
             let mut headers_map = std::collections::HashMap::new();
-            headers_map.insert("Accept-Language".to_string(), serde_json::Value::String(al.clone()));
-            let headers = network::Headers::new(serde_json::Value::Object(headers_map.into_iter().map(|(k, v)| (k, v)).collect()));
+            headers_map.insert(
+                "Accept-Language".to_string(),
+                serde_json::Value::String(al.clone()),
+            );
+            let headers = network::Headers::new(serde_json::Value::Object(
+                headers_map.into_iter().map(|(k, v)| (k, v)).collect(),
+            ));
             let p = network::SetExtraHttpHeadersParams::builder()
                 .headers(headers)
                 .build()
@@ -686,10 +755,15 @@ impl BrowserManager {
 
         // Timezone / locale
         if let Some(tz) = &config.timezone {
-            page.execute(emulation::SetTimezoneOverrideParams { timezone_id: tz.clone() }).await?;
+            page.execute(emulation::SetTimezoneOverrideParams {
+                timezone_id: tz.clone(),
+            })
+            .await?;
         }
         if let Some(locale) = &config.locale {
-            let p = emulation::SetLocaleOverrideParams::builder().locale(locale).build();
+            let p = emulation::SetLocaleOverrideParams::builder()
+                .locale(locale)
+                .build();
             page.execute(p).await?;
         }
 
@@ -875,11 +949,10 @@ impl BrowserManager {
     }
 
     async fn capture_screenshot_internal(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
-        // Always use the regular approach - capture from the actual page
-        // The background page strategy was fundamentally broken
+        // Always capture from the active page; do not create background tabs.
         self.capture_screenshot_regular().await
     }
-    
+
     /// Capture screenshot using regular strategy (launched Chrome)
     async fn capture_screenshot_regular(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
         // For launched Chrome, use the regular approach since it's already isolated
@@ -933,6 +1006,56 @@ impl BrowserManager {
         Ok((paths, current_url))
     }
 
+    /// Capture using a dedicated background tab when connected to external Chrome.
+    async fn capture_screenshot_background(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
+        let page = self.get_or_create_page().await?;
+        let current_url = page
+            .get_current_url()
+            .await
+            .unwrap_or_else(|_| "about:blank".to_string());
+
+        let bg = self.get_or_create_background_page().await?;
+        // Keep background page in sync with current URL; minimal wait
+        let cfg = self.config.read().await;
+        let _ = bg.goto(&current_url, Some(cfg.wait.clone())).await;
+
+        // Initialize assets manager if needed
+        let mut assets_guard = self.assets.lock().await;
+        if assets_guard.is_none() {
+            *assets_guard = Some(Arc::new(crate::assets::AssetManager::new().await?));
+        }
+        let assets = assets_guard.as_ref().unwrap().clone();
+        drop(assets_guard);
+
+        // Determine screenshot mode
+        let mode = if cfg.fullpage {
+            crate::page::ScreenshotMode::FullPage {
+                segments_max: Some(cfg.segments_max),
+            }
+        } else {
+            crate::page::ScreenshotMode::Viewport
+        };
+
+        let screenshots = bg.screenshot(mode).await?;
+
+        let mut paths = Vec::new();
+        for screenshot in screenshots {
+            let image_ref = assets
+                .store_screenshot(
+                    &screenshot.data,
+                    screenshot.format,
+                    screenshot.width,
+                    screenshot.height,
+                    300000,
+                )
+                .await?;
+            paths.push(std::path::PathBuf::from(image_ref.path));
+        }
+
+        self.update_activity().await;
+        Ok((paths, current_url))
+    }
+
     pub async fn close(&self) -> Result<()> {
         // Just delegate to stop() which handles cleanup properly
         self.stop().await
@@ -961,7 +1084,7 @@ impl BrowserManager {
         let page = self.get_or_create_page().await?;
         page.execute_javascript(code).await
     }
-    
+
     /// Set a callback to be called when navigation occurs
     pub async fn set_navigation_callback<F>(&self, callback: F)
     where
@@ -970,19 +1093,19 @@ impl BrowserManager {
         let mut callback_guard = self.navigation_callback.write().await;
         *callback_guard = Some(Box::new(callback));
     }
-    
+
     /// Start monitoring for page navigation changes
     async fn start_navigation_monitor(&self, page: Arc<Page>) {
         // Stop any existing monitor
         self.stop_navigation_monitor().await;
-        
+
         let navigation_callback = Arc::clone(&self.navigation_callback);
         let page_weak = Arc::downgrade(&page);
-        
+
         let handle = tokio::spawn(async move {
             let mut last_url = String::new();
             let mut check_count = 0;
-            
+
             loop {
                 // Check if page is still alive
                 let page = match page_weak.upgrade() {
@@ -992,29 +1115,35 @@ impl BrowserManager {
                         break;
                     }
                 };
-                
+
                 // Get current URL
                 if let Ok(current_url) = page.get_current_url().await {
                     // Check if URL changed (ignore about:blank)
                     if current_url != last_url && current_url != "about:blank" {
-                        info!("Navigation detected: {} -> {}", 
-                              if last_url.is_empty() { "initial" } else { &last_url }, 
-                              current_url);
+                        info!(
+                            "Navigation detected: {} -> {}",
+                            if last_url.is_empty() {
+                                "initial"
+                            } else {
+                                &last_url
+                            },
+                            current_url
+                        );
                         last_url = current_url.clone();
-                        
+
                         // Call the callback if set (immediate)
                         if let Some(ref callback) = *navigation_callback.read().await {
                             debug!("Triggering navigation callback for URL: {}", current_url);
                             callback(current_url.clone());
                         }
-                        
+
                         // Schedule a delayed callback for fully loaded page
                         let navigation_callback_delayed = Arc::clone(&navigation_callback);
                         let current_url_delayed = current_url.clone();
                         tokio::spawn(async move {
                             // Wait for page to fully load
                             tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-                            
+
                             // Call the callback again with a marker that it's fully loaded
                             if let Some(ref callback) = *navigation_callback_delayed.read().await {
                                 info!("Page fully loaded callback for: {}", current_url_delayed);
@@ -1023,7 +1152,7 @@ impl BrowserManager {
                         });
                     }
                 }
-                
+
                 // Also inject JavaScript to detect client-side navigation
                 if check_count % 10 == 0 {
                     // Every 10 checks, reinject the navigation detection script
@@ -1067,7 +1196,7 @@ impl BrowserManager {
                             };
                         })()
                     "#;
-                    
+
                     if let Ok(result) = page.execute_javascript(script).await {
                         if let Some(changed) = result.get("changed").and_then(|v| v.as_bool()) {
                             if changed {
@@ -1076,14 +1205,23 @@ impl BrowserManager {
                                     if let Some(ref callback) = *navigation_callback.read().await {
                                         callback(url.to_string());
                                     }
-                                    
+
                                     // Schedule a delayed callback for fully loaded page
-                                    let navigation_callback_delayed = Arc::clone(&navigation_callback);
+                                    let navigation_callback_delayed =
+                                        Arc::clone(&navigation_callback);
                                     let url_delayed = url.to_string();
                                     tokio::spawn(async move {
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-                                        if let Some(ref callback) = *navigation_callback_delayed.read().await {
-                                            info!("Page fully loaded callback for client-side nav: {}", url_delayed);
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                                            2000,
+                                        ))
+                                        .await;
+                                        if let Some(ref callback) =
+                                            *navigation_callback_delayed.read().await
+                                        {
+                                            info!(
+                                                "Page fully loaded callback for client-side nav: {}",
+                                                url_delayed
+                                            );
                                             callback(url_delayed);
                                         }
                                     });
@@ -1092,18 +1230,18 @@ impl BrowserManager {
                         }
                     }
                 }
-                
+
                 check_count += 1;
-                
+
                 // Check every 500ms
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
         });
-        
+
         let mut handle_guard = self.navigation_monitor_handle.lock().await;
         *handle_guard = Some(handle);
     }
-    
+
     /// Stop navigation monitoring
     async fn stop_navigation_monitor(&self) {
         let mut handle_guard = self.navigation_monitor_handle.lock().await;

@@ -1,6 +1,8 @@
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::time::{Duration, Instant};
+use std::io::Read;
+use std::io::Write;
+use std::time::Duration;
+use std::time::Instant;
 
 fn read_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
     let start = Instant::now();

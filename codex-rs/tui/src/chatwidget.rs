@@ -56,7 +56,6 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
-use crate::common::DEFAULT_WRAP_COLS;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
@@ -164,6 +163,13 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
+    /// If the user is at or near the bottom, keep following new messages.
+    /// We treat "near" as within 3 rows, matching our scroll step.
+    fn autoscroll_if_near_bottom(&mut self) {
+        if self.scroll_offset <= 3 {
+            self.scroll_offset = 0;
+        }
+    }
     /// Get or create the global browser manager
     async fn get_browser_manager() -> Arc<BrowserManager> {
         codex_browser::global::get_or_create_browser_manager().await
@@ -258,7 +264,8 @@ impl ChatWidget<'_> {
             self.submit_op(Op::Interrupt);
             self.bottom_pane.set_task_running(false);
             self.bottom_pane.clear_live_ring();
-            self.live_builder = RowBuilder::new(self.live_builder.width());
+            // Reset with max width to disable wrapping
+            self.live_builder = RowBuilder::new(usize::MAX);
             self.current_stream = None;
             self.stream_header_emitted = false;
             self.answer_buffer.clear();
@@ -346,7 +353,8 @@ impl ChatWidget<'_> {
             StreamKind::Reasoning => {
                 // Always add space above reasoning (unless history is completely empty)
                 if !self.history_cells.is_empty() {
-                    self.history_cells.push(HistoryCell::new_text_line(RLine::from("")));
+                    self.history_cells
+                        .push(HistoryCell::new_text_line(RLine::from("")));
                 }
                 self.stream_header_emitted = true;
                 self.request_redraw();
@@ -358,38 +366,41 @@ impl ChatWidget<'_> {
                 } else {
                     // Check if the last item is a blank line (from any cell type that could be empty)
                     match self.history_cells.last() {
-                        Some(HistoryCell::BackgroundEvent { view }) 
+                        Some(HistoryCell::BackgroundEvent { view })
                         | Some(HistoryCell::StyledText { view })
-                        | Some(HistoryCell::DimmedReasoning { view }) 
-                            if view.lines.len() == 1 => 
+                        | Some(HistoryCell::DimmedReasoning { view })
+                            if view.lines.len() == 1 =>
                         {
                             // Check if it's an empty line
                             let line = &view.lines[0];
-                            let is_empty = line.spans.is_empty() || 
-                                          (line.spans.len() == 1 && line.spans[0].content.is_empty());
+                            let is_empty = line.spans.is_empty()
+                                || (line.spans.len() == 1 && line.spans[0].content.is_empty());
                             !is_empty // Need space if the line is NOT empty
                         }
-                        _ => true // Always need space for other cell types
+                        _ => true, // Always need space for other cell types
                     }
                 };
-                
+
                 if needs_space {
-                    self.history_cells.push(HistoryCell::new_text_line(RLine::from("")));
+                    self.history_cells
+                        .push(HistoryCell::new_text_line(RLine::from("")));
                 }
-                
+
                 // Add GPT-5 header with secondary color
                 let formatted_model = self.format_model_name(&self.config.model);
-                use ratatui::style::{Style, Modifier};
+                use ratatui::style::Modifier;
+                use ratatui::style::Style;
                 use ratatui::text::Span;
-                self.history_cells.push(HistoryCell::new_styled_text_line(
-                    RLine::from(Span::styled(
-                        formatted_model,
-                        Style::default()
-                            .fg(crate::colors::secondary())
-                            .add_modifier(Modifier::BOLD)
-                    ))
-                ));
-                
+                self.history_cells
+                    .push(HistoryCell::new_styled_text_line(RLine::from(
+                        Span::styled(
+                            formatted_model,
+                            Style::default()
+                                .fg(crate::colors::secondary())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    )));
+
                 self.stream_header_emitted = true;
                 self.request_redraw();
             }
@@ -480,7 +491,9 @@ impl ChatWidget<'_> {
             content_buffer: String::new(),
             answer_buffer: String::new(),
             running_commands: HashMap::new(),
-            live_builder: RowBuilder::new(DEFAULT_WRAP_COLS.into()),
+            // Use max width to disable wrapping during streaming
+            // Text will be properly wrapped when displayed based on terminal width
+            live_builder: RowBuilder::new(usize::MAX),
             current_stream: None,
             stream_header_emitted: false,
             live_max_rows: 3,
@@ -514,18 +527,18 @@ impl ChatWidget<'_> {
     /// Calculate the maximum scroll offset based on current content size
     fn calculate_max_scroll_offset(&self, content_area_height: u16) -> u16 {
         let mut total_height = 0u16;
-        
+
         // Calculate total content height (same logic as render method)
         for cell in &self.history_cells {
             let h = cell.desired_height(80); // Use reasonable width for height calculation
             total_height = total_height.saturating_add(h);
         }
-        
+
         if let Some(ref cell) = self.active_history_cell {
             let h = cell.desired_height(80);
             total_height = total_height.saturating_add(h);
         }
-        
+
         // Max scroll is content height minus available height
         total_height.saturating_sub(content_area_height)
     }
@@ -544,7 +557,10 @@ impl ChatWidget<'_> {
                 // Scroll up in chat history (increase offset, towards older content)
                 // Estimate max scroll based on content - use reasonable content area height of 30
                 let estimated_max_scroll = self.calculate_max_scroll_offset(30);
-                let new_offset = self.scroll_offset.saturating_add(3).min(estimated_max_scroll);
+                let new_offset = self
+                    .scroll_offset
+                    .saturating_add(3)
+                    .min(estimated_max_scroll);
                 self.scroll_offset = new_offset;
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -668,12 +684,8 @@ impl ChatWidget<'_> {
 
         // Store in memory instead of sending to scrollback
         self.history_cells.push(cell);
-        // Auto-scroll to bottom when new content arrives, but only if we're already at the bottom
-        // This preserves the user's scroll position if they've manually scrolled up
-        if self.scroll_offset == 0 {
-            // Already at bottom, stay there
-            self.scroll_offset = 0;
-        }
+        // Auto-follow if we're at or near the bottom (preserve position if scrolled up)
+        self.autoscroll_if_near_bottom();
         // If user has scrolled up (scroll_offset > 0), don't change their position
         // Check if there's actual conversation history (any user prompts submitted)
         let has_conversation = self
@@ -744,7 +756,7 @@ impl ChatWidget<'_> {
         // Check if browser mode is enabled and capture screenshot
         // IMPORTANT: Always use global browser manager for consistency
         // The global browser manager ensures both TUI and agent tools use the same instance
-        
+
         // We need to check if browser is enabled first
         // Use a channel to check browser status from async context
         let (status_tx, status_rx) = std::sync::mpsc::channel();
@@ -753,46 +765,54 @@ impl ChatWidget<'_> {
             let enabled = browser_manager.is_enabled().await;
             let _ = status_tx.send(enabled);
         });
-        
-        let browser_enabled = status_rx.recv().unwrap_or(false);
 
+        let browser_enabled = status_rx.recv().unwrap_or(false);
 
         // Start async screenshot capture in background (non-blocking)
         if browser_enabled {
             tracing::info!("Browser is enabled, starting async screenshot capture...");
-            
+
             // Clone necessary data for the async task
             let codex_op_tx_clone = self.codex_op_tx.clone();
             let latest_browser_screenshot_clone = Arc::clone(&self.latest_browser_screenshot);
-            
+
             tokio::spawn(async move {
                 tracing::info!("Starting background screenshot capture...");
-                
+
                 // Wait a bit longer before capturing to ensure page is ready
                 tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-                
+
                 let browser_manager = ChatWidget::get_browser_manager().await;
-                
+
                 // Retry screenshot capture with exponential backoff
                 let mut attempts = 0;
                 let max_attempts = 3;
-                
+
                 loop {
                     attempts += 1;
-                    tracing::info!("Screenshot capture attempt {} of {}", attempts, max_attempts);
-                    
+                    tracing::info!(
+                        "Screenshot capture attempt {} of {}",
+                        attempts,
+                        max_attempts
+                    );
+
                     match browser_manager.capture_screenshot_with_url().await {
                         Ok((screenshot_paths, url)) => {
-                            tracing::info!("Background screenshot capture succeeded with {} images on attempt {}", screenshot_paths.len(), attempts);
-                            
+                            tracing::info!(
+                                "Background screenshot capture succeeded with {} images on attempt {}",
+                                screenshot_paths.len(),
+                                attempts
+                            );
+
                             // Save the first screenshot path and URL for display in the TUI
                             if let Some(first_path) = screenshot_paths.first() {
                                 if let Ok(mut latest) = latest_browser_screenshot_clone.lock() {
-                                    let url_string = url.clone().unwrap_or_else(|| "Browser".to_string());
+                                    let url_string =
+                                        url.clone().unwrap_or_else(|| "Browser".to_string());
                                     *latest = Some((first_path.clone(), url_string));
                                 }
                             }
-                            
+
                             // Create screenshot items
                             let mut screenshot_items = Vec::new();
                             for path in screenshot_paths {
@@ -813,23 +833,28 @@ impl ChatWidget<'_> {
                                     });
                                 }
                             }
-                            
-                            // Send a follow-up message with just the screenshots
-                            if !screenshot_items.is_empty() {
-                                let _ = codex_op_tx_clone.send(Op::UserInput {
-                                    items: screenshot_items,
-                                });
-                            }
+
+                            // Do not enqueue screenshots as messages.
+                            // They are now injected per-turn by the core session.
                             break; // Success - exit retry loop
                         }
                         Err(e) => {
                             if attempts >= max_attempts {
-                                tracing::error!("Background screenshot capture failed after {} attempts: {}", attempts, e);
+                                tracing::error!(
+                                    "Background screenshot capture failed after {} attempts: {}",
+                                    attempts,
+                                    e
+                                );
                                 break; // Give up after max attempts
                             } else {
-                                tracing::warn!("Background screenshot capture failed on attempt {} ({}), retrying...", attempts, e);
+                                tracing::warn!(
+                                    "Background screenshot capture failed on attempt {} ({}), retrying...",
+                                    attempts,
+                                    e
+                                );
                                 // Exponential backoff: wait 1s, then 2s, then 4s
-                                let wait_time = std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
+                                let wait_time =
+                                    std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
                                 tokio::time::sleep(wait_time).await;
                             }
                         }
@@ -897,7 +922,8 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
-        use crossterm::event::{KeyModifiers, MouseEventKind};
+        use crossterm::event::KeyModifiers;
+        use crossterm::event::MouseEventKind;
 
         // Check if Shift is held - if so, let the terminal handle selection
         if mouse_event.modifiers.contains(KeyModifiers::SHIFT) {
@@ -908,9 +934,12 @@ impl ChatWidget<'_> {
 
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
-                // Scroll up with proper bounds checking 
+                // Scroll up with proper bounds checking
                 let estimated_max_scroll = self.calculate_max_scroll_offset(30);
-                let new_offset = self.scroll_offset.saturating_add(3).min(estimated_max_scroll);
+                let new_offset = self
+                    .scroll_offset
+                    .saturating_add(3)
+                    .min(estimated_max_scroll);
                 self.scroll_offset = new_offset;
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -958,14 +987,18 @@ impl ChatWidget<'_> {
                     self.begin_stream(StreamKind::Answer);
                     self.stream_push_and_maybe_commit(&message);
                 }
-                self.finalize_stream(StreamKind::Answer);
+                // Only finalize if we actually had a stream
+                if self.current_stream == Some(StreamKind::Answer) {
+                    self.finalize_stream(StreamKind::Answer);
+                }
                 self.request_redraw();
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 self.begin_stream(StreamKind::Answer);
                 // Update status to show we're generating a response
                 if self.bottom_pane.is_task_running() {
-                    self.bottom_pane.update_status_text("responding".to_string());
+                    self.bottom_pane
+                        .update_status_text("responding".to_string());
                 }
                 self.answer_buffer.push_str(&delta);
                 self.stream_push_and_maybe_commit(&delta);
@@ -989,7 +1022,10 @@ impl ChatWidget<'_> {
                     self.begin_stream(StreamKind::Reasoning);
                     self.stream_push_and_maybe_commit(&text);
                 }
-                self.finalize_stream(StreamKind::Reasoning);
+                // Only finalize if we actually had a stream
+                if self.current_stream == Some(StreamKind::Reasoning) {
+                    self.finalize_stream(StreamKind::Reasoning);
+                }
                 self.request_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -1011,7 +1047,10 @@ impl ChatWidget<'_> {
                     self.begin_stream(StreamKind::Reasoning);
                     self.stream_push_and_maybe_commit(&text);
                 }
-                self.finalize_stream(StreamKind::Reasoning);
+                // Only finalize if we actually had a stream
+                if self.current_stream == Some(StreamKind::Reasoning) {
+                    self.finalize_stream(StreamKind::Reasoning);
+                }
                 self.request_redraw();
             }
             EventMsg::TaskStarted => {
@@ -1045,7 +1084,8 @@ impl ChatWidget<'_> {
                 self.add_to_history(HistoryCell::new_error_event(message.clone()));
                 self.bottom_pane.set_task_running(false);
                 self.bottom_pane.clear_live_ring();
-                self.live_builder = RowBuilder::new(self.live_builder.width());
+                // Reset with max width to disable wrapping
+            self.live_builder = RowBuilder::new(usize::MAX);
                 self.current_stream = None;
                 self.stream_header_emitted = false;
                 self.answer_buffer.clear();
@@ -1209,7 +1249,11 @@ impl ChatWidget<'_> {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
             }
-            EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents, context, task }) => {
+            EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents,
+                context,
+                task,
+            }) => {
                 // Update the active agents list from the event
                 self.active_agents.clear();
                 for agent in agents {
@@ -1224,24 +1268,36 @@ impl ChatWidget<'_> {
                         },
                     });
                 }
-                
+
                 // Store shared context and task
                 self.agent_context = context;
                 self.agent_task = task;
-                
+
                 // Update overall task status based on agent states
                 self.overall_task_status = if self.active_agents.is_empty() {
                     "preparing".to_string()
-                } else if self.active_agents.iter().any(|a| matches!(a.status, AgentStatus::Running)) {
+                } else if self
+                    .active_agents
+                    .iter()
+                    .any(|a| matches!(a.status, AgentStatus::Running))
+                {
                     "running".to_string()
-                } else if self.active_agents.iter().all(|a| matches!(a.status, AgentStatus::Completed)) {
+                } else if self
+                    .active_agents
+                    .iter()
+                    .all(|a| matches!(a.status, AgentStatus::Completed))
+                {
                     "complete".to_string()
-                } else if self.active_agents.iter().any(|a| matches!(a.status, AgentStatus::Failed)) {
+                } else if self
+                    .active_agents
+                    .iter()
+                    .any(|a| matches!(a.status, AgentStatus::Failed))
+                {
                     "failed".to_string()
                 } else {
                     "planning".to_string()
                 };
-                
+
                 // Clear agents HUD when task is complete or failed
                 if matches!(self.overall_task_status.as_str(), "complete" | "failed") {
                     self.active_agents.clear();
@@ -1251,7 +1307,7 @@ impl ChatWidget<'_> {
                     self.last_agent_prompt = None;
                     self.sparkline_data.borrow_mut().clear();
                 }
-                
+
                 // Reset ready to start flag when we get actual agent updates
                 if !self.active_agents.is_empty() {
                     self.agents_ready_to_start = false;
@@ -1349,7 +1405,7 @@ impl ChatWidget<'_> {
     pub(crate) fn prepare_agents(&mut self) {
         // Set the flag to show agents are ready to start
         self.agents_ready_to_start = true;
-        
+
         // Initialize sparkline with some data so it shows immediately
         {
             let mut sparkline_data = self.sparkline_data.borrow_mut();
@@ -1358,24 +1414,31 @@ impl ChatWidget<'_> {
                 for _ in 0..10 {
                     sparkline_data.push((2, false));
                 }
-                tracing::info!("Initialized sparkline data with {} points for preparing phase", sparkline_data.len());
+                tracing::info!(
+                    "Initialized sparkline data with {} points for preparing phase",
+                    sparkline_data.len()
+                );
             }
         } // Drop the borrow here
-        
+
         self.request_redraw();
     }
 
     /// Update sparkline data with randomized activity based on agent count
     fn update_sparkline_data(&self) {
         let now = std::time::Instant::now();
-        
+
         // Update every 100ms for smooth animation
-        if now.duration_since(*self.last_sparkline_update.borrow()).as_millis() < 100 {
+        if now
+            .duration_since(*self.last_sparkline_update.borrow())
+            .as_millis()
+            < 100
+        {
             return;
         }
-        
+
         *self.last_sparkline_update.borrow_mut() = now;
-        
+
         // Calculate base height based on number of agents and status
         let agent_count = self.active_agents.len();
         let is_planning = self.overall_task_status == "planning";
@@ -1392,19 +1455,20 @@ impl ChatWidget<'_> {
         } else {
             0 // No activity when no agents
         };
-        
+
         // Don't generate data if there's no activity
         if base_height == 0 {
             return;
         }
-        
+
         // Generate random variation
         use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use std::hash::Hash;
+        use std::hash::Hasher;
         let mut hasher = DefaultHasher::new();
         now.elapsed().as_nanos().hash(&mut hasher);
         let random_seed = hasher.finish();
-        
+
         // More variation during planning phase for visibility (+/- 50%)
         // Less variation during running for stability (+/- 30%)
         let variation_percent = if self.agents_ready_to_start && self.active_agents.is_empty() {
@@ -1412,15 +1476,19 @@ impl ChatWidget<'_> {
         } else {
             30 // Standard variation during running
         };
-        
+
         let variation_range = variation_percent * 2; // e.g., 100 for +/- 50%
-        let variation = ((random_seed % variation_range) as i32 - variation_percent as i32) * base_height as i32 / 100;
+        let variation = ((random_seed % variation_range) as i32 - variation_percent as i32)
+            * base_height as i32
+            / 100;
         let height = ((base_height as i32 + variation).max(1) as u64).min(20);
-        
+
         // Check if any agents are completed
-        let has_completed = self.active_agents.iter()
+        let has_completed = self
+            .active_agents
+            .iter()
             .any(|a| matches!(a.status, AgentStatus::Completed));
-        
+
         // Keep a rolling window of 60 data points (about 6 seconds at 100ms intervals)
         let mut sparkline_data = self.sparkline_data.borrow_mut();
         sparkline_data.push((height, has_completed));
@@ -1568,6 +1636,8 @@ impl ChatWidget<'_> {
         for line in lines {
             self.history_cells.push(HistoryCell::new_text_line(line));
         }
+        // Auto-follow if near bottom so new inserts are visible
+        self.autoscroll_if_near_bottom();
         self.request_redraw();
     }
 
@@ -1596,78 +1666,100 @@ impl ChatWidget<'_> {
                 let latest_screenshot = self.latest_browser_screenshot.clone();
                 let app_event_tx = self.app_event_tx.clone();
                 let url_for_goto = full_url.clone();
-                
+
                 // Connect immediately, don't wait for message send
                 tokio::spawn(async move {
                     // Get the global browser manager
                     let browser_manager = ChatWidget::get_browser_manager().await;
-                    
+
                     // Enable browser mode and ensure it's visible (not headless) for URL navigation
                     browser_manager.set_enabled_sync(true);
                     {
                         let mut config = browser_manager.config.write().await;
                         config.headless = false; // Ensure browser is visible when navigating to URL
                     }
-                    
+
                     // IMPORTANT: Start the browser manager first before navigating
                     if let Err(e) = browser_manager.start().await {
                         tracing::error!("Failed to start TUI browser manager: {}", e);
                         return;
                     }
-                    
+
                     // Set up navigation callback to auto-capture screenshots
                     {
                         let latest_screenshot_callback = latest_screenshot.clone();
                         let app_event_tx_callback = app_event_tx.clone();
-                        
-                        browser_manager.set_navigation_callback(move |url| {
-                            tracing::info!("Navigation callback triggered for URL: {}", url);
-                            let latest_screenshot_inner = latest_screenshot_callback.clone();
-                            let app_event_tx_inner = app_event_tx_callback.clone();
-                            let url_inner = url.clone();
-                            
-                            tokio::spawn(async move {
-                                // Get browser manager in the inner async block
-                                let browser_manager_inner = ChatWidget::get_browser_manager().await;
-                                // Capture screenshot after navigation
-                                match browser_manager_inner.capture_screenshot_with_url().await {
-                                    Ok((paths, _)) => {
-                                        if let Some(first_path) = paths.first() {
-                                            tracing::info!("Auto-captured screenshot after navigation: {}", first_path.display());
-                                            
-                                            // Update the latest screenshot
-                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
-                                                *latest = Some((first_path.clone(), url_inner.clone()));
+
+                        browser_manager
+                            .set_navigation_callback(move |url| {
+                                tracing::info!("Navigation callback triggered for URL: {}", url);
+                                let latest_screenshot_inner = latest_screenshot_callback.clone();
+                                let app_event_tx_inner = app_event_tx_callback.clone();
+                                let url_inner = url.clone();
+
+                                tokio::spawn(async move {
+                                    // Get browser manager in the inner async block
+                                    let browser_manager_inner =
+                                        ChatWidget::get_browser_manager().await;
+                                    // Capture screenshot after navigation
+                                    match browser_manager_inner.capture_screenshot_with_url().await
+                                    {
+                                        Ok((paths, _)) => {
+                                            if let Some(first_path) = paths.first() {
+                                                tracing::info!(
+                                                    "Auto-captured screenshot after navigation: {}",
+                                                    first_path.display()
+                                                );
+
+                                                // Update the latest screenshot
+                                                if let Ok(mut latest) =
+                                                    latest_screenshot_inner.lock()
+                                                {
+                                                    *latest = Some((
+                                                        first_path.clone(),
+                                                        url_inner.clone(),
+                                                    ));
+                                                }
+
+                                                // Send update event
+                                                use codex_core::protocol::{
+                                                    BrowserScreenshotUpdateEvent, EventMsg,
+                                                };
+                                                let _ = app_event_tx_inner.send(
+                                                    AppEvent::CodexEvent(Event {
+                                                        id: uuid::Uuid::new_v4().to_string(),
+                                                        msg: EventMsg::BrowserScreenshotUpdate(
+                                                            BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url_inner,
+                                                            },
+                                                        ),
+                                                    }),
+                                                );
                                             }
-                                            
-                                            // Send update event
-                                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
-                                                id: uuid::Uuid::new_v4().to_string(),
-                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                                    screenshot_path: first_path.clone(),
-                                                    url: url_inner,
-                                                }),
-                                            }));
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to auto-capture screenshot: {}",
+                                                e
+                                            );
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::error!("Failed to auto-capture screenshot: {}", e);
-                                    }
-                                }
-                            });
-                        }).await;
+                                });
+                            })
+                            .await;
                     }
-                    
+
                     // Set the browser manager as the global manager so both TUI and Session use the same instance
-                    codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
-                    
+                    codex_browser::global::set_global_browser_manager(browser_manager.clone())
+                        .await;
+
                     // Ensure the navigation callback is also set on the global manager
                     let global_manager = codex_browser::global::get_browser_manager().await;
                     if let Some(global_manager) = global_manager {
                         let latest_screenshot_global = latest_screenshot.clone();
                         let app_event_tx_global = app_event_tx.clone();
-                        
+
                         global_manager.set_navigation_callback(move |url| {
                             tracing::info!("Global manager navigation callback triggered for URL: {}", url);
                             let latest_screenshot_inner = latest_screenshot_global.clone();
@@ -1710,7 +1802,7 @@ impl ChatWidget<'_> {
                             });
                         }).await;
                     }
-                    
+
                     // Navigate using global manager
                     match browser_manager.goto(&url_for_goto).await {
                         Ok(result) => {
@@ -1719,27 +1811,36 @@ impl ChatWidget<'_> {
                                 result.url,
                                 result.title
                             );
-                            
+
                             // Capture initial screenshot
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                             match browser_manager.capture_screenshot_with_url().await {
                                 Ok((paths, url)) => {
                                     if let Some(first_path) = paths.first() {
-                                        tracing::info!("Initial screenshot captured: {}", first_path.display());
-                                        
+                                        tracing::info!(
+                                            "Initial screenshot captured: {}",
+                                            first_path.display()
+                                        );
+
                                         // Update the latest screenshot
                                         if let Ok(mut latest) = latest_screenshot.lock() {
-                                            *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| result.url.clone())));
+                                            *latest = Some((
+                                                first_path.clone(),
+                                                url.clone().unwrap_or_else(|| result.url.clone()),
+                                            ));
                                         }
-                                        
+
                                         // Send update event
-                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                        use codex_core::protocol::BrowserScreenshotUpdateEvent;
+                                        use codex_core::protocol::EventMsg;
                                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                             id: uuid::Uuid::new_v4().to_string(),
-                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                                screenshot_path: first_path.clone(),
-                                                url: url.unwrap_or_else(|| result.url.clone()),
-                                            }),
+                                            msg: EventMsg::BrowserScreenshotUpdate(
+                                                BrowserScreenshotUpdateEvent {
+                                                    screenshot_path: first_path.clone(),
+                                                    url: url.unwrap_or_else(|| result.url.clone()),
+                                                },
+                                            ),
                                         }));
                                     }
                                 }
@@ -1754,10 +1855,7 @@ impl ChatWidget<'_> {
                     }
                 });
 
-                format!(
-                    "Browser mode enabled: {}\n",
-                    full_url
-                )
+                format!("Browser mode enabled: {}\n", full_url)
             } else {
                 // It's a subcommand
                 match first_arg {
@@ -1783,7 +1881,7 @@ impl ChatWidget<'_> {
                             // Get the global browser manager
                             let browser_manager = ChatWidget::get_browser_manager().await;
                             browser_manager.set_enabled_sync(true);
-                            
+
                             // Configure the manager for local Chrome connection
                             {
                                 let mut config = browser_manager.config.write().await;
@@ -1796,15 +1894,13 @@ impl ChatWidget<'_> {
                             // Connect using the global manager
                             match browser_manager.start().await {
                                 Ok(_) => {
-                                    tracing::info!(
-                                        "Connected to local Chrome instance"
-                                    );
-                                    
+                                    tracing::info!("Connected to local Chrome instance");
+
                                     // Set up navigation callback to auto-capture screenshots
                                     {
                                         let latest_screenshot_callback = latest_screenshot.clone();
                                         let app_event_tx_callback = app_event_tx.clone();
-                                        
+
                                         browser_manager.set_navigation_callback(move |url| {
                                             tracing::info!("CDP Navigation callback triggered for URL: {}", url);
                                             let latest_screenshot_inner = latest_screenshot_callback.clone();
@@ -1846,16 +1942,20 @@ impl ChatWidget<'_> {
                                             });
                                         }).await;
                                     }
-                                    
+
                                     // Set the browser manager as the global manager
-                                    codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
-                                    
+                                    codex_browser::global::set_global_browser_manager(
+                                        browser_manager.clone(),
+                                    )
+                                    .await;
+
                                     // Ensure the navigation callback is also set on the global manager
-                                    let global_manager = codex_browser::global::get_browser_manager().await;
+                                    let global_manager =
+                                        codex_browser::global::get_browser_manager().await;
                                     if let Some(global_manager) = global_manager {
                                         let latest_screenshot_global = latest_screenshot.clone();
                                         let app_event_tx_global = app_event_tx.clone();
-                                        
+
                                         global_manager.set_navigation_callback(move |url| {
                                             tracing::info!("Global CDP navigation callback triggered for URL: {}", url);
                                             let latest_screenshot_inner = latest_screenshot_global.clone();
@@ -1898,36 +1998,54 @@ impl ChatWidget<'_> {
                                             });
                                         }).await;
                                     }
-                                    
+
                                     tracing::info!(
                                         "All browser operations (TUI and LLM tools) will use external Chrome"
                                     );
-                                    
+
                                     // Capture initial screenshot from current tab
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500))
+                                        .await;
                                     match browser_manager.capture_screenshot_with_url().await {
                                         Ok((paths, url)) => {
                                             if let Some(first_path) = paths.first() {
-                                                tracing::info!("Initial CDP screenshot captured: {}", first_path.display());
-                                                
+                                                tracing::info!(
+                                                    "Initial CDP screenshot captured: {}",
+                                                    first_path.display()
+                                                );
+
                                                 // Update the latest screenshot
                                                 if let Ok(mut latest) = latest_screenshot.lock() {
-                                                    *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| "Chrome".to_string())));
+                                                    *latest = Some((
+                                                        first_path.clone(),
+                                                        url.clone().unwrap_or_else(|| {
+                                                            "Chrome".to_string()
+                                                        }),
+                                                    ));
                                                 }
-                                                
+
                                                 // Send update event
                                                 use codex_core::protocol::BrowserScreenshotUpdateEvent;
-                                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                                    id: uuid::Uuid::new_v4().to_string(),
-                                                    msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                                        screenshot_path: first_path.clone(),
-                                                        url: url.unwrap_or_else(|| "Chrome".to_string()),
-                                                    }),
-                                                }));
+                                                let _ = app_event_tx.send(AppEvent::CodexEvent(
+                                                    Event {
+                                                        id: uuid::Uuid::new_v4().to_string(),
+                                                        msg: EventMsg::BrowserScreenshotUpdate(
+                                                            BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url.unwrap_or_else(|| {
+                                                                    "Chrome".to_string()
+                                                                }),
+                                                            },
+                                                        ),
+                                                    },
+                                                ));
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::error!("Failed to capture initial CDP screenshot: {}", e);
+                                            tracing::error!(
+                                                "Failed to capture initial CDP screenshot: {}",
+                                                e
+                                            );
                                         }
                                     }
                                 }
@@ -1936,7 +2054,6 @@ impl ChatWidget<'_> {
                                         "Failed to connect to local Chrome: {}. Trying to launch Chrome with debug port...",
                                         e
                                     );
-
 
                                     // Try launching Chrome with debug port
                                     #[cfg(target_os = "macos")]
@@ -1961,13 +2078,16 @@ impl ChatWidget<'_> {
                                     // Try connecting again
                                     match browser_manager.start().await {
                                         Ok(_) => {
-                                            tracing::info!("Successfully connected to Chrome after launching");
-                                            
+                                            tracing::info!(
+                                                "Successfully connected to Chrome after launching"
+                                            );
+
                                             // Set up navigation callback
                                             {
-                                                let latest_screenshot_callback = latest_screenshot.clone();
+                                                let latest_screenshot_callback =
+                                                    latest_screenshot.clone();
                                                 let app_event_tx_callback = app_event_tx.clone();
-                                                
+
                                                 browser_manager.set_navigation_callback(move |url| {
                                                     tracing::info!("CDP Navigation callback (launched) triggered for URL: {}", url);
                                                     let latest_screenshot_inner = latest_screenshot_callback.clone();
@@ -2001,16 +2121,21 @@ impl ChatWidget<'_> {
                                                     });
                                                 }).await;
                                             }
-                                            
+
                                             // Set the browser manager as the global manager
-                                            codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
-                                            
+                                            codex_browser::global::set_global_browser_manager(
+                                                browser_manager.clone(),
+                                            )
+                                            .await;
+
                                             // Ensure the navigation callback is also set on the global manager
-                                            let global_manager = codex_browser::global::get_browser_manager().await;
+                                            let global_manager =
+                                                codex_browser::global::get_browser_manager().await;
                                             if let Some(global_manager) = global_manager {
-                                                let latest_screenshot_global = latest_screenshot.clone();
+                                                let latest_screenshot_global =
+                                                    latest_screenshot.clone();
                                                 let app_event_tx_global = app_event_tx.clone();
-                                                
+
                                                 global_manager.set_navigation_callback(move |url| {
                                                     tracing::info!("Global CDP (launched) navigation callback triggered for URL: {}", url);
                                                     let latest_screenshot_inner = latest_screenshot_global.clone();
@@ -2053,16 +2178,30 @@ impl ChatWidget<'_> {
                                                     });
                                                 }).await;
                                             }
-                                            
+
                                             // Capture initial screenshot
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                                            match browser_manager.capture_screenshot_with_url().await {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                                1000,
+                                            ))
+                                            .await;
+                                            match browser_manager
+                                                .capture_screenshot_with_url()
+                                                .await
+                                            {
                                                 Ok((paths, url)) => {
                                                     if let Some(first_path) = paths.first() {
-                                                        if let Ok(mut latest) = latest_screenshot.lock() {
-                                                            *latest = Some((first_path.clone(), url.clone().unwrap_or_else(|| "Chrome".to_string())));
+                                                        if let Ok(mut latest) =
+                                                            latest_screenshot.lock()
+                                                        {
+                                                            *latest = Some((
+                                                                first_path.clone(),
+                                                                url.clone().unwrap_or_else(|| {
+                                                                    "Chrome".to_string()
+                                                                }),
+                                                            ));
                                                         }
-                                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                        use codex_core::protocol::BrowserScreenshotUpdateEvent;
+                                                        use codex_core::protocol::EventMsg;
                                                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -2073,7 +2212,10 @@ impl ChatWidget<'_> {
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    tracing::error!("Failed to capture initial launched CDP screenshot: {}", e);
+                                                    tracing::error!(
+                                                        "Failed to capture initial launched CDP screenshot: {}",
+                                                        e
+                                                    );
                                                 }
                                             }
                                         }
@@ -2123,7 +2265,9 @@ impl ChatWidget<'_> {
                             let status = browser_manager.get_status_sync();
                             let _ = status_tx.send(status);
                         });
-                        status_rx.recv().unwrap_or_else(|_| "Failed to get browser status.".to_string())
+                        status_rx
+                            .recv()
+                            .unwrap_or_else(|_| "Failed to get browser status.".to_string())
                     }
                     "fullpage" => {
                         if parts.len() > 2 {
@@ -2131,7 +2275,8 @@ impl ChatWidget<'_> {
                                 "on" => {
                                     // Enable full-page mode
                                     tokio::spawn(async move {
-                                        let browser_manager = ChatWidget::get_browser_manager().await;
+                                        let browser_manager =
+                                            ChatWidget::get_browser_manager().await;
                                         browser_manager.set_fullpage_sync(true);
                                     });
                                     "Full-page screenshot mode enabled (max 8 segments)."
@@ -2140,7 +2285,8 @@ impl ChatWidget<'_> {
                                 "off" => {
                                     // Disable full-page mode
                                     tokio::spawn(async move {
-                                        let browser_manager = ChatWidget::get_browser_manager().await;
+                                        let browser_manager =
+                                            ChatWidget::get_browser_manager().await;
                                         browser_manager.set_fullpage_sync(false);
                                     });
                                     "Full-page screenshot mode disabled.".to_string()
@@ -2164,7 +2310,8 @@ impl ChatWidget<'_> {
                                             (width_str.parse::<u32>(), height_str.parse::<u32>())
                                         {
                                             tokio::spawn(async move {
-                                                let browser_manager = ChatWidget::get_browser_manager().await;
+                                                let browser_manager =
+                                                    ChatWidget::get_browser_manager().await;
                                                 browser_manager.set_viewport_sync(width, height);
                                             });
                                             format!(
@@ -2181,7 +2328,8 @@ impl ChatWidget<'_> {
                                 "segments_max" => {
                                     if let Ok(max) = value.parse::<usize>() {
                                         tokio::spawn(async move {
-                                            let browser_manager = ChatWidget::get_browser_manager().await;
+                                            let browser_manager =
+                                                ChatWidget::get_browser_manager().await;
                                             browser_manager.set_segments_max_sync(max);
                                         });
                                         format!("Browser segments_max updated: {}", max)
@@ -2242,7 +2390,6 @@ impl ChatWidget<'_> {
             self.config.model_context_window,
         );
     }
-
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout_areas = self.layout_areas(area);
@@ -2329,9 +2476,13 @@ impl ChatWidget<'_> {
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
         use crate::exec_command::relativize_to_home;
         use ratatui::layout::Margin;
-        use ratatui::style::{Modifier, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Paragraph};
+        use ratatui::style::Modifier;
+        use ratatui::style::Style;
+        use ratatui::text::Line;
+        use ratatui::text::Span;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        use ratatui::widgets::Paragraph;
 
         // Add same horizontal padding as the Message input (2 chars on each side)
         let horizontal_padding = 2u16;
@@ -2352,7 +2503,7 @@ impl ChatWidget<'_> {
         // Build status line spans
         let mut status_spans = vec![
             Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw( " •  "),
+            Span::raw(" •  "),
             Span::styled("Model: ", Style::default().dim()),
             Span::styled(
                 self.format_model_name(&self.config.model),
@@ -2394,16 +2545,18 @@ impl ChatWidget<'_> {
         status_block.render(padded_area, buf);
 
         // Then render the text inside with padding, centered
-        let status_widget = Paragraph::new(vec![status_line])
-            .alignment(ratatui::layout::Alignment::Center);
+        let status_widget =
+            Paragraph::new(vec![status_line]).alignment(ratatui::layout::Alignment::Center);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
         use image::GenericImageView; // for dimensions()
         use ratatui::widgets::Widget;
-        use ratatui_image::picker::{Picker, ProtocolType};
-        use ratatui_image::{Image, Resize};
+        use ratatui_image::Image;
+        use ratatui_image::Resize;
+        use ratatui_image::picker::Picker;
+        use ratatui_image::picker::ProtocolType;
 
         // open + decode
         let reader = match image::ImageReader::open(path) {
@@ -2519,8 +2672,11 @@ impl ChatWidget<'_> {
     }
 
     fn render_screenshot_placeholder(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use ratatui::style::{Modifier, Style};
-        use ratatui::widgets::{Block, Borders, Paragraph};
+        use ratatui::style::Modifier;
+        use ratatui::style::Style;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        use ratatui::widgets::Paragraph;
 
         // Show a placeholder box with screenshot info
         let filename = path
@@ -2581,7 +2737,7 @@ impl ChatWidget<'_> {
             let chunks =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas::<2>(padded_area);
-            
+
             self.render_browser_panel(chunks[0], buf);
             // Right side remains empty
         } else if has_active_agents {
@@ -2589,7 +2745,7 @@ impl ChatWidget<'_> {
             let chunks =
                 Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
                     .areas::<2>(padded_area);
-            
+
             self.render_agent_panel(chunks[0], buf);
             // Right side remains empty
         }
@@ -2598,7 +2754,9 @@ impl ChatWidget<'_> {
     /// Render the browser panel (left side when both panels are shown)
     fn render_browser_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::widgets::{Block, Borders, Widget};
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        use ratatui::widgets::Widget;
 
         if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
             if let Some((screenshot_path, url)) = &*screenshot_lock {
@@ -2617,12 +2775,19 @@ impl ChatWidget<'_> {
         }
     }
 
-
     /// Render the agent status panel in the HUD
     fn render_agent_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::style::Style;
-        use ratatui::text::{Line as RLine, Span, Text};
-        use ratatui::widgets::{Block, Borders, Paragraph, Sparkline, SparklineBar, Widget, Wrap};
+        use ratatui::text::Line as RLine;
+        use ratatui::text::Span;
+        use ratatui::text::Text;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        use ratatui::widgets::Paragraph;
+        use ratatui::widgets::Sparkline;
+        use ratatui::widgets::SparklineBar;
+        use ratatui::widgets::Widget;
+        use ratatui::widgets::Wrap;
 
         // Update sparkline data for animation
         if !self.active_agents.is_empty() || self.agents_ready_to_start {
@@ -2648,19 +2813,27 @@ impl ChatWidget<'_> {
         } else {
             (agent_count as u16 + 1).min(4) // 2-4 lines based on agent count
         };
-        
+
         // Ensure we have enough space for both content and sparkline
         // Reserve at least 3 lines for content (status + blank + message)
         let min_content_height = 3u16;
         let available_height = inner_agent.height;
-        
+
         let (actual_content_height, actual_sparkline_height) = if sparkline_height > 0 {
             if available_height > min_content_height + sparkline_height {
                 // Enough space for both
-                (available_height.saturating_sub(sparkline_height), sparkline_height)
+                (
+                    available_height.saturating_sub(sparkline_height),
+                    sparkline_height,
+                )
             } else if available_height > min_content_height {
                 // Limited space - give minimum to content, rest to sparkline
-                (min_content_height, available_height.saturating_sub(min_content_height).min(sparkline_height))
+                (
+                    min_content_height,
+                    available_height
+                        .saturating_sub(min_content_height)
+                        .min(sparkline_height),
+                )
             } else {
                 // Very limited space - content only
                 (available_height, 0)
@@ -2669,7 +2842,7 @@ impl ChatWidget<'_> {
             // No sparkline needed
             (available_height, 0)
         };
-        
+
         let content_area = Rect {
             x: inner_agent.x,
             y: inner_agent.y,
@@ -2699,7 +2872,6 @@ impl ChatWidget<'_> {
             _ => crate::colors::text_dim(),
         };
 
-
         text_content.push(RLine::from(vec![
             Span::from(" "),
             Span::styled(
@@ -2708,10 +2880,7 @@ impl ChatWidget<'_> {
                     .fg(crate::colors::text())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                &self.overall_task_status,
-                Style::default().fg(status_color),
-            ),
+            Span::styled(&self.overall_task_status, Style::default().fg(status_color)),
         ]));
 
         // Add blank line
@@ -2769,10 +2938,10 @@ impl ChatWidget<'_> {
 
         // Calculate how much vertical space the fixed content takes
         let fixed_content_height = text_content.len() as u16;
-        
+
         // Create the first paragraph for the fixed content (status and agents) without wrapping
         let fixed_paragraph = Paragraph::new(Text::from(text_content));
-        
+
         // Render the fixed content first
         let fixed_area = Rect {
             x: content_area.x,
@@ -2781,7 +2950,7 @@ impl ChatWidget<'_> {
             height: fixed_content_height.min(content_area.height),
         };
         fixed_paragraph.render(fixed_area, buf);
-        
+
         // Calculate remaining area for wrapped content
         let remaining_height = content_area.height.saturating_sub(fixed_content_height);
         if remaining_height > 0 {
@@ -2791,7 +2960,7 @@ impl ChatWidget<'_> {
                 width: content_area.width,
                 height: remaining_height,
             };
-            
+
             // Add context and task sections with proper wrapping in the remaining area
             let mut wrapped_content = vec![];
 
@@ -2806,26 +2975,24 @@ impl ChatWidget<'_> {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::from(" "),
-                    Span::styled(
-                        task,
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
+                    Span::styled(task, Style::default().fg(crate::colors::text_dim())),
                 ]));
             }
-            
+
             if !wrapped_content.is_empty() {
                 // Create paragraph with wrapping enabled for the long text content
-                let wrapped_paragraph = Paragraph::new(Text::from(wrapped_content))
-                    .wrap(Wrap { trim: false });
+                let wrapped_paragraph =
+                    Paragraph::new(Text::from(wrapped_content)).wrap(Wrap { trim: false });
                 wrapped_paragraph.render(wrapped_area, buf);
             }
         }
 
         // Render sparkline at the bottom if we have data and agents are active
         let sparkline_data = self.sparkline_data.borrow();
-        
+
         // Debug logging
-        tracing::debug!("Sparkline render check: data_len={}, agents={}, ready={}, height={}, actual_height={}, area={:?}",
+        tracing::debug!(
+            "Sparkline render check: data_len={}, agents={}, ready={}, height={}, actual_height={}, area={:?}",
             sparkline_data.len(),
             self.active_agents.len(),
             self.agents_ready_to_start,
@@ -2833,10 +3000,14 @@ impl ChatWidget<'_> {
             actual_sparkline_height,
             sparkline_area
         );
-        
-        if !sparkline_data.is_empty() && (!self.active_agents.is_empty() || self.agents_ready_to_start) && actual_sparkline_height > 0 {
+
+        if !sparkline_data.is_empty()
+            && (!self.active_agents.is_empty() || self.agents_ready_to_start)
+            && actual_sparkline_height > 0
+        {
             // Convert data to SparklineBar with colors based on completion status
-            let bars: Vec<SparklineBar> = sparkline_data.iter()
+            let bars: Vec<SparklineBar> = sparkline_data
+                .iter()
                 .map(|(value, is_completed)| {
                     let color = if *is_completed {
                         crate::colors::success() // Green for completed
@@ -2846,21 +3017,29 @@ impl ChatWidget<'_> {
                     SparklineBar::from(*value).style(Style::default().fg(color))
                 })
                 .collect();
-            
+
             // Use dynamic max based on the actual data for better visibility
             // During preparing/planning, values are small (2-3), during running they're larger (5-15)
             // For planning phase with single line, use smaller max for better visibility
             let max_value = if self.agents_ready_to_start && self.active_agents.is_empty() {
                 // Planning phase - use smaller max for better visibility of 1-3 range
-                sparkline_data.iter().map(|(v, _)| *v).max().unwrap_or(4).max(4)
+                sparkline_data
+                    .iter()
+                    .map(|(v, _)| *v)
+                    .max()
+                    .unwrap_or(4)
+                    .max(4)
             } else {
                 // Running phase - use larger max
-                sparkline_data.iter().map(|(v, _)| *v).max().unwrap_or(10).max(10)
+                sparkline_data
+                    .iter()
+                    .map(|(v, _)| *v)
+                    .max()
+                    .unwrap_or(10)
+                    .max(10)
             };
-            
-            let sparkline = Sparkline::default()
-                .data(bars)
-                .max(max_value); // Dynamic max for better visibility
+
+            let sparkline = Sparkline::default().data(bars).max(max_value); // Dynamic max for better visibility
             sparkline.render(sparkline_area, buf);
         }
     }
@@ -2876,7 +3055,8 @@ impl ChatWidget<'_> {
             self.current_stream = Some(kind);
             self.stream_header_emitted = false;
             // Clear any previous live content; we're starting a new stream.
-            self.live_builder = RowBuilder::new(self.live_builder.width());
+            // Reset with max width to disable wrapping
+            self.live_builder = RowBuilder::new(usize::MAX);
             self.emit_stream_header(kind);
         }
     }
@@ -2894,11 +3074,14 @@ impl ChatWidget<'_> {
                 let line = match self.current_stream {
                     Some(StreamKind::Reasoning) => {
                         // Use dimmer color for reasoning text
-                        use ratatui::text::Span;
                         use ratatui::style::Style;
-                        ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                        use ratatui::text::Span;
+                        ratatui::text::Line::from(Span::styled(
+                            r.text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ))
                     }
-                    _ => ratatui::text::Line::from(r.text)
+                    _ => ratatui::text::Line::from(r.text),
                 };
                 lines.push(line);
             }
@@ -2906,11 +3089,14 @@ impl ChatWidget<'_> {
             for line in lines {
                 // Use dimmed reasoning for thinking to get both markdown and dimming
                 if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
-                    self.history_cells.push(HistoryCell::new_dimmed_reasoning_line(line));
+                    self.history_cells
+                        .push(HistoryCell::new_dimmed_reasoning_line(line));
                 } else {
                     self.history_cells.push(HistoryCell::new_text_line(line));
                 }
             }
+            // Auto-follow if near bottom so streaming stays visible
+            self.autoscroll_if_near_bottom();
             // Ensure input focus is maintained when adding streamed content
             self.bottom_pane.ensure_input_focus();
             self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -2937,11 +3123,14 @@ impl ChatWidget<'_> {
                 let line = match kind {
                     StreamKind::Reasoning => {
                         // Use dimmer color for reasoning text
-                        use ratatui::text::Span;
                         use ratatui::style::Style;
-                        ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                        use ratatui::text::Span;
+                        ratatui::text::Line::from(Span::styled(
+                            r.text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ))
                     }
-                    _ => ratatui::text::Line::from(r.text)
+                    _ => ratatui::text::Line::from(r.text),
                 };
                 lines.push(line);
             }
@@ -2953,18 +3142,22 @@ impl ChatWidget<'_> {
             for line in lines {
                 // Use dimmed reasoning for thinking to get both markdown and dimming
                 if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
-                    self.history_cells.push(HistoryCell::new_dimmed_reasoning_line(line));
+                    self.history_cells
+                        .push(HistoryCell::new_dimmed_reasoning_line(line));
                 } else {
                     self.history_cells.push(HistoryCell::new_text_line(line));
                 }
             }
+            // Auto-follow if near bottom when finalizing a stream
+            self.autoscroll_if_near_bottom();
             // Ensure input focus is maintained when adding streamed content
             self.bottom_pane.ensure_input_focus();
             self.app_event_tx.send(AppEvent::RequestRedraw);
         }
 
         // Clear the live overlay and reset state for the next stream.
-        self.live_builder = RowBuilder::new(self.live_builder.width());
+        // Use max width to disable wrapping during streaming
+        self.live_builder = RowBuilder::new(usize::MAX);
         self.bottom_pane.clear_live_ring();
         self.current_stream = None;
         self.stream_header_emitted = false;
@@ -3039,9 +3232,12 @@ impl WidgetRef for &ChatWidget<'_> {
             .map(|r| {
                 if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
                     // Apply dimming to live reasoning content
-                    use ratatui::text::Span;
                     use ratatui::style::Style;
-                    ratatui::text::Line::from(Span::styled(r.text, Style::default().fg(crate::colors::text_dim())))
+                    use ratatui::text::Span;
+                    ratatui::text::Line::from(Span::styled(
+                        r.text,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ))
                 } else {
                     ratatui::text::Line::from(r.text)
                 }
