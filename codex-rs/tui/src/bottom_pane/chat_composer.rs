@@ -994,7 +994,7 @@ impl WidgetRef for &ChatComposer {
             } else if r < 101 {
                 &['✧','✦','✧']
             } else {
-                match (r % 3) {
+                match r % 3 {
                     0 => &['✶'],
                     1 => &['◇'],
                     _ => &['◆'],
