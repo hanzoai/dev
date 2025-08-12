@@ -5,12 +5,53 @@ use ratatui::style::{Modifier, Style};
 pub(crate) fn process_markdown_text(text: &str, _width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
-    // Split by existing newlines to preserve intentional line breaks
-    for line in text.lines() {
+    // Split by newlines but preserve empty lines (text.lines() skips empty lines!)
+    for line in text.split('\n') {
         lines.push(parse_markdown_line(line));
     }
 
     lines
+}
+
+/// Process text with markdown support and apply dimming to all text
+pub(crate) fn process_dimmed_markdown_text(text: &str, width: u16) -> Vec<Line<'static>> {
+    let lines = process_markdown_text(text, width);
+    
+    // Remove empty lines that immediately follow bold titles (common in thinking content)
+    let mut filtered_lines = Vec::new();
+    let mut last_was_bold_title = false;
+    
+    for line in &lines {
+        let is_empty = line.spans.is_empty() || 
+                      (line.spans.len() == 1 && line.spans[0].content.is_empty());
+        
+        // Check if this line has bold content (likely a title)
+        let has_bold = line.spans.iter().any(|span| 
+            span.style.add_modifier.contains(ratatui::style::Modifier::BOLD)
+        );
+        
+        // Skip empty lines that come right after bold titles
+        if is_empty && last_was_bold_title {
+            last_was_bold_title = false; // Reset flag
+            continue; // Skip this empty line
+        }
+        
+        filtered_lines.push(line.clone());
+        last_was_bold_title = has_bold;
+    }
+    
+    // Apply dimming to all spans in all remaining lines
+    filtered_lines.into_iter().map(|line| {
+        let dimmed_spans: Vec<_> = line.spans.into_iter().map(|span| {
+            // Apply dim color while preserving other styling (bold, etc.)
+            ratatui::text::Span::styled(
+                span.content, 
+                span.style.fg(crate::colors::text_dim())
+            )
+        }).collect();
+        
+        ratatui::text::Line::from(dimmed_spans)
+    }).collect()
 }
 
 /// Parse a single line with markdown formatting

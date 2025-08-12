@@ -36,6 +36,10 @@ pub(crate) fn border() -> Color {
     current_theme().border
 }
 
+pub(crate) fn border_focused() -> Color {
+    current_theme().border_focused
+}
+
 pub(crate) fn text() -> Color {
     current_theme().text
 }
@@ -50,10 +54,6 @@ pub(crate) fn text_bright() -> Color {
 
 pub(crate) fn info() -> Color {
     current_theme().info
-}
-
-pub(crate) fn spinner() -> Color {
-    current_theme().spinner
 }
 
 // Alias for text_dim

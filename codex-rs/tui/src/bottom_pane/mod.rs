@@ -34,7 +34,6 @@ pub(crate) enum CancellationEvent {
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 
-use crate::status_indicator_widget::StatusIndicatorWidget;
 use approval_modal_view::ApprovalModalView;
 use codex_core::config_types::{ReasoningEffort, ThemeName};
 use reasoning_selection_view::ReasoningSelectionView;
@@ -54,10 +53,6 @@ pub(crate) struct BottomPane<'a> {
     is_task_running: bool,
     ctrl_c_quit_hint: bool,
 
-    /// Optional live, multi‑line status/"live cell" rendered directly above
-    /// the composer while a task is running. Unlike `active_view`, this does
-    /// not replace the composer; it augments it.
-    live_status: Option<StatusIndicatorWidget>,
 
     /// Optional transient ring shown above the composer. This is a rendering-only
     /// container used during development before we wire it to ChatWidget events.
@@ -89,7 +84,6 @@ impl BottomPane<'_> {
             has_input_focus: params.has_input_focus,
             is_task_running: false,
             ctrl_c_quit_hint: false,
-            live_status: None,
             live_ring: None,
             status_view_active: false,
         }
@@ -100,11 +94,7 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        let overlay_status_h = self
-            .live_status
-            .as_ref()
-            .map(|s| s.desired_height(width))
-            .unwrap_or(0);
+        let overlay_status_h: u16 = 0;
         let ring_h = self
             .live_ring
             .as_ref()
@@ -120,7 +110,8 @@ impl BottomPane<'_> {
             };
             spacer + view.desired_height(width)
         } else {
-            self.composer.desired_height(width)
+            // Add 1 for the empty line above the composer
+            1 + self.composer.desired_height(width)
         };
 
         overlay_status_h
@@ -135,13 +126,10 @@ impl BottomPane<'_> {
         if self.active_view.is_some() {
             None
         } else {
-            // Calculate y_offset for status overlay if present
-            let mut y_offset = 0u16;
-            if let Some(status) = &self.live_status {
-                y_offset = status.desired_height(area.width).min(area.height);
-            }
+            // Account for the empty line above the composer
+            let y_offset = 1u16;
 
-            // Adjust composer area to account for status overlay and padding
+            // Adjust composer area to account for empty line and padding
             let horizontal_padding = 2u16; // Message input uses 2 chars padding
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
@@ -216,28 +204,18 @@ impl BottomPane<'_> {
     /// to allow continued input while processing.
     pub(crate) fn update_status_text(&mut self, text: String) {
         // If there's an active modal view that can handle status updates, let it
-        let mut handled_by_view = false;
         if let Some(view) = self.active_view.as_mut() {
             if matches!(
                 view.update_status_text(text.clone()),
                 bottom_pane_view::ConditionalUpdate::NeedsRedraw
             ) {
-                handled_by_view = true;
+                self.request_redraw();
+                return;
             }
         }
 
-        // If not handled by a modal, show as overlay above composer
-        if !handled_by_view && self.active_view.is_none() {
-            if self.live_status.is_none() {
-                self.live_status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
-            }
-            if let Some(status) = &mut self.live_status {
-                status.update_text(text);
-            }
-        } else if !handled_by_view {
-            // Ensure any previous overlay is cleared when a modal becomes active.
-            self.live_status = None;
-        }
+        // Pass status message to composer for dynamic title display
+        self.composer.update_status_message(text);
         self.request_redraw();
     }
 
@@ -263,18 +241,13 @@ impl BottomPane<'_> {
 
     pub fn set_task_running(&mut self, running: bool) {
         self.is_task_running = running;
+        self.composer.set_task_running(running);
 
         if running {
-            // Show status as overlay above composer instead of replacing it
-            if self.live_status.is_none() {
-                self.live_status = Some(StatusIndicatorWidget::new(self.app_event_tx.clone()));
-            }
-            if let Some(status) = &mut self.live_status {
-                status.update_text("waiting for model".to_string());
-            }
+            // No longer need separate status widget - title shows in composer
             self.request_redraw();
         } else {
-            self.live_status = None;
+            // Status now shown in composer title
             // Drop the status view when a task completes, but keep other
             // modal views (e.g. approval dialogs).
             if let Some(mut view) = self.active_view.take() {
@@ -325,7 +298,7 @@ impl BottomPane<'_> {
         let modal = ApprovalModalView::new(request, self.app_event_tx.clone());
         self.active_view = Some(Box::new(modal));
         // Hide any overlay status while a modal is visible.
-        self.live_status = None;
+        // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
     }
@@ -334,7 +307,7 @@ impl BottomPane<'_> {
     pub fn show_reasoning_selection(&mut self, current_effort: ReasoningEffort) {
         let view = ReasoningSelectionView::new(current_effort, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
-        self.live_status = None;
+        // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
     }
@@ -343,7 +316,7 @@ impl BottomPane<'_> {
     pub fn show_theme_selection(&mut self, current_theme: ThemeName) {
         let view = ThemeSelectionView::new(current_theme, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
-        self.live_status = None;
+        // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
     }
@@ -391,7 +364,7 @@ impl BottomPane<'_> {
             // Reset any transient state that might affect focus
             // Clear any temporary status overlays that might interfere
             if !self.is_task_running {
-                self.live_status = None;
+                // Status now shown in composer title
             }
             // Ensure composer knows it has focus
             self.composer
@@ -423,24 +396,7 @@ impl WidgetRef for &BottomPane<'_> {
             // Leave one empty line
             y_offset = y_offset.saturating_add(1);
         }
-        if let Some(status) = &self.live_status {
-            // Add horizontal padding (3 chars on each side) to match composer
-            let horizontal_padding = 3u16;
-            let padded_width = area.width.saturating_sub(horizontal_padding * 2);
-            let live_h = status
-                .desired_height(padded_width)
-                .min(area.height.saturating_sub(y_offset));
-            if live_h > 0 {
-                let live_rect = Rect {
-                    x: area.x + horizontal_padding,
-                    y: area.y + y_offset,
-                    width: padded_width,
-                    height: live_h,
-                };
-                status.render_ref(live_rect, buf);
-                y_offset = y_offset.saturating_add(live_h);
-            }
-        }
+        // Status is now shown in the composer title, no need for separate rendering
 
         if let Some(view) = &self.active_view {
             if y_offset < area.height {
@@ -458,6 +414,9 @@ impl WidgetRef for &BottomPane<'_> {
                 view.render(view_rect, buf);
             }
         } else if y_offset < area.height {
+            // Always add an empty line above the input box
+            y_offset = y_offset.saturating_add(1);
+            
             // Add horizontal padding (2 chars on each side) for Message input
             let horizontal_padding = 2u16;
             let composer_rect = Rect {
