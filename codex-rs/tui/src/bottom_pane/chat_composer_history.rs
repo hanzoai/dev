@@ -61,6 +61,12 @@ impl ChatComposerHistory {
             self.last_history_text = None;
         }
     }
+    
+    /// Reset navigation state (used when clearing input with double-Esc)
+    pub fn reset_navigation(&mut self) {
+        self.history_cursor = None;
+        self.last_history_text = None;
+    }
 
     /// Should Up/Down key presses be interpreted as history navigation given
     /// the current content and cursor position of `textarea`?
