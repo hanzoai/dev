@@ -278,11 +278,11 @@ impl ChatWidget<'_> {
 
             // rows = cols * (3/4) * (cell_w/cell_h)
             let (cw, ch) = self.measured_font_size();
-            let numer = (inner_cols as u32) * 3 * (cw as u32);
+            let number = (inner_cols as u32) * 3 * (cw as u32);
             let denom = 4 * (ch as u32);
 
             // use FLOOR to avoid over-estimating (which creates bottom slack)
-            let inner_rows: u16 = (numer / denom) as u16;
+            let inner_rows: u16 = (number / denom) as u16;
 
             // add back the top/bottom borders of the Preview block
             let mut hud_height = inner_rows.saturating_add(2);
