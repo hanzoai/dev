@@ -107,6 +107,8 @@ pub(crate) struct ChatWidget<'a> {
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
     // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
     scroll_offset: u16,
+    // Cached max scroll from last render to prevent overscroll artifacts
+    last_max_scroll: std::cell::Cell<u16>,
     // Agent tracking for multi-agent tasks
     active_agents: Vec<AgentInfo>,
     agents_ready_to_start: bool,
@@ -504,6 +506,7 @@ impl ChatWidget<'_> {
             cached_picker: RefCell::new(None),
             cached_cell_size: std::cell::OnceCell::new(),
             scroll_offset: 0,
+            last_max_scroll: std::cell::Cell::new(0),
             active_agents: Vec::new(),
             agents_ready_to_start: false,
             last_agent_prompt: None,
@@ -555,12 +558,11 @@ impl ChatWidget<'_> {
             }
             InputResult::ScrollUp => {
                 // Scroll up in chat history (increase offset, towards older content)
-                // Estimate max scroll based on content - use reasonable content area height of 30
-                let estimated_max_scroll = self.calculate_max_scroll_offset(30);
+                // Use last_max_scroll computed during the previous render to avoid overshoot
                 let new_offset = self
                     .scroll_offset
                     .saturating_add(3)
-                    .min(estimated_max_scroll);
+                    .min(self.last_max_scroll.get());
                 self.scroll_offset = new_offset;
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -773,7 +775,6 @@ impl ChatWidget<'_> {
             tracing::info!("Browser is enabled, starting async screenshot capture...");
 
             // Clone necessary data for the async task
-            let codex_op_tx_clone = self.codex_op_tx.clone();
             let latest_browser_screenshot_clone = Arc::clone(&self.latest_browser_screenshot);
 
             tokio::spawn(async move {
@@ -934,12 +935,11 @@ impl ChatWidget<'_> {
 
         match mouse_event.kind {
             MouseEventKind::ScrollUp => {
-                // Scroll up with proper bounds checking
-                let estimated_max_scroll = self.calculate_max_scroll_offset(30);
+                // Scroll up with proper bounds using last_max_scroll from render
                 let new_offset = self
                     .scroll_offset
                     .saturating_add(3)
-                    .min(estimated_max_scroll);
+                    .min(self.last_max_scroll.get());
                 self.scroll_offset = new_offset;
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -3304,13 +3304,16 @@ impl WidgetRef for &ChatWidget<'_> {
         let (start_y, scroll_pos) = if total_height <= content_area.height {
             // Content fits - align to bottom of container
             let start_y = content_area.y + content_area.height.saturating_sub(total_height);
+            // Update last_max_scroll cache
+            self.last_max_scroll.set(0);
             (start_y, 0u16) // No scrolling needed
         } else {
             // Content overflows - calculate scroll position
             // scroll_offset of 0 = show newest at bottom
             // scroll_offset > 0 = scroll up to see older content
             let max_scroll = total_height.saturating_sub(content_area.height);
-            // Clamp scroll_offset to valid range (can't mutate in render, so just clamp for display)
+            // Update cache and clamp for display only
+            self.last_max_scroll.set(max_scroll);
             let clamped_scroll_offset = self.scroll_offset.min(max_scroll);
             (content_area.y, clamped_scroll_offset)
         };
