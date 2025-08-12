@@ -1,16 +1,27 @@
-use chrono::{DateTime, Duration, Utc};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use chrono::DateTime;
+use chrono::Duration;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::config_types::AgentConfig;
-use crate::openai_tools::{JsonSchema, OpenAiTool, ResponsesApiTool};
-use crate::protocol::{Event, EventMsg, AgentStatusUpdateEvent, AgentInfo};
+use crate::openai_tools::JsonSchema;
+use crate::openai_tools::OpenAiTool;
+use crate::openai_tools::ResponsesApiTool;
+use crate::protocol::AgentInfo;
+use crate::protocol::AgentStatusUpdateEvent;
+use crate::protocol::Event;
+use crate::protocol::EventMsg;
 
 // Agent status enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,7 +85,9 @@ impl AgentManager {
 
     async fn send_agent_status_update(&self) {
         if let Some(ref sender) = self.event_sender {
-            let agents: Vec<AgentInfo> = self.agents.values()
+            let agents: Vec<AgentInfo> = self
+                .agents
+                .values()
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
                     let name = agent.model.clone();
@@ -89,23 +102,25 @@ impl AgentManager {
                 .collect();
 
             // Get context and task from the first agent (they're all the same)
-            let (context, task) = self.agents.values().next()
+            let (context, task) = self
+                .agents
+                .values()
+                .next()
                 .map(|agent| (agent.context.clone(), agent.output_goal.clone()))
                 .unwrap_or((None, None));
 
             let event = Event {
                 id: uuid::Uuid::new_v4().to_string(),
-                msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { 
-                    agents, 
-                    context, 
-                    task 
+                msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                    agents,
+                    context,
+                    task,
                 }),
             };
 
             let _ = sender.send(event);
         }
     }
-
 
     pub async fn create_agent(
         &mut self,

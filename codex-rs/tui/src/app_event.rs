@@ -1,7 +1,9 @@
-use codex_core::config_types::{ReasoningEffort, ThemeName};
+use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
 use codex_file_search::FileMatch;
-use crossterm::event::{KeyEvent, MouseEvent};
+use crossterm::event::KeyEvent;
+use crossterm::event::MouseEvent;
 use ratatui::text::Line;
 
 use crate::app::ChatWidgetArgs;

@@ -1,11 +1,11 @@
-use crate::{
-    Result,
-    assets::{AssetManager, ImageRef},
-    manager::BrowserManager,
-    page::ScreenshotMode,
-};
+use crate::Result;
+use crate::assets::AssetManager;
+use crate::assets::ImageRef;
+use crate::manager::BrowserManager;
+use crate::page::ScreenshotMode;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::debug;
+use tracing::info;
 
 pub struct BrowserInjector {
     manager: Arc<BrowserManager>,

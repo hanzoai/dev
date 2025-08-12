@@ -6,9 +6,13 @@ pub mod manager;
 pub mod page;
 pub mod tools;
 
-pub use config::{BrowserConfig, ViewportConfig, WaitStrategy};
+pub use config::BrowserConfig;
+pub use config::ViewportConfig;
+pub use config::WaitStrategy;
 pub use manager::BrowserManager;
-pub use page::{Page, ScreenshotMode, ScreenshotRegion};
+pub use page::Page;
+pub use page::ScreenshotMode;
+pub use page::ScreenshotRegion;
 
 use thiserror::Error;
 

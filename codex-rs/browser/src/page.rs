@@ -1,23 +1,29 @@
-use crate::{
-    BrowserError, Result,
-    config::{BrowserConfig, ImageFormat, ViewportConfig, WaitStrategy},
-};
+use crate::BrowserError;
+use crate::Result;
+use crate::config::BrowserConfig;
+use crate::config::ImageFormat;
+use crate::config::ViewportConfig;
+use crate::config::WaitStrategy;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
-use chromiumoxide::cdp::browser_protocol::input::{
-    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
-};
-use chromiumoxide::cdp::browser_protocol::page::{
-    CaptureScreenshotFormat, CaptureScreenshotParams,
-};
+use chromiumoxide::cdp::browser_protocol::input::DispatchKeyEventParams;
+use chromiumoxide::cdp::browser_protocol::input::DispatchKeyEventType;
+use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventParams;
+use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventType;
+use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams;
 use chromiumoxide::page::Page as CdpPage;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::debug;
+use tracing::info;
 
 pub struct Page {
     cdp_page: Arc<CdpPage>,
     config: BrowserConfig,
     current_url: Arc<RwLock<Option<String>>>,
+    // Cache of the last viewport metrics we explicitly enforced to avoid
+    // re-applying the same device metrics (which can cause flicker/focus).
+    last_enforced_viewport: Arc<RwLock<Option<(u32, u32, f64, bool)>>>,
 }
 
 impl Page {
@@ -26,7 +32,13 @@ impl Page {
             cdp_page: Arc::new(cdp_page),
             config,
             current_url: Arc::new(RwLock::new(None)),
+            last_enforced_viewport: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Returns the current page title, if available.
+    pub async fn get_title(&self) -> Option<String> {
+        self.cdp_page.get_title().await.ok().flatten()
     }
 
     pub async fn goto(&self, url: &str, wait: Option<WaitStrategy>) -> Result<GotoResult> {
@@ -36,7 +48,7 @@ impl Page {
 
         // Navigate to the URL
         self.cdp_page.goto(url).await?;
-        
+
         // Wait according to the strategy
         match wait_strategy {
             WaitStrategy::Event(event) => match event.as_str() {
@@ -72,7 +84,7 @@ impl Page {
 
         // Get the final URL and title after navigation completes
         let title = self.cdp_page.get_title().await.ok().flatten();
-        
+
         // Try to get the URL multiple times in case it's not immediately available
         let mut final_url = None;
         for _ in 0..3 {
@@ -82,7 +94,7 @@ impl Page {
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
-        
+
         let final_url = final_url.unwrap_or_else(|| url.to_string());
 
         let mut current_url = self.current_url.write().await;
@@ -105,25 +117,95 @@ impl Page {
         }
     }
 
+    async fn ensure_viewport_if_needed(&self) -> Result<()> {
+        // Compare the current effective viewport to the desired. Only call
+        // setDeviceMetricsOverride when strictly necessary to avoid flicker
+        // and focus-stealing in headed Chrome.
+        let desired = &self.config.viewport;
+
+        // Use clientWidth/Height for a more stable reading vs inner{Width,Height}
+        let probe = self
+            .inject_js(
+                "(() => ({ w: (document.documentElement.clientWidth|0), h: (document.documentElement.clientHeight|0), dpr: (window.devicePixelRatio||1) }))()",
+            )
+            .await
+            .ok();
+
+        let mut need_resize = false;
+        if let Some(val) = probe {
+            let w = val.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let h = val.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let dpr = val.get("dpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let dpr_rounded = (dpr * 100.0).round() / 100.0;
+            let desired_dpr_rounded = (desired.device_scale_factor * 100.0).round() / 100.0;
+
+            let dims_mismatch = w != desired.width || h != desired.height;
+            // Be lenient for DPR to avoid churn due to tiny rounding diffs
+            let dpr_mismatch = (dpr_rounded - desired_dpr_rounded).abs() > 0.25;
+
+            need_resize = dims_mismatch || dpr_mismatch;
+        } else {
+            // If probing fails, don't attempt to resize.
+            need_resize = false;
+        }
+
+        if !need_resize {
+            return Ok(());
+        }
+
+        // Skip if we already enforced these exact metrics previously for this page
+        let last = { self.last_enforced_viewport.read().await.clone() };
+        let current_target = (
+            desired.width,
+            desired.height,
+            desired.device_scale_factor,
+            desired.mobile,
+        );
+        if last.as_ref() == Some(&current_target) {
+            return Ok(());
+        }
+
+        self.update_viewport(desired.clone()).await?;
+        let mut guard = self.last_enforced_viewport.write().await;
+        *guard = Some(current_target);
+        Ok(())
+    }
+
     pub async fn screenshot_viewport(&self) -> Result<Vec<Screenshot>> {
-        debug!("Taking viewport screenshot");
+        debug!("Taking viewport screenshot (clipped, no resize)");
 
         let format = match self.config.format {
             ImageFormat::Png => CaptureScreenshotFormat::Png,
             ImageFormat::Webp => CaptureScreenshotFormat::Webp,
         };
 
+        // Compute a stable clip based on document size to avoid resizing/focus
+        let lm = self.cdp_page.layout_metrics().await?;
+        let content = lm.css_content_size;
+        let doc_w = content.width.ceil() as u32;
+        let doc_h = content.height.ceil() as u32;
+        let target_w = self.config.viewport.width.min(doc_w);
+        let target_h = self.config.viewport.height.min(doc_h);
+
         let params = CaptureScreenshotParams::builder()
             .format(format)
-            .capture_beyond_viewport(false)
+            .from_surface(true)
+            .capture_beyond_viewport(true)
+            .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: target_w as f64,
+                height: target_h as f64,
+                scale: 1.0,
+            })
             .build();
 
         let data = self.cdp_page.screenshot(params).await?;
 
         Ok(vec![Screenshot {
             data,
-            width: self.config.viewport.width,
-            height: self.config.viewport.height,
+            width: target_w,
+            height: target_h,
             format: self.config.format,
         }])
     }
@@ -165,7 +247,12 @@ impl Page {
                 .build();
 
             let data = self.cdp_page.screenshot(params).await?;
-            shots.push(Screenshot { data, width: vw, height: h, format: self.config.format });
+            shots.push(Screenshot {
+                data,
+                width: vw,
+                height: h,
+                format: self.config.format,
+            });
 
             y += h;
             taken += 1;

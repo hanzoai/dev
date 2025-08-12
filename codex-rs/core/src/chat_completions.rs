@@ -46,17 +46,42 @@ pub(crate) async fn stream_chat_completions(
     for item in &input {
         match item {
             ResponseItem::Message { role, content, .. } => {
-                let mut text = String::new();
-                for c in content {
-                    match c {
-                        ContentItem::InputText { text: t }
-                        | ContentItem::OutputText { text: t } => {
-                            text.push_str(t);
+                // If the message contains any images, we must use the
+                // multi-modal array form supported by Chat Completions:
+                //   [{ type: "text", text: "..." }, { type: "image_url", image_url: { url: "data:..." } }]
+                let contains_image = content.iter().any(|c| matches!(c, ContentItem::InputImage { .. }));
+
+                if contains_image {
+                    let mut parts = Vec::<serde_json::Value>::new();
+                    for c in content {
+                        match c {
+                            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                                parts.push(json!({ "type": "text", "text": text }));
+                            }
+                            ContentItem::InputImage { image_url } => {
+                                parts.push(json!({
+                                    "type": "image_url",
+                                    "image_url": { "url": image_url }
+                                }));
+                            }
                         }
-                        _ => {}
                     }
+                    messages.push(json!({"role": role, "content": parts}));
+                } else {
+                    // Text-only messages can be sent as a single string for
+                    // maximal compatibility with providers that only accept
+                    // plain text in Chat Completions.
+                    let mut text = String::new();
+                    for c in content {
+                        match c {
+                            ContentItem::InputText { text: t } | ContentItem::OutputText { text: t } => {
+                                text.push_str(t);
+                            }
+                            _ => {}
+                        }
+                    }
+                    messages.push(json!({"role": role, "content": text}));
                 }
-                messages.push(json!({"role": role, "content": text}));
             }
             ResponseItem::FunctionCall {
                 name,

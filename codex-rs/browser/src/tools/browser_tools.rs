@@ -1,11 +1,13 @@
-use crate::{
-    Result,
-    assets::{AssetManager, ImageRef},
-    config::WaitStrategy,
-    manager::BrowserManager,
-    page::{ScreenshotMode, ScreenshotRegion, SetViewportParams},
-};
-use serde::{Deserialize, Serialize};
+use crate::Result;
+use crate::assets::AssetManager;
+use crate::assets::ImageRef;
+use crate::config::WaitStrategy;
+use crate::manager::BrowserManager;
+use crate::page::ScreenshotMode;
+use crate::page::ScreenshotRegion;
+use crate::page::SetViewportParams;
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
 
 pub struct BrowserTools {
