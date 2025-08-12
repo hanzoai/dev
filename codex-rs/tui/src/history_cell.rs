@@ -322,8 +322,12 @@ impl HistoryCell {
                 processed_lines.len() as u16
             }
             HistoryCell::StyledText { view } => {
-                // For styled text, use the lines as-is without markdown processing
-                view.lines.len() as u16
+                // For styled text, respect wrapping to the available width
+                Paragraph::new(Text::from(view.lines.clone()))
+                    .wrap(Wrap { trim: false })
+                    .line_count(width)
+                    .try_into()
+                    .unwrap_or(0)
             }
             HistoryCell::DimmedReasoning { view: _ } => {
                 // For dimmed reasoning, use dimmed markdown processing
