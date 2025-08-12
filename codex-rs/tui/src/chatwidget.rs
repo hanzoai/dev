@@ -121,7 +121,6 @@ struct UserMessage {
 struct AgentInfo {
     name: String,
     status: AgentStatus,
-    started_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -572,26 +571,6 @@ impl ChatWidget<'_> {
         });
     }
 
-    /// Calculate the total height of all content items for scrolling bounds
-    fn calculate_total_content_height(&self, width: u16) -> u16 {
-        let mut all_content = Vec::new();
-        
-        // Add history cells
-        for cell in &self.history_cells {
-            all_content.push(cell);
-        }
-        
-        // Note: Streaming content height is calculated separately in the main render loop
-        
-        // Calculate total height
-        let mut total_height = 0u16;
-        for item in &all_content {
-            let h = item.desired_height(width);
-            total_height += h;
-        }
-        
-        total_height
-    }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
         let UserMessage { text, image_paths } = user_message;
@@ -1110,11 +1089,6 @@ impl ChatWidget<'_> {
                             "completed" => AgentStatus::Completed,
                             "failed" => AgentStatus::Failed,
                             _ => AgentStatus::Pending,
-                        },
-                        started_at: if agent.status == "running" {
-                            Some(std::time::Instant::now())
-                        } else {
-                            None
                         },
                     });
                 }
