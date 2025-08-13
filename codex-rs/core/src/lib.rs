@@ -16,7 +16,6 @@ pub mod debug_logger;
 pub mod slash_commands;
 pub use codex::Codex;
 pub use codex::CodexSpawnOk;
-pub mod codex_wrapper;
 mod codex_conversation;
 pub use codex_conversation::CodexConversation;
 pub mod config;

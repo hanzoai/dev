@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::citation_regex::CITATION_REGEX;
 use codex_core::config::Config;
 use codex_core::config_types::UriBasedFileOpener;
