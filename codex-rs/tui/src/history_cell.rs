@@ -470,7 +470,7 @@ impl HistoryCell {
     }
 
     fn new_parsed_command(
-        command: &[String],
+        _command: &[String],
         parsed_commands: &[ParsedCommand],
         output: Option<&CommandOutput>,
     ) -> Vec<Line<'static>> {

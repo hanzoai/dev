@@ -1,0 +1,3 @@
+Test the following JavaScript code in a browser at https://example.com:
+
+(() => { return { test: 'iife-works' }; })()
