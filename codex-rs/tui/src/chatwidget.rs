@@ -27,6 +27,8 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::InputItem;
+use codex_core::protocol::CustomToolCallBeginEvent;
+use codex_core::protocol::CustomToolCallEndEvent;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
@@ -1364,6 +1366,32 @@ impl ChatWidget<'_> {
                         .as_ref()
                         .map(|r| r.is_error.unwrap_or(false))
                         .unwrap_or(false),
+                    result,
+                ));
+            }
+            EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+                call_id: _,
+                tool_name,
+                parameters,
+            }) => {
+                self.finalize_active_stream();
+                self.add_to_history(HistoryCell::new_active_custom_tool_call(
+                    tool_name,
+                    parameters,
+                ));
+            }
+            EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+                call_id: _,
+                tool_name,
+                parameters,
+                duration,
+                result,
+            }) => {
+                self.add_to_history(HistoryCell::new_completed_custom_tool_call(
+                    80,
+                    tool_name,
+                    parameters,
+                    duration,
                     result,
                 ));
             }

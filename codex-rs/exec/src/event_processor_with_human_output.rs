@@ -521,6 +521,35 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 // Currently ignored in exec output.
             }
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,
+            EventMsg::CustomToolCallBegin(event) => {
+                ts_println!(
+                    self,
+                    "{} {}",
+                    "tool".style(self.magenta),
+                    event.tool_name.style(self.bold),
+                );
+                if let Some(params) = &event.parameters {
+                    if let Ok(formatted) = serde_json::to_string_pretty(params) {
+                        for line in formatted.lines() {
+                            println!("{}", line.style(self.dimmed));
+                        }
+                    }
+                }
+            }
+            EventMsg::CustomToolCallEnd(event) => {
+                let status = if event.result.is_ok() {
+                    "success".style(self.green)
+                } else {
+                    "failed".style(self.red)
+                };
+                ts_println!(
+                    self,
+                    "{} {} {}",
+                    "tool".style(self.magenta),
+                    event.tool_name.style(self.bold),
+                    status,
+                );
+            }
         }
         CodexStatus::Running
     }
