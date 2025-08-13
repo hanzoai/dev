@@ -17,6 +17,7 @@ mod chat_composer;
 mod chat_composer_history;
 mod command_popup;
 mod file_search_popup;
+mod live_ring_widget;
 mod popup_consts;
 mod reasoning_selection_view;
 mod scroll_state;
@@ -93,7 +94,6 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        let overlay_status_h: u16 = 0;
         let ring_h = self
             .live_ring
             .as_ref()
@@ -107,7 +107,7 @@ impl BottomPane<'_> {
             1 + self.composer.desired_height(width)
         };
 
-        overlay_status_h
+        ring_h
             .saturating_add(view_height)
             .saturating_add(Self::BOTTOM_PAD_LINES)
     }

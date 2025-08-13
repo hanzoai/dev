@@ -22,6 +22,7 @@ use textwrap::Options as TwOptions;
 use textwrap::WordSplitter;
 
 /// Insert `lines` above the viewport.
+#[allow(dead_code)]
 pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line>) {
     let mut out = std::io::stdout();
     insert_history_lines_to_writer(terminal, &mut out, lines);
@@ -29,8 +30,9 @@ pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line>) {
 
 /// Like `insert_history_lines`, but writes ANSI to the provided writer. This
 /// is intended for testing where a capture buffer is used instead of stdout.
+#[allow(dead_code)]
 pub fn insert_history_lines_to_writer<B, W>(
-    terminal: &mut crate::custom_terminal::Terminal<B>,
+    terminal: &mut ratatui::Terminal<B>,
     writer: &mut W,
     lines: Vec<Line>,
 ) where

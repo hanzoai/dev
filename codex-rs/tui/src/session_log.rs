@@ -150,7 +150,7 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
             });
             LOGGER.write_json_line(value);
         }
-        AppEvent::DispatchCommand(cmd) => {
+        AppEvent::DispatchCommand(cmd, _text) => {
             let value = json!({
                 "ts": now_ts(),
                 "dir": "to_tui",
