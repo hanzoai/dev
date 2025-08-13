@@ -32,6 +32,35 @@ impl Page {
         }
     }
 
+    /// Helper function to capture screenshot with retry logic.
+    /// First tries with from_surface(false) to avoid flashing.
+    /// If that fails, retries with from_surface(true) for when window is not visible.
+    async fn capture_screenshot_with_retry(
+        &self,
+        params_builder: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParamsBuilder,
+    ) -> Result<chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotReturns> {
+        // First try with from_surface(false) to avoid flashing
+        let params = params_builder.clone().from_surface(false).build();
+        
+        match self.cdp_page.execute(params).await {
+            Ok(resp) => Ok(resp.result),
+            Err(e) => {
+                // Log the initial failure
+                debug!("Screenshot with from_surface(false) failed: {}. Retrying with from_surface(true)...", e);
+                
+                // Retry with from_surface(true) - this may cause flashing but will work when window is not visible
+                let retry_params = params_builder.from_surface(true).build();
+                match self.cdp_page.execute(retry_params).await {
+                    Ok(resp) => Ok(resp.result),
+                    Err(retry_err) => {
+                        debug!("Screenshot retry with from_surface(true) also failed: {}", retry_err);
+                        Err(retry_err.into())
+                    }
+                }
+            }
+        }
+    }
+
     /// Returns the current page title, if available.
     pub async fn get_title(&self) -> Option<String> {
         self.cdp_page.get_title().await.ok().flatten()
@@ -150,9 +179,8 @@ impl Page {
         let target_w = vw.min(self.config.viewport.width);
         let target_h = vh.min(self.config.viewport.height);
 
-        let params = CaptureScreenshotParams::builder()
+        let params_builder = CaptureScreenshotParams::builder()
             .format(format)
-            .from_surface(false)
             .capture_beyond_viewport(true)
             .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                 x: 0.0,
@@ -160,11 +188,10 @@ impl Page {
                 width: target_w as f64,
                 height: target_h as f64,
                 scale: 1.0,
-            })
-            .build();
+            });
 
-        // Use raw execute to avoid any helper that might front the tab
-        let resp = self.cdp_page.execute(params).await?;
+        // Use our retry logic to handle cases where window is not visible
+        let resp = self.capture_screenshot_with_retry(params_builder).await?;
         let data_b64: &str = resp.data.as_ref();
         let data = base64::engine::general_purpose::STANDARD
             .decode(data_b64.as_bytes())
@@ -201,9 +228,8 @@ impl Page {
 
         while y < doc_h && taken < segments_max {
             let h = vh.min(doc_h - y); // last slice may be shorter
-            let params = CaptureScreenshotParams::builder()
+            let params_builder = CaptureScreenshotParams::builder()
                 .format(format.clone())
-                .from_surface(false)
                 .capture_beyond_viewport(true) // key to avoid scrolling/flash
                 .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                     x: 0.0,
@@ -211,10 +237,9 @@ impl Page {
                     width: vw as f64,
                     height: h as f64,
                     scale: 1.0,
-                })
-                .build();
+                });
 
-            let resp = self.cdp_page.execute(params).await?;
+            let resp = self.capture_screenshot_with_retry(params_builder).await?;
             let data_b64: &str = resp.data.as_ref();
             let data = base64::engine::general_purpose::STANDARD
                 .decode(data_b64.as_bytes())
@@ -248,19 +273,17 @@ impl Page {
             ImageFormat::Webp => CaptureScreenshotFormat::Webp,
         };
 
-        let params = CaptureScreenshotParams::builder()
+        let params_builder = CaptureScreenshotParams::builder()
             .format(format)
-            .from_surface(false)
             .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
                 x: region.x as f64,
                 y: region.y as f64,
                 width: region.width as f64,
                 height: region.height as f64,
                 scale: 1.0,
-            })
-            .build();
+            });
 
-        let resp = self.cdp_page.execute(params).await?;
+        let resp = self.capture_screenshot_with_retry(params_builder).await?;
         let data_b64: &str = resp.data.as_ref();
         let data = base64::engine::general_purpose::STANDARD
             .decode(data_b64.as_bytes())
@@ -400,149 +423,116 @@ impl Page {
             &code.chars().take(100).collect::<String>()
         );
 
-        // Helper to check if a line looks like an expression that should be returned
-        let is_expression_line = |line: &str| -> bool {
-            let line = line.trim();
-            if line.is_empty() {
-                return false;
-            }
+        // Create the user code with sourceURL for better debugging
+        let user_code_with_source = format!("{}\n//# sourceURL=browser_js_user_code.js", code);
 
-            // Skip lines that are already returns or start with control keywords
-            let control_keywords = [
-                "return", "const", "let", "var", "class", "function", "async", "if", "for",
-                "while", "switch", "try", "catch", "finally", "throw", "import", "export", "yield",
-                "await", "break", "continue", "debugger",
-            ];
-
-            for keyword in &control_keywords {
-                if line.starts_with(keyword)
-                    && (line.len() == keyword.len()
-                        || line
-                            .chars()
-                            .nth(keyword.len())
-                            .map_or(false, |c| !c.is_alphanumeric()))
-                {
-                    return false;
-                }
-            }
-
-            // Skip lines that end with block closures
-            if line.starts_with('}') {
-                return false;
-            }
-
-            true
-        };
-
-        // Analyze the code
-        let lines: Vec<&str> = code.split('\n').collect();
-        let mut last_expr_line = None;
-        let mut has_explicit_return = false;
-
-        // Scan for significant lines from the end
-        for (i, line) in lines.iter().enumerate().rev() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with("//") {
-                continue;
-            }
-
-            if line.starts_with("return") {
-                has_explicit_return = true;
-                break;
-            }
-
-            if last_expr_line.is_none() && is_expression_line(line) {
-                last_expr_line = Some(i);
-                if !line.ends_with(';') && !line.ends_with('}') {
-                    break;
-                }
-            }
-        }
-
-        // Build the function body
-        let body = if has_explicit_return {
-            code.to_string()
-        } else if let Some(expr_line_idx) = last_expr_line {
-            let prefix = lines[..expr_line_idx].join("\n");
-            let expr_line = lines[expr_line_idx].trim();
-            let suffix = lines[expr_line_idx + 1..].join("\n");
-
-            // Handle object literals and array literals - wrap in parentheses
-            let wrapped_expr = if expr_line.starts_with('{') || expr_line.starts_with('[') {
-                format!("({})", expr_line)
-            } else {
-                expr_line.to_string()
-            };
-
-            format!("{}\nreturn {};\n{}", prefix, wrapped_expr, suffix)
-        } else {
-            // Try to capture the last variable defined
-            let var_regex =
-                regex::Regex::new(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=").unwrap();
-            if let Some(captures) = var_regex.captures(code) {
-                if let Some(var_name) = captures.get(1) {
-                    format!(
-                        "{}; return typeof {} !== 'undefined' ? {} : undefined;",
-                        code,
-                        var_name.as_str(),
-                        var_name.as_str()
-                    )
-                } else {
-                    code.to_string()
-                }
-            } else {
-                code.to_string()
-            }
-        };
-
-        // Wrap in async IIFE with error handling and console.log capture
+        // Use the improved JavaScript harness
         let wrapped = format!(
-            r#"
-(async () => {{
-    const __logs = [];
-    const __origLog = console.log;
-    
-    function safe(arg) {{
-        if (arg === null || typeof arg !== 'object') return String(arg);
-        try {{ return JSON.stringify(arg); }} catch {{ return '[Circular]'; }}
+            r#"(async () => {{
+  const __meta = {{ startTs: Date.now(), urlBefore: location.href }};
+  const __logs = [];
+  const __errs = [];
+
+  const __orig = {{
+    log: console.log, warn: console.warn, error: console.error, debug: console.debug
+  }};
+
+  function __normalize(v, d = 0) {{
+    const MAX_DEPTH = 3, MAX_STR = 4000;
+    if (d > MAX_DEPTH) return {{ __type: 'truncated' }};
+    if (v === undefined) return {{ __type: 'undefined' }};
+    if (v === null || typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v === 'string') return v.length > MAX_STR ? v.slice(0, MAX_STR) + '…' : v;
+    if (typeof v === 'bigint') return {{ __type: 'bigint', value: v.toString() + 'n' }};
+    if (typeof v === 'symbol') return {{ __type: 'symbol', value: String(v) }};
+    if (typeof v === 'function') return {{ __type: 'function', name: v.name || '' }};
+
+    if (typeof Element !== 'undefined' && v instanceof Element) {{
+      return {{
+        __type: 'element',
+        tag: v.tagName, id: v.id || null, class: v.className || null,
+        text: (v.textContent || '').trim().slice(0, 200)
+      }};
     }}
-    
-    console.log = function(...args) {{
-        __logs.push(args.map(safe).join(' '));
-        __origLog.apply(console, args);
+    try {{ return JSON.parse(JSON.stringify(v)); }} catch {{}}
+
+    if (Array.isArray(v)) return v.slice(0, 50).map(x => __normalize(x, d + 1));
+
+    const out = Object.create(null);
+    let n = 0;
+    for (const k in v) {{
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      out[k] = __normalize(v[k], d + 1);
+      if (++n >= 50) {{ out.__truncated = true; break; }}
+    }}
+    return out;
+  }}
+
+  const __push = (level, args) => {{
+    __logs.push({{ level, args: args.map(a => __normalize(a)) }});
+  }};
+  console.log  = (...a) => {{ __push('log', a);  __orig.log(...a);  }};
+  console.warn = (...a) => {{ __push('warn', a); __orig.warn(...a); }};
+  console.error= (...a) => {{ __push('error',a); __orig.error(...a); }};
+  console.debug= (...a) => {{ __push('debug',a); __orig.debug(...a); }};
+
+  window.addEventListener('error', e => {{
+    try {{ __errs.push(String(e.error || e.message || e)); }} catch {{ __errs.push('window.error'); }}
+  }});
+  window.addEventListener('unhandledrejection', e => {{
+    try {{ __errs.push('unhandledrejection: ' + String(e.reason)); }} catch {{ __errs.push('unhandledrejection'); }}
+  }});
+
+  try {{
+    const AsyncFunction = Object.getPrototypeOf(async function(){{}}).constructor;
+    const __userCode = {0};
+    const evaluator = new AsyncFunction('__code', '"use strict"; return eval(__code);');
+    const raw = await evaluator(__userCode);
+    const value = (raw === undefined ? null : __normalize(raw));
+
+    return {{
+      success: true,
+      value,
+      logs: __logs,
+      errors: __errs,
+      meta: {{
+        urlBefore: __meta.urlBefore,
+        urlAfter: location.href,
+        durationMs: Date.now() - __meta.startTs
+      }}
     }};
-    
-    try {{
-        const AsyncFunction = Object.getPrototypeOf(async function(){{}}).constructor;
-        const __userCode = {};
-        const fn = new AsyncFunction(__userCode);
-        const value = await fn();
-        return {{
-            success: true,
-            value: (value === undefined && __logs.length > 0) ? __logs[__logs.length-1] : value,
-            logs: __logs
-        }};
-    }} catch (err) {{
-        return {{
-            success: false,
-            error: err.toString() + (err.stack ? '\n' + err.stack : ''),
-            logs: __logs
-        }};
-    }} finally {{
-        console.log = __origLog;
-    }}
-}})()
-"#,
-            serde_json::to_string(&body).unwrap()
+  }} catch (err) {{
+    return {{
+      success: false,
+      value: null,
+      error: String(err),
+      stack: (err && err.stack) ? String(err.stack) : '',
+      logs: __logs,
+      errors: __errs
+    }};
+  }} finally {{
+    console.log = __orig.log;
+    console.warn = __orig.warn;
+    console.error = __orig.error;
+    console.debug = __orig.debug;
+  }}
+}})()"#,
+            serde_json::to_string(&user_code_with_source).unwrap()
         );
 
         tracing::debug!("Executing JavaScript code: {}", code);
         tracing::debug!("Wrapped code: {}", wrapped);
 
+        // Execute the wrapped code - chromiumoxide's evaluate method handles async functions
         let result = self.cdp_page.evaluate(wrapped).await?;
         let result_value = result.value().cloned().unwrap_or(serde_json::Value::Null);
 
         tracing::info!("JavaScript execution result: {}", result_value);
+
+        // Give a brief moment for potential navigation triggered by the script
+        // (e.g., element.click(), location changes) to take effect before
+        // downstream consumers capture screenshots.
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
         Ok(result_value)
     }
