@@ -3297,11 +3297,6 @@ async fn handle_browser_open(
                             Err(e) => {
                                 tracing::warn!("Screenshot capture failed after navigation: {}", e);
                             }
-                        } else {
-                            tracing::warn!(
-                                "Failed to capture screenshot after navigation to {}",
-                                url
-                            );
                         }
 
                         ResponseInputItem::FunctionCallOutput {
@@ -3444,7 +3439,7 @@ async fn handle_browser_click(
                 match browser_manager.click(x, y).await {
                     Ok(_) => {
                         // Capture screenshot after clicking
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
@@ -3502,7 +3497,7 @@ async fn handle_browser_type(
                 match browser_manager.type_text(text).await {
                     Ok(_) => {
                         // Capture screenshot after typing
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
@@ -3560,7 +3555,7 @@ async fn handle_browser_key(
                 match browser_manager.press_key(key).await {
                     Ok(_) => {
                         // Capture screenshot after pressing key
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
@@ -3667,7 +3662,7 @@ async fn handle_browser_javascript(
                         tracing::info!("Returning to LLM: {}", formatted_result);
 
                         // Capture screenshot after executing JavaScript
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
@@ -3725,7 +3720,7 @@ async fn handle_browser_scroll(
 
                 match browser_manager.scroll_by(dx, dy).await {
                     Ok(_) => {
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
@@ -3803,7 +3798,7 @@ async fn handle_browser_history(
 
                 match action_res {
                     Ok(_) => {
-                        if let Some((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
                         {
                             add_pending_screenshot(sess, screenshot_path, url);
                         }
