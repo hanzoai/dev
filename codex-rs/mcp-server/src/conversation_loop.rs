@@ -108,7 +108,9 @@ pub async fn run_conversation_loop(
                     | EventMsg::PlanUpdate(_)
                     | EventMsg::BrowserScreenshotUpdate(_)
                     | EventMsg::AgentStatusUpdate(_)
-                    | EventMsg::ShutdownComplete => {
+                    | EventMsg::ShutdownComplete
+                    | EventMsg::CustomToolCallBegin(_)
+                    | EventMsg::CustomToolCallEnd(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that
                         // send(codex_event_to_notification(&event)) above has

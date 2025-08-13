@@ -140,7 +140,22 @@ impl Prompt {
                 content: vec![ContentItem::InputText { text: ui }],
             });
         }
-        input_with_instructions.extend(self.input.clone());
+        // Deduplicate function call outputs before adding to input
+        let mut seen_call_ids = std::collections::HashSet::new();
+        for item in &self.input {
+            match item {
+                ResponseItem::FunctionCallOutput { call_id, .. } => {
+                    if !seen_call_ids.insert(call_id.clone()) {
+                        // Skip duplicate function call output
+                        tracing::debug!("Filtering duplicate FunctionCallOutput with call_id: {} from input", call_id);
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            input_with_instructions.push(item.clone());
+        }
+        
         // Add ephemeral items at the end so they're fresh for each request
         input_with_instructions.extend(self.ephemeral_items.clone());
         input_with_instructions
@@ -155,9 +170,9 @@ pub enum ResponseEvent {
         response_id: String,
         token_usage: Option<TokenUsage>,
     },
-    OutputTextDelta(String),
-    ReasoningSummaryDelta(String),
-    ReasoningContentDelta(String),
+    OutputTextDelta { delta: String, item_id: Option<String> },
+    ReasoningSummaryDelta { delta: String, item_id: Option<String> },
+    ReasoningContentDelta { delta: String, item_id: Option<String> },
 }
 
 #[derive(Debug, Serialize)]
