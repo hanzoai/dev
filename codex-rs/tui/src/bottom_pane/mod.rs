@@ -17,7 +17,6 @@ mod chat_composer;
 mod chat_composer_history;
 mod command_popup;
 mod file_search_popup;
-mod live_ring_widget;
 mod popup_consts;
 mod reasoning_selection_view;
 mod scroll_state;
@@ -102,20 +101,13 @@ impl BottomPane<'_> {
             .unwrap_or(0);
 
         let view_height = if let Some(view) = self.active_view.as_ref() {
-            // Add a single blank spacer line between live ring and status view when active.
-            let spacer = if self.live_ring.is_some() && self.status_view_active {
-                1
-            } else {
-                0
-            };
-            spacer + view.desired_height(width)
+            view.desired_height(width)
         } else {
             // Add 1 for the empty line above the composer
             1 + self.composer.desired_height(width)
         };
 
         overlay_status_h
-            .saturating_add(ring_h)
             .saturating_add(view_height)
             .saturating_add(Self::BOTTOM_PAD_LINES)
     }
@@ -396,7 +388,6 @@ impl WidgetRef for &BottomPane<'_> {
             // Leave one empty line
             y_offset = y_offset.saturating_add(1);
         }
-        // Status is now shown in the composer title, no need for separate rendering
 
         if let Some(view) = &self.active_view {
             if y_offset < area.height {
@@ -438,15 +429,12 @@ mod tests {
     use crate::app_event::AppEvent;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use ratatui::text::Line;
-    use std::path::PathBuf;
     use std::sync::mpsc::channel;
 
     fn exec_request() -> ApprovalRequest {
         ApprovalRequest::Exec {
             id: "1".to_string(),
             command: vec!["echo".into(), "ok".into()],
-            cwd: PathBuf::from("."),
             reason: None,
         }
     }
@@ -563,6 +551,7 @@ mod tests {
             "expected Coding header in status line: {r3:?}"
         );
     }
+    // live ring removed; related tests deleted.
 
     #[test]
     fn overlay_not_shown_above_approval_modal() {

@@ -9,6 +9,7 @@ use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::should_show_login_screen;
 use crate::slash_command::SlashCommand;
 use crate::tui;
+use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
@@ -28,7 +29,7 @@ use std::thread;
 use std::time::Duration;
 
 /// Time window for debouncing redraw requests.
-const REDRAW_DEBOUNCE: Duration = Duration::from_millis(10);
+const REDRAW_DEBOUNCE: Duration = Duration::from_millis(1);
 
 /// Top-level application state: which full-screen view is currently active.
 #[allow(clippy::large_enum_variant)]
@@ -45,6 +46,7 @@ enum AppState<'a> {
 }
 
 pub(crate) struct App<'a> {
+    server: Arc<ConversationManager>,
     app_event_tx: AppEventSender,
     app_event_rx: Receiver<AppEvent>,
     app_state: AppState<'a>,
@@ -61,6 +63,9 @@ pub(crate) struct App<'a> {
     
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
+
+    /// Controls the animation thread that sends CommitTick events.
+    commit_anim_running: Arc<AtomicBool>,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -81,6 +86,8 @@ impl App<'_> {
         show_trust_screen: bool,
         debug: bool,
     ) -> Self {
+        let conversation_manager = Arc::new(ConversationManager::default());
+
         let (app_event_tx, app_event_rx) = channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         let pending_redraw = Arc::new(AtomicBool::new(false));
@@ -109,10 +116,8 @@ impl App<'_> {
                                     app_event_tx.send(AppEvent::RequestRedraw);
                                 }
                                 crossterm::event::Event::Paste(pasted) => {
-                                    // Many terminals convert newlines to \r when
-                                    // pasting, e.g. [iTerm2][]. But [tui-textarea
-                                    // expects \n][tui-textarea]. This seems like a bug
-                                    // in tui-textarea IMO, but work around it for now.
+                                    // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
+                                    // but tui-textarea expects \n. Normalize CR to LF.
                                     // [tui-textarea]: https://github.com/rhysd/tui-textarea/blob/4d18622eeac13b309e0ff6a55a46ac6706da68cf/src/textarea.rs#L782-L783
                                     // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
                                     let pasted = pasted.replace("\r", "\n");
@@ -154,6 +159,7 @@ impl App<'_> {
         } else {
             let chat_widget = ChatWidget::new(
                 config.clone(),
+                conversation_manager.clone(),
                 app_event_tx.clone(),
                 initial_prompt,
                 initial_images,
@@ -166,6 +172,7 @@ impl App<'_> {
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         Self {
+            server: conversation_manager,
             app_event_tx,
             app_event_rx,
             app_state,
@@ -174,6 +181,7 @@ impl App<'_> {
             pending_redraw,
             enhanced_keys_supported,
             _debug: debug,
+            commit_anim_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -190,7 +198,7 @@ impl App<'_> {
         // redraw is already pending so we can return early.
         if self
             .pending_redraw
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             return;
@@ -201,7 +209,7 @@ impl App<'_> {
         thread::spawn(move || {
             thread::sleep(REDRAW_DEBOUNCE);
             tx.send(AppEvent::Redraw);
-            pending_redraw.store(false, Ordering::SeqCst);
+            pending_redraw.store(false, Ordering::Release);
         });
     }
 
@@ -221,6 +229,30 @@ impl App<'_> {
                 }
                 AppEvent::Redraw => {
                     std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
+                }
+                AppEvent::StartCommitAnimation => {
+                    if self
+                        .commit_anim_running
+                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        let tx = self.app_event_tx.clone();
+                        let running = self.commit_anim_running.clone();
+                        thread::spawn(move || {
+                            while running.load(Ordering::Relaxed) {
+                                thread::sleep(Duration::from_millis(50));
+                                tx.send(AppEvent::CommitTick);
+                            }
+                        });
+                    }
+                }
+                AppEvent::StopCommitAnimation => {
+                    self.commit_anim_running.store(false, Ordering::Release);
+                }
+                AppEvent::CommitTick => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_commit_tick();
+                    }
                 }
                 AppEvent::KeyEvent(key_event) => {
                     match key_event {
@@ -260,20 +292,6 @@ impl App<'_> {
                             }
                             AppState::Onboarding { .. } => {
                                 self.app_event_tx.send(AppEvent::ExitRequest);
-                            }
-                        },
-                        KeyEvent {
-                            code: KeyCode::Esc,
-                            kind: KeyEventKind::Press,
-                            ..
-                        } => match &mut self.app_state {
-                            AppState::Chat { widget } => {
-                                if !widget.on_esc() {
-                                    self.dispatch_key_event(key_event);
-                                }
-                            }
-                            AppState::Onboarding { .. } => {
-                                self.dispatch_key_event(key_event);
                             }
                         },
                         KeyEvent {
@@ -317,7 +335,7 @@ impl App<'_> {
                             self.dispatch_key_event(key_event);
                         }
                         _ => {
-                            // Ignore Release key events for now.
+                            // Ignore Release key events.
                         }
                     };
                 }
@@ -346,6 +364,7 @@ impl App<'_> {
                         // User accepted – switch to chat view.
                         let new_widget = Box::new(ChatWidget::new(
                             self.config.clone(),
+                            self.server.clone(),
                             self.app_event_tx.clone(),
                             None,
                             Vec::new(),
@@ -569,6 +588,7 @@ impl App<'_> {
                     self.app_state = AppState::Chat {
                         widget: Box::new(ChatWidget::new(
                             config,
+                            self.server.clone(),
                             app_event_tx.clone(),
                             initial_prompt,
                             initial_images,
