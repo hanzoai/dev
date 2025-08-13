@@ -507,6 +507,18 @@ impl BrowserManager {
         self.config.try_read().map(|c| c.enabled).unwrap_or(false)
     }
 
+    /// Get a description of the browser connection type
+    pub async fn get_browser_type(&self) -> String {
+        let config = self.config.read().await;
+        if config.connect_ws.is_some() || config.connect_port.is_some() {
+            "CDP-connected to user's Chrome browser".to_string()
+        } else if config.headless {
+            "internal headless Chrome browser".to_string()
+        } else {
+            "internal Chrome browser (headed mode)".to_string()
+        }
+    }
+
     pub async fn set_enabled(&self, enabled: bool) -> Result<()> {
         let mut config = self.config.write().await;
         config.enabled = enabled;
@@ -896,6 +908,24 @@ impl BrowserManager {
     pub async fn execute_javascript(&self, code: &str) -> Result<serde_json::Value> {
         let page = self.get_or_create_page().await?;
         page.execute_javascript(code).await
+    }
+
+    /// Scroll the page by the given delta in pixels
+    pub async fn scroll_by(&self, dx: f64, dy: f64) -> Result<()> {
+        let page = self.get_or_create_page().await?;
+        page.scroll_by(dx, dy).await
+    }
+
+    /// Navigate browser history backward one entry
+    pub async fn history_back(&self) -> Result<()> {
+        let page = self.get_or_create_page().await?;
+        page.go_back().await
+    }
+
+    /// Navigate browser history forward one entry
+    pub async fn history_forward(&self) -> Result<()> {
+        let page = self.get_or_create_page().await?;
+        page.go_forward().await
     }
 
     /// Set a callback to be called when navigation occurs

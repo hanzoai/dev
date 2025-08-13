@@ -163,6 +163,9 @@ pub struct Config {
 
     /// The value for the `originator` header included with Responses API requests.
     pub internal_originator: Option<String>,
+    
+    /// Enable debug logging of LLM requests and responses
+    pub debug: bool,
 }
 
 impl Config {
@@ -494,6 +497,7 @@ pub struct ConfigOverrides {
     pub include_plan_tool: Option<bool>,
     pub disable_response_storage: Option<bool>,
     pub show_raw_agent_reasoning: Option<bool>,
+    pub debug: Option<bool>,
 }
 
 impl Config {
@@ -519,6 +523,7 @@ impl Config {
             include_plan_tool,
             disable_response_storage,
             show_raw_agent_reasoning,
+            debug,
         } = overrides;
 
         let config_profile = match config_profile_key.as_ref().or(cfg.profile.as_ref()) {
@@ -673,6 +678,7 @@ impl Config {
             experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
             internal_originator: cfg.internal_originator,
+            debug: debug.unwrap_or(false),
         };
         Ok(config)
     }
