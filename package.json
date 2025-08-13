@@ -3,8 +3,8 @@
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
-    "format": "prettier --check *.json *.md .github/workflows/*.yml",
-    "format:fix": "prettier --write *.json *.md .github/workflows/*.yml",
+    "format": "prettier --check *.json *.md .github/workflows/*.yml **/*.js",
+    "format:fix": "prettier --write *.json *.md .github/workflows/*.yml **/*.js",
     "build": "cd codex-rs && cargo build --release --bin coder --bin coder-tui --bin coder-exec",
     "build:dev": "cd codex-rs && cargo build --bin coder --bin coder-tui --bin coder-exec",
     "build:quick": "cd codex-rs && cargo build --release --bin coder",

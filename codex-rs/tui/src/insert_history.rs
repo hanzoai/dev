@@ -2,31 +2,94 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 
+use crate::tui;
 use crossterm::Command;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
+use crossterm::style::Color as CColor;
 use crossterm::style::Colors;
 use crossterm::style::Print;
 use crossterm::style::SetAttribute;
+use crossterm::style::SetBackgroundColor;
 use crossterm::style::SetColors;
+use crossterm::style::SetForegroundColor;
+use ratatui::layout::Size;
+use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use textwrap::Options as TwOptions;
+use textwrap::WordSplitter;
 
 /// Insert `lines` above the viewport.
-/// Writes ANSI to the provided writer. This
+pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line>) {
+    let mut out = std::io::stdout();
+    insert_history_lines_to_writer(terminal, &mut out, lines);
+}
+
+/// Like `insert_history_lines`, but writes ANSI to the provided writer. This
 /// is intended for testing where a capture buffer is used instead of stdout.
-/// NOTE: Simplified for full-screen terminal mode - no viewport manipulation needed
 pub fn insert_history_lines_to_writer<B, W>(
-    terminal: &mut ratatui::Terminal<B>,
+    terminal: &mut crate::custom_terminal::Terminal<B>,
     writer: &mut W,
     lines: Vec<Line>,
 ) where
     B: ratatui::backend::Backend,
     W: Write,
 {
-    // In full screen mode, we just write lines at the current position
-    // This is mainly used for tests now
+    let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
+    let cursor_pos = terminal.get_cursor_position().ok();
+
+    let mut area = terminal.get_frame().area();
+
+    // Pre-wrap lines using word-aware wrapping so terminal scrollback sees the same
+    // formatting as the TUI. This avoids character-level hard wrapping by the terminal.
+    let wrapped = word_wrap_lines(&lines, area.width.max(1));
+    let wrapped_lines = wrapped.len() as u16;
+    let cursor_top = if area.bottom() < screen_size.height {
+        // If the viewport is not at the bottom of the screen, scroll it down to make room.
+        // Don't scroll it past the bottom of the screen.
+        let scroll_amount = wrapped_lines.min(screen_size.height - area.bottom());
+
+        // Emit ANSI to scroll the lower region (from the top of the viewport to the bottom
+        // of the screen) downward by `scroll_amount` lines. We do this by:
+        //   1) Limiting the scroll region to [area.top()+1 .. screen_height] (1-based bounds)
+        //   2) Placing the cursor at the top margin of that region
+        //   3) Emitting Reverse Index (RI, ESC M) `scroll_amount` times
+        //   4) Resetting the scroll region back to full screen
+        let top_1based = area.top() + 1; // Convert 0-based row to 1-based for DECSTBM
+        queue!(writer, SetScrollRegion(top_1based..screen_size.height)).ok();
+        queue!(writer, MoveTo(0, area.top())).ok();
+        for _ in 0..scroll_amount {
+            // Reverse Index (RI): ESC M
+            queue!(writer, Print("\x1bM")).ok();
+        }
+        queue!(writer, ResetScrollRegion).ok();
+
+        let cursor_top = area.top().saturating_sub(1);
+        area.y += scroll_amount;
+        terminal.set_viewport_area(area);
+        cursor_top
+    } else {
+        area.top().saturating_sub(1)
+    };
+
+    // Limit the scroll region to the lines from the top of the screen to the
+    // top of the viewport. With this in place, when we add lines inside this
+    // area, only the lines in this area will be scrolled. We place the cursor
+    // at the end of the scroll region, and add lines starting there.
+    //
+    // ┌─Screen───────────────────────┐
+    // │┌╌Scroll region╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐│
+    // │┆                            ┆│
+    // │┆                            ┆│
+    // │┆                            ┆│
+    // │█╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘│
+    // │╭─Viewport───────────────────╮│
+    // ││                            ││
+    // │╰────────────────────────────╯│
+    // └──────────────────────────────┘
+    queue!(writer, SetScrollRegion(1..area.top())).ok();
 
     // Set theme colors for the newlines and any unstyled content
     let theme_fg = crate::colors::text();
@@ -37,34 +100,31 @@ pub fn insert_history_lines_to_writer<B, W>(
     )
     .ok();
 
-    for line in lines {
-        // Fill entire line with background before writing content
+    // NB: we are using MoveTo instead of set_cursor_position here to avoid messing with the
+    // terminal's last_known_cursor_position, which hopefully will still be accurate after we
+    // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
+    queue!(writer, MoveTo(0, cursor_top)).ok();
+
+    for line in wrapped {
         queue!(writer, Print("\r\n")).ok();
         queue!(writer, Print("\x1b[K")).ok(); // Clear to end of line with current bg
         write_spans(writer, line.iter()).ok();
         queue!(writer, Print("\x1b[K")).ok(); // Clear remainder of line after content
     }
 
-    // Restore cursor position if we had one
-    if let Ok(pos) = terminal.get_cursor_position() {
-        queue!(writer, MoveTo(pos.x, pos.y)).ok();
+    queue!(writer, ResetScrollRegion).ok();
+
+    // Restore the cursor position to where it was before we started.
+    if let Some(cursor_pos) = cursor_pos {
+        queue!(writer, MoveTo(cursor_pos.x, cursor_pos.y)).ok();
     }
 
     writer.flush().ok();
 }
 
-/// Insert `lines` above the viewport.
-#[allow(dead_code)]
-pub fn insert_history_lines<B>(terminal: &mut ratatui::Terminal<B>, lines: Vec<Line>)
-where
-    B: ratatui::backend::Backend,
-{
-    let mut writer = std::io::stdout();
-    insert_history_lines_to_writer(terminal, &mut writer, lines);
-}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetScrollRegion(pub std::ops::Range<u16>);
 
-#[allow(dead_code)]
-struct SetScrollRegion(std::ops::Range<u16>);
 impl Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
         // CSI Ps ; Ps r  (DECSTBM)
@@ -75,14 +135,19 @@ impl Command for SetScrollRegion {
 
     #[cfg(windows)]
     fn execute_winapi(&self) -> io::Result<()> {
-        // Windows doesn't support scroll regions in the same way
-        // This is a no-op on Windows
-        Ok(())
+        panic!("tried to execute SetScrollRegion command using WinAPI, use ANSI instead");
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        // TODO(nornagon): is this supported on Windows?
+        true
     }
 }
 
-#[allow(dead_code)]
-struct ResetScrollRegion;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResetScrollRegion;
+
 impl Command for ResetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
         // CSI r  (DECSTBM)
@@ -92,83 +157,16 @@ impl Command for ResetScrollRegion {
 
     #[cfg(windows)]
     fn execute_winapi(&self) -> io::Result<()> {
-        // Windows doesn't support scroll regions in the same way
-        // This is a no-op on Windows
-        Ok(())
-    }
-}
-
-/// Write the spans to the writer with the correct styling
-#[allow(dead_code)]
-fn write_spans<'a, W: io::Write>(
-    writer: &mut W,
-    spans: impl Iterator<Item = &'a Span<'a>>,
-) -> io::Result<()> {
-    let mut prev_fg = None;
-    let mut prev_bg = None;
-    let mut prev_underline_color = None;
-    let mut prev_modifier = Modifier::empty();
-
-    for span in spans {
-        let Span { content, style } = span;
-        let fg = style.fg;
-        let bg = style.bg;
-        let underline_color = style.underline_color;
-        let modifier = style.add_modifier;
-
-        if fg != prev_fg || bg != prev_bg {
-            let fg = fg.unwrap_or(crate::colors::text());
-            let bg = bg.unwrap_or(crate::colors::background());
-            queue!(writer, SetColors(Colors::new(fg.into(), bg.into())))?;
-        }
-
-        if underline_color != prev_underline_color {
-            if let Some(color) = underline_color {
-                queue!(writer, SetUnderlineColor(color.into()))?;
-            }
-        }
-
-        if modifier != prev_modifier {
-            ModifierDiff {
-                from: prev_modifier,
-                to: modifier,
-            }
-            .queue(&mut *writer)?;
-        }
-
-        prev_fg = fg;
-        prev_bg = bg;
-        prev_underline_color = underline_color;
-        prev_modifier = modifier;
-
-        queue!(writer, Print(content.as_ref()))?;
-    }
-
-    Ok(())
-}
-
-#[allow(dead_code)]
-struct SetUnderlineColor(crossterm::style::Color);
-impl Command for SetUnderlineColor {
-    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // Set underline color using SGR 58
-        // Always try to write it, terminals that don't support it will ignore
-        write!(
-            f,
-            "\x1b[58:5:{}m",
-            ansi_color_code_from_ratatui_color(self.0)
-        )
+        panic!("tried to execute ResetScrollRegion command using WinAPI, use ANSI instead");
     }
 
     #[cfg(windows)]
-    fn execute_winapi(&self) -> io::Result<()> {
-        // Windows terminal may not support underline colors
-        // This is a no-op on Windows
-        Ok(())
+    fn is_ansi_code_supported(&self) -> bool {
+        // TODO(nornagon): is this supported on Windows?
+        true
     }
 }
 
-#[allow(dead_code)]
 struct ModifierDiff {
     pub from: Modifier,
     pub to: Modifier,
@@ -236,58 +234,263 @@ impl ModifierDiff {
     }
 }
 
-/// Count the number of terminal lines required to render these Lines
-/// accounting for line wrapping.
-#[allow(dead_code)]
-fn wrapped_line_count(lines: &[Line], width: u16) -> u16 {
-    lines
-        .iter()
-        .map(|line| {
-            let line_width = line.width() as u16;
-            if line_width == 0 {
-                1
-            } else {
-                (line_width + width - 1) / width
-            }
-        })
-        .sum()
+/// Write the spans to the writer with the correct styling
+fn write_spans<'a, I>(mut writer: &mut impl Write, content: I) -> io::Result<()>
+where
+    I: Iterator<Item = &'a Span<'a>>,
+{
+    let mut fg = Color::Reset;
+    let mut bg = Color::Reset;
+    let mut last_modifier = Modifier::empty();
+    for span in content {
+        let mut modifier = Modifier::empty();
+        modifier.insert(span.style.add_modifier);
+        modifier.remove(span.style.sub_modifier);
+        if modifier != last_modifier {
+            let diff = ModifierDiff {
+                from: last_modifier,
+                to: modifier,
+            };
+            diff.queue(&mut writer)?;
+            last_modifier = modifier;
+        }
+        let next_fg = span.style.fg.unwrap_or(Color::Reset);
+        let next_bg = span.style.bg.unwrap_or(Color::Reset);
+        if next_fg != fg || next_bg != bg {
+            queue!(
+                writer,
+                SetColors(Colors::new(next_fg.into(), next_bg.into()))
+            )?;
+            fg = next_fg;
+            bg = next_bg;
+        }
+
+        queue!(writer, Print(span.content.clone()))?;
+    }
+
+    queue!(
+        writer,
+        SetForegroundColor(CColor::Reset),
+        SetBackgroundColor(CColor::Reset),
+        SetAttribute(crossterm::style::Attribute::Reset),
+    )
 }
 
-/// Convert ratatui::style::Color to ANSI color code
-#[allow(dead_code)]
-fn ansi_color_code_from_ratatui_color(color: crossterm::style::Color) -> u8 {
-    use crossterm::style::Color;
-    match color {
-        Color::Black => 0,
-        Color::DarkRed => 1,
-        Color::DarkGreen => 2,
-        Color::DarkYellow => 3,
-        Color::DarkBlue => 4,
-        Color::DarkMagenta => 5,
-        Color::DarkCyan => 6,
-        Color::Grey => 7,
-        Color::DarkGrey => 8,
-        Color::Red => 9,
-        Color::Green => 10,
-        Color::Yellow => 11,
-        Color::Blue => 12,
-        Color::Magenta => 13,
-        Color::Cyan => 14,
-        Color::White => 15,
-        Color::Rgb { r, g, b } => {
-            // Map RGB to closest 256 color
-            // This is a simplified mapping
-            if r == g && g == b {
-                // Grayscale
-                232 + ((r as u16 * 23) / 255) as u8
-            } else {
-                // Color cube
-                16 + (36 * (r as u16 * 5 / 255) as u8)
-                    + (6 * (g as u16 * 5 / 255) as u8)
-                    + (b as u16 * 5 / 255) as u8
-            }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetUnderlineColor(pub CColor);
+
+impl Command for SetUnderlineColor {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        // Use the CSI 58 sequence for underline color
+        // CSI 58:5:n m for 256 colors or CSI 58:2::r:g:b m for RGB
+        match self.0 {
+            CColor::Black => write!(f, "\x1b[58:5:0m"),
+            CColor::DarkGrey => write!(f, "\x1b[58:5:8m"),
+            CColor::Red => write!(f, "\x1b[58:5:1m"),
+            CColor::DarkRed => write!(f, "\x1b[58:5:9m"),
+            CColor::Green => write!(f, "\x1b[58:5:2m"),
+            CColor::DarkGreen => write!(f, "\x1b[58:5:10m"),
+            CColor::Yellow => write!(f, "\x1b[58:5:3m"),
+            CColor::DarkYellow => write!(f, "\x1b[58:5:11m"),
+            CColor::Blue => write!(f, "\x1b[58:5:4m"),
+            CColor::DarkBlue => write!(f, "\x1b[58:5:12m"),
+            CColor::Magenta => write!(f, "\x1b[58:5:5m"),
+            CColor::DarkMagenta => write!(f, "\x1b[58:5:13m"),
+            CColor::Cyan => write!(f, "\x1b[58:5:6m"),
+            CColor::DarkCyan => write!(f, "\x1b[58:5:14m"),
+            CColor::White => write!(f, "\x1b[58:5:7m"),
+            CColor::Grey => write!(f, "\x1b[58:5:15m"),
+            CColor::Rgb { r, g, b } => write!(f, "\x1b[58:2::{}:{}:{}m", r, g, b),
+            CColor::AnsiValue(n) => write!(f, "\x1b[58:5:{}m", n),
+            CColor::Reset => write!(f, "\x1b[59m"), // Reset underline color
         }
-        Color::AnsiValue(v) => v,
-        _ => 7, // Default to grey for unknown
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        // Windows doesn't support underline colors in the same way
+        Ok(())
+    }
+}
+
+/// Word-aware wrapping for a list of `Line`s preserving styles.
+pub(crate) fn word_wrap_lines(lines: &[Line], width: u16) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let w = width.max(1) as usize;
+    for line in lines {
+        out.extend(word_wrap_line(line, w));
+    }
+    out
+}
+
+fn word_wrap_line(line: &Line, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![to_owned_line(line)];
+    }
+    // Concatenate content and keep span boundaries for later re-slicing.
+    let mut flat = String::new();
+    let mut span_bounds = Vec::new(); // (start_byte, end_byte, style)
+    let mut cursor = 0usize;
+    for s in &line.spans {
+        let text = s.content.as_ref();
+        let start = cursor;
+        flat.push_str(text);
+        cursor += text.len();
+        span_bounds.push((start, cursor, s.style));
+    }
+
+    // Use textwrap for robust word-aware wrapping; no hyphenation, no breaking words.
+    let opts = TwOptions::new(width)
+        .break_words(false)
+        .word_splitter(WordSplitter::NoHyphenation);
+    let wrapped = textwrap::wrap(&flat, &opts);
+
+    if wrapped.len() <= 1 {
+        return vec![to_owned_line(line)];
+    }
+
+    // Map wrapped pieces back to byte ranges in `flat` sequentially.
+    let mut start_cursor = 0usize;
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(wrapped.len());
+    for piece in wrapped {
+        let piece_str: &str = &piece;
+        if piece_str.is_empty() {
+            out.push(Line {
+                style: line.style,
+                alignment: line.alignment,
+                spans: Vec::new(),
+            });
+            continue;
+        }
+        // Find the next occurrence of piece_str at or after start_cursor.
+        // textwrap preserves order, so a linear scan is sufficient.
+        if let Some(rel) = flat[start_cursor..].find(piece_str) {
+            let s = start_cursor + rel;
+            let e = s + piece_str.len();
+            out.push(slice_line_spans(line, &span_bounds, s, e));
+            start_cursor = e;
+        } else {
+            // Fallback: slice by length from cursor.
+            let s = start_cursor;
+            let e = (start_cursor + piece_str.len()).min(flat.len());
+            out.push(slice_line_spans(line, &span_bounds, s, e));
+            start_cursor = e;
+        }
+    }
+
+    out
+}
+
+fn to_owned_line(l: &Line<'_>) -> Line<'static> {
+    Line {
+        style: l.style,
+        alignment: l.alignment,
+        spans: l
+            .spans
+            .iter()
+            .map(|s| Span {
+                style: s.style,
+                content: std::borrow::Cow::Owned(s.content.to_string()),
+            })
+            .collect(),
+    }
+}
+
+fn slice_line_spans(
+    original: &Line<'_>,
+    span_bounds: &[(usize, usize, ratatui::style::Style)],
+    start_byte: usize,
+    end_byte: usize,
+) -> Line<'static> {
+    let mut acc: Vec<Span<'static>> = Vec::new();
+    for (i, (s, e, style)) in span_bounds.iter().enumerate() {
+        if *e <= start_byte {
+            continue;
+        }
+        if *s >= end_byte {
+            break;
+        }
+        let seg_start = start_byte.max(*s);
+        let seg_end = end_byte.min(*e);
+        if seg_end > seg_start {
+            let local_start = seg_start - *s;
+            let local_end = seg_end - *s;
+            let content = original.spans[i].content.as_ref();
+            let slice = &content[local_start..local_end];
+            acc.push(Span {
+                style: *style,
+                content: std::borrow::Cow::Owned(slice.to_string()),
+            });
+        }
+        if *e >= end_byte {
+            break;
+        }
+    }
+    Line {
+        style: original.style,
+        alignment: original.alignment,
+        spans: acc,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn writes_bold_then_regular_spans() {
+        use ratatui::style::Stylize;
+
+        let spans = ["A".bold(), "B".into()];
+
+        let mut actual: Vec<u8> = Vec::new();
+        write_spans(&mut actual, spans.iter()).unwrap();
+
+        let mut expected: Vec<u8> = Vec::new();
+        queue!(
+            expected,
+            SetAttribute(crossterm::style::Attribute::Bold),
+            Print("A"),
+            SetAttribute(crossterm::style::Attribute::NormalIntensity),
+            Print("B"),
+            SetForegroundColor(CColor::Reset),
+            SetBackgroundColor(CColor::Reset),
+            SetAttribute(crossterm::style::Attribute::Reset),
+        )
+        .unwrap();
+        assert_eq!(
+            actual, expected,
+            "Actual: {}",
+            String::from_utf8_lossy(&actual)
+        );
+    }
+
+    #[test]
+    fn word_wrap_line_simple() {
+        let line = Line::from("hello world foo bar baz");
+        let wrapped = word_wrap_line(&line, 10);
+        assert_eq!(wrapped.len(), 3);
+        assert_eq!(wrapped[0].to_string(), "hello");
+        assert_eq!(wrapped[1].to_string(), "world foo");
+        assert_eq!(wrapped[2].to_string(), "bar baz");
+    }
+
+    #[test]
+    fn word_wrap_line_preserves_styles() {
+        use ratatui::style::Stylize;
+        let line = Line::from(vec!["hello ".into(), "world".bold(), " foo".into()]);
+        let wrapped = word_wrap_line(&line, 8);
+        assert_eq!(wrapped.len(), 2);
+        assert_eq!(wrapped[0].spans.len(), 2);
+        assert_eq!(wrapped[0].spans[0].content, "hello ");
+        assert!(!wrapped[0].spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(wrapped[0].spans[1].content, "wo");
+        assert!(wrapped[0].spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(wrapped[1].spans.len(), 2);
+        assert_eq!(wrapped[1].spans[0].content, "rld");
+        assert!(wrapped[1].spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(wrapped[1].spans[1].content, " foo");
+        assert!(!wrapped[1].spans[1].style.add_modifier.contains(Modifier::BOLD));
     }
 }
