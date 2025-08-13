@@ -28,24 +28,45 @@ impl ConversationHistory {
                 continue;
             }
 
-            // Merge adjacent assistant messages into a single history entry.
-            // This prevents duplicates when a partial assistant message was
-            // streamed into history earlier in the turn and the final full
-            // message is recorded at turn end.
-            match (&*item, self.items.last_mut()) {
-                (
-                    ResponseItem::Message {
-                        role: new_role,
-                        content: new_content,
-                        ..
-                    },
-                    Some(ResponseItem::Message {
-                        role: last_role,
-                        content: last_content,
-                        ..
-                    }),
-                ) if new_role == "assistant" && last_role == "assistant" => {
-                    append_text_content(last_content, new_content);
+            // De-duplicate assistant messages more robustly by leveraging IDs
+            // when available and falling back to adjacency/prefix merging.
+            match &*item {
+                ResponseItem::Message {
+                    id: new_id,
+                    role: new_role,
+                    content: new_content,
+                } if new_role == "assistant" => {
+                    // 1) If this assistant message has an ID, try to find an existing
+                    //    assistant entry with the same ID anywhere in history and
+                    //    replace its text with the new content.
+                    if let Some(id) = new_id.as_ref() {
+                        if let Some(idx) = find_assistant_index_by_id(&self.items, id) {
+                            if let ResponseItem::Message { id: existing_id, content, .. } = &mut self.items[idx] {
+                                // Ensure the existing entry carries the id
+                                if existing_id.is_none() {
+                                    *existing_id = Some(id.clone());
+                                }
+                                replace_or_append_text(content, new_content);
+                                continue;
+                            }
+                        }
+                    }
+
+                    // 2) Otherwise, attempt to merge with the immediately previous
+                    //    assistant message (streamed deltas case).
+                    if let Some(ResponseItem::Message { id: last_id, role: last_role, content: last_content }) = self.items.last_mut() {
+                        if last_role == "assistant" {
+                            // If new item has an ID, propagate it to the existing entry
+                            if last_id.is_none() {
+                                if let Some(id) = new_id.clone() { *last_id = Some(id); }
+                            }
+                            replace_or_append_text(last_content, new_content);
+                            continue;
+                        }
+                    }
+
+                    // 3) No merge opportunity – push as a new assistant message.
+                    self.items.push(item.clone());
                 }
                 _ => {
                     self.items.push(item.clone());
@@ -142,6 +163,48 @@ fn append_text_delta(content: &mut Vec<crate::models::ContentItem>, delta: &str)
             text: delta.to_string(),
         });
     }
+}
+
+/// Concatenate all OutputText segments into a single string.
+fn collect_text_content(content: &Vec<crate::models::ContentItem>) -> String {
+    let mut out = String::new();
+    for c in content {
+        if let crate::models::ContentItem::OutputText { text } = c {
+            out.push_str(text);
+        }
+    }
+    out
+}
+
+/// Replace the text content with a single OutputText item containing `text`.
+fn replace_text_content(content: &mut Vec<crate::models::ContentItem>, text: &str) {
+    content.clear();
+    content.push(crate::models::ContentItem::OutputText {
+        text: text.to_string(),
+    });
+}
+
+/// Merge strategy: if the new text starts with the old, replace; otherwise append deltas.
+fn replace_or_append_text(existing: &mut Vec<crate::models::ContentItem>, new_content: &Vec<crate::models::ContentItem>) {
+    let prev = collect_text_content(existing);
+    let new_full = collect_text_content(new_content);
+    if !prev.is_empty() && new_full.starts_with(&prev) {
+        replace_text_content(existing, &new_full);
+    } else {
+        append_text_content(existing, new_content);
+    }
+}
+
+fn find_assistant_index_by_id(items: &Vec<ResponseItem>, id: &str) -> Option<usize> {
+    // Search from the end (most recent first) for better performance in practice.
+    for (idx, it) in items.iter().enumerate().rev() {
+        if let ResponseItem::Message { id: Some(existing), role, .. } = it {
+            if role == "assistant" && existing == id {
+                return Some(idx);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ pub enum ResponseInputItem {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentItem {
     InputText { text: String },
-    InputImage { image_url: String },
+    InputImage { image_url: String, detail: Option<String> },
     OutputText { text: String },
 }
 
@@ -154,7 +154,7 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                     content_items.push(ContentItem::InputText { text });
                 }
                 InputItem::Image { image_url } => {
-                    content_items.push(ContentItem::InputImage { image_url });
+                    content_items.push(ContentItem::InputImage { image_url, detail: None });
                 }
                 InputItem::LocalImage { path } => match std::fs::read(&path) {
                     Ok(bytes) => {
@@ -165,6 +165,7 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
                         content_items.push(ContentItem::InputImage {
                             image_url: format!("data:{mime};base64,{encoded}"),
+                            detail: None,
                         });
                     }
                     Err(err) => {
@@ -199,6 +200,7 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                             tracing::info!("Created ephemeral image data URL with mime: {}", mime);
                             content_items.push(ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
+                                detail: Some("high".to_string()),
                             });
                         }
                         Err(err) => {

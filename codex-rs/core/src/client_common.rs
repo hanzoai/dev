@@ -23,6 +23,9 @@ use tokio::sync::mpsc;
 /// with this content.
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 
+/// Additional prompt for Coder. Can not edit Codex instructions.
+const ADDITIONAL_INSTRUCTIONS: &str = include_str!("../prompt_coder.md");
+
 /// wraps environment context message in a tag for the model to parse more easily.
 const ENVIRONMENT_CONTEXT_START: &str = "<environment_context>\n\n";
 const ENVIRONMENT_CONTEXT_END: &str = "\n\n</environment_context>";
@@ -83,6 +86,10 @@ pub struct Prompt {
     /// external MCP servers.
     pub tools: Vec<OpenAiTool>,
 
+    /// Ephemeral items to be added at the end of the input
+    /// These are generated fresh for each request
+    pub ephemeral_items: Vec<ResponseItem>,
+
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
 }
@@ -113,7 +120,12 @@ impl Prompt {
     }
 
     pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
-        let mut input_with_instructions = Vec::with_capacity(self.input.len() + 2);
+        let mut input_with_instructions = Vec::with_capacity(self.input.len() + self.ephemeral_items.len() + 3);
+        input_with_instructions.push(ResponseItem::Message {
+            id: None,
+            role: "developer".to_string(),
+            content: vec![ContentItem::InputText { text: ADDITIONAL_INSTRUCTIONS.to_string() }],
+        });
         if let Some(ec) = self.get_formatted_environment_context() {
             input_with_instructions.push(ResponseItem::Message {
                 id: None,
@@ -129,6 +141,8 @@ impl Prompt {
             });
         }
         input_with_instructions.extend(self.input.clone());
+        // Add ephemeral items at the end so they're fresh for each request
+        input_with_instructions.extend(self.ephemeral_items.clone());
         input_with_instructions
     }
 }
