@@ -130,8 +130,7 @@ async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
     let mut content: Vec<ContentItem> = Vec::new();
     content.push(ContentItem::InputText {
         text: format!(r#"== System Status ==
-This ephemeral message is added to the current turn to provide context about your environment. You only see the current version of it.
-Use this message only as context and work from the previous user or assistant message.
+[ephemeral message - added automatically by system]
 
 cwd: {}
 branch: {}
@@ -684,6 +683,14 @@ impl Session {
     /// Browser screenshots are filtered out from history to keep them ephemeral.
     pub fn turn_input_with_history(&self, extra: Vec<ResponseItem>) -> Vec<ResponseItem> {
         let history = self.state.lock().unwrap().history.contents();
+        
+        // Debug: Count function call outputs in history
+        let fc_output_count = history.iter().filter(|item| {
+            matches!(item, ResponseItem::FunctionCallOutput { .. })
+        }).count();
+        if fc_output_count > 0 {
+            debug!("History contains {} FunctionCallOutput items", fc_output_count);
+        }
 
         // Count images in extra for debugging (we can't distinguish ephemeral at this level anymore)
         let images_in_extra = extra
@@ -1464,6 +1471,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                             ResponseItem::FunctionCall { .. },
                             Some(ResponseInputItem::FunctionCallOutput { call_id, output }),
                         ) => {
+                            debug!("Recording function call and output for call_id: {}", call_id);
                             items_to_record_in_conversation_history.push(item);
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::FunctionCallOutput {
@@ -1525,26 +1533,10 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
 
                 // Only attempt to take the lock if there is something to record.
                 if !items_to_record_in_conversation_history.is_empty() {
-                    // To ensure streamed assistant deltas (already appended into
-                    // history during OutputTextDelta) merge cleanly with the final
-                    // assistant message, record assistant messages first. This
-                    // preserves merge-adjacency even if the provider delivered
-                    // other output items (e.g., reasoning) before the final
-                    // assistant message.
-                    let mut assistants = Vec::new();
-                    let mut others = Vec::new();
-                    for item in items_to_record_in_conversation_history.drain(..) {
-                        match &item {
-                            ResponseItem::Message { role, .. } if role == "assistant" => {
-                                assistants.push(item)
-                            }
-                            _ => others.push(item),
-                        }
-                    }
-                    // Maintain relative order within each group while ensuring
-                    // assistants are recorded first for proper merge behaviour.
-                    assistants.extend(others.into_iter());
-                    sess.record_conversation_items(&assistants).await;
+                    // Record items in their original chronological order to maintain
+                    // proper sequence of events. This ensures function calls and their
+                    // outputs appear in the correct order in conversation history.
+                    sess.record_conversation_items(&items_to_record_in_conversation_history).await;
                 }
 
                 // If there are responses, add them to pending input for the next iteration
@@ -1789,29 +1781,34 @@ async fn try_run_turn(
 
                 return Ok(output);
             }
-            ResponseEvent::OutputTextDelta(delta) => {
-                {
-                    let mut st = sess.state.lock().unwrap();
-                    st.history.append_assistant_text(&delta);
-                }
-
+            ResponseEvent::OutputTextDelta { delta, item_id } => {
+                // Don't append to history during streaming - only send UI events.
+                // The complete message will be added to history when OutputItemDone arrives.
+                // This ensures items are recorded in the correct chronological order.
+                
+                // Use the item_id if present, otherwise fall back to sub_id
+                let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 let event = Event {
-                    id: sub_id.to_string(),
+                    id: event_id,
                     msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }),
                 };
                 sess.tx_event.send(event).await.ok();
             }
-            ResponseEvent::ReasoningSummaryDelta(delta) => {
+            ResponseEvent::ReasoningSummaryDelta { delta, item_id } => {
+                // Use the item_id if present, otherwise fall back to sub_id
+                let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 let event = Event {
-                    id: sub_id.to_string(),
+                    id: event_id,
                     msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }),
                 };
                 sess.tx_event.send(event).await.ok();
             }
-            ResponseEvent::ReasoningContentDelta(delta) => {
+            ResponseEvent::ReasoningContentDelta { delta, item_id } => {
                 if sess.show_raw_agent_reasoning {
+                    // Use the item_id if present, otherwise fall back to sub_id
+                    let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                     let event = Event {
-                        id: sub_id.to_string(),
+                        id: event_id,
                         msg: EventMsg::AgentReasoningRawContentDelta(
                             AgentReasoningRawContentDeltaEvent { delta },
                         ),
@@ -1917,11 +1914,13 @@ async fn handle_response_item(
 ) -> CodexResult<Option<ResponseInputItem>> {
     debug!(?item, "Output item");
     let output = match item {
-        ResponseItem::Message { content, .. } => {
+        ResponseItem::Message { content, id, .. } => {
+            // Use the item_id if present, otherwise fall back to sub_id
+            let event_id = id.unwrap_or_else(|| sub_id.to_string());
             for item in content {
                 if let ContentItem::OutputText { text } = item {
                     let event = Event {
-                        id: sub_id.to_string(),
+                        id: event_id.clone(),
                         msg: EventMsg::AgentMessage(AgentMessageEvent { message: text }),
                     };
                     sess.tx_event.send(event).await.ok();
@@ -1930,17 +1929,19 @@ async fn handle_response_item(
             None
         }
         ResponseItem::Reasoning {
-            id: _,
+            id,
             summary,
             content,
             encrypted_content: _,
         } => {
+            // Use the item_id if present and not empty, otherwise fall back to sub_id
+            let event_id = if !id.is_empty() { id.clone() } else { sub_id.to_string() };
             for item in summary {
                 let text = match item {
                     ReasoningItemReasoningSummary::SummaryText { text } => text,
                 };
                 let event = Event {
-                    id: sub_id.to_string(),
+                    id: event_id.clone(),
                     msg: EventMsg::AgentReasoning(AgentReasoningEvent { text }),
                 };
                 sess.tx_event.send(event).await.ok();
@@ -1952,7 +1953,7 @@ async fn handle_response_item(
                         ReasoningItemContent::ReasoningText { text } => text,
                     };
                     let event = Event {
-                        id: sub_id.to_string(),
+                        id: event_id.clone(),
                         msg: EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent {
                             text,
                         }),
@@ -3248,16 +3249,92 @@ fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
         .collect()
 }
 
+/// Helper function to wrap custom tool calls with events
+async fn execute_custom_tool<F, Fut>(
+    sess: &Session,
+    sub_id: &str,
+    call_id: String,
+    tool_name: String,
+    parameters: Option<serde_json::Value>,
+    tool_fn: F,
+) -> ResponseInputItem
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ResponseInputItem>,
+{
+    use std::time::Instant;
+    use crate::protocol::{CustomToolCallBeginEvent, CustomToolCallEndEvent};
+    
+    // Send begin event
+    let begin_event = Event {
+        id: sub_id.to_string(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.clone(),
+            tool_name: tool_name.clone(),
+            parameters: parameters.clone(),
+        }),
+    };
+    sess.send_event(begin_event).await;
+    
+    // Execute the tool
+    let start = Instant::now();
+    let result = tool_fn().await;
+    let duration = start.elapsed();
+    
+    // Extract success/failure from result
+    let (success, message) = match &result {
+        ResponseInputItem::FunctionCallOutput { output, .. } => {
+            let content = &output.content;
+            let is_error = content.contains("error") || content.contains("failed");
+            (!is_error, content.clone())
+        }
+        _ => (true, String::from("Tool completed")),
+    };
+    
+    // Send end event
+    let end_event = Event {
+        id: sub_id.to_string(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.clone(),
+            tool_name,
+            parameters,
+            duration,
+            result: if success {
+                Ok(message)
+            } else {
+                Err(message)
+            },
+        }),
+    };
+    sess.send_event(end_event).await;
+    
+    result
+}
+
 async fn handle_browser_open(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    // Parse the URL from arguments
-    let args: Result<Value, _> = serde_json::from_str(&arguments);
+    // Parse arguments as JSON for the event
+    let params = serde_json::from_str(&arguments).ok();
+    
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_open".to_string(),
+        params,
+        || async move {
+            // Parse the URL from arguments
+            let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
 
-    match args {
+            match args {
         Ok(json) => {
             let url = json
                 .get("url")
@@ -3285,14 +3362,14 @@ async fn handle_browser_open(
                     Ok(_) => {
                         tracing::info!("Browser navigation to {} completed successfully", url);
                         // Capture screenshot after navigation
-                        match capture_browser_screenshot(sess).await {
+                        match capture_browser_screenshot(sess_clone).await {
                             Ok((screenshot_path, updated_url)) => {
                                 tracing::info!(
                                     "Screenshot captured after navigation: {} at URL: {}",
                                     screenshot_path.display(),
                                     updated_url
                                 );
-                                add_pending_screenshot(sess, screenshot_path, updated_url);
+                                add_pending_screenshot(sess_clone, screenshot_path, updated_url);
                             }
                             Err(e) => {
                                 tracing::warn!("Screenshot capture failed after navigation: {}", e);
@@ -3300,7 +3377,7 @@ async fn handle_browser_open(
                         }
 
                         ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
                                 content: format!(
                                     "Browser opened to: {}. Screenshots will be automatically attached to messages.",
@@ -3311,7 +3388,7 @@ async fn handle_browser_open(
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to navigate browser to {}: {}", url, e),
                             success: Some(false),
@@ -3320,7 +3397,7 @@ async fn handle_browser_open(
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone.clone(),
                     output: FunctionCallOutputPayload {
                         content: "Failed to initialize browser manager.".to_string(),
                         success: Some(false),
@@ -3329,13 +3406,16 @@ async fn handle_browser_open(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Failed to parse browser_open arguments: {}", e),
                 success: Some(false),
             },
         },
     }
+        },
+    )
+    .await
 }
 
 /// Get the browser manager for the session (always uses global)
@@ -3348,17 +3428,27 @@ async fn get_browser_manager_for_session(
 
 async fn handle_browser_close(
     sess: &Session,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
+    let sess_clone = sess;
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_close".to_string(),
+        None,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
     if let Some(browser_manager) = browser_manager {
         match browser_manager.stop().await {
             Ok(_) => {
                 // Clear the browser manager from global
                 codex_browser::global::clear_browser_manager().await;
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone.clone(),
                     output: FunctionCallOutputPayload {
                         content: "Browser closed. Screenshot capture disabled.".to_string(),
                         success: Some(true),
@@ -3366,7 +3456,7 @@ async fn handle_browser_close(
                 }
             }
             Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone.clone(),
                 output: FunctionCallOutputPayload {
                     content: format!("Failed to close browser: {}", e),
                     success: Some(false),
@@ -3375,21 +3465,34 @@ async fn handle_browser_close(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not currently open.".to_string(),
                 success: Some(false),
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_status(
     sess: &Session,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
+    let sess_clone = sess;
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_status".to_string(),
+        None,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
     if let Some(browser_manager) = browser_manager {
         let status = browser_manager.get_status().await;
         let status_msg = if status.enabled {
@@ -3403,7 +3506,7 @@ async fn handle_browser_status(
         };
 
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone.clone(),
             output: FunctionCallOutputPayload {
                 content: status_msg,
                 success: Some(true),
@@ -3411,7 +3514,7 @@ async fn handle_browser_status(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not initialized. Use browser_open to start the browser."
                     .to_string(),
@@ -3419,18 +3522,33 @@ async fn handle_browser_status(
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_click(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_click".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
         match args {
             Ok(json) => {
                 let x = json.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3439,13 +3557,13 @@ async fn handle_browser_click(
                 match browser_manager.click(x, y).await {
                     Ok(_) => {
                         // Capture screenshot after clicking
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
                         {
-                            add_pending_screenshot(sess, screenshot_path, url);
+                            add_pending_screenshot(sess_clone, screenshot_path, url);
                         }
 
                         ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
                                 content: format!("Clicked at ({}, {})", x, y),
                                 success: Some(true),
@@ -3453,7 +3571,7 @@ async fn handle_browser_click(
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to click: {}", e),
                             success: Some(false),
@@ -3462,7 +3580,7 @@ async fn handle_browser_click(
                 }
             }
             Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone.clone(),
                 output: FunctionCallOutputPayload {
                     content: format!("Failed to parse browser_click arguments: {}", e),
                     success: Some(false),
@@ -3471,7 +3589,7 @@ async fn handle_browser_click(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not initialized. Use browser_open to start the browser."
                     .to_string(),
@@ -3479,17 +3597,32 @@ async fn handle_browser_click(
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_type(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_type".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
         match args {
             Ok(json) => {
                 let text = json.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -3497,13 +3630,13 @@ async fn handle_browser_type(
                 match browser_manager.type_text(text).await {
                     Ok(_) => {
                         // Capture screenshot after typing
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
                         {
-                            add_pending_screenshot(sess, screenshot_path, url);
+                            add_pending_screenshot(sess_clone, screenshot_path, url);
                         }
 
                         ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
                                 content: format!("Typed: {}", text),
                                 success: Some(true),
@@ -3511,7 +3644,7 @@ async fn handle_browser_type(
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to type text: {}", e),
                             success: Some(false),
@@ -3520,7 +3653,7 @@ async fn handle_browser_type(
                 }
             }
             Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone.clone(),
                 output: FunctionCallOutputPayload {
                     content: format!("Failed to parse browser_type arguments: {}", e),
                     success: Some(false),
@@ -3529,7 +3662,7 @@ async fn handle_browser_type(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not initialized. Use browser_open to start the browser."
                     .to_string(),
@@ -3537,6 +3670,9 @@ async fn handle_browser_type(
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_key(

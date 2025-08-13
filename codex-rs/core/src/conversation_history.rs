@@ -1,4 +1,5 @@
 use crate::models::ResponseItem;
+use tracing::debug;
 
 /// Transcript of conversation history
 #[derive(Debug, Clone, Default)]
@@ -67,6 +68,31 @@ impl ConversationHistory {
 
                     // 3) No merge opportunity – push as a new assistant message.
                     self.items.push(item.clone());
+                }
+                ResponseItem::FunctionCallOutput { call_id, .. } => {
+                    // Check if we already have an output for this call_id to prevent duplicates
+                    let already_exists = self.items.iter().any(|existing| {
+                        matches!(existing, ResponseItem::FunctionCallOutput { call_id: existing_id, .. } if existing_id == call_id)
+                    });
+                    
+                    if already_exists {
+                        debug!("Skipping duplicate FunctionCallOutput for call_id: {} (already in history)", call_id);
+                    } else {
+                        debug!("Recording FunctionCallOutput to history for call_id: {}", call_id);
+                        self.items.push(item.clone());
+                    }
+                }
+                ResponseItem::FunctionCall { call_id, .. } => {
+                    // Check if we already have this function call to prevent duplicates during retries
+                    let already_exists = self.items.iter().any(|existing| {
+                        matches!(existing, ResponseItem::FunctionCall { call_id: existing_id, .. } if existing_id == call_id)
+                    });
+                    
+                    if already_exists {
+                        debug!("Skipping duplicate FunctionCall for call_id: {} (already in history)", call_id);
+                    } else {
+                        self.items.push(item.clone());
+                    }
                 }
                 _ => {
                     self.items.push(item.clone());

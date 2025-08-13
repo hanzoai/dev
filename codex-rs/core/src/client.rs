@@ -193,10 +193,12 @@ impl ModelClient {
             serde_json::to_string(&payload)?
         );
 
-        // Log the request if debug is enabled
-        if let Ok(logger) = self.debug_logger.lock() {
-            let _ = logger.log_request(&endpoint, &serde_json::to_value(&payload)?);
-        }
+        // Start logging the request and get a request_id to track the response
+        let request_id = if let Ok(logger) = self.debug_logger.lock() {
+            logger.start_request_log(&endpoint, &serde_json::to_value(&payload)?).unwrap_or_default()
+        } else {
+            String::new()
+        };
 
         loop {
             attempt += 1;
@@ -242,13 +244,12 @@ impl ModelClient {
 
             match res {
                 Ok(resp) if resp.status().is_success() => {
-                    // Log successful response initiation (streaming)
+                    // Log successful response initiation
                     if let Ok(logger) = self.debug_logger.lock() {
-                        let _ = logger.log_response(&endpoint, &serde_json::json!({
+                        let _ = logger.append_response_event(&request_id, "stream_initiated", &serde_json::json!({
                             "status": "success",
-                            "type": "stream_initiated",
                             "status_code": resp.status().as_u16(),
-                            "request_id": resp.headers()
+                            "x_request_id": resp.headers()
                                 .get("x-request-id")
                                 .and_then(|v| v.to_str().ok())
                                 .unwrap_or_default()
@@ -258,10 +259,14 @@ impl ModelClient {
 
                     // spawn task to process SSE
                     let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
+                    let debug_logger = Arc::clone(&self.debug_logger);
+                    let request_id_clone = request_id.clone();
                     tokio::spawn(process_sse(
                         stream,
                         tx_event,
                         self.provider.stream_idle_timeout(),
+                        debug_logger,
+                        request_id_clone,
                     ));
 
                     return Ok(ResponseStream { rx_event });
@@ -288,7 +293,11 @@ impl ModelClient {
                         let body = res.text().await.unwrap_or_default();
                         // Log error response
                         if let Ok(logger) = self.debug_logger.lock() {
-                            let _ = logger.log_error(&endpoint, &format!("Status: {}, Body: {}", status, body));
+                            let _ = logger.append_response_event(&request_id, "error", &serde_json::json!({
+                                "status": status.as_u16(),
+                                "body": body
+                            }));
+                            let _ = logger.end_request_log(&request_id);
                         }
                         return Err(CodexErr::UnexpectedStatus(status, body));
                     }
@@ -395,6 +404,8 @@ async fn process_sse<S>(
     stream: S,
     tx_event: mpsc::Sender<Result<ResponseEvent>>,
     idle_timeout: Duration,
+    debug_logger: Arc<Mutex<DebugLogger>>,
+    request_id: String,
 ) where
     S: Stream<Item = Result<Bytes>> + Unpin,
 {
@@ -403,6 +414,8 @@ async fn process_sse<S>(
     // If the stream stays completely silent for an extended period treat it as disconnected.
     // The response id returned from the "complete" message.
     let mut response_completed: Option<ResponseCompleted> = None;
+    // Track the current item_id to include with delta events
+    let mut current_item_id: Option<String> = None;
 
     loop {
         let sse = match timeout(idle_timeout, stream.next()).await {
@@ -433,6 +446,10 @@ async fn process_sse<S>(
                             .await;
                     }
                 }
+                // Mark the request log as complete
+                if let Ok(logger) = debug_logger.lock() {
+                    let _ = logger.end_request_log(&request_id);
+                }
                 return;
             }
             Err(_) => {
@@ -444,6 +461,13 @@ async fn process_sse<S>(
         };
 
         trace!("SSE event: {}", sse.data);
+
+        // Log the raw SSE event data
+        if let Ok(logger) = debug_logger.lock() {
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&sse.data) {
+                let _ = logger.append_response_event(&request_id, "sse_event", &json_value);
+            }
+        }
 
         let event: SseEvent = match serde_json::from_str(&sse.data) {
             Ok(event) => event,
@@ -474,10 +498,30 @@ async fn process_sse<S>(
             // drop the duplicated list inside `response.completed`.
             "response.output_item.done" => {
                 let Some(item_val) = event.item else { continue };
-                let Ok(item) = serde_json::from_value::<ResponseItem>(item_val) else {
+                let Ok(item) = serde_json::from_value::<ResponseItem>(item_val.clone()) else {
                     debug!("failed to parse ResponseItem from output_item.done");
                     continue;
                 };
+
+                // Extract item_id if present
+                if let Some(id) = item_val.get("id").and_then(|v| v.as_str()) {
+                    current_item_id = Some(id.to_string());
+                } else {
+                    // Check within the parsed item structure
+                    match &item {
+                        ResponseItem::Message { id, .. } |
+                        ResponseItem::FunctionCall { id, .. } |
+                        ResponseItem::LocalShellCall { id, .. } => {
+                            if let Some(item_id) = id {
+                                current_item_id = Some(item_id.clone());
+                            }
+                        }
+                        ResponseItem::Reasoning { id, .. } => {
+                            current_item_id = Some(id.clone());
+                        }
+                        _ => {}
+                    }
+                }
 
                 let event = ResponseEvent::OutputItemDone(item);
                 if tx_event.send(Ok(event)).await.is_err() {
@@ -486,7 +530,10 @@ async fn process_sse<S>(
             }
             "response.output_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::OutputTextDelta(delta);
+                    let event = ResponseEvent::OutputTextDelta { 
+                        delta, 
+                        item_id: current_item_id.clone() 
+                    };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
                     }
@@ -494,7 +541,10 @@ async fn process_sse<S>(
             }
             "response.reasoning_summary_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningSummaryDelta(delta);
+                    let event = ResponseEvent::ReasoningSummaryDelta { 
+                        delta, 
+                        item_id: current_item_id.clone() 
+                    };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
                     }
@@ -502,7 +552,10 @@ async fn process_sse<S>(
             }
             "response.reasoning_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningContentDelta(delta);
+                    let event = ResponseEvent::ReasoningContentDelta { 
+                        delta, 
+                        item_id: current_item_id.clone() 
+                    };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
                     }
@@ -573,10 +626,14 @@ async fn stream_from_fixture(
 
     let rdr = std::io::Cursor::new(content);
     let stream = ReaderStream::new(rdr).map_err(CodexErr::Io);
+    // Create a dummy debug logger for testing
+    let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
     tokio::spawn(process_sse(
         stream,
         tx_event,
         provider.stream_idle_timeout(),
+        debug_logger,
+        String::new(), // Empty request_id for test fixture
     ));
     Ok(ResponseStream { rx_event })
 }
@@ -609,7 +666,8 @@ mod tests {
         let reader = builder.build();
         let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout()));
+        let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
+        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout(), debug_logger, String::new()));
 
         let mut events = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -639,7 +697,8 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
         let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout()));
+        let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
+        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout(), debug_logger, String::new()));
 
         let mut out = Vec::new();
         while let Some(ev) = rx.recv().await {

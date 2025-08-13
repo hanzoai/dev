@@ -100,6 +100,12 @@ pub(crate) enum HistoryCell {
     /// Completed MCP tool call where we show the result serialized as JSON.
     CompletedMcpToolCall { view: TextBlock },
 
+    /// An active custom tool call (browser, agent, etc) that has not finished yet.
+    ActiveCustomToolCall { view: TextBlock },
+
+    /// Completed custom tool call with result
+    CompletedCustomToolCall { view: TextBlock },
+
     /// Completed MCP tool call where the result is an image.
     /// Admittedly, [mcp_types::CallToolResult] can have multiple content types,
     /// which could be a mix of text and images, so we need to tighten this up.
@@ -291,7 +297,9 @@ impl HistoryCell {
             | HistoryCell::PendingPatch { view }
             | HistoryCell::PlanUpdate { view }
             | HistoryCell::PatchApplyResult { view }
-            | HistoryCell::ActiveMcpToolCall { view, .. } => {
+            | HistoryCell::ActiveMcpToolCall { view, .. }
+            | HistoryCell::ActiveCustomToolCall { view, .. }
+            | HistoryCell::CompletedCustomToolCall { view, .. } => {
                 view.lines.iter().map(line_to_static).collect()
             }
             HistoryCell::Exec(ExecCell {
@@ -543,6 +551,33 @@ impl HistoryCell {
         }
     }
 
+    pub(crate) fn new_active_custom_tool_call(
+        tool_name: String,
+        parameters: Option<serde_json::Value>,
+    ) -> Self {
+        let title_line = Line::from(vec!["tool".magenta(), " running...".dim()]);
+        
+        let mut lines: Vec<Line> = vec![title_line];
+        
+        // Add tool name
+        lines.push(Line::from(vec![tool_name.bold()]));
+        
+        // Add parameters if present
+        if let Some(params) = parameters {
+            if let Ok(formatted) = serde_json::to_string_pretty(&params) {
+                lines.push(Line::from(""));
+                for line in formatted.lines() {
+                    lines.push(Line::from(line.to_string().dim()));
+                }
+            }
+        }
+        lines.push(Line::from(""));
+
+        HistoryCell::ActiveCustomToolCall {
+            view: TextBlock::new(lines),
+        }
+    }
+
     /// If the first content is an image, return a new cell with the image.
     /// TODO(rgwood-dd): Handle images properly even if they're not the first result.
     fn try_new_completed_mcp_tool_call_with_image_output(
@@ -672,6 +707,65 @@ impl HistoryCell {
     }
     // allow dead code for now. maybe we'll use it again.
     #[allow(dead_code)]
+    pub(crate) fn new_completed_custom_tool_call(
+        num_cols: usize,
+        tool_name: String,
+        parameters: Option<serde_json::Value>,
+        duration: Duration,
+        result: Result<String, String>,
+    ) -> Self {
+        let duration_str = format_duration(duration);
+        let success = result.is_ok();
+        let status_str = if success { "success" } else { "failed" };
+        
+        let title_line = Line::from(vec![
+            "tool".magenta(),
+            " ".into(),
+            if success {
+                status_str.green()
+            } else {
+                status_str.red()
+            },
+            format!(", duration: {duration_str}").gray(),
+        ]);
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(title_line);
+        lines.push(Line::from(vec![tool_name.bold()]));
+
+        // Add parameters if present
+        if let Some(params) = parameters {
+            if let Ok(formatted) = serde_json::to_string_pretty(&params) {
+                lines.push(Line::from(""));
+                for line in formatted.lines().take(10) {
+                    lines.push(Line::from(line.to_string().dim()));
+                }
+                if formatted.lines().count() > 10 {
+                    lines.push(Line::from("...".dim()));
+                }
+            }
+        }
+
+        // Add result
+        lines.push(Line::from(""));
+        match result {
+            Ok(msg) => {
+                let truncated = format_and_truncate_tool_result(&msg, TOOL_CALL_MAX_LINES, num_cols);
+                for line in truncated.lines() {
+                    lines.push(Line::from(line.to_string()));
+                }
+            }
+            Err(err) => {
+                lines.push(Line::from(format!("Error: {}", err).red()));
+            }
+        }
+        lines.push(Line::from(""));
+
+        HistoryCell::CompletedCustomToolCall {
+            view: TextBlock::new(lines),
+        }
+    }
+
     pub(crate) fn new_background_event(message: String) -> Self {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("event".dim()));
@@ -1261,7 +1355,9 @@ impl HistoryCell {
             | HistoryCell::PlanUpdate { .. }
             | HistoryCell::PatchApplyResult { .. }
             | HistoryCell::CompletedMcpToolCall { .. }
-            | HistoryCell::ActiveMcpToolCall { .. } => {
+            | HistoryCell::ActiveMcpToolCall { .. }
+            | HistoryCell::ActiveCustomToolCall { .. }
+            | HistoryCell::CompletedCustomToolCall { .. } => {
                 // Use the same processed/plain lines as desired_height/render_ref but apply a vertical scroll.
                 let lines = match self {
                     HistoryCell::BackgroundEvent { .. }
@@ -1278,7 +1374,9 @@ impl HistoryCell {
                     | HistoryCell::PlanUpdate { view }
                     | HistoryCell::PatchApplyResult { view }
                     | HistoryCell::CompletedMcpToolCall { view }
-                    | HistoryCell::ActiveMcpToolCall { view } => view.lines.clone(),
+                    | HistoryCell::ActiveMcpToolCall { view }
+                    | HistoryCell::ActiveCustomToolCall { view }
+                    | HistoryCell::CompletedCustomToolCall { view } => view.lines.clone(),
                     _ => self.plain_lines(),
                 };
                 Paragraph::new(Text::from(lines))
