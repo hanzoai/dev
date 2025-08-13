@@ -46,7 +46,7 @@ enum AppState<'a> {
 }
 
 pub(crate) struct App<'a> {
-    server: Arc<ConversationManager>,
+    _server: Arc<ConversationManager>,
     app_event_tx: AppEventSender,
     app_event_rx: Receiver<AppEvent>,
     app_state: AppState<'a>,
@@ -159,7 +159,6 @@ impl App<'_> {
         } else {
             let chat_widget = ChatWidget::new(
                 config.clone(),
-                conversation_manager.clone(),
                 app_event_tx.clone(),
                 initial_prompt,
                 initial_images,
@@ -172,7 +171,7 @@ impl App<'_> {
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
         Self {
-            server: conversation_manager,
+            _server: conversation_manager,
             app_event_tx,
             app_event_rx,
             app_state,
@@ -246,13 +245,14 @@ impl App<'_> {
                         });
                     }
                 }
+                AppEvent::StartCommitAnimation => {
+                    // Animation handling - currently not used but needed for compilation
+                }
                 AppEvent::StopCommitAnimation => {
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
                 AppEvent::CommitTick => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.on_commit_tick();
-                    }
+                    // CommitTick handling removed - no longer needed
                 }
                 AppEvent::KeyEvent(key_event) => {
                     match key_event {
@@ -364,7 +364,6 @@ impl App<'_> {
                         // User accepted – switch to chat view.
                         let new_widget = Box::new(ChatWidget::new(
                             self.config.clone(),
-                            self.server.clone(),
                             self.app_event_tx.clone(),
                             None,
                             Vec::new(),
@@ -588,7 +587,6 @@ impl App<'_> {
                     self.app_state = AppState::Chat {
                         widget: Box::new(ChatWidget::new(
                             config,
-                            self.server.clone(),
                             app_event_tx.clone(),
                             initial_prompt,
                             initial_images,
