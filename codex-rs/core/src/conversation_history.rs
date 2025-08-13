@@ -101,25 +101,6 @@ impl ConversationHistory {
         }
     }
 
-    /// Append a text `delta` to the latest assistant message, creating a new
-    /// assistant entry if none exists yet (e.g. first delta for this turn).
-    pub(crate) fn append_assistant_text(&mut self, delta: &str) {
-        match self.items.last_mut() {
-            Some(ResponseItem::Message { role, content, .. }) if role == "assistant" => {
-                append_text_delta(content, delta);
-            }
-            _ => {
-                // Start a new assistant message with the delta.
-                self.items.push(ResponseItem::Message {
-                    id: None,
-                    role: "assistant".to_string(),
-                    content: vec![crate::models::ContentItem::OutputText {
-                        text: delta.to_string(),
-                    }],
-                });
-            }
-        }
-    }
 
     pub(crate) fn keep_last_messages(&mut self, n: usize) {
         if n == 0 {
