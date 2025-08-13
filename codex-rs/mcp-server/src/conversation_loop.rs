@@ -4,7 +4,7 @@ use crate::exec_approval::handle_exec_approval_request;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
-use codex_core::Codex;
+use codex_core::CodexConversation;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::EventMsg;
@@ -13,7 +13,7 @@ use mcp_types::RequestId;
 use tracing::error;
 
 pub async fn run_conversation_loop(
-    codex: Arc<Codex>,
+    codex: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
     request_id: RequestId,
 ) {
@@ -95,6 +95,7 @@ pub async fn run_conversation_loop(
                     | EventMsg::TaskStarted
                     | EventMsg::TokenCount(_)
                     | EventMsg::AgentReasoning(_)
+                    | EventMsg::AgentReasoningSectionBreak(_)
                     | EventMsg::McpToolCallBegin(_)
                     | EventMsg::McpToolCallEnd(_)
                     | EventMsg::ExecCommandBegin(_)

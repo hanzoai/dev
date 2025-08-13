@@ -7,6 +7,7 @@ use crate::codex_tool_config::CodexToolCallParam;
 use crate::codex_tool_config::CodexToolCallReplyParam;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_param;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_reply_param;
+use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::mcp_protocol::ToolCallRequestParams;
 use crate::mcp_protocol::ToolCallResponse;
 use crate::mcp_protocol::ToolCallResponseResult;
@@ -14,7 +15,7 @@ use crate::outgoing_message::OutgoingMessageSender;
 use crate::tool_handlers::create_conversation::handle_create_conversation;
 use crate::tool_handlers::send_message::handle_send_message;
 
-use codex_core::Codex;
+use codex_core::ConversationManager;
 use codex_core::config::Config as CodexConfig;
 use codex_core::protocol::Submission;
 use mcp_types::CallToolRequest;
@@ -42,7 +43,7 @@ pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     initialized: bool,
     codex_linux_sandbox_exe: Option<PathBuf>,
-    session_map: Arc<Mutex<HashMap<Uuid, Arc<Codex>>>>,
+    conversation_manager: Arc<ConversationManager>,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
     running_session_ids: Arc<Mutex<HashSet<Uuid>>>,
 }
@@ -58,14 +59,14 @@ impl MessageProcessor {
             outgoing: Arc::new(outgoing),
             initialized: false,
             codex_linux_sandbox_exe,
-            session_map: Arc::new(Mutex::new(HashMap::new())),
+            conversation_manager: Arc::new(ConversationManager::default()),
             running_requests_id_to_codex_uuid: Arc::new(Mutex::new(HashMap::new())),
             running_session_ids: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
-    pub(crate) fn session_map(&self) -> Arc<Mutex<HashMap<Uuid, Arc<Codex>>>> {
-        self.session_map.clone()
+    pub(crate) fn get_conversation_manager(&self) -> &ConversationManager {
+        &self.conversation_manager
     }
 
     pub(crate) fn outgoing(&self) -> Arc<OutgoingMessageSender> {
@@ -191,7 +192,7 @@ impl MessageProcessor {
         if self.initialized {
             // Already initialised: send JSON-RPC error response.
             let error = JSONRPCErrorError {
-                code: -32600, // Invalid Request
+                code: INVALID_REQUEST_ERROR_CODE,
                 message: "initialize called more than once".to_string(),
                 data: None,
             };
@@ -230,9 +231,6 @@ impl MessageProcessor {
     where
         T: ModelContextProtocolRequest,
     {
-        // result has `Serialized` instance so should never fail
-        #[expect(clippy::unwrap_used)]
-        let result = serde_json::to_value(result).unwrap();
         self.outgoing.send_response(id, result).await;
     }
 
@@ -431,9 +429,9 @@ impl MessageProcessor {
             }
         };
 
-        // Clone outgoing and session map to move into async task.
+        // Clone outgoing and server to move into async task.
         let outgoing = self.outgoing.clone();
-        let session_map = self.session_map.clone();
+        let conversation_manager = self.conversation_manager.clone();
         let running_requests_id_to_codex_uuid = self.running_requests_id_to_codex_uuid.clone();
 
         // Spawn an async task to handle the Codex session so that we do not
@@ -445,7 +443,7 @@ impl MessageProcessor {
                 initial_prompt,
                 config,
                 outgoing,
-                session_map,
+                conversation_manager,
                 running_requests_id_to_codex_uuid,
             )
             .await;
@@ -516,33 +514,25 @@ impl MessageProcessor {
             }
         };
 
-        // load codex from session map
-        let session_map_mutex = Arc::clone(&self.session_map);
-
-        // Clone outgoing and session map to move into async task.
+        // Clone outgoing to move into async task.
         let outgoing = self.outgoing.clone();
         let running_requests_id_to_codex_uuid = self.running_requests_id_to_codex_uuid.clone();
 
-        let codex = {
-            let session_map = session_map_mutex.lock().await;
-            match session_map.get(&session_id).cloned() {
-                Some(c) => c,
-                None => {
-                    tracing::warn!("Session not found for session_id: {session_id}");
-                    let result = CallToolResult {
-                        content: vec![ContentBlock::TextContent(TextContent {
-                            r#type: "text".to_owned(),
-                            text: format!("Session not found for session_id: {session_id}"),
-                            annotations: None,
-                        })],
-                        is_error: Some(true),
-                        structured_content: None,
-                    };
-                    outgoing
-                        .send_response(request_id, serde_json::to_value(result).unwrap_or_default())
-                        .await;
-                    return;
-                }
+        let codex = match self.conversation_manager.get_conversation(session_id).await {
+            Ok(c) => c,
+            Err(_) => {
+                tracing::warn!("Session not found for session_id: {session_id}");
+                let result = CallToolResult {
+                    content: vec![ContentBlock::TextContent(TextContent {
+                        r#type: "text".to_owned(),
+                        text: format!("Session not found for session_id: {session_id}"),
+                        annotations: None,
+                    })],
+                    is_error: Some(true),
+                    structured_content: None,
+                };
+                outgoing.send_response(request_id, result).await;
+                return;
             }
         };
 
@@ -609,15 +599,12 @@ impl MessageProcessor {
         };
         tracing::info!("session_id: {session_id}");
 
-        // Obtain the Codex Arc while holding the session_map lock, then release.
-        let codex_arc = {
-            let sessions_guard = self.session_map.lock().await;
-            match sessions_guard.get(&session_id) {
-                Some(codex) => Arc::clone(codex),
-                None => {
-                    tracing::warn!("Session not found for session_id: {session_id}");
-                    return;
-                }
+        // Obtain the Codex conversation from the server.
+        let codex_arc = match self.conversation_manager.get_conversation(session_id).await {
+            Ok(c) => c,
+            Err(_) => {
+                tracing::warn!("Session not found for session_id: {session_id}");
+                return;
             }
         };
 
