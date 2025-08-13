@@ -12,6 +12,7 @@ mod chat_completions;
 mod client;
 mod client_common;
 pub mod codex;
+pub mod debug_logger;
 pub mod slash_commands;
 pub use codex::Codex;
 pub use codex::CodexSpawnOk;

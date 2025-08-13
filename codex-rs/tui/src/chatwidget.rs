@@ -89,6 +89,10 @@ pub(crate) struct ChatWidget<'a> {
     answer_buffer: String,
     // Cache of the last finalized assistant message to suppress immediate duplicates
     last_assistant_message: Option<String>,
+    // Track the ID of the current streaming message to prevent duplicates
+    current_stream_message_id: Option<String>,
+    // Track the ID of the current streaming reasoning to prevent duplicates
+    current_stream_reasoning_id: Option<String>,
     running_commands: HashMap<String, RunningCommand>,
     live_builder: RowBuilder,
     current_stream: Option<StreamKind>,
@@ -357,8 +361,7 @@ impl ChatWidget<'_> {
             StreamKind::Reasoning => {
                 // Always add space above reasoning (unless history is completely empty)
                 if !self.history_cells.is_empty() {
-                    self.history_cells
-                        .push(HistoryCell::new_text_line(RLine::from("")));
+                    self.add_to_history(HistoryCell::new_text_line(RLine::from("")));
                 }
                 self.stream_header_emitted = true;
                 self.request_redraw();
@@ -386,8 +389,7 @@ impl ChatWidget<'_> {
                 };
 
                 if needs_space {
-                    self.history_cells
-                        .push(HistoryCell::new_text_line(RLine::from("")));
+                    self.add_to_history(HistoryCell::new_text_line(RLine::from("")));
                 }
 
                 // Add GPT-5 header with secondary color
@@ -395,15 +397,14 @@ impl ChatWidget<'_> {
                 use ratatui::style::Modifier;
                 use ratatui::style::Style;
                 use ratatui::text::Span;
-                self.history_cells
-                    .push(HistoryCell::new_styled_text_line(RLine::from(
-                        Span::styled(
-                            formatted_model,
-                            Style::default()
-                                .fg(crate::colors::secondary())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    )));
+                self.add_to_history(HistoryCell::new_styled_text_line(RLine::from(
+                    Span::styled(
+                        formatted_model,
+                        Style::default()
+                            .fg(crate::colors::secondary())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                )));
 
                 self.stream_header_emitted = true;
                 self.request_redraw();
@@ -495,6 +496,8 @@ impl ChatWidget<'_> {
             content_buffer: String::new(),
             answer_buffer: String::new(),
             last_assistant_message: None,
+            current_stream_message_id: None,
+            current_stream_reasoning_id: None,
             running_commands: HashMap::new(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -974,6 +977,10 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
+        tracing::info!(
+            "handle_codex_event({})",
+            serde_json::to_string_pretty(&event).unwrap_or_default()
+        );
         let Event { id, msg } = event;
         match msg {
             EventMsg::SessionConfigured(event) => {
@@ -996,7 +1003,23 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // Check if we've already processed this message (duplicate detection)
+                // Check if this is the final message for a stream we've been processing
+                if let Some(stream_id) = &self.current_stream_message_id {
+                    if stream_id == &id {
+                        // This is the final message for the current stream
+                        // Just finalize without adding duplicate content
+                        if self.current_stream == Some(StreamKind::Answer) {
+                            self.finalize_stream(StreamKind::Answer);
+                            self.last_assistant_message = Some(message.clone());
+                            self.answer_buffer.clear();
+                            self.current_stream_message_id = None;
+                        }
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                
+                // Fallback: Check if we've already processed this message (duplicate detection)
                 let message_trimmed = message.trim();
                 if !message_trimmed.is_empty() {
                     if let Some(prev) = &self.last_assistant_message {
@@ -1015,6 +1038,7 @@ impl ChatWidget<'_> {
                             self.finalize_stream(StreamKind::Answer);
                             self.last_assistant_message = Some(message.clone());
                             self.answer_buffer.clear();
+                            self.current_stream_message_id = None;
                         }
                         self.request_redraw();
                         return;
@@ -1035,11 +1059,14 @@ impl ChatWidget<'_> {
                         self.last_assistant_message = Some(message.clone());
                     }
                     self.answer_buffer.clear();
+                    self.current_stream_message_id = None;
                 }
                 self.request_redraw();
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 self.begin_stream(StreamKind::Answer);
+                // Track the message ID for this stream
+                self.current_stream_message_id = Some(id.clone());
                 // Update status to show we're generating a response
                 if self.bottom_pane.is_task_running() {
                     self.bottom_pane
@@ -1053,6 +1080,8 @@ impl ChatWidget<'_> {
                 // Stream CoT into the live pane; keep input visible and commit
                 // overflow rows incrementally to scrollback.
                 self.begin_stream(StreamKind::Reasoning);
+                // Track the reasoning ID for this stream
+                self.current_stream_reasoning_id = Some(id.clone());
                 // Update status to show we're thinking/reasoning
                 if self.bottom_pane.is_task_running() {
                     self.bottom_pane.update_status_text("reasoning".to_string());
@@ -1062,6 +1091,35 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                // Check if this is the final message for a stream we've been processing
+                if let Some(stream_id) = &self.current_stream_reasoning_id {
+                    if stream_id == &id {
+                        // This is the final message for the current stream
+                        // Just finalize without adding duplicate content
+                        if self.current_stream == Some(StreamKind::Reasoning) {
+                            self.finalize_stream(StreamKind::Reasoning);
+                            self.reasoning_buffer.clear();
+                            self.current_stream_reasoning_id = None;
+                        }
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                
+                // Fallback: Check if we've already streamed this content via deltas
+                let text_trimmed = text.trim();
+                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed {
+                    // We've already streamed this content via deltas
+                    // Just finalize the stream without adding duplicate content
+                    if self.current_stream == Some(StreamKind::Reasoning) {
+                        self.finalize_stream(StreamKind::Reasoning);
+                        self.reasoning_buffer.clear();
+                        self.current_stream_reasoning_id = None;
+                    }
+                    self.request_redraw();
+                    return;
+                }
+                
                 // Final reasoning: if no deltas were streamed, render the final text.
                 if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
                     self.begin_stream(StreamKind::Reasoning);
@@ -1070,6 +1128,8 @@ impl ChatWidget<'_> {
                 // Only finalize if we actually had a stream
                 if self.current_stream == Some(StreamKind::Reasoning) {
                     self.finalize_stream(StreamKind::Reasoning);
+                    self.reasoning_buffer.clear();
+                    self.current_stream_reasoning_id = None;
                 }
                 self.request_redraw();
             }
@@ -1078,6 +1138,8 @@ impl ChatWidget<'_> {
             }) => {
                 // Treat raw reasoning content the same as summarized reasoning for UI flow.
                 self.begin_stream(StreamKind::Reasoning);
+                // Track the reasoning ID for this stream
+                self.current_stream_reasoning_id = Some(id.clone());
                 // Update status to show we're thinking/reasoning
                 if self.bottom_pane.is_task_running() {
                     self.bottom_pane.update_status_text("reasoning".to_string());
@@ -1087,6 +1149,35 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
+                // Check if this is the final message for a stream we've been processing
+                if let Some(stream_id) = &self.current_stream_reasoning_id {
+                    if stream_id == &id {
+                        // This is the final message for the current stream
+                        // Just finalize without adding duplicate content
+                        if self.current_stream == Some(StreamKind::Reasoning) {
+                            self.finalize_stream(StreamKind::Reasoning);
+                            self.reasoning_buffer.clear();
+                            self.current_stream_reasoning_id = None;
+                        }
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                
+                // Fallback: Check if we've already streamed this content via deltas
+                let text_trimmed = text.trim();
+                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed {
+                    // We've already streamed this content via deltas
+                    // Just finalize the stream without adding duplicate content
+                    if self.current_stream == Some(StreamKind::Reasoning) {
+                        self.finalize_stream(StreamKind::Reasoning);
+                        self.reasoning_buffer.clear();
+                        self.current_stream_reasoning_id = None;
+                    }
+                    self.request_redraw();
+                    return;
+                }
+                
                 // Final raw reasoning: if no deltas were streamed, render the final text.
                 if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
                     self.begin_stream(StreamKind::Reasoning);
@@ -1095,6 +1186,8 @@ impl ChatWidget<'_> {
                 // Only finalize if we actually had a stream
                 if self.current_stream == Some(StreamKind::Reasoning) {
                     self.finalize_stream(StreamKind::Reasoning);
+                    self.reasoning_buffer.clear();
+                    self.current_stream_reasoning_id = None;
                 }
                 self.request_redraw();
             }
@@ -3134,10 +3227,9 @@ impl ChatWidget<'_> {
             for line in lines {
                 // Use dimmed reasoning for thinking to get both markdown and dimming
                 if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
-                    self.history_cells
-                        .push(HistoryCell::new_dimmed_reasoning_line(line));
+                    self.add_to_history(HistoryCell::new_dimmed_reasoning_line(line));
                 } else {
-                    self.history_cells.push(HistoryCell::new_text_line(line));
+                    self.add_to_history(HistoryCell::new_text_line(line));
                 }
             }
             // Auto-follow if near bottom so streaming stays visible
@@ -3187,10 +3279,9 @@ impl ChatWidget<'_> {
             for line in lines {
                 // Use dimmed reasoning for thinking to get both markdown and dimming
                 if matches!(self.current_stream, Some(StreamKind::Reasoning)) {
-                    self.history_cells
-                        .push(HistoryCell::new_dimmed_reasoning_line(line));
+                    self.add_to_history(HistoryCell::new_dimmed_reasoning_line(line));
                 } else {
-                    self.history_cells.push(HistoryCell::new_text_line(line));
+                    self.add_to_history(HistoryCell::new_text_line(line));
                 }
             }
             // Auto-follow if near bottom when finalizing a stream
@@ -3354,13 +3445,14 @@ impl WidgetRef for &ChatWidget<'_> {
             (start_y, 0u16) // No scrolling needed
         } else {
             // Content overflows - calculate scroll position
-            // scroll_offset of 0 = show newest at bottom
-            // scroll_offset > 0 = scroll up to see older content
+            // scroll_offset is measured from the bottom (0 = bottom/newest)
+            // Convert to distance from the top for rendering math.
             let max_scroll = total_height.saturating_sub(content_area.height);
             // Update cache and clamp for display only
             self.last_max_scroll.set(max_scroll);
             let clamped_scroll_offset = self.scroll_offset.min(max_scroll);
-            (content_area.y, clamped_scroll_offset)
+            let scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
+            (content_area.y, scroll_from_top)
         };
 
         // Render the scrollable content
@@ -3400,8 +3492,9 @@ impl WidgetRef for &ChatWidget<'_> {
                     height: visible_height,
                 };
 
-                // Render the item
-                item.render_ref(item_area, buf);
+                // Render only the visible window of the item using vertical skip
+                let skip_rows = skip_top;
+                item.render_with_skip(item_area, buf, skip_rows);
                 screen_y += visible_height;
             }
 

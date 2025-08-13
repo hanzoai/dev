@@ -629,9 +629,9 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
     properties.insert(
-        "agent".to_string(),
+        "task".to_string(),
         JsonSchema::String {
-            description: Some("The agent prompt - what to perform (required)".to_string()),
+            description: Some("The task prompt - what to perform (required)".to_string()),
         },
     );
 
@@ -680,11 +680,11 @@ pub fn create_run_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "run_agent".to_string(),
-        description: "Start a complex AI agent asynchronously. Returns a agent ID immediately to check status and retrieve results.".to_string(),
+        description: "Start a complex AI task asynchronously. Returns a agent ID immediately to check status and retrieve results.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
-            required: Some(vec!["agent".to_string()]),
+            required: Some(vec!["task".to_string()]),
             additional_properties: Some(false),
         },
     })
@@ -861,7 +861,7 @@ pub fn create_list_agents_tool() -> OpenAiTool {
 // Parameter structs for handlers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunAgentParams {
-    pub agent: String,
+    pub task: String,
     pub model: Option<serde_json::Value>, // Can be string or array
     pub context: Option<String>,
     pub output: Option<String>,

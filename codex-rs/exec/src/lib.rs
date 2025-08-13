@@ -42,6 +42,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         full_auto,
         dangerously_bypass_approvals_and_sandbox,
         cwd,
+        debug,
         skip_git_repo_check,
         color,
         last_message_file,
@@ -149,6 +150,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         include_plan_tool: None,
         disable_response_storage: oss.then_some(true),
         show_raw_agent_reasoning: oss.then_some(true),
+        debug: Some(debug),
     };
     // Parse `-c` overrides.
     let cli_kv_overrides = match config_overrides.parse_overrides() {
