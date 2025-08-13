@@ -173,6 +173,7 @@ pub enum ResponseEvent {
     OutputTextDelta { delta: String, item_id: Option<String> },
     ReasoningSummaryDelta { delta: String, item_id: Option<String> },
     ReasoningContentDelta { delta: String, item_id: Option<String> },
+    ReasoningSummaryPartAdded,
 }
 
 #[derive(Debug, Serialize)]

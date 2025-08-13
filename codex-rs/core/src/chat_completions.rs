@@ -708,6 +708,9 @@ where
                 Poll::Ready(Some(Ok(ResponseEvent::ReasoningSummaryDelta { .. }))) => {
                     continue;
                 }
+                Poll::Ready(Some(Ok(ResponseEvent::ReasoningSummaryPartAdded))) => {
+                    continue;
+                }
             }
         }
     }
