@@ -469,6 +469,8 @@ pub(crate) fn get_openai_tools(
     tools.push(create_browser_type_tool());
     tools.push(create_browser_key_tool());
     tools.push(create_browser_javascript_tool());
+    tools.push(create_browser_scroll_tool());
+    tools.push(create_browser_history_tool());
 
     // Add agent management tools for calling external LLMs asynchronously
     tools.push(create_run_agent_tool());
@@ -992,6 +994,54 @@ fn create_browser_javascript_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["code".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_scroll_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "dx".to_string(),
+        JsonSchema::Number {
+            description: Some("Horizontal scroll delta in pixels (positive = right)".to_string()),
+        },
+    );
+    properties.insert(
+        "dy".to_string(),
+        JsonSchema::Number {
+            description: Some("Vertical scroll delta in pixels (positive = down)".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_scroll".to_string(),
+        description: "Scrolls the page by the specified pixel deltas.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_history_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "direction".to_string(),
+        JsonSchema::String {
+            description: Some("History direction: 'back' or 'forward'".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_history".to_string(),
+        description: "Navigates browser history backward or forward.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["direction".to_string()]),
             additional_properties: Some(false),
         },
     })

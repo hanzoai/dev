@@ -19,6 +19,7 @@ use crate::ModelProviderInfo;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::debug_logger::DebugLogger;
 use crate::error::CodexErr;
 use crate::error::Result;
 use crate::model_family::ModelFamily;
@@ -27,6 +28,7 @@ use crate::models::ReasoningItemContent;
 use crate::models::ResponseItem;
 use crate::openai_tools::create_tools_json_for_chat_completions_api;
 use crate::util::backoff;
+use std::sync::{Arc, Mutex};
 
 /// Implementation for the classic Chat Completions API.
 pub(crate) async fn stream_chat_completions(
@@ -34,6 +36,7 @@ pub(crate) async fn stream_chat_completions(
     model_family: &ModelFamily,
     client: &reqwest::Client,
     provider: &ModelProviderInfo,
+    debug_logger: &Arc<Mutex<DebugLogger>>,
 ) -> Result<ResponseStream> {
     // Build messages array
     let mut messages = Vec::<serde_json::Value>::new();
@@ -58,10 +61,11 @@ pub(crate) async fn stream_chat_completions(
                             ContentItem::InputText { text } | ContentItem::OutputText { text } => {
                                 parts.push(json!({ "type": "text", "text": text }));
                             }
-                            ContentItem::InputImage { image_url } => {
+                            ContentItem::InputImage { image_url, detail } => {
                                 parts.push(json!({
                                     "type": "image_url",
-                                    "image_url": { "url": image_url }
+                                    "image_url": { "url": image_url },
+                                    "detail": detail.clone().unwrap_or_else(|| "auto".to_string())
                                 }));
                             }
                         }
@@ -142,11 +146,17 @@ pub(crate) async fn stream_chat_completions(
         "tools": tools_json,
     });
 
+    let endpoint = provider.get_full_url(&None);
     debug!(
         "POST to {}: {}",
-        provider.get_full_url(&None),
+        endpoint,
         serde_json::to_string_pretty(&payload).unwrap_or_default()
     );
+
+    // Log the request if debug is enabled
+    if let Ok(logger) = debug_logger.lock() {
+        let _ = logger.log_request(&endpoint, &payload);
+    }
 
     let mut attempt = 0;
     let max_retries = provider.request_max_retries();
@@ -163,6 +173,14 @@ pub(crate) async fn stream_chat_completions(
 
         match res {
             Ok(resp) if resp.status().is_success() => {
+                // Log successful response initiation (streaming)
+                if let Ok(logger) = debug_logger.lock() {
+                    let _ = logger.log_response(&endpoint, &serde_json::json!({
+                        "status": "success",
+                        "type": "stream_initiated", 
+                        "status_code": resp.status().as_u16()
+                    }));
+                }
                 let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
                 let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
                 tokio::spawn(process_chat_sse(
@@ -176,6 +194,10 @@ pub(crate) async fn stream_chat_completions(
                 let status = res.status();
                 if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()) {
                     let body = (res.text().await).unwrap_or_default();
+                    // Log error response
+                    if let Ok(logger) = debug_logger.lock() {
+                        let _ = logger.log_error(&endpoint, &format!("Status: {}, Body: {}", status, body));
+                    }
                     return Err(CodexErr::UnexpectedStatus(status, body));
                 }
 
@@ -196,6 +218,10 @@ pub(crate) async fn stream_chat_completions(
             }
             Err(e) => {
                 if attempt > max_retries {
+                    // Log network error
+                    if let Ok(logger) = debug_logger.lock() {
+                        let _ = logger.log_error(&endpoint, &format!("Network error: {}", e));
+                    }
                     return Err(e.into());
                 }
                 let delay = backoff(attempt);

@@ -58,6 +58,9 @@ pub(crate) struct App<'a> {
     pending_redraw: Arc<AtomicBool>,
 
     enhanced_keys_supported: bool,
+    
+    /// Debug flag for logging LLM requests/responses
+    _debug: bool,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -76,6 +79,7 @@ impl App<'_> {
         initial_prompt: Option<String>,
         initial_images: Vec<std::path::PathBuf>,
         show_trust_screen: bool,
+        debug: bool,
     ) -> Self {
         let (app_event_tx, app_event_rx) = channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
@@ -169,6 +173,7 @@ impl App<'_> {
             file_search,
             pending_redraw,
             enhanced_keys_supported,
+            _debug: debug,
         }
     }
 

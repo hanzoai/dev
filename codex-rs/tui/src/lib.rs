@@ -42,6 +42,7 @@ pub mod live_wrap;
 mod log_layer;
 mod markdown;
 pub mod onboarding;
+mod scroll_view;
 mod shimmer;
 mod slash_command;
 mod terminal_info;
@@ -112,6 +113,7 @@ pub async fn run_main(
         include_plan_tool: Some(true),
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
+        debug: Some(cli.debug),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -269,8 +271,8 @@ fn run_ratatui_app(
     let mut terminal = tui::init(&config)?;
     terminal.clear()?;
 
-    let Cli { prompt, images, .. } = cli;
-    let mut app = App::new(config.clone(), prompt, images, should_show_trust_screen);
+    let Cli { prompt, images, debug, .. } = cli;
+    let mut app = App::new(config.clone(), prompt, images, should_show_trust_screen, debug);
 
     // Bridge log receiver into the AppEvent channel so latest log lines update the UI.
     {

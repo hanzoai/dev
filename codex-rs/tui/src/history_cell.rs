@@ -1,6 +1,7 @@
 use crate::diff_render::create_diff_summary;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::scroll_view::ScrollView;
 use crate::slash_command::SlashCommand;
 use crate::text_block::TextBlock;
 use crate::text_formatting::format_and_truncate_tool_result;
@@ -319,7 +320,11 @@ impl HistoryCell {
             HistoryCell::BackgroundEvent { view: _ } => {
                 // For background events (LLM responses), use proper word wrapping
                 let processed_lines = self.get_processed_lines(width);
-                processed_lines.len() as u16
+                Paragraph::new(Text::from(processed_lines))
+                    .wrap(Wrap { trim: false })
+                    .line_count(width)
+                    .try_into()
+                    .unwrap_or(0)
             }
             HistoryCell::StyledText { view } => {
                 // For styled text, respect wrapping to the available width
@@ -330,9 +335,13 @@ impl HistoryCell {
                     .unwrap_or(0)
             }
             HistoryCell::DimmedReasoning { view: _ } => {
-                // For dimmed reasoning, use dimmed markdown processing
+                // For dimmed reasoning, use dimmed markdown processing with wrapping
                 let processed_lines = self.get_processed_lines(width);
-                processed_lines.len() as u16
+                Paragraph::new(Text::from(processed_lines))
+                    .wrap(Wrap { trim: false })
+                    .line_count(width)
+                    .try_into()
+                    .unwrap_or(0)
             }
             _ => Paragraph::new(Text::from(self.plain_lines()))
                 .wrap(Wrap { trim: false })
@@ -438,15 +447,27 @@ impl HistoryCell {
     ) -> Vec<Line<'static>> {
         match parsed.is_empty() {
             true => HistoryCell::new_exec_command_generic(command, output),
-            false => HistoryCell::new_parsed_command(parsed, output),
+            false => HistoryCell::new_parsed_command(command, parsed, output),
         }
     }
 
     fn new_parsed_command(
+        command: &[String],
         parsed_commands: &[ParsedCommand],
         output: Option<&CommandOutput>,
     ) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line> = vec![Line::from("⚙︎ Working")];
+        let mut lines: Vec<Line> = Vec::new();
+        if output.is_some() {
+            // Completed: show the command that ran
+            let cmd_text = shlex_join_safe(command);
+            lines.push(Line::from(vec![
+                "⚡ Ran command ".magenta(),
+                cmd_text.into(),
+            ]));
+        } else {
+            // In progress
+            lines.push(Line::from("⚙︎ Working"));
+        }
 
         for (i, parsed) in parsed_commands.iter().enumerate() {
             let text = match parsed {
@@ -1213,6 +1234,110 @@ impl WidgetRef for &HistoryCell {
                             .bg(crate::colors::background()),
                     )
                     .render(area, buf);
+            }
+        }
+    }
+}
+
+impl HistoryCell {
+    /// Render this history cell with a vertical skip of `skip_top` rows.
+    /// This is used by the outer scroller to render only the visible window
+    /// of a potentially tall cell (e.g., large diffs).
+    pub(crate) fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_top: u16) {
+        match self {
+            // Animated items ignore vertical skip due to custom rendering.
+            HistoryCell::AnimatedWelcome { .. } => self.render_ref(area, buf),
+            HistoryCell::BackgroundEvent { .. }
+            | HistoryCell::StyledText { .. }
+            | HistoryCell::WelcomeMessage { .. }
+            | HistoryCell::DimmedReasoning { .. }
+            | HistoryCell::GitDiffOutput { .. }
+            | HistoryCell::ReasoningOutput { .. }
+            | HistoryCell::StatusOutput { .. }
+            | HistoryCell::PromptsOutput { .. }
+            | HistoryCell::ErrorEvent { .. }
+            | HistoryCell::SessionInfo { .. }
+            | HistoryCell::PendingPatch { .. }
+            | HistoryCell::PlanUpdate { .. }
+            | HistoryCell::PatchApplyResult { .. }
+            | HistoryCell::CompletedMcpToolCall { .. }
+            | HistoryCell::ActiveMcpToolCall { .. } => {
+                // Use the same processed/plain lines as desired_height/render_ref but apply a vertical scroll.
+                let lines = match self {
+                    HistoryCell::BackgroundEvent { .. }
+                    | HistoryCell::DimmedReasoning { .. } => self.get_processed_lines(area.width),
+                    HistoryCell::StyledText { view }
+                    | HistoryCell::WelcomeMessage { view }
+                    | HistoryCell::GitDiffOutput { view }
+                    | HistoryCell::ReasoningOutput { view }
+                    | HistoryCell::StatusOutput { view }
+                    | HistoryCell::PromptsOutput { view }
+                    | HistoryCell::ErrorEvent { view }
+                    | HistoryCell::SessionInfo { view }
+                    | HistoryCell::PendingPatch { view }
+                    | HistoryCell::PlanUpdate { view }
+                    | HistoryCell::PatchApplyResult { view }
+                    | HistoryCell::CompletedMcpToolCall { view }
+                    | HistoryCell::ActiveMcpToolCall { view } => view.lines.clone(),
+                    _ => self.plain_lines(),
+                };
+                Paragraph::new(Text::from(lines))
+                    .wrap(Wrap { trim: false })
+                    .scroll((skip_top, 0))
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .bg(crate::colors::background()),
+                    )
+                    .render(area, buf);
+            }
+            HistoryCell::UserPrompt { view } => {
+                // Keep the left border and apply scroll inside the text area.
+                for y in area.top()..area.bottom() {
+                    if area.left() < area.right() {
+                        buf[(area.left(), y)]
+                            .set_char('│')
+                            .set_fg(crate::colors::border_focused());
+                    }
+                }
+                let text_area = Rect {
+                    x: area.x + 2,
+                    y: area.y,
+                    width: area.width.saturating_sub(2),
+                    height: area.height,
+                };
+                Paragraph::new(Text::from(
+                    view.lines.iter().map(line_to_static).collect::<Vec<_>>(),
+                ))
+                .wrap(Wrap { trim: false })
+                .scroll((skip_top, 0))
+                .style(Style::default().bg(crate::colors::background()))
+                .render(text_area, buf);
+            }
+            HistoryCell::Exec(_) | HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => {
+                // Use ScrollView for complex widgets that don't support native scrolling
+                let content_height = self.desired_height(area.width);
+                
+                // Create a wrapper that implements Widget
+                #[derive(Clone)]
+                struct CellRenderer<'a> {
+                    cell: &'a HistoryCell,
+                }
+                
+                impl<'a> Widget for CellRenderer<'a> {
+                    fn render(self, area: Rect, buf: &mut Buffer) {
+                        self.cell.render_ref(area, buf);
+                    }
+                }
+                
+                // Apply ScrollView with the vertical skip
+                let scroll_view = ScrollView::new(
+                    CellRenderer { cell: self },
+                    content_height as usize,
+                )
+                .scroll_y(skip_top as usize);
+                
+                scroll_view.render(area, buf);
             }
         }
     }

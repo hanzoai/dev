@@ -40,6 +40,8 @@ use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::protocol::TokenUsage;
 use crate::util::backoff;
 use std::sync::Arc;
+use std::sync::Mutex;
+use crate::debug_logger::DebugLogger;
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -60,6 +62,7 @@ pub struct ModelClient {
     session_id: Uuid,
     effort: ReasoningEffortConfig,
     summary: ReasoningSummaryConfig,
+    debug_logger: Arc<Mutex<DebugLogger>>,
 }
 
 impl ModelClient {
@@ -70,6 +73,7 @@ impl ModelClient {
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
         session_id: Uuid,
+        debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
         Self {
             config,
@@ -79,7 +83,13 @@ impl ModelClient {
             session_id,
             effort,
             summary,
+            debug_logger,
         }
+    }
+
+    /// Get the reasoning effort configuration
+    pub fn get_reasoning_effort(&self) -> ReasoningEffortConfig {
+        self.effort
     }
 
     /// Dispatches to either the Responses or Chat implementation depending on
@@ -95,6 +105,7 @@ impl ModelClient {
                     &self.config.model_family,
                     &self.client,
                     &self.provider,
+                    &self.debug_logger,
                 )
                 .await?;
 
@@ -164,7 +175,7 @@ impl ModelClient {
             input: &input_with_instructions,
             tools: &tools_json,
             tool_choice: "auto",
-            parallel_tool_calls: false,
+            parallel_tool_calls: true,
             reasoning,
             store,
             stream: true,
@@ -175,11 +186,17 @@ impl ModelClient {
         let mut attempt = 0;
         let max_retries = self.provider.request_max_retries();
 
+        let endpoint = self.provider.get_full_url(&auth);
         trace!(
             "POST to {}: {}",
-            self.provider.get_full_url(&auth),
+            endpoint,
             serde_json::to_string(&payload)?
         );
+
+        // Log the request if debug is enabled
+        if let Ok(logger) = self.debug_logger.lock() {
+            let _ = logger.log_request(&endpoint, &serde_json::to_value(&payload)?);
+        }
 
         loop {
             attempt += 1;
@@ -225,6 +242,18 @@ impl ModelClient {
 
             match res {
                 Ok(resp) if resp.status().is_success() => {
+                    // Log successful response initiation (streaming)
+                    if let Ok(logger) = self.debug_logger.lock() {
+                        let _ = logger.log_response(&endpoint, &serde_json::json!({
+                            "status": "success",
+                            "type": "stream_initiated",
+                            "status_code": resp.status().as_u16(),
+                            "request_id": resp.headers()
+                                .get("x-request-id")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or_default()
+                        }));
+                    }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
                     // spawn task to process SSE
@@ -257,6 +286,10 @@ impl ModelClient {
                     if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()) {
                         // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
                         let body = res.text().await.unwrap_or_default();
+                        // Log error response
+                        if let Ok(logger) = self.debug_logger.lock() {
+                            let _ = logger.log_error(&endpoint, &format!("Status: {}, Body: {}", status, body));
+                        }
                         return Err(CodexErr::UnexpectedStatus(status, body));
                     }
 
@@ -291,6 +324,10 @@ impl ModelClient {
                 }
                 Err(e) => {
                     if attempt > max_retries {
+                        // Log network error
+                        if let Ok(logger) = self.debug_logger.lock() {
+                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e));
+                        }
                         return Err(e.into());
                     }
                     let delay = backoff(attempt);

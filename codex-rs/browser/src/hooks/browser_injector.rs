@@ -59,7 +59,7 @@ impl BrowserInjector {
             .unwrap_or_else(|_| "about:blank".to_string());
 
         let system_hint = format!(
-            "A fresh screenshot of the active page ({}) is attached; use browser.* tools to navigate or capture more.",
+            "A fresh screenshot of the active page ({}) is attached; use browser_* tools to navigate or capture more.",
             current_url
         );
 

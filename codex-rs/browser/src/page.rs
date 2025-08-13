@@ -354,9 +354,11 @@ impl Page {
 
     /// Type text into the currently focused element
     pub async fn type_text(&self, text: &str) -> Result<()> {
-        debug!("Typing text: {}", text);
+        // Replace em dashes with regular dashes
+        let processed_text = text.replace('—', " - ");
+        debug!("Typing text: {}", processed_text);
 
-        for ch in text.chars() {
+        for ch in processed_text.chars() {
             let params = DispatchKeyEventParams::builder()
                 .r#type(DispatchKeyEventType::Char)
                 .text(ch.to_string())
@@ -543,6 +545,30 @@ impl Page {
         tracing::info!("JavaScript execution result: {}", result_value);
 
         Ok(result_value)
+    }
+
+    /// Scroll the page by the given delta in pixels
+    pub async fn scroll_by(&self, dx: f64, dy: f64) -> Result<()> {
+        debug!("Scrolling by ({}, {})", dx, dy);
+        let js = format!(
+            "(function() {{ window.scrollBy({dx}, {dy}); return {{ x: window.scrollX, y: window.scrollY }}; }})()"
+        );
+        let _ = self.execute_javascript(&js).await?;
+        Ok(())
+    }
+
+    /// Navigate browser history backward one entry
+    pub async fn go_back(&self) -> Result<()> {
+        debug!("History back");
+        let _ = self.execute_javascript("history.back();").await?;
+        Ok(())
+    }
+
+    /// Navigate browser history forward one entry
+    pub async fn go_forward(&self) -> Result<()> {
+        debug!("History forward");
+        let _ = self.execute_javascript("history.forward();").await?;
+        Ok(())
     }
 }
 
