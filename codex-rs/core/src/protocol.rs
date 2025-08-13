@@ -401,6 +401,10 @@ pub enum EventMsg {
 
     McpToolCallEnd(McpToolCallEndEvent),
 
+    /// Custom tool call events for non-MCP tools (browser, agent, etc)
+    CustomToolCallBegin(CustomToolCallBeginEvent),
+    CustomToolCallEnd(CustomToolCallEndEvent),
+
     /// Notification that the server is about to execute a command.
     ExecCommandBegin(ExecCommandBeginEvent),
 
@@ -585,6 +589,30 @@ impl McpToolCallEndEvent {
             Err(_) => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CustomToolCallBeginEvent {
+    /// Identifier so this can be paired with the CustomToolCallEnd event.
+    pub call_id: String,
+    /// Name of the tool (e.g., "browser_navigate", "run_agent")
+    pub tool_name: String,
+    /// Parameters passed to the tool as JSON
+    pub parameters: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CustomToolCallEndEvent {
+    /// Identifier for the corresponding CustomToolCallBegin that finished.
+    pub call_id: String,
+    /// Name of the tool
+    pub tool_name: String,
+    /// Parameters passed to the tool as JSON
+    pub parameters: Option<serde_json::Value>,
+    /// Duration of the tool call
+    pub duration: Duration,
+    /// Result of the tool call (success message or error)
+    pub result: Result<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
