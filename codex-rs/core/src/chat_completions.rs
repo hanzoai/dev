@@ -52,7 +52,9 @@ pub(crate) async fn stream_chat_completions(
                 // If the message contains any images, we must use the
                 // multi-modal array form supported by Chat Completions:
                 //   [{ type: "text", text: "..." }, { type: "image_url", image_url: { url: "data:..." } }]
-                let contains_image = content.iter().any(|c| matches!(c, ContentItem::InputImage { .. }));
+                let contains_image = content
+                    .iter()
+                    .any(|c| matches!(c, ContentItem::InputImage { .. }));
 
                 if contains_image {
                     let mut parts = Vec::<serde_json::Value>::new();
@@ -78,7 +80,8 @@ pub(crate) async fn stream_chat_completions(
                     let mut text = String::new();
                     for c in content {
                         match c {
-                            ContentItem::InputText { text: t } | ContentItem::OutputText { text: t } => {
+                            ContentItem::InputText { text: t }
+                            | ContentItem::OutputText { text: t } => {
                                 text.push_str(t);
                             }
                             _ => {}
@@ -155,7 +158,9 @@ pub(crate) async fn stream_chat_completions(
 
     // Start logging the request and get a request_id to track the response
     let request_id = if let Ok(logger) = debug_logger.lock() {
-        logger.start_request_log(&endpoint, &payload).unwrap_or_default()
+        logger
+            .start_request_log(&endpoint, &payload)
+            .unwrap_or_default()
     } else {
         String::new()
     };
@@ -177,10 +182,14 @@ pub(crate) async fn stream_chat_completions(
             Ok(resp) if resp.status().is_success() => {
                 // Log successful response initiation
                 if let Ok(logger) = debug_logger.lock() {
-                    let _ = logger.append_response_event(&request_id, "stream_initiated", &serde_json::json!({
-                        "status": "success",
-                        "status_code": resp.status().as_u16()
-                    }));
+                    let _ = logger.append_response_event(
+                        &request_id,
+                        "stream_initiated",
+                        &serde_json::json!({
+                            "status": "success",
+                            "status_code": resp.status().as_u16()
+                        }),
+                    );
                 }
                 let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
                 let stream = resp.bytes_stream().map_err(CodexErr::Reqwest);
@@ -201,10 +210,14 @@ pub(crate) async fn stream_chat_completions(
                     let body = (res.text().await).unwrap_or_default();
                     // Log error response
                     if let Ok(logger) = debug_logger.lock() {
-                        let _ = logger.append_response_event(&request_id, "error", &serde_json::json!({
-                            "status": status.as_u16(),
-                            "body": body
-                        }));
+                        let _ = logger.append_response_event(
+                            &request_id,
+                            "error",
+                            &serde_json::json!({
+                                "status": status.as_u16(),
+                                "body": body
+                            }),
+                        );
                         let _ = logger.end_request_log(&request_id);
                     }
                     return Err(CodexErr::UnexpectedStatus(status, body));
@@ -229,9 +242,13 @@ pub(crate) async fn stream_chat_completions(
                 if attempt > max_retries {
                     // Log network error
                     if let Ok(logger) = debug_logger.lock() {
-                        let _ = logger.append_response_event(&request_id, "network_error", &serde_json::json!({
-                            "error": e.to_string()
-                        }));
+                        let _ = logger.append_response_event(
+                            &request_id,
+                            "network_error",
+                            &serde_json::json!({
+                                "error": e.to_string()
+                            }),
+                        );
                         let _ = logger.end_request_log(&request_id);
                     }
                     return Err(e.into());
@@ -355,7 +372,7 @@ async fn process_chat_sse<S>(
             Err(_) => continue,
         };
         trace!("chat_completions received SSE chunk: {chunk:?}");
-        
+
         // Log the SSE chunk to debug log
         if let Ok(logger) = debug_logger.lock() {
             let _ = logger.append_response_event(&request_id, "sse_event", &chunk);
@@ -373,7 +390,7 @@ async fn process_chat_sse<S>(
             if let Some(item_id) = choice.get("item_id").and_then(|id| id.as_str()) {
                 current_item_id = Some(item_id.to_string());
             }
-            
+
             // Handle assistant content tokens as streaming deltas.
             if let Some(content) = choice
                 .get("delta")
@@ -525,7 +542,7 @@ async fn process_chat_sse<S>(
                 if let Ok(logger) = debug_logger.lock() {
                     let _ = logger.end_request_log(&request_id);
                 }
-                
+
                 return; // End processing for this SSE stream.
             }
         }
@@ -593,7 +610,8 @@ where
                         // seen any deltas; otherwise, deltas already built the
                         // cumulative text and this would duplicate it.
                         if this.cumulative.is_empty() {
-                            if let crate::models::ResponseItem::Message { content, id, .. } = &item {
+                            if let crate::models::ResponseItem::Message { content, id, .. } = &item
+                            {
                                 // Capture the item_id if present
                                 if let Some(item_id) = id {
                                     this.cumulative_item_id = Some(item_id.clone());
@@ -610,7 +628,7 @@ where
                         // Swallow assistant message here; emit on Completed.
                         continue;
                     }
-                    
+
                     // Also capture item_id from Reasoning items
                     if let crate::models::ResponseItem::Reasoning { id, .. } = &item {
                         if !id.is_empty() {
@@ -691,7 +709,10 @@ where
                     }
                     if matches!(this.mode, AggregateMode::Streaming) {
                         // In streaming mode, also forward the delta immediately.
-                        return Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta { delta, item_id })));
+                        return Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta {
+                            delta,
+                            item_id,
+                        })));
                     } else {
                         continue;
                     }
@@ -705,7 +726,10 @@ where
                     }
                     if matches!(this.mode, AggregateMode::Streaming) {
                         // In streaming mode, also forward the delta immediately.
-                        return Poll::Ready(Some(Ok(ResponseEvent::ReasoningContentDelta { delta, item_id })));
+                        return Poll::Ready(Some(Ok(ResponseEvent::ReasoningContentDelta {
+                            delta,
+                            item_id,
+                        })));
                     } else {
                         continue;
                     }

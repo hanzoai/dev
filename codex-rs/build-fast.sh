@@ -2,8 +2,6 @@
 # Fast build script for local development - optimized for speed
 set -euo pipefail
 
-# No need to cd, we're already in the Rust project root
-
 # Use dev-fast profile by default for quick iteration
 # Can override with: PROFILE=release ./build-fast.sh
 PROFILE="${PROFILE:-dev-fast}"

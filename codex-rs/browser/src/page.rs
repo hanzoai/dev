@@ -11,10 +11,10 @@ use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventType;
 // Import MouseButton (New)
 use chromiumoxide::cdp::browser_protocol::input::MouseButton;
 // Import AddScriptToEvaluateOnNewDocumentParams (New)
+use base64::Engine as _;
 use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams;
-use base64::Engine as _;
 use chromiumoxide::page::Page as CdpPage;
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,7 +62,7 @@ impl Page {
         let cdp_page_clone = page.cdp_page.clone();
         tokio::spawn(async move {
             if let Err(e) = Self::inject_tab_interception_script(&cdp_page_clone).await {
-                 warn!("Failed to inject navigation interception script: {}", e);
+                warn!("Failed to inject navigation interception script: {}", e);
             }
         });
 
@@ -175,56 +175,63 @@ impl Page {
     ) -> Result<chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotReturns> {
         // First try with from_surface(false) to avoid flashing, with timeout
         let params = params_builder.clone().from_surface(false).build();
-        
+
         let first_attempt = tokio::time::timeout(
             tokio::time::Duration::from_secs(8),
-            self.cdp_page.execute(params)
-        ).await;
-        
+            self.cdp_page.execute(params),
+        )
+        .await;
+
         match first_attempt {
             Ok(Ok(resp)) => Ok(resp.result),
             Ok(Err(e)) => {
                 // Log the initial failure
-                debug!("Screenshot with from_surface(false) failed: {}. Retrying with from_surface(true)...", e);
-                
+                debug!(
+                    "Screenshot with from_surface(false) failed: {}. Retrying with from_surface(true)...",
+                    e
+                );
+
                 // Retry with from_surface(true) - this may cause flashing but will work when window is not visible
                 let retry_params = params_builder.from_surface(true).build();
                 let retry_attempt = tokio::time::timeout(
                     tokio::time::Duration::from_secs(8),
-                    self.cdp_page.execute(retry_params)
-                ).await;
-                
+                    self.cdp_page.execute(retry_params),
+                )
+                .await;
+
                 match retry_attempt {
                     Ok(Ok(resp)) => Ok(resp.result),
                     Ok(Err(retry_err)) => {
-                        debug!("Screenshot retry with from_surface(true) also failed: {}", retry_err);
+                        debug!(
+                            "Screenshot retry with from_surface(true) also failed: {}",
+                            retry_err
+                        );
                         Err(retry_err.into())
                     }
-                    Err(_) => {
-                        Err(BrowserError::ScreenshotError(
-                            "Screenshot retry timed out after 8 seconds".to_string()
-                        ))
-                    }
+                    Err(_) => Err(BrowserError::ScreenshotError(
+                        "Screenshot retry timed out after 8 seconds".to_string(),
+                    )),
                 }
             }
             Err(_) => {
                 // First attempt timed out, try with from_surface(true)
-                debug!("Screenshot with from_surface(false) timed out. Retrying with from_surface(true)...");
-                
+                debug!(
+                    "Screenshot with from_surface(false) timed out. Retrying with from_surface(true)..."
+                );
+
                 let retry_params = params_builder.from_surface(true).build();
                 let retry_attempt = tokio::time::timeout(
                     tokio::time::Duration::from_secs(8),
-                    self.cdp_page.execute(retry_params)
-                ).await;
-                
+                    self.cdp_page.execute(retry_params),
+                )
+                .await;
+
                 match retry_attempt {
                     Ok(Ok(resp)) => Ok(resp.result),
                     Ok(Err(e)) => Err(e.into()),
-                    Err(_) => {
-                        Err(BrowserError::ScreenshotError(
-                            "Screenshot timed out after 8 seconds on both attempts".to_string()
-                        ))
-                    }
+                    Err(_) => Err(BrowserError::ScreenshotError(
+                        "Screenshot timed out after 8 seconds on both attempts".to_string(),
+                    )),
                 }
             }
         }
@@ -237,23 +244,24 @@ impl Page {
 
     /// (NEW) Injects a virtual cursor element into the page at the current coordinates.
     pub async fn inject_virtual_cursor(&self) -> Result<()> {
-    let cursor = self.cursor_state.lock().await.clone();
-    let cursor_x = cursor.x;
-    let cursor_y = cursor.y;
+        let cursor = self.cursor_state.lock().await.clone();
+        let cursor_x = cursor.x;
+        let cursor_y = cursor.y;
 
-    // Creates (once) and updates a two-part virtual cursor:
-    // - Arrow (instant follow)
-    // - Badge (slight lag / offset for a nicer feel)
-    //
-    // Tunables inside script:
-    //   ARROW_SIZE_PX        => overall design width (scales arrow)
-    //   BADGE_SIZE_PX        => overall design width (scales badge)
-    //   TIP_X/TIP_Y    => pixel nudge so the arrow tip lands exactly on (x,y)
-    //   BADGE_OFF_*    => relative offset of the trailing badge
-    //   LAG            => how much the badge trails; lower = looser, higher = tighter
-    //
-    // To remove later: evaluate `window.__vc?.destroy()`
-    let script = format!(r#"
+        // Creates (once) and updates a two-part virtual cursor:
+        // - Arrow (instant follow)
+        // - Badge (slight lag / offset for a nicer feel)
+        //
+        // Tunables inside script:
+        //   ARROW_SIZE_PX        => overall design width (scales arrow)
+        //   BADGE_SIZE_PX        => overall design width (scales badge)
+        //   TIP_X/TIP_Y    => pixel nudge so the arrow tip lands exactly on (x,y)
+        //   BADGE_OFF_*    => relative offset of the trailing badge
+        //   LAG            => how much the badge trails; lower = looser, higher = tighter
+        //
+        // To remove later: evaluate `window.__vc?.destroy()`
+        let script = format!(
+            r#"
 (function(x, y) {{
   const ns = 'http://www.w3.org/2000/svg';
   const VIEW_W = 40, VIEW_H = 30;       // original viewBox of your assets
@@ -511,11 +519,14 @@ impl Page {
     window.__vc.moveTo(x, y);
   }}
 }})({cursor_x}, {cursor_y});
-"#, cursor_x=cursor_x, cursor_y=cursor_y);
+"#,
+            cursor_x = cursor_x,
+            cursor_y = cursor_y
+        );
 
-    self.cdp_page.evaluate(script).await?;
-    Ok(())
-}
+        self.cdp_page.evaluate(script).await?;
+        Ok(())
+    }
 
     /// (NEW) Ensures an editable element is focused before typing. (Ported from TS implementation)
     async fn ensure_editable_focused(&self) -> Result<bool> {
@@ -524,7 +535,8 @@ impl Page {
         let cursor_y = cursor.y;
 
         // The JS logic from browser_session.ts
-        let script = format!(r#"
+        let script = format!(
+            r#"
             (function(cursorX, cursorY) {{
                 const editable = el => el && (
                     // Refined list: exclude input types not meant for direct typing
@@ -576,12 +588,13 @@ impl Page {
                 }}
                 return false;
             }})({cursor_x}, {cursor_y})
-        "#, cursor_x=cursor_x, cursor_y=cursor_y);
+        "#,
+            cursor_x = cursor_x,
+            cursor_y = cursor_y
+        );
 
         let result = self.cdp_page.evaluate(script).await?;
-        let focused = result.value()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let focused = result.value().and_then(|v| v.as_bool()).unwrap_or(false);
 
         Ok(focused)
     }
@@ -594,7 +607,7 @@ impl Page {
         // Navigate to the URL with retry on timeout
         let max_retries = 3;
         let mut last_error = None;
-        
+
         for attempt in 1..=max_retries {
             match self.cdp_page.goto(url).await {
                 Ok(_) => {
@@ -604,9 +617,12 @@ impl Page {
                 Err(e) => {
                     let error_str = e.to_string();
                     if error_str.contains("Request timed out") || error_str.contains("timeout") {
-                        warn!("Navigation timeout on attempt {}/{}: {}", attempt, max_retries, error_str);
+                        warn!(
+                            "Navigation timeout on attempt {}/{}: {}",
+                            attempt, max_retries, error_str
+                        );
                         last_error = Some(e);
-                        
+
                         if attempt < max_retries {
                             // Wait before retry, increasing delay each time
                             let delay_ms = 1000 * attempt as u64;
@@ -621,12 +637,13 @@ impl Page {
                 }
             }
         }
-        
+
         // If we exhausted retries, return the last error
         if let Some(e) = last_error {
-            return Err(BrowserError::CdpError(
-                format!("Navigation failed after {} retries: {}", max_retries, e)
-            ));
+            return Err(BrowserError::CdpError(format!(
+                "Navigation failed after {} retries: {}",
+                max_retries, e
+            )));
         }
 
         // Wait according to the strategy
@@ -701,7 +718,7 @@ impl Page {
             warn!("Failed to inject virtual cursor: {}", e);
             // Continue with screenshot even if cursor injection fails
         }
-        
+
         // Allow a brief moment for the cursor SVG to render
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -714,7 +731,6 @@ impl Page {
             ScreenshotMode::Region(region) => self.screenshot_region(region).await,
         }
     }
-
 
     pub async fn screenshot_viewport(&self) -> Result<Vec<Screenshot>> {
         // Safe viewport capture: do not change device metrics or viewport.
@@ -735,18 +751,20 @@ impl Page {
             .await
             .unwrap_or(serde_json::Value::Null);
 
-        let doc_w = probe
-            .get("w")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        let doc_h = probe
-            .get("h")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let doc_w = probe.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let doc_h = probe.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
         // Fall back to configured viewport if probe failed
-        let vw = if doc_w > 0 { doc_w } else { self.config.viewport.width };
-        let vh = if doc_h > 0 { doc_h } else { self.config.viewport.height };
+        let vw = if doc_w > 0 {
+            doc_w
+        } else {
+            self.config.viewport.width
+        };
+        let vh = if doc_h > 0 {
+            doc_h
+        } else {
+            self.config.viewport.height
+        };
 
         // Clamp to configured maximums to keep images small for the LLM
         let target_w = vw.min(self.config.viewport.width);
@@ -816,7 +834,9 @@ impl Page {
             let data_b64: &str = resp.data.as_ref();
             let data = base64::engine::general_purpose::STANDARD
                 .decode(data_b64.as_bytes())
-                .map_err(|e| BrowserError::ScreenshotError(format!("base64 decode failed: {}", e)))?;
+                .map_err(|e| {
+                    BrowserError::ScreenshotError(format!("base64 decode failed: {}", e))
+                })?;
             shots.push(Screenshot {
                 data,
                 width: vw,
@@ -846,15 +866,15 @@ impl Page {
             ImageFormat::Webp => CaptureScreenshotFormat::Webp,
         };
 
-        let params_builder = CaptureScreenshotParams::builder()
-            .format(format)
-            .clip(chromiumoxide::cdp::browser_protocol::page::Viewport {
+        let params_builder = CaptureScreenshotParams::builder().format(format).clip(
+            chromiumoxide::cdp::browser_protocol::page::Viewport {
                 x: region.x as f64,
                 y: region.y as f64,
                 width: region.width as f64,
                 height: region.height as f64,
                 scale: 1.0,
-            });
+            },
+        );
 
         let resp = self.capture_screenshot_with_retry(params_builder).await?;
         let data_b64: &str = resp.data.as_ref();
@@ -908,7 +928,9 @@ impl Page {
         }
     }
 
-    pub async fn update_viewport(&self, _viewport: ViewportConfig) -> Result<()> { Ok(()) }
+    pub async fn update_viewport(&self, _viewport: ViewportConfig) -> Result<()> {
+        Ok(())
+    }
 
     // Move the mouse by relative offset from current position
     pub async fn move_mouse_relative(&self, dx: f64, dy: f64) -> Result<(f64, f64)> {
@@ -917,19 +939,21 @@ impl Page {
         let current_x = cursor.x;
         let current_y = cursor.y;
         drop(cursor);
-        
+
         // Calculate new position
         let new_x = current_x + dx;
         let new_y = current_y + dy;
-        
-        debug!("Moving mouse relatively by ({}, {}) from ({}, {}) to ({}, {})", 
-               dx, dy, current_x, current_y, new_x, new_y);
-        
+
+        debug!(
+            "Moving mouse relatively by ({}, {}) from ({}, {}) to ({}, {})",
+            dx, dy, current_x, current_y, new_x, new_y
+        );
+
         // Use absolute move with the calculated position
         self.move_mouse(new_x, new_y).await?;
         Ok((new_x, new_y))
     }
-    
+
     // (NEW) Move the mouse to the specified coordinates
     pub async fn move_mouse(&self, x: f64, y: f64) -> Result<()> {
         debug!("Moving mouse to ({}, {})", x, y);
@@ -957,7 +981,8 @@ impl Page {
 
         // First check if cursor exists, if not inject it
         let check_script = "typeof window.__vc !== 'undefined'";
-        let cursor_exists = self.cdp_page
+        let cursor_exists = self
+            .cdp_page
             .evaluate(check_script)
             .await
             .ok()
@@ -972,7 +997,8 @@ impl Page {
         }
 
         // Update cursor position
-        let _ = self.cdp_page
+        let _ = self
+            .cdp_page
             .evaluate(format!(
                 "window.__vc && window.__vc.update({:.0}, {:.0});",
                 move_x, move_y
@@ -1044,7 +1070,7 @@ impl Page {
                 }
             }
         "#;
-        
+
         // Start the click animation
         let _ = self.cdp_page.evaluate(animation_script).await;
 
@@ -1134,7 +1160,7 @@ impl Page {
                 }
             }
         "#;
-        
+
         // Start the click animation
         let _ = self.cdp_page.evaluate(animation_script).await;
 
@@ -1174,12 +1200,12 @@ impl Page {
         // Replace em dashes with regular dashes
         let processed_text = text.replace('—', " - ");
         debug!("Typing text: {}", processed_text);
-        
+
         // Ensure an editable element is focused first
         self.ensure_editable_focused().await?;
 
         let text_len = processed_text.len();
-        
+
         if text_len < 20 {
             // Short text: character-by-character with natural delays
             for ch in processed_text.chars() {
@@ -1189,7 +1215,7 @@ impl Page {
                     .build()
                     .map_err(|e| BrowserError::CdpError(e))?;
                 self.cdp_page.execute(params).await?;
-                
+
                 // Natural typing delay with slight randomization
                 let delay = 50 + (rand::random::<u64>() % 30);
                 tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -1202,7 +1228,7 @@ impl Page {
                 .chunks(chunk_size)
                 .map(|chunk| chunk.iter().collect())
                 .collect();
-            
+
             for chunk in chunks {
                 // Type each character in the chunk
                 for ch in chunk.chars() {
@@ -1213,7 +1239,7 @@ impl Page {
                         .map_err(|e| BrowserError::CdpError(e))?;
                     self.cdp_page.execute(params).await?;
                 }
-                
+
                 // Delay between chunks
                 let delay = 100 + (rand::random::<u64>() % 50);
                 tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -1226,7 +1252,7 @@ impl Page {
                 .chunks(chunk_size)
                 .map(|chunk| chunk.iter().collect())
                 .collect();
-            
+
             for (i, chunk) in chunks.iter().enumerate() {
                 // Type each character in the chunk
                 for ch in chunk.chars() {
@@ -1237,7 +1263,7 @@ impl Page {
                         .map_err(|e| BrowserError::CdpError(e))?;
                     self.cdp_page.execute(params).await?;
                 }
-                
+
                 // Add occasional longer pauses to simulate thinking
                 if i % 5 == 0 && i > 0 {
                     let delay = 300 + (rand::random::<u64>() % 200);
@@ -1248,7 +1274,7 @@ impl Page {
                 }
             }
         }
-        
+
         Ok(())
     }
 

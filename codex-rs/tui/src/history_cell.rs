@@ -27,7 +27,6 @@ use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
 use mcp_types::ResourceLink;
 use ratatui::prelude::*;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
@@ -503,7 +502,10 @@ impl HistoryCell {
                 let prefix = if j == 0 { first_prefix } else { "    " };
                 lines.push(Line::from(vec![
                     Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
-                    Span::styled(line_text.to_string(), Style::default().fg(Color::LightBlue)),
+                    Span::styled(
+                        line_text.to_string(),
+                        Style::default().fg(crate::colors::info()),
+                    ),
                 ]));
             }
         }
@@ -556,9 +558,9 @@ impl HistoryCell {
         parameters: Option<serde_json::Value>,
     ) -> Self {
         let title_line = Line::from(vec![tool_name.bold(), " running...".dim()]);
-        
+
         let mut lines: Vec<Line> = vec![title_line];
-        
+
         // Add parameters if present
         if let Some(params) = parameters {
             if let Ok(formatted) = serde_json::to_string_pretty(&params) {
@@ -692,7 +694,9 @@ impl HistoryCell {
                 lines.push(Line::from(vec![
                     Span::styled(
                         "Error: ",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(crate::colors::error())
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(e),
                 ]));
@@ -715,7 +719,7 @@ impl HistoryCell {
         let duration_str = format_duration(duration);
         let success = result.is_ok();
         let status_str = if success { "success" } else { "failed" };
-        
+
         let title_line = Line::from(vec![
             tool_name.bold(),
             " ".into(),
@@ -733,7 +737,8 @@ impl HistoryCell {
         // Add result
         match result {
             Ok(msg) => {
-                let truncated = format_and_truncate_tool_result(&msg, TOOL_CALL_MAX_LINES, num_cols);
+                let truncated =
+                    format_and_truncate_tool_result(&msg, TOOL_CALL_MAX_LINES, num_cols);
                 for line in truncated.lines() {
                     lines.push(Line::from(format!("> {}", line)));
                 }
@@ -965,7 +970,7 @@ impl HistoryCell {
         if filled > 0 {
             header.push(Span::styled(
                 "█".repeat(filled),
-                Style::default().fg(Color::Green),
+                Style::default().fg(crate::colors::success()),
             ));
         }
         if empty > 0 {
@@ -996,7 +1001,7 @@ impl HistoryCell {
             for (idx, PlanItemArg { step, status }) in plan.into_iter().enumerate() {
                 let (box_span, text_span) = match status {
                     StepStatus::Completed => (
-                        Span::styled("✔", Style::default().fg(Color::Green)),
+                        Span::styled("✔", Style::default().fg(crate::colors::success())),
                         Span::styled(
                             step,
                             Style::default().add_modifier(Modifier::CROSSED_OUT | Modifier::DIM),
@@ -1007,7 +1012,7 @@ impl HistoryCell {
                         Span::styled(
                             step,
                             Style::default()
-                                .fg(Color::Blue)
+                                .fg(crate::colors::info())
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ),
@@ -1345,8 +1350,9 @@ impl HistoryCell {
             | HistoryCell::CompletedCustomToolCall { .. } => {
                 // Use the same processed/plain lines as desired_height/render_ref but apply a vertical scroll.
                 let lines = match self {
-                    HistoryCell::BackgroundEvent { .. }
-                    | HistoryCell::DimmedReasoning { .. } => self.get_processed_lines(area.width),
+                    HistoryCell::BackgroundEvent { .. } | HistoryCell::DimmedReasoning { .. } => {
+                        self.get_processed_lines(area.width)
+                    }
                     HistoryCell::StyledText { view }
                     | HistoryCell::WelcomeMessage { view }
                     | HistoryCell::GitDiffOutput { view }
@@ -1400,26 +1406,24 @@ impl HistoryCell {
             HistoryCell::Exec(_) | HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => {
                 // Use ScrollView for complex widgets that don't support native scrolling
                 let content_height = self.desired_height(area.width);
-                
+
                 // Create a wrapper that implements Widget
                 #[derive(Clone)]
                 struct CellRenderer<'a> {
                     cell: &'a HistoryCell,
                 }
-                
+
                 impl<'a> Widget for CellRenderer<'a> {
                     fn render(self, area: Rect, buf: &mut Buffer) {
                         self.cell.render_ref(area, buf);
                     }
                 }
-                
+
                 // Apply ScrollView with the vertical skip
-                let scroll_view = ScrollView::new(
-                    CellRenderer { cell: self },
-                    content_height as usize,
-                )
-                .scroll_y(skip_top as usize);
-                
+                let scroll_view =
+                    ScrollView::new(CellRenderer { cell: self }, content_height as usize)
+                        .scroll_y(skip_top as usize);
+
                 scroll_view.render(area, buf);
             }
         }
@@ -1437,7 +1441,10 @@ fn format_mcp_invocation<'a>(invocation: McpInvocation) -> Line<'a> {
         .unwrap_or_default();
 
     let invocation_spans = vec![
-        Span::styled(invocation.server.clone(), Style::default().fg(Color::Blue)),
+        Span::styled(
+            invocation.server.clone(),
+            Style::default().fg(crate::colors::info()),
+        ),
         Span::raw("."),
         Span::styled(invocation.tool.clone(), Style::default().fg(Color::Blue)),
         Span::raw("("),
