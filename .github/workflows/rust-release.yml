@@ -126,9 +126,9 @@ jobs:
       - name: Cargo build
         shell: bash
         run: |
-          # Use all available cores and enable incremental compilation
+          # Use all available cores
           export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
-          export CARGO_INCREMENTAL=1
+          # Note: CARGO_INCREMENTAL is disabled when using sccache
           echo "Building with $CARGO_BUILD_JOBS parallel jobs"
           cargo build --target ${{ matrix.target }} --release --bin coder
 

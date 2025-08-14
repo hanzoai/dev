@@ -476,6 +476,8 @@ impl Page {
     rect.setAttribute('stroke', 'white');
     rect.setAttribute('stroke-width','1');
     rect.setAttribute('vector-effect','non-scaling-stroke');
+    rect.setAttribute('filter', 'url(#vc-drop-shadow)');
+    badge.appendChild(defs.cloneNode(true));
 
     const glyphs = createSvg('path');
     glyphs.setAttribute('d',
