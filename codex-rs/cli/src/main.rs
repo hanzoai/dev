@@ -25,13 +25,14 @@ use crate::proto::ProtoCli;
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    version,
+    name = "coder",
+    version = env!("CARGO_PKG_VERSION"),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
     // the generic `codex` command name that users run.
-    bin_name = "codex"
+    bin_name = "coder"
 )]
 struct MultitoolCli {
     #[clap(flatten)]

@@ -8,6 +8,7 @@ use ratatui::style::Modifier;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::TextVerbosity;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -364,10 +365,6 @@ impl ChatWidget<'_> {
         }
         match kind {
             StreamKind::Reasoning => {
-                // Always add space above reasoning (unless history is completely empty)
-                if !self.history_cells.is_empty() {
-                    self.add_to_history(HistoryCell::new_text_line(RLine::from("")));
-                }
                 self.stream_header_emitted = true;
                 self.request_redraw();
             }
@@ -392,11 +389,7 @@ impl ChatWidget<'_> {
                         _ => true, // Always need space for other cell types
                     }
                 };
-
-                if needs_space {
-                    self.add_to_history(HistoryCell::new_text_line(RLine::from("")));
-                }
-
+                
                 // Add GPT-5 header with secondary color
                 let formatted_model = self.format_model_name(&self.config.model);
                 use ratatui::style::Modifier;
@@ -493,6 +486,7 @@ impl ChatWidget<'_> {
                 app_event_tx,
                 has_input_focus: true,
                 enhanced_keys_supported,
+                using_chatgpt_auth: config.using_chatgpt_auth,
             }),
             active_history_cell: None,
             history_cells,
@@ -1593,13 +1587,13 @@ impl ChatWidget<'_> {
         self.add_to_history(HistoryCell::new_prompts_output());
     }
 
-    pub(crate) fn handle_reasoning_command(&mut self, command_text: String) {
-        // Parse the command to extract the parameter
-        let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
+    pub(crate) fn handle_reasoning_command(&mut self, command_args: String) {
+        // command_args contains only the arguments after the command (e.g., "high" not "/reasoning high")
+        let trimmed = command_args.trim();
 
-        if parts.len() > 1 {
-            // User specified a level: /reasoning high
-            let new_effort = match parts[1].to_lowercase().as_str() {
+        if !trimmed.is_empty() {
+            // User specified a level: e.g., "high"
+            let new_effort = match trimmed.to_lowercase().as_str() {
                 "low" => ReasoningEffort::Low,
                 "medium" | "med" => ReasoningEffort::Medium,
                 "high" => ReasoningEffort::High,
@@ -1608,7 +1602,7 @@ impl ChatWidget<'_> {
                     // Invalid parameter, show error and return
                     let message = format!(
                         "Invalid reasoning level: '{}'. Use: low, medium, high, or none",
-                        parts[1]
+                        trimmed
                     );
                     self.add_to_history(HistoryCell::new_error_event(message));
                     return;
@@ -1619,6 +1613,66 @@ impl ChatWidget<'_> {
             // No parameter - show interactive selection UI
             self.bottom_pane
                 .show_reasoning_selection(self.config.model_reasoning_effort);
+            return;
+        }
+    }
+
+    pub(crate) fn handle_verbosity_command(&mut self, command_args: String) {
+        // Verbosity is not supported with ChatGPT auth
+        if self.config.using_chatgpt_auth {
+            let message = "Text verbosity is not available when using Sign in with ChatGPT".to_string();
+            self.add_to_history(HistoryCell::new_error_event(message));
+            return;
+        }
+        
+        // command_args contains only the arguments after the command (e.g., "high" not "/verbosity high")
+        let trimmed = command_args.trim();
+
+        if !trimmed.is_empty() {
+            // User specified a level: e.g., "high"
+            let new_verbosity = match trimmed.to_lowercase().as_str() {
+                "low" => TextVerbosity::Low,
+                "medium" | "med" => TextVerbosity::Medium,
+                "high" => TextVerbosity::High,
+                _ => {
+                    // Invalid parameter, show error and return
+                    let message = format!(
+                        "Invalid verbosity level: '{}'. Use: low, medium, or high",
+                        trimmed
+                    );
+                    self.add_to_history(HistoryCell::new_error_event(message));
+                    return;
+                }
+            };
+
+            // Update the configuration
+            self.config.model_text_verbosity = new_verbosity;
+
+            // Display success message
+            let message = format!("Text verbosity set to: {}", new_verbosity);
+            self.add_to_history(HistoryCell::new_background_event(message));
+
+            // Send the update to the backend
+            let op = Op::ConfigureSession {
+                provider: self.config.model_provider.clone(),
+                model: self.config.model.clone(),
+                model_reasoning_effort: self.config.model_reasoning_effort,
+                model_reasoning_summary: self.config.model_reasoning_summary,
+                model_text_verbosity: self.config.model_text_verbosity,
+                user_instructions: self.config.user_instructions.clone(),
+                base_instructions: self.config.base_instructions.clone(),
+                approval_policy: self.config.approval_policy,
+                sandbox_policy: self.config.sandbox_policy.clone(),
+                disable_response_storage: self.config.disable_response_storage,
+                notify: self.config.notify.clone(),
+                cwd: self.config.cwd.clone(),
+                resume_path: None,
+            };
+            let _ = self.codex_op_tx.send(op);
+        } else {
+            // No parameter specified, show interactive UI
+            self.bottom_pane
+                .show_verbosity_selection(self.config.model_text_verbosity);
             return;
         }
     }
@@ -1728,6 +1782,7 @@ impl ChatWidget<'_> {
             model: self.config.model.clone(),
             model_reasoning_effort: new_effort,
             model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: self.config.model_text_verbosity,
             user_instructions: self.config.user_instructions.clone(),
             base_instructions: self.config.base_instructions.clone(),
             approval_policy: self.config.approval_policy.clone(),
@@ -1742,6 +1797,34 @@ impl ChatWidget<'_> {
 
         // Add status message to history
         self.add_to_history(HistoryCell::new_reasoning_output(new_effort));
+    }
+
+    pub(crate) fn set_text_verbosity(&mut self, new_verbosity: TextVerbosity) {
+        // Update the config
+        self.config.model_text_verbosity = new_verbosity;
+
+        // Send ConfigureSession op to update the backend
+        let op = Op::ConfigureSession {
+            provider: self.config.model_provider.clone(),
+            model: self.config.model.clone(),
+            model_reasoning_effort: self.config.model_reasoning_effort,
+            model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: new_verbosity,
+            user_instructions: self.config.user_instructions.clone(),
+            base_instructions: self.config.base_instructions.clone(),
+            approval_policy: self.config.approval_policy.clone(),
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            disable_response_storage: self.config.disable_response_storage,
+            notify: self.config.notify.clone(),
+            cwd: self.config.cwd.clone(),
+            resume_path: None,
+        };
+
+        self.submit_op(op);
+
+        // Add status message to history  
+        let message = format!("Text verbosity set to: {}", new_verbosity);
+        self.add_to_history(HistoryCell::new_background_event(message));
     }
 
     /// Forward file-search results to the bottom pane.
