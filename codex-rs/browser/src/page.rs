@@ -412,7 +412,7 @@ impl Page {
 
     // --- Arrow SVG container ---
     const arrow = createSvg('svg');
-    arrow.setAttribute('viewBox', '0 0 40 30');
+    arrow.setAttribute('viewBox', '0 0 42 32');
     arrow.setAttribute('aria-hidden', 'true');
     arrow.style.position = 'absolute';
     arrow.style.transformOrigin = '0 0';
@@ -432,7 +432,7 @@ impl Page {
     const blur = createSvg('feGaussianBlur'); blur.setAttribute('in', 'SourceAlpha'); blur.setAttribute('stdDeviation', '1');
     const off  = createSvg('feOffset');       off.setAttribute('dx', '0'); off.setAttribute('dy', '0');
     const ct   = createSvg('feComponentTransfer'); ct.setAttribute('result', 'offsetblur');
-    const fa   = createSvg('feFuncA'); fa.setAttribute('type', 'linear'); fa.setAttribute('slope', '0.8'); ct.appendChild(fa);
+    const fa   = createSvg('feFuncA'); fa.setAttribute('type', 'linear'); fa.setAttribute('slope', '1'); ct.appendChild(fa);
     const flood = createSvg('feFlood'); flood.setAttribute('flood-color', '#000'); flood.setAttribute('flood-opacity', '0.3');
     const comp  = createSvg('feComposite'); comp.setAttribute('in2', 'offsetblur'); comp.setAttribute('operator', 'in');
     const merge = createSvg('feMerge');
@@ -458,7 +458,7 @@ impl Page {
 
     // --- Badge SVG container ---
     const badge = createSvg('svg');
-    badge.setAttribute('viewBox', '0 0 40 30');
+    badge.setAttribute('viewBox', '0 0 42 32');
     badge.setAttribute('aria-hidden', 'true');
     badge.style.position = 'absolute';
     badge.style.transformOrigin = '0 0';
