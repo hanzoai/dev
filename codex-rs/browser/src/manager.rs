@@ -1120,6 +1120,98 @@ impl BrowserManager {
         page.go_forward().await
     }
 
+    /// Capture console logs from the browser
+    pub async fn get_console_logs(&self, lines: Option<usize>) -> Result<serde_json::Value> {
+        let page = self.get_or_create_page().await?;
+        
+        // JavaScript to capture console logs
+        let script = r#"
+            (() => {
+                // Get or create console log buffer
+                if (!window.__codex_console_logs) {
+                    window.__codex_console_logs = [];
+                    
+                    // Override console methods to capture logs
+                    const originalLog = console.log;
+                    const originalWarn = console.warn;
+                    const originalError = console.error;
+                    const originalInfo = console.info;
+                    const originalDebug = console.debug;
+                    
+                    const captureLog = (level, args) => {
+                        const timestamp = new Date().toISOString();
+                        const message = args.map(arg => {
+                            try {
+                                if (typeof arg === 'object') {
+                                    return JSON.stringify(arg, null, 2);
+                                } else {
+                                    return String(arg);
+                                }
+                            } catch (e) {
+                                return String(arg);
+                            }
+                        }).join(' ');
+                        
+                        window.__codex_console_logs.push({
+                            timestamp,
+                            level,
+                            message
+                        });
+                        
+                        // Keep only last 1000 logs to prevent memory issues
+                        if (window.__codex_console_logs.length > 1000) {
+                            window.__codex_console_logs.shift();
+                        }
+                    };
+                    
+                    console.log = function(...args) {
+                        captureLog('log', args);
+                        originalLog.apply(console, args);
+                    };
+                    
+                    console.warn = function(...args) {
+                        captureLog('warn', args);
+                        originalWarn.apply(console, args);
+                    };
+                    
+                    console.error = function(...args) {
+                        captureLog('error', args);
+                        originalError.apply(console, args);
+                    };
+                    
+                    console.info = function(...args) {
+                        captureLog('info', args);
+                        originalInfo.apply(console, args);
+                    };
+                    
+                    console.debug = function(...args) {
+                        captureLog('debug', args);
+                        originalDebug.apply(console, args);
+                    };
+                }
+                
+                // Return the requested number of logs
+                const logs = window.__codex_console_logs || [];
+                const requestedLines = arguments[0];
+                
+                if (requestedLines && requestedLines > 0) {
+                    return logs.slice(-requestedLines);
+                } else {
+                    return logs;
+                }
+            })()
+        "#;
+        
+        // Pass the lines parameter to the script
+        let script_with_params = if let Some(lines) = lines {
+            format!("(({}) => {{{}}})({})", lines, script, lines)
+        } else {
+            format!("(() => {{{}}})()", script)
+        };
+        
+        page.execute_javascript(&script_with_params).await
+    }
+
     /// Get the current cursor position
     pub async fn get_cursor_position(&self) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;

@@ -442,6 +442,7 @@ fn sanitize_json_schema(value: &mut JsonValue) {
 pub(crate) fn get_openai_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
+    browser_enabled: bool,
 ) -> Vec<OpenAiTool> {
     let mut tools: Vec<OpenAiTool> = Vec::new();
 
@@ -461,17 +462,24 @@ pub(crate) fn get_openai_tools(
         tools.push(PLAN_TOOL.clone());
     }
 
-    // Add browser tools
-    tools.push(create_browser_open_tool());
-    tools.push(create_browser_close_tool());
-    tools.push(create_browser_status_tool());
-    tools.push(create_browser_click_tool());
-    tools.push(create_browser_move_tool());
-    tools.push(create_browser_type_tool());
-    tools.push(create_browser_key_tool());
-    tools.push(create_browser_javascript_tool());
-    tools.push(create_browser_scroll_tool());
-    tools.push(create_browser_history_tool());
+    // Add browser tools only when browser is enabled
+    if browser_enabled {
+        tools.push(create_browser_open_tool());
+        tools.push(create_browser_close_tool());
+        tools.push(create_browser_status_tool());
+        tools.push(create_browser_click_tool());
+        tools.push(create_browser_move_tool());
+        tools.push(create_browser_type_tool());
+        tools.push(create_browser_key_tool());
+        tools.push(create_browser_javascript_tool());
+        tools.push(create_browser_scroll_tool());
+        tools.push(create_browser_history_tool());
+        tools.push(create_browser_console_tool());
+    } else {
+        // Only include browser_open and browser_status when browser is disabled
+        tools.push(create_browser_open_tool());
+        tools.push(create_browser_status_tool());
+    }
 
     // Add agent management tools for calling external LLMs asynchronously
     tools.push(create_run_agent_tool());
@@ -536,9 +544,9 @@ mod tests {
             SandboxPolicy::ReadOnly,
             true,
         );
-        let tools = get_openai_tools(&config, Some(HashMap::new()));
+        let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["local_shell", "update_plan"]);
+        assert_eq_tool_names(&tools, &["local_shell", "update_plan", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents"]);
     }
 
     #[test]
@@ -550,9 +558,9 @@ mod tests {
             SandboxPolicy::ReadOnly,
             true,
         );
-        let tools = get_openai_tools(&config, Some(HashMap::new()));
+        let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["shell", "update_plan"]);
+        assert_eq_tool_names(&tools, &["shell", "update_plan", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents"]);
     }
 
     #[test]
@@ -600,9 +608,10 @@ mod tests {
                     description: Some("Do something cool".to_string()),
                 },
             )])),
+            false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "test_server/do_something_cool"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "test_server/do_something_cool"]);
 
         assert_eq!(
             tools[1],
@@ -679,9 +688,10 @@ mod tests {
                     description: Some("Search docs".to_string()),
                 },
             )])),
+            false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "dash/search"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/search"]);
 
         assert_eq!(
             tools[1],
@@ -732,9 +742,10 @@ mod tests {
                     description: Some("Pagination".to_string()),
                 },
             )])),
+            false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "dash/paginate"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/paginate"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {
@@ -782,9 +793,10 @@ mod tests {
                     description: Some("Tags".to_string()),
                 },
             )])),
+            false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "dash/tags"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/tags"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {
@@ -835,9 +847,10 @@ mod tests {
                     description: Some("AnyOf Value".to_string()),
                 },
             )])),
+            false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "dash/value"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/value"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {
@@ -1080,6 +1093,27 @@ fn create_browser_history_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["direction".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_console_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "lines".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional: Number of recent console lines to return (default: all available)".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_console".to_string(),
+        description: "Captures and returns the console output from the browser, including logs, warnings, and errors.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
             additional_properties: Some(false),
         },
     })

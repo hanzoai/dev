@@ -348,6 +348,7 @@ impl Codex {
             model: config.model.clone(),
             model_reasoning_effort: config.model_reasoning_effort,
             model_reasoning_summary: config.model_reasoning_summary,
+            model_text_verbosity: config.model_text_verbosity,
             user_instructions,
             base_instructions: config.base_instructions.clone(),
             approval_policy: config.approval_policy,
@@ -1221,6 +1222,7 @@ async fn submission_loop(
                 model,
                 model_reasoning_effort,
                 model_reasoning_summary,
+                model_text_verbosity,
                 user_instructions,
                 base_instructions,
                 approval_policy,
@@ -1299,6 +1301,7 @@ async fn submission_loop(
                     provider.clone(),
                     model_reasoning_effort,
                     model_reasoning_summary,
+                    model_text_verbosity,
                     session_id,
                     debug_logger,
                 );
@@ -1800,9 +1803,13 @@ async fn run_turn(
     sub_id: String,
     input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
+    // Check if browser is enabled
+    let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
+    
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
+        browser_enabled,
     );
 
     let mut retries = 0;
@@ -2310,6 +2317,7 @@ async fn handle_function_call(
         "browser_javascript" => handle_browser_javascript(sess, arguments, sub_id, call_id).await,
         "browser_scroll" => handle_browser_scroll(sess, arguments, sub_id, call_id).await,
         "browser_history" => handle_browser_history(sess, arguments, sub_id, call_id).await,
+        "browser_console" => handle_browser_console(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -4284,6 +4292,92 @@ async fn handle_browser_scroll(
             },
         }
     }
+        },
+    )
+    .await
+}
+
+async fn handle_browser_console(
+    sess: &Session,
+    arguments: String,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_console".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                let lines = match args {
+                    Ok(json) => json.get("lines").and_then(|v| v.as_u64()).map(|n| n as usize),
+                    Err(_) => None,
+                };
+
+                match browser_manager.get_console_logs(lines).await {
+                    Ok(logs) => {
+                        // Format the logs for display
+                        let formatted = if let Some(logs_array) = logs.as_array() {
+                            if logs_array.is_empty() {
+                                "No console logs captured.".to_string()
+                            } else {
+                                let mut output = String::new();
+                                output.push_str("Console logs:\n");
+                                for log in logs_array {
+                                    if let Some(log_obj) = log.as_object() {
+                                        let timestamp = log_obj.get("timestamp")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let level = log_obj.get("level")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("log");
+                                        let message = log_obj.get("message")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        
+                                        output.push_str(&format!("[{}] [{}] {}\n", timestamp, level.to_uppercase(), message));
+                                    }
+                                }
+                                output
+                            }
+                        } else {
+                            "No console logs captured.".to_string()
+                        };
+
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: formatted,
+                                success: Some(true),
+                            },
+                        }
+                    }
+                    Err(e) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to get console logs: {}", e),
+                            success: Some(false),
+                        },
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not enabled. Use browser_open to enable it first.".to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
         },
     )
     .await
