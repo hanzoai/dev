@@ -150,10 +150,17 @@ jobs:
       shell: bash
         
     - name: Build binaries
+      shell: bash
       run: |
         cd codex-rs
         # Use all available cores
-        export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          # Windows: Use NUMBER_OF_PROCESSORS env var
+          export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
+        else
+          # Unix-like: Use nproc or sysctl
+          export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
+        fi
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         # Use --locked to ensure reproducible builds
         cargo build --release --locked --target ${{ matrix.target }} --bin coder --bin coder-tui --bin coder-exec
