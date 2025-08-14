@@ -12,6 +12,7 @@ use chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventType;
 use chromiumoxide::cdp::browser_protocol::input::MouseButton;
 // Import AddScriptToEvaluateOnNewDocumentParams (New)
 use base64::Engine as _;
+use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams;
@@ -242,6 +243,96 @@ impl Page {
         self.cdp_page.get_title().await.ok().flatten()
     }
 
+    /// Check and fix viewport scaling issues before taking screenshots
+    async fn check_and_fix_scaling(&self) -> Result<()> {
+        // Check current viewport and scaling
+        let check_script = r#"
+            (() => {
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const dpr = window.devicePixelRatio || 1;
+                const zoom = Math.round(window.outerWidth / window.innerWidth * 100) / 100;
+                
+                // Check if viewport matches expected dimensions
+                const expectedWidth = %EXPECTED_WIDTH%;
+                const expectedHeight = %EXPECTED_HEIGHT%;
+                const expectedDpr = %EXPECTED_DPR%;
+                
+                return {
+                    currentWidth: vw,
+                    currentHeight: vh,
+                    currentDpr: dpr,
+                    currentZoom: zoom,
+                    expectedWidth: expectedWidth,
+                    expectedHeight: expectedHeight,
+                    expectedDpr: expectedDpr,
+                    needsCorrection: (
+                        Math.abs(vw - expectedWidth) > 5 || 
+                        Math.abs(vh - expectedHeight) > 5 ||
+                        Math.abs(dpr - expectedDpr) > 0.1 ||
+                        Math.abs(zoom - 1.0) > 0.1
+                    )
+                };
+            })()
+        "#;
+        
+        // Replace placeholders with actual expected values
+        let script = check_script
+            .replace("%EXPECTED_WIDTH%", &self.config.viewport.width.to_string())
+            .replace("%EXPECTED_HEIGHT%", &self.config.viewport.height.to_string())
+            .replace("%EXPECTED_DPR%", &self.config.viewport.device_scale_factor.to_string());
+        
+        let result = self.cdp_page.evaluate(script).await?;
+        
+        if let Some(obj) = result.value() {
+            let needs_correction = obj.get("needsCorrection")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            
+            if needs_correction {
+                let current_width = obj.get("currentWidth").and_then(|v| v.as_u64()).unwrap_or(0);
+                let current_height = obj.get("currentHeight").and_then(|v| v.as_u64()).unwrap_or(0);
+                let current_dpr = obj.get("currentDpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                let current_zoom = obj.get("currentZoom").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                
+                debug!(
+                    "Viewport needs correction: {}x{} @ {}x DPR (zoom: {}) -> {}x{} @ {}x DPR",
+                    current_width, current_height, current_dpr, current_zoom,
+                    self.config.viewport.width, self.config.viewport.height, 
+                    self.config.viewport.device_scale_factor
+                );
+                
+                // Use CDP to set the correct viewport metrics
+                let params = SetDeviceMetricsOverrideParams::builder()
+                    .width(self.config.viewport.width as i64)
+                    .height(self.config.viewport.height as i64)
+                    .device_scale_factor(self.config.viewport.device_scale_factor)
+                    .mobile(self.config.viewport.mobile)
+                    .build()
+                    .map_err(|e| BrowserError::CdpError(format!("Failed to build viewport params: {}", e)))?;
+                
+                self.cdp_page.execute(params).await?;
+                
+                // Also reset zoom if it's not 1.0
+                if (current_zoom - 1.0).abs() > 0.1 {
+                    debug!("Resetting zoom from {} to 1.0", current_zoom);
+                    let reset_zoom_script = r#"
+                        // Reset zoom to 100%
+                        document.body.style.zoom = '1.0';
+                        // Also try to reset CSS transform scale if present
+                        document.documentElement.style.transform = 'scale(1)';
+                        document.documentElement.style.transformOrigin = '0 0';
+                    "#;
+                    let _ = self.cdp_page.evaluate(reset_zoom_script).await;
+                }
+                
+                info!("Viewport scaling corrected");
+            }
+        }
+        
+        Ok(())
+    }
+    
     /// (NEW) Injects a virtual cursor element into the page at the current coordinates.
     pub async fn inject_virtual_cursor(&self) -> Result<()> {
         let cursor = self.cursor_state.lock().await.clone();
@@ -713,14 +804,19 @@ impl Page {
 
     // (UPDATED) Inject cursor before taking screenshot
     pub async fn screenshot(&self, mode: ScreenshotMode) -> Result<Vec<Screenshot>> {
+        // First, check and fix viewport scaling if needed
+        if let Err(e) = self.check_and_fix_scaling().await {
+            warn!("Failed to check/fix viewport scaling: {}, continuing anyway", e);
+        }
+        
         // Inject the virtual cursor before capturing
         if let Err(e) = self.inject_virtual_cursor().await {
             warn!("Failed to inject virtual cursor: {}", e);
             // Continue with screenshot even if cursor injection fails
         }
 
-        // Allow a brief moment for the cursor SVG to render
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Allow a brief moment for the cursor SVG to render and scaling to apply
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         match mode {
             ScreenshotMode::Viewport => self.screenshot_viewport().await,

@@ -15,8 +15,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  determine-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+        
+    - name: Determine next version
+      id: version
+      working-directory: codex-cli
+      run: |
+        # Get current version from package.json
+        CURRENT_VERSION=$(node -p "require('./package.json').version")
+        echo "Current version in package.json: $CURRENT_VERSION"
+        
+        # Check latest published version
+        PUBLISHED_VERSION=$(npm view @just-every/coder version 2>/dev/null || echo "0.0.0")
+        echo "Latest published version: $PUBLISHED_VERSION"
+        
+        # Determine the version to use for this build
+        if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
+          # Need to bump from published version
+          echo "Will bump from published version $PUBLISHED_VERSION"
+          # Calculate next patch version
+          IFS='.' read -ra VERSION_PARTS <<< "$PUBLISHED_VERSION"
+          MAJOR=${VERSION_PARTS[0]}
+          MINOR=${VERSION_PARTS[1]}
+          PATCH=${VERSION_PARTS[2]}
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+        else
+          echo "Using current version $CURRENT_VERSION which is ahead of published $PUBLISHED_VERSION"
+          NEW_VERSION=$CURRENT_VERSION
+        fi
+        
+        echo "Version for this build: $NEW_VERSION"
+        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
   build-binaries:
     name: Build ${{ matrix.target }}
+    needs: determine-version
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -61,6 +110,31 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y musl-tools pkg-config
         
+    - name: Set version in Cargo.toml
+      run: |
+        VERSION="${{ needs.determine-version.outputs.version }}"
+        echo "📝 Setting version to ${VERSION} in Cargo.toml files"
+        
+        # Update the workspace version in root Cargo.toml
+        cd codex-rs
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          # Windows doesn't have sed -i, use a different approach
+          powershell -Command "(Get-Content Cargo.toml) -replace '^version = \".*\"', 'version = \"$env:VERSION\"' | Set-Content Cargo.toml"
+        else
+          # Unix-like systems
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+        fi
+        
+        # Verify the update
+        echo "Updated Cargo.toml:"
+        grep "^version = " Cargo.toml || true
+        
+        # Update Cargo.lock to reflect the new version
+        cargo update --workspace
+      shell: bash
+      env:
+        VERSION: ${{ needs.determine-version.outputs.version }}
+        
     - name: Build binaries
       run: |
         cd codex-rs
@@ -88,7 +162,7 @@ jobs:
 
   release:
     name: Publish to npm
-    needs: build-binaries
+    needs: [determine-version, build-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Skip if commit message contains [skip ci]
@@ -128,7 +202,7 @@ jobs:
         # List assets for verification
         ls -la release-assets/
         
-    - name: Bump version
+    - name: Update package.json version
       id: version
       working-directory: codex-cli
       run: |
@@ -136,27 +210,13 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
-        # Get current version
-        CURRENT_VERSION=$(node -p "require('./package.json').version")
-        echo "Current version in package.json: $CURRENT_VERSION"
+        # Use the pre-determined version
+        NEW_VERSION="${{ needs.determine-version.outputs.version }}"
+        echo "Setting version to: $NEW_VERSION"
         
-        # Check latest published version
-        PUBLISHED_VERSION=$(npm view @just-every/coder version 2>/dev/null || echo "0.0.0")
-        echo "Latest published version: $PUBLISHED_VERSION"
+        # Update package.json with the new version
+        npm version $NEW_VERSION --no-git-tag-version --allow-same-version
         
-        # Compare versions and bump appropriately
-        if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
-          # Need to bump from published version
-          echo "Bumping from published version $PUBLISHED_VERSION"
-          # Set to published version first, then bump
-          npm version $PUBLISHED_VERSION --no-git-tag-version --allow-same-version
-          npm version patch --no-git-tag-version
-        else
-          echo "Current version $CURRENT_VERSION is already ahead of published $PUBLISHED_VERSION"
-        fi
-        
-        NEW_VERSION=$(node -p "require('./package.json').version")
-        echo "New version: $NEW_VERSION"
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
         
         # Commit changes
