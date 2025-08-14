@@ -235,7 +235,7 @@ pub async fn run_main(
 
         eprintln!(
             "{} {current_version} -> {latest_version}.",
-            "✨⬆️ Update available!".bold().cyan()
+            "Coder update available!".blue()
         );
 
         if managed_by_npm {
@@ -279,7 +279,7 @@ fn run_ratatui_app(
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
-    let mut terminal = tui::init(&config)?;
+    let (mut terminal, terminal_info) = tui::init(&config)?;
     terminal.clear()?;
 
     // Initialize high-fidelity session event logging if enabled.
@@ -297,6 +297,7 @@ fn run_ratatui_app(
         images,
         should_show_trust_screen,
         debug,
+        terminal_info,
     );
 
     // Bridge log receiver into the AppEvent channel so latest log lines update the UI.

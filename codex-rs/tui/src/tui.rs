@@ -18,12 +18,31 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
+use ratatui_image::picker::Picker;
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
+/// Terminal information queried at startup
+#[derive(Clone)]
+pub struct TerminalInfo {
+    /// The image picker with detected capabilities
+    pub picker: Option<Picker>,
+    /// Measured font size (width, height) in pixels
+    pub font_size: (u16, u16),
+}
+
+impl std::fmt::Debug for TerminalInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TerminalInfo")
+            .field("picker", &self.picker.is_some())
+            .field("font_size", &self.font_size)
+            .finish()
+    }
+}
+
 /// Initialize the terminal (full screen mode with alternate screen)
-pub fn init(config: &Config) -> Result<Tui> {
+pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     // Initialize the theme based on config
     crate::theme::init_theme(&config.tui.theme);
 
@@ -31,6 +50,10 @@ pub fn init(config: &Config) -> Result<Tui> {
 
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
+    
+    // Query terminal capabilities and font size after entering alternate screen
+    // but before enabling raw mode
+    let terminal_info = query_terminal_info();
 
     enable_raw_mode()?;
     // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
@@ -66,7 +89,42 @@ pub fn init(config: &Config) -> Result<Tui> {
 
     let backend = CrosstermBackend::new(stdout());
     let tui = Terminal::new(backend)?;
-    Ok(tui)
+    Ok((tui, terminal_info))
+}
+
+/// Query terminal capabilities before entering raw mode
+fn query_terminal_info() -> TerminalInfo {
+    // Try to query using ratatui_image's picker
+    let picker = match Picker::from_query_stdio() {
+        Ok(p) => {
+            tracing::info!("Successfully queried terminal capabilities via Picker");
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!("Failed to query terminal via Picker: {}", e);
+            None
+        }
+    };
+    
+    // Get font size from picker if available, otherwise fall back to terminal_info query
+    let font_size = if let Some(ref p) = picker {
+        // The picker has font size information
+        let (w, h) = p.font_size();
+        tracing::info!("Got font size from Picker: {}x{}", w, h);
+        (w, h)
+    } else {
+        // Fall back to our own terminal query
+        crate::terminal_info::get_cell_size_pixels().unwrap_or_else(|| {
+            tracing::warn!("Failed to get cell size, using defaults");
+            if std::env::var("TERM_PROGRAM").unwrap_or_default() == "iTerm.app" {
+                (7, 15)
+            } else {
+                (8, 16)
+            }
+        })
+    };
+    
+    TerminalInfo { picker, font_size }
 }
 
 fn set_panic_hook() {
