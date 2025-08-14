@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -392,23 +393,33 @@ impl Codex {
     }
 }
 
+/// Mutable state of the agent
+#[derive(Default)]
+struct State {
+    approved_commands: HashSet<Vec<String>>,
+    current_task: Option<AgentTask>,
+    pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
+    pending_input: Vec<ResponseInputItem>,
+    history: ConversationHistory,
+}
+
 /// Context for an initialized model agent
 ///
 /// A session has at most 1 running agent at a time, and can be interrupted by user input.
 pub(crate) struct Session {
     client: ModelClient,
-    pub(crate) tx_event: Sender<Event>,
+    tx_event: Sender<Event>,
 
     /// The session's current working directory. All relative paths provided by
     /// the model as well as sandbox policies are resolved against this path
     /// instead of `std::env::current_dir()`.
-    pub(crate) cwd: PathBuf,
+    cwd: PathBuf,
     base_instructions: Option<String>,
     user_instructions: Option<String>,
-    pub(crate) approval_policy: AskForApproval,
+    approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     shell_environment_policy: ShellEnvironmentPolicy,
-    pub(crate) writable_roots: Mutex<Vec<PathBuf>>,
+    writable_roots: Vec<PathBuf>,
     disable_response_storage: bool,
     tools_config: ToolsConfig,
 
@@ -439,12 +450,23 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    pub(crate) fn get_writable_roots(&self) -> &[PathBuf] {
+        &self.writable_roots
+    }
+
+    pub(crate) fn get_approval_policy(&self) -> AskForApproval {
+        self.approval_policy
+    }
+
+    pub(crate) fn get_cwd(&self) -> &Path {
+        &self.cwd
+    }
+
     fn resolve_path(&self, path: Option<String>) -> PathBuf {
         path.as_ref()
             .map(PathBuf::from)
             .map_or_else(|| self.cwd.clone(), |p| self.cwd.join(p))
     }
-}
 
 /// Mutable state of the agent
 #[derive(Default)]
@@ -1088,6 +1110,7 @@ impl AgentAgent {
             handle,
         }
     }
+
     fn compact(
         sess: Arc<Session>,
         sub_id: String,
@@ -1274,7 +1297,7 @@ async fn submission_loop(
                     },
                 };
 
-                let writable_roots = Mutex::new(get_writable_roots(&cwd));
+                let writable_roots = get_writable_roots(&cwd);
 
                 // Error messages to dispatch after SessionConfigured is sent.
                 let mut mcp_connection_errors = Vec::<Event>::new();
@@ -1799,7 +1822,10 @@ async fn run_turn(
                 let max_retries = sess.client.get_provider().stream_max_retries();
                 if retries < max_retries {
                     retries += 1;
-                    let delay = backoff(retries);
+                    let delay = match e {
+                        CodexErr::Stream(_, Some(delay)) => delay,
+                        _ => backoff(retries),
+                    };
                     warn!(
                         "stream disconnected - retrying turn ({retries}/{max_retries} in {delay:?})...",
                     );
@@ -1909,6 +1935,7 @@ async fn try_run_turn(
             // Treat as a disconnected stream so the caller can retry.
             return Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
+                None,
             ));
         };
 
@@ -2139,6 +2166,7 @@ async fn handle_response_item(
                 for item in content {
                     let text = match item {
                         ReasoningItemContent::ReasoningText { text } => text,
+                        ReasoningItemContent::Text { text } => text,
                     };
                     let event = Event {
                         id: event_id.clone(),
@@ -3245,6 +3273,7 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
         let Some(event) = maybe_event else {
             return Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
+                None,
             ));
         };
         match event {
@@ -3262,6 +3291,7 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
                     None => {
                         return Err(CodexErr::Stream(
                             "token_usage was None in ResponseEvent::Completed".into(),
+                            None,
                         ));
                     }
                 };

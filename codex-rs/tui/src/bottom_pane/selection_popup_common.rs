@@ -93,9 +93,7 @@ pub(crate) fn render_rows(
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
                     desc.clone(),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().add_modifier(Modifier::DIM),
                 ));
             }
 
