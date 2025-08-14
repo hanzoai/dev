@@ -210,6 +210,7 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn log_outbound_op(op: &Op) {
     if !LOGGER.is_enabled() {
         return;

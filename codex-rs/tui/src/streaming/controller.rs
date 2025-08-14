@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use codex_core::config::Config;
 use ratatui::text::Line;
 

@@ -318,7 +318,6 @@ impl HistoryCell {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("event".dim()));
         lines.extend(message.lines().map(|line| ansi_escape_line(line).dim()));
-        lines.push(Line::from(""));
         HistoryCell::BackgroundEvent {
             view: TextBlock::new(lines),
         }
@@ -510,7 +509,6 @@ impl HistoryCell {
         }
 
         lines.extend(output_lines(output, true, false));
-        lines.push(Line::from(""));
 
         lines
     }
@@ -536,7 +534,6 @@ impl HistoryCell {
         }
 
         lines.extend(output_lines(output, false, true));
-        lines.push(Line::from(""));
 
         lines
     }
@@ -558,23 +555,18 @@ impl HistoryCell {
         tool_name: String,
         parameters: Option<serde_json::Value>,
     ) -> Self {
-        let title_line = Line::from(vec!["tool".magenta(), " running...".dim()]);
+        let title_line = Line::from(vec![tool_name.bold(), " running...".dim()]);
         
         let mut lines: Vec<Line> = vec![title_line];
-        
-        // Add tool name
-        lines.push(Line::from(vec![tool_name.bold()]));
         
         // Add parameters if present
         if let Some(params) = parameters {
             if let Ok(formatted) = serde_json::to_string_pretty(&params) {
-                lines.push(Line::from(""));
                 for line in formatted.lines() {
                     lines.push(Line::from(line.to_string().dim()));
                 }
             }
         }
-        lines.push(Line::from(""));
 
         HistoryCell::ActiveCustomToolCall {
             view: TextBlock::new(lines),
@@ -713,7 +705,7 @@ impl HistoryCell {
     pub(crate) fn new_completed_custom_tool_call(
         num_cols: usize,
         tool_name: String,
-        parameters: Option<serde_json::Value>,
+        _parameters: Option<serde_json::Value>,
         duration: Duration,
         result: Result<String, String>,
     ) -> Self {
@@ -722,48 +714,31 @@ impl HistoryCell {
         let status_str = if success { "success" } else { "failed" };
         
         let title_line = Line::from(vec![
-            "tool".magenta(),
+            tool_name.bold(),
             " ".into(),
             if success {
                 status_str.green()
             } else {
                 status_str.red()
             },
-            format!(", duration: {duration_str}").gray(),
+            format!(" ({duration_str})").gray(),
         ]);
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(title_line);
-        lines.push(Line::from(vec![tool_name.bold()]));
-
-        // Add parameters if present
-        if let Some(params) = parameters {
-            if let Ok(formatted) = serde_json::to_string_pretty(&params) {
-                lines.push(Line::from(""));
-                for line in formatted.lines().take(10) {
-                    lines.push(Line::from(line.to_string().dim()));
-                }
-                if formatted.lines().count() > 10 {
-                    lines.push(Line::from("...".dim()));
-                }
-            }
-        }
 
         // Add result
-        lines.push(Line::from(""));
         match result {
             Ok(msg) => {
                 let truncated = format_and_truncate_tool_result(&msg, TOOL_CALL_MAX_LINES, num_cols);
                 for line in truncated.lines() {
-                    lines.push(Line::from(line.to_string()));
+                    lines.push(Line::from(format!("> {}", line)));
                 }
             }
             Err(err) => {
-                lines.push(Line::from(format!("Error: {}", err).red()));
+                lines.push(Line::from(format!("> Error: {}", err).red()));
             }
         }
-        lines.push(Line::from(""));
-
         HistoryCell::CompletedCustomToolCall {
             view: TextBlock::new(lines),
         }
@@ -779,7 +754,6 @@ impl HistoryCell {
             lines.extend(message.lines().map(ansi_escape_line));
         }
 
-        lines.push(Line::from(""));
         HistoryCell::GitDiffOutput {
             view: TextBlock::new(lines),
         }
@@ -793,7 +767,6 @@ impl HistoryCell {
             "Reasoning effort changed to: ".into(),
             format!("{}", effort).bold().into(),
         ]));
-        lines.push(Line::from(""));
         HistoryCell::ReasoningOutput {
             view: TextBlock::new(lines),
         }
@@ -929,7 +902,6 @@ impl HistoryCell {
             usage.blended_total().to_string().into(),
         ]));
 
-        lines.push(Line::from(""));
         HistoryCell::StatusOutput {
             view: TextBlock::new(lines),
         }
@@ -1060,8 +1032,6 @@ impl HistoryCell {
             }
         }
 
-        lines.push(Line::from(""));
-
         HistoryCell::PlanUpdate {
             view: TextBlock::new(lines),
         }
@@ -1121,13 +1091,12 @@ impl HistoryCell {
             }
         }
 
-        lines.push(Line::from(""));
-
         HistoryCell::PatchApplyResult {
             view: TextBlock::new(lines),
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_patch_apply_success(stdout: String) -> Self {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
@@ -1147,8 +1116,6 @@ impl HistoryCell {
                 lines.push(Line::from(format!("... +{remaining} lines")).dim());
             }
         }
-
-        lines.push(Line::from(""));
 
         HistoryCell::PatchApplyResult {
             view: TextBlock::new(lines),

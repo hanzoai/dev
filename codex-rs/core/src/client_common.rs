@@ -86,9 +86,9 @@ pub struct Prompt {
     /// external MCP servers.
     pub tools: Vec<OpenAiTool>,
 
-    /// Ephemeral items to be added at the end of the input
-    /// These are generated fresh for each request
-    pub ephemeral_items: Vec<ResponseItem>,
+    /// Status items to be added at the end of the input
+    /// These are generated fresh for each request (screenshots, system status)
+    pub status_items: Vec<ResponseItem>,
 
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
@@ -120,7 +120,7 @@ impl Prompt {
     }
 
     pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
-        let mut input_with_instructions = Vec::with_capacity(self.input.len() + self.ephemeral_items.len() + 3);
+        let mut input_with_instructions = Vec::with_capacity(self.input.len() + self.status_items.len() + 3);
         input_with_instructions.push(ResponseItem::Message {
             id: None,
             role: "developer".to_string(),
@@ -156,8 +156,8 @@ impl Prompt {
             input_with_instructions.push(item.clone());
         }
         
-        // Add ephemeral items at the end so they're fresh for each request
-        input_with_instructions.extend(self.ephemeral_items.clone());
+        // Add status items at the end so they're fresh for each request
+        input_with_instructions.extend(self.status_items.clone());
         input_with_instructions
     }
 }
