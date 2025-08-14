@@ -378,6 +378,7 @@ fn derive_config_from_params(
         include_plan_tool,
         disable_response_storage: None,
         show_raw_agent_reasoning: None,
+        debug: None,
     };
 
     let cli_overrides = cli_overrides

@@ -1,8 +1,8 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
     style::Style,
+    widgets::{Block, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
 /// A generic scrollable viewport for any Widget.
@@ -87,7 +87,9 @@ where
         // Clamp scroll positions
         let max_y = self.content_height.saturating_sub(viewport_h);
         let sy = self.scroll_y.min(max_y);
-        let sx = self.scroll_x.min(self.content_width.unwrap_or(0).saturating_sub(viewport_w));
+        let sx = self
+            .scroll_x
+            .min(self.content_width.unwrap_or(0).saturating_sub(viewport_w));
 
         // Offscreen render: pretend we have a huge height = content_height
         // (Width = viewport width so we don't waste memory horizontally)

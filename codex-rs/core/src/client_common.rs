@@ -120,11 +120,14 @@ impl Prompt {
     }
 
     pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
-        let mut input_with_instructions = Vec::with_capacity(self.input.len() + self.status_items.len() + 3);
+        let mut input_with_instructions =
+            Vec::with_capacity(self.input.len() + self.status_items.len() + 3);
         input_with_instructions.push(ResponseItem::Message {
             id: None,
             role: "developer".to_string(),
-            content: vec![ContentItem::InputText { text: ADDITIONAL_INSTRUCTIONS.to_string() }],
+            content: vec![ContentItem::InputText {
+                text: ADDITIONAL_INSTRUCTIONS.to_string(),
+            }],
         });
         if let Some(ec) = self.get_formatted_environment_context() {
             input_with_instructions.push(ResponseItem::Message {
@@ -147,7 +150,10 @@ impl Prompt {
                 ResponseItem::FunctionCallOutput { call_id, .. } => {
                     if !seen_call_ids.insert(call_id.clone()) {
                         // Skip duplicate function call output
-                        tracing::debug!("Filtering duplicate FunctionCallOutput with call_id: {} from input", call_id);
+                        tracing::debug!(
+                            "Filtering duplicate FunctionCallOutput with call_id: {} from input",
+                            call_id
+                        );
                         continue;
                     }
                 }
@@ -155,7 +161,7 @@ impl Prompt {
             }
             input_with_instructions.push(item.clone());
         }
-        
+
         // Add status items at the end so they're fresh for each request
         input_with_instructions.extend(self.status_items.clone());
         input_with_instructions
@@ -170,9 +176,18 @@ pub enum ResponseEvent {
         response_id: String,
         token_usage: Option<TokenUsage>,
     },
-    OutputTextDelta { delta: String, item_id: Option<String> },
-    ReasoningSummaryDelta { delta: String, item_id: Option<String> },
-    ReasoningContentDelta { delta: String, item_id: Option<String> },
+    OutputTextDelta {
+        delta: String,
+        item_id: Option<String>,
+    },
+    ReasoningSummaryDelta {
+        delta: String,
+        item_id: Option<String>,
+    },
+    ReasoningContentDelta {
+        delta: String,
+        item_id: Option<String>,
+    },
     ReasoningSummaryPartAdded,
 }
 

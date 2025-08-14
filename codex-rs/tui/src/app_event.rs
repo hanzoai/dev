@@ -78,10 +78,10 @@ pub(crate) enum AppEvent {
     /// Onboarding: result of login_with_chatgpt.
     OnboardingAuthComplete(Result<(), String>),
     OnboardingComplete(ChatWidgetArgs),
-    
+
     /// Show Chrome launch options dialog
     ShowChromeOptions(Option<u16>),
-    
+
     /// Chrome launch option selected by user
     ChromeLaunchOptionSelected(ChromeLaunchOption, Option<u16>),
 }

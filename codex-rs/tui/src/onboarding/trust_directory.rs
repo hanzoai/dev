@@ -8,7 +8,6 @@ use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
@@ -116,7 +115,7 @@ impl WidgetRef for &TrustDirectoryWidget {
         }
         lines.push(Line::from(""));
         if let Some(error) = &self.error {
-            lines.push(Line::from(format!("  {error}")).fg(Color::Red));
+            lines.push(Line::from(format!("  {error}")).fg(crate::colors::error()));
             lines.push(Line::from(""));
         }
         lines.push(Line::from("  Press Enter to continue").add_modifier(Modifier::DIM));

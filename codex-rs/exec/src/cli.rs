@@ -48,7 +48,7 @@ pub struct Cli {
     /// Tell the agent to use the specified directory as its working root.
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
-    
+
     /// Enable debug logging of all LLM requests and responses to files.
     #[clap(long = "debug", short = 'd', default_value_t = false)]
     pub debug: bool,

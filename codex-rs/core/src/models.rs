@@ -29,9 +29,16 @@ pub enum ResponseInputItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentItem {
-    InputText { text: String },
-    InputImage { image_url: String, detail: Option<String> },
-    OutputText { text: String },
+    InputText {
+        text: String,
+    },
+    InputImage {
+        image_url: String,
+        detail: Option<String>,
+    },
+    OutputText {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,7 +171,10 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                     content_items.push(ContentItem::InputText { text });
                 }
                 InputItem::Image { image_url } => {
-                    content_items.push(ContentItem::InputImage { image_url, detail: None });
+                    content_items.push(ContentItem::InputImage {
+                        image_url,
+                        detail: None,
+                    });
                 }
                 InputItem::LocalImage { path } => match std::fs::read(&path) {
                     Ok(bytes) => {

@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::sync::Mutex;
 use chrono::Local;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 struct StreamInfo {
@@ -43,7 +43,11 @@ impl DebugLogger {
     }
 
     /// Start a new request/response log file and return the request ID
-    pub fn start_request_log(&self, endpoint: &str, payload: &Value) -> Result<String, std::io::Error> {
+    pub fn start_request_log(
+        &self,
+        endpoint: &str,
+        payload: &Value,
+    ) -> Result<String, std::io::Error> {
         if !self.enabled {
             return Ok(String::new());
         }
@@ -51,7 +55,7 @@ impl DebugLogger {
         let timestamp = Local::now();
         let request_id = Uuid::new_v4().to_string();
         let request_id_short = &request_id[..8]; // Use first 8 chars of UUID for brevity
-        
+
         // Create request file with pretty-printed JSON
         let request_filename = format!(
             "{}_{}_request.json",
@@ -59,7 +63,7 @@ impl DebugLogger {
             request_id_short
         );
         let request_file_path = self.log_dir.join(request_filename);
-        
+
         // Create request object with metadata
         let request_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
@@ -82,17 +86,25 @@ impl DebugLogger {
 
         // Store the stream info for this request_id
         if let Ok(mut streams) = self.active_streams.lock() {
-            streams.insert(request_id.clone(), StreamInfo {
-                response_file: response_file_path,
-                events: Vec::new(),
-            });
+            streams.insert(
+                request_id.clone(),
+                StreamInfo {
+                    response_file: response_file_path,
+                    events: Vec::new(),
+                },
+            );
         }
 
         Ok(request_id)
     }
 
     /// Append a response event to the in-memory event list
-    pub fn append_response_event(&self, request_id: &str, event_type: &str, data: &Value) -> Result<(), std::io::Error> {
+    pub fn append_response_event(
+        &self,
+        request_id: &str,
+        event_type: &str,
+        data: &Value,
+    ) -> Result<(), std::io::Error> {
         if !self.enabled || request_id.is_empty() {
             return Ok(());
         }
@@ -143,13 +155,10 @@ impl DebugLogger {
         }
 
         let timestamp = Local::now();
-        let filename = format!(
-            "{}_request.json",
-            timestamp.format("%Y%m%d_%H%M%S%.3f")
-        );
+        let filename = format!("{}_request.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
         let file_path = self.log_dir.join(filename);
-        
+
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
             "type": "request",
@@ -169,16 +178,13 @@ impl DebugLogger {
         }
 
         let timestamp = Local::now();
-        let filename = format!(
-            "{}_response.json",
-            timestamp.format("%Y%m%d_%H%M%S%.3f")
-        );
+        let filename = format!("{}_response.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
         let file_path = self.log_dir.join(filename);
-        
+
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
-            "type": "response", 
+            "type": "response",
             "endpoint": endpoint,
             "response": response
         });
@@ -195,13 +201,10 @@ impl DebugLogger {
         }
 
         let timestamp = Local::now();
-        let filename = format!(
-            "{}_stream.txt",
-            timestamp.format("%Y%m%d_%H%M%S%.3f")
-        );
+        let filename = format!("{}_stream.txt", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
         let file_path = self.log_dir.join(filename);
-        
+
         let log_entry = format!(
             "=== Stream Chunk at {} ===\nEndpoint: {}\n\n{}\n",
             timestamp.to_rfc3339(),
@@ -220,13 +223,10 @@ impl DebugLogger {
         }
 
         let timestamp = Local::now();
-        let filename = format!(
-            "{}_error.txt",
-            timestamp.format("%Y%m%d_%H%M%S%.3f")
-        );
+        let filename = format!("{}_error.txt", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
         let file_path = self.log_dir.join(filename);
-        
+
         let log_entry = format!(
             "=== Error at {} ===\nEndpoint: {}\n\n{}\n",
             timestamp.to_rfc3339(),
@@ -250,13 +250,10 @@ impl DebugLogger {
         }
 
         let timestamp = Local::now();
-        let filename = format!(
-            "{}_sse.json",
-            timestamp.format("%Y%m%d_%H%M%S%.3f")
-        );
+        let filename = format!("{}_sse.json", timestamp.format("%Y%m%d_%H%M%S%.3f"));
 
         let file_path = self.log_dir.join(filename);
-        
+
         let log_entry = serde_json::json!({
             "timestamp": timestamp.to_rfc3339(),
             "type": "sse_event",

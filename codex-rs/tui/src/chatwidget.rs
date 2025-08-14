@@ -5,9 +5,9 @@ use std::sync::Mutex;
 
 use ratatui::style::Modifier;
 
+use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
-use codex_core::ConversationManager;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -19,6 +19,8 @@ use codex_core::protocol::AgentStatusUpdateEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::BackgroundEventEvent;
 use codex_core::protocol::BrowserScreenshotUpdateEvent;
+use codex_core::protocol::CustomToolCallBeginEvent;
+use codex_core::protocol::CustomToolCallEndEvent;
 use codex_core::protocol::ErrorEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
@@ -26,8 +28,6 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::InputItem;
-use codex_core::protocol::CustomToolCallBeginEvent;
-use codex_core::protocol::CustomToolCallEndEvent;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
@@ -432,7 +432,10 @@ impl ChatWidget<'_> {
         tokio::spawn(async move {
             // Use ConversationManager to properly handle authentication
             let conversation_manager = ConversationManager::default();
-            let new_conversation = match conversation_manager.new_conversation(config_for_agent_loop).await {
+            let new_conversation = match conversation_manager
+                .new_conversation(config_for_agent_loop)
+                .await
+            {
                 Ok(conv) => conv,
                 Err(e) => {
                     // TODO: surface this error to the user.
@@ -680,13 +683,17 @@ impl ChatWidget<'_> {
         // Check for duplicate text lines to prevent adding the same content twice
         if let Some(last_cell) = self.history_cells.last() {
             // If both are text lines with identical content, skip adding the duplicate
-            if let (HistoryCell::StyledText { view: last_view }, HistoryCell::StyledText { view: new_view }) = (last_cell, &cell) {
+            if let (
+                HistoryCell::StyledText { view: last_view },
+                HistoryCell::StyledText { view: new_view },
+            ) = (last_cell, &cell)
+            {
                 if last_view.lines == new_view.lines {
                     return; // Skip duplicate
                 }
             }
         }
-        
+
         // If this is the first user prompt, start fade-out animation for AnimatedWelcome
         if matches!(cell, HistoryCell::UserPrompt { .. }) {
             let has_existing_user_prompts = self
@@ -820,9 +827,10 @@ impl ChatWidget<'_> {
                     // Add timeout to screenshot capture
                     let capture_result = tokio::time::timeout(
                         tokio::time::Duration::from_secs(10),
-                        browser_manager.capture_screenshot_with_url()
-                    ).await;
-                    
+                        browser_manager.capture_screenshot_with_url(),
+                    )
+                    .await;
+
                     match capture_result {
                         Ok(Ok((screenshot_paths, url))) => {
                             tracing::info!(
@@ -892,9 +900,12 @@ impl ChatWidget<'_> {
                                 "Screenshot capture timed out on attempt {} - browser may be disconnected",
                                 attempts
                             );
-                            
+
                             if attempts >= max_attempts {
-                                tracing::error!("Giving up after {} timeout attempts", max_attempts);
+                                tracing::error!(
+                                    "Giving up after {} timeout attempts",
+                                    max_attempts
+                                );
                                 break;
                             } else {
                                 // Try to reconnect the browser before next attempt
@@ -902,13 +913,13 @@ impl ChatWidget<'_> {
                                 if let Err(e) = browser_manager.close().await {
                                     tracing::warn!("Error closing browser: {}", e);
                                 }
-                                
+
                                 // Wait a bit before reconnection
                                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                
+
                                 // Browser will auto-reconnect on next capture attempt
                                 tracing::info!("Will retry screenshot capture after reconnection");
-                                
+
                                 // Exponential backoff
                                 let wait_time =
                                     std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
@@ -1057,7 +1068,7 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                
+
                 // Fallback: Check if we've already processed this message (duplicate detection)
                 let message_trimmed = message.trim();
                 if !message_trimmed.is_empty() {
@@ -1068,9 +1079,11 @@ impl ChatWidget<'_> {
                             return;
                         }
                     }
-                    
+
                     // Also check against the current answer_buffer
-                    if !self.answer_buffer.is_empty() && self.answer_buffer.trim() == message_trimmed {
+                    if !self.answer_buffer.is_empty()
+                        && self.answer_buffer.trim() == message_trimmed
+                    {
                         // We've already streamed this content via deltas
                         // Just finalize the stream without adding duplicate content
                         if self.current_stream == Some(StreamKind::Answer) {
@@ -1083,7 +1096,7 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                
+
                 // AgentMessage: if no deltas were streamed, render the final text once.
                 if self.current_stream != Some(StreamKind::Answer) && !message.is_empty() {
                     self.begin_stream(StreamKind::Answer);
@@ -1144,10 +1157,11 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                
+
                 // Fallback: Check if we've already streamed this content via deltas
                 let text_trimmed = text.trim();
-                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed {
+                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed
+                {
                     // We've already streamed this content via deltas
                     // Just finalize the stream without adding duplicate content
                     if self.current_stream == Some(StreamKind::Reasoning) {
@@ -1158,7 +1172,7 @@ impl ChatWidget<'_> {
                     self.request_redraw();
                     return;
                 }
-                
+
                 // Final reasoning: if no deltas were streamed, render the final text.
                 if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
                     self.begin_stream(StreamKind::Reasoning);
@@ -1202,10 +1216,11 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                
+
                 // Fallback: Check if we've already streamed this content via deltas
                 let text_trimmed = text.trim();
-                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed {
+                if !self.reasoning_buffer.is_empty() && self.reasoning_buffer.trim() == text_trimmed
+                {
                     // We've already streamed this content via deltas
                     // Just finalize the stream without adding duplicate content
                     if self.current_stream == Some(StreamKind::Reasoning) {
@@ -1216,7 +1231,7 @@ impl ChatWidget<'_> {
                     self.request_redraw();
                     return;
                 }
-                
+
                 // Final raw reasoning: if no deltas were streamed, render the final text.
                 if self.current_stream != Some(StreamKind::Reasoning) && !text.is_empty() {
                     self.begin_stream(StreamKind::Reasoning);
@@ -1262,7 +1277,7 @@ impl ChatWidget<'_> {
                 self.bottom_pane.set_task_running(false);
                 self.bottom_pane.clear_live_ring();
                 // Reset with max width to disable wrapping
-            self.live_builder = RowBuilder::new(usize::MAX);
+                self.live_builder = RowBuilder::new(usize::MAX);
                 self.current_stream = None;
                 self.stream_header_emitted = false;
                 self.answer_buffer.clear();
@@ -1412,8 +1427,7 @@ impl ChatWidget<'_> {
             }) => {
                 self.finalize_active_stream();
                 self.add_to_history(HistoryCell::new_active_custom_tool_call(
-                    tool_name,
-                    parameters,
+                    tool_name, parameters,
                 ));
             }
             EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
@@ -1424,11 +1438,7 @@ impl ChatWidget<'_> {
                 result,
             }) => {
                 self.add_to_history(HistoryCell::new_completed_custom_tool_call(
-                    80,
-                    tool_name,
-                    parameters,
-                    duration,
-                    result,
+                    80, tool_name, parameters, duration, result,
                 ));
             }
             EventMsg::GetHistoryEntryResponse(event) => {
@@ -1850,12 +1860,16 @@ impl ChatWidget<'_> {
     pub(crate) fn show_chrome_options(&mut self, port: Option<u16>) {
         self.bottom_pane.show_chrome_selection(port);
     }
-    
-    pub(crate) fn handle_chrome_launch_option(&mut self, option: crate::bottom_pane::chrome_selection_view::ChromeLaunchOption, port: Option<u16>) {
+
+    pub(crate) fn handle_chrome_launch_option(
+        &mut self,
+        option: crate::bottom_pane::chrome_selection_view::ChromeLaunchOption,
+        port: Option<u16>,
+    ) {
         use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
-        
+
         let launch_port = port.unwrap_or(9222);
-        
+
         match option {
             ChromeLaunchOption::CloseAndUseProfile => {
                 // Kill existing Chrome and launch with user profile
@@ -1903,15 +1917,17 @@ impl ChatWidget<'_> {
             }
         }
     }
-    
+
     fn launch_chrome_with_profile(&mut self, port: u16) {
-        use std::process::Stdio;
         use ratatui::text::Line;
-        
+        use std::process::Stdio;
+
         #[cfg(target_os = "macos")]
         {
             let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
-            let mut cmd = std::process::Command::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+            let mut cmd = std::process::Command::new(
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            );
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg("--no-first-run")
                 .arg("--no-default-browser-check")
@@ -1931,7 +1947,7 @@ impl ChatWidget<'_> {
                 .stdin(Stdio::null());
             let _ = cmd.spawn();
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
@@ -1955,17 +1971,19 @@ impl ChatWidget<'_> {
                 .stdin(Stdio::null());
             let _ = cmd.spawn();
         }
-        
+
         #[cfg(target_os = "windows")]
         {
             let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                format!("{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe", 
-                    std::env::var("USERPROFILE").unwrap_or_default()),
+                format!(
+                    "{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+                    std::env::var("USERPROFILE").unwrap_or_default()
+                ),
             ];
-            
+
             for chrome_path in chrome_paths {
                 if std::path::Path::new(&chrome_path).exists() {
                     let mut cmd = std::process::Command::new(&chrome_path);
@@ -1991,27 +2009,27 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        
+
         // Add status message
         self.add_to_history(HistoryCell::BackgroundEvent {
             view: TextBlock::new(vec![Line::from("✅ Chrome launched with user profile")]),
         });
     }
-    
+
     fn connect_to_chrome_after_launch(&mut self, port: u16) {
         // Wait a moment for Chrome to start, then reuse the existing connection logic
         let app_event_tx = self.app_event_tx.clone();
         let latest_screenshot = self.latest_browser_screenshot.clone();
-        
+
         tokio::spawn(async move {
             // Wait for Chrome to fully start
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            
+
             // Now try to connect using the shared CDP connection logic
             ChatWidget::connect_to_cdp_chrome(Some(port), latest_screenshot, app_event_tx).await;
         });
     }
-    
+
     /// Shared CDP connection logic used by both /chrome command and Chrome launch options
     async fn connect_to_cdp_chrome(
         port: Option<u16>,
@@ -2034,52 +2052,62 @@ impl ChatWidget<'_> {
         match browser_manager.connect_to_chrome_only().await {
             Ok(_) => {
                 tracing::info!("Connected to Chrome via CDP");
-                
+
                 // Send success message
                 let success_msg = if let Some(p) = port {
                     format!("✅ Connected to Chrome on port {}", p)
                 } else {
                     "✅ Connected to Chrome (auto-detected port)".to_string()
                 };
-                
+
                 // Set up navigation callback
                 let latest_screenshot_callback = latest_screenshot.clone();
                 let app_event_tx_callback = app_event_tx.clone();
-                
-                browser_manager.set_navigation_callback(move |url| {
-                    tracing::info!("CDP Navigation callback triggered for URL: {}", url);
-                    let latest_screenshot_inner = latest_screenshot_callback.clone();
-                    let app_event_tx_inner = app_event_tx_callback.clone();
-                    let url_inner = url.clone();
-                    
-                    tokio::spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                        let browser_manager_inner = ChatWidget::get_browser_manager().await;
-                        match browser_manager_inner.capture_screenshot_with_url().await {
-                            Ok((paths, _)) => {
-                                if let Some(first_path) = paths.first() {
-                                    tracing::info!("Auto-captured CDP screenshot: {}", first_path.display());
-                                    
-                                    if let Ok(mut latest) = latest_screenshot_inner.lock() {
-                                        *latest = Some((first_path.clone(), url_inner.clone()));
+
+                browser_manager
+                    .set_navigation_callback(move |url| {
+                        tracing::info!("CDP Navigation callback triggered for URL: {}", url);
+                        let latest_screenshot_inner = latest_screenshot_callback.clone();
+                        let app_event_tx_inner = app_event_tx_callback.clone();
+                        let url_inner = url.clone();
+
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                            match browser_manager_inner.capture_screenshot_with_url().await {
+                                Ok((paths, _)) => {
+                                    if let Some(first_path) = paths.first() {
+                                        tracing::info!(
+                                            "Auto-captured CDP screenshot: {}",
+                                            first_path.display()
+                                        );
+
+                                        if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                            *latest = Some((first_path.clone(), url_inner.clone()));
+                                        }
+
+                                        use codex_core::protocol::{
+                                            BrowserScreenshotUpdateEvent, Event, EventMsg,
+                                        };
+                                        let _ =
+                                            app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                msg: EventMsg::BrowserScreenshotUpdate(
+                                                    BrowserScreenshotUpdateEvent {
+                                                        screenshot_path: first_path.clone(),
+                                                        url: url_inner,
+                                                    },
+                                                ),
+                                            }));
                                     }
-                                    
-                                    use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg, Event};
-                                    let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
-                                        id: uuid::Uuid::new_v4().to_string(),
-                                        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                            screenshot_path: first_path.clone(),
-                                            url: url_inner,
-                                        }),
-                                    }));
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to auto-capture CDP screenshot: {}", e);
                                 }
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to auto-capture CDP screenshot: {}", e);
-                            }
-                        }
-                    });
-                }).await;
+                        });
+                    })
+                    .await;
 
                 // Set as global manager
                 codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
@@ -2089,22 +2117,29 @@ impl ChatWidget<'_> {
                 match browser_manager.capture_screenshot_with_url().await {
                     Ok((paths, url)) => {
                         if let Some(first_path) = paths.first() {
-                            tracing::info!("Initial CDP screenshot captured: {}", first_path.display());
-                            
+                            tracing::info!(
+                                "Initial CDP screenshot captured: {}",
+                                first_path.display()
+                            );
+
                             if let Ok(mut latest) = latest_screenshot.lock() {
                                 *latest = Some((
                                     first_path.clone(),
                                     url.clone().unwrap_or_else(|| "Chrome".to_string()),
                                 ));
                             }
-                            
-                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg, Event};
+
+                            use codex_core::protocol::{
+                                BrowserScreenshotUpdateEvent, Event, EventMsg,
+                            };
                             let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
-                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                    screenshot_path: first_path.clone(),
-                                    url: url.unwrap_or_else(|| "Chrome".to_string()),
-                                }),
+                                msg: EventMsg::BrowserScreenshotUpdate(
+                                    BrowserScreenshotUpdateEvent {
+                                        screenshot_path: first_path.clone(),
+                                        url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                    },
+                                ),
                             }));
                         }
                     }
@@ -2112,9 +2147,9 @@ impl ChatWidget<'_> {
                         tracing::error!("Failed to capture initial CDP screenshot: {}", e);
                     }
                 }
-                
+
                 // Send success status to chat
-                use codex_core::protocol::{EventMsg, BackgroundEventEvent, Event};
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -2124,10 +2159,10 @@ impl ChatWidget<'_> {
             }
             Err(e) => {
                 tracing::error!("Failed to connect to Chrome: {}", e);
-                
+
                 // Send error message only - don't show dialog again since we're already
                 // in the post-launch connection attempt
-                use codex_core::protocol::{BackgroundEventEvent, EventMsg, Event};
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -2137,18 +2172,20 @@ impl ChatWidget<'_> {
             }
         }
     }
-    
+
     fn launch_chrome_with_temp_profile(&mut self, port: u16) {
-        use std::process::Stdio;
         use ratatui::text::Line;
-        
+        use std::process::Stdio;
+
         let temp_dir = std::env::temp_dir();
         let profile_dir = temp_dir.join(format!("coder-chrome-temp-{}", port));
-        
+
         #[cfg(target_os = "macos")]
         {
             let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
-            let mut cmd = std::process::Command::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+            let mut cmd = std::process::Command::new(
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            );
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg(format!("--user-data-dir={}", profile_dir.display()))
                 .arg("--no-first-run")
@@ -2169,7 +2206,7 @@ impl ChatWidget<'_> {
                 .stdin(Stdio::null());
             let _ = cmd.spawn();
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
@@ -2194,17 +2231,19 @@ impl ChatWidget<'_> {
                 .stdin(Stdio::null());
             let _ = cmd.spawn();
         }
-        
+
         #[cfg(target_os = "windows")]
         {
             let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                format!("{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe", 
-                    std::env::var("USERPROFILE").unwrap_or_default()),
+                format!(
+                    "{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+                    std::env::var("USERPROFILE").unwrap_or_default()
+                ),
             ];
-            
+
             for chrome_path in chrome_paths {
                 if std::path::Path::new(&chrome_path).exists() {
                     let mut cmd = std::process::Command::new(&chrome_path);
@@ -2231,17 +2270,20 @@ impl ChatWidget<'_> {
                 }
             }
         }
-        
+
         // Add status message
         self.add_to_history(HistoryCell::BackgroundEvent {
-            view: TextBlock::new(vec![Line::from(format!("✅ Chrome launched with temporary profile at {}", profile_dir.display()))]),
+            view: TextBlock::new(vec![Line::from(format!(
+                "✅ Chrome launched with temporary profile at {}",
+                profile_dir.display()
+            ))]),
         });
     }
-    
+
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let trimmed = command_text.trim();
-        
+
         // Handle the case where just "/browser" was typed
         if trimmed.is_empty() {
             let response = "Browser commands:\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser";
@@ -2254,7 +2296,7 @@ impl ChatWidget<'_> {
             });
             return;
         }
-        
+
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         let response = if !parts.is_empty() {
             let first_arg = parts[0];
@@ -2277,7 +2319,7 @@ impl ChatWidget<'_> {
                 let latest_screenshot = self.latest_browser_screenshot.clone();
                 let app_event_tx = self.app_event_tx.clone();
                 let url_for_goto = full_url.clone();
-                
+
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
                 self.add_to_history(HistoryCell::BackgroundEvent {
@@ -2430,9 +2472,9 @@ impl ChatWidget<'_> {
                                 result.url,
                                 result.title
                             );
-                            
+
                             // Send success message to chat
-                            use codex_core::protocol::{EventMsg, BackgroundEventEvent};
+                            use codex_core::protocol::{BackgroundEventEvent, EventMsg};
                             let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -2619,7 +2661,7 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_chrome_command(&mut self, command_text: String) {
         // Parse the chrome command arguments
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
-        
+
         // Check if it's a status command
         if !parts.is_empty() && parts[0] == "status" {
             // Get status from BrowserManager - same as /browser status
@@ -2632,7 +2674,7 @@ impl ChatWidget<'_> {
             let status = status_rx
                 .recv()
                 .unwrap_or_else(|_| "Failed to get browser status.".to_string());
-            
+
             // Add the response to the UI
             let lines = status
                 .lines()
@@ -2643,7 +2685,7 @@ impl ChatWidget<'_> {
             });
             return;
         }
-        
+
         // Extract port if provided (number as first argument)
         let port = if !parts.is_empty() {
             parts[0].parse::<u16>().ok()
@@ -2657,7 +2699,10 @@ impl ChatWidget<'_> {
         let launch_port = port.unwrap_or(9222);
 
         // Add status message to chat
-        let status_msg = format!("🔗 Connecting to Chrome DevTools Protocol (port: {})...", port_display);
+        let status_msg = format!(
+            "🔗 Connecting to Chrome DevTools Protocol (port: {})...",
+            port_display
+        );
         self.add_to_history(HistoryCell::BackgroundEvent {
             view: TextBlock::new(vec![Line::from(status_msg)]),
         });
@@ -3582,12 +3627,12 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut total_height = 0u16;
         let mut item_heights = Vec::new();
         let spacing = 1u16; // Add 1 line of spacing between each history cell
-        
+
         for (idx, item) in all_content.iter().enumerate() {
             let h = item.desired_height(content_area.width);
             item_heights.push(h);
             total_height += h;
-            
+
             // Add spacing after each item except the last one
             if idx < all_content.len() - 1 {
                 total_height += spacing;
@@ -3699,13 +3744,14 @@ impl WidgetRef for &ChatWidget<'_> {
             }
 
             content_y += item_height;
-            
+
             // Add spacing after this item (except for the last item)
             if idx < all_content.len() - 1 {
                 content_y += spacing;
                 // Also advance screen_y by the visible portion of the spacing
                 if content_y > scroll_pos && screen_y < content_area.y + content_area.height {
-                    screen_y += spacing.min((content_area.y + content_area.height).saturating_sub(screen_y));
+                    screen_y += spacing
+                        .min((content_area.y + content_area.height).saturating_sub(screen_y));
                 }
             }
         }

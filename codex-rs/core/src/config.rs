@@ -163,7 +163,7 @@ pub struct Config {
 
     /// The value for the `originator` header included with Responses API requests.
     pub internal_originator: Option<String>,
-    
+
     /// Enable debug logging of LLM requests and responses
     pub debug: bool,
 }

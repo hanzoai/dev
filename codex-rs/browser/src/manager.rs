@@ -234,10 +234,7 @@ impl BrowserManager {
                         info!("Connecting to Chrome via WebSocket...");
                         let connect_start = tokio::time::Instant::now();
                         let (browser, mut handler) = Browser::connect(ws).await?;
-                        info!(
-                            "Connected to Chrome in {:?}",
-                            connect_start.elapsed()
-                        );
+                        info!("Connected to Chrome in {:?}", connect_start.elapsed());
 
                         let task =
                             tokio::spawn(
@@ -260,12 +257,12 @@ impl BrowserManager {
                 }
             } else {
                 return Err(BrowserError::CdpError(
-                    "No Chrome instance found with debug port".to_string()
+                    "No Chrome instance found with debug port".to_string(),
                 ));
             }
         } else {
             return Err(BrowserError::CdpError(
-                "No CDP port configured for Chrome connection".to_string()
+                "No CDP port configured for Chrome connection".to_string(),
             ));
         }
     }
@@ -400,8 +397,11 @@ impl BrowserManager {
             .arg("--disable-background-timer-throttling")
             // Redirect Chrome logging to a file to keep terminal clean
             .arg("--enable-logging")
-            .arg("--log-level=1")  // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
-            .arg(format!("--log-file={}/coder-chrome.log", std::env::temp_dir().display()))
+            .arg("--log-level=1") // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
+            .arg(format!(
+                "--log-file={}/coder-chrome.log",
+                std::env::temp_dir().display()
+            ))
             // Suppress console output
             .arg("--silent-launch")
             // Set a longer timeout for CDP requests (60 seconds instead of default 30)
@@ -491,11 +491,9 @@ impl BrowserManager {
         let mut page_guard = self.page.lock().await;
         if let Some(page) = page_guard.as_ref() {
             // Verify the page is still responsive
-            let check_result = tokio::time::timeout(
-                Duration::from_secs(2),
-                page.get_current_url()
-            ).await;
-            
+            let check_result =
+                tokio::time::timeout(Duration::from_secs(2), page.get_current_url()).await;
+
             match check_result {
                 Ok(Ok(_)) => {
                     // Page is responsive
@@ -769,15 +767,13 @@ impl BrowserManager {
 
     async fn ensure_browser(&self) -> Result<()> {
         let mut browser_guard = self.browser.lock().await;
-        
+
         // Check if we have a browser instance
         if let Some(browser) = browser_guard.as_ref() {
             // Try to verify it's still connected with a simple operation
-            let check_result = tokio::time::timeout(
-                Duration::from_secs(2),
-                browser.version()
-            ).await;
-            
+            let check_result =
+                tokio::time::timeout(Duration::from_secs(2), browser.version()).await;
+
             match check_result {
                 Ok(Ok(_)) => {
                     // Browser is responsive
@@ -793,7 +789,7 @@ impl BrowserManager {
                 }
             }
         }
-        
+
         // Need to start or restart the browser
         drop(browser_guard);
         info!("Starting/restarting browser connection...");
@@ -1000,33 +996,33 @@ impl BrowserManager {
         };
 
         // Get current URL with timeout
-        let current_url = match tokio::time::timeout(
-            Duration::from_secs(3),
-            page.get_current_url()
-        ).await {
-            Ok(Ok(url)) => url,
-            Ok(Err(_)) | Err(_) => {
-                warn!("Failed to get current URL, using default");
-                "about:blank".to_string()
-            }
-        };
+        let current_url =
+            match tokio::time::timeout(Duration::from_secs(3), page.get_current_url()).await {
+                Ok(Ok(url)) => url,
+                Ok(Err(_)) | Err(_) => {
+                    warn!("Failed to get current URL, using default");
+                    "about:blank".to_string()
+                }
+            };
 
         // Capture screenshots with timeout
         let screenshot_result = tokio::time::timeout(
             Duration::from_secs(15), // Allow up to 15 seconds for screenshot
-            page.screenshot(mode)
-        ).await;
-        
+            page.screenshot(mode),
+        )
+        .await;
+
         let screenshots = match screenshot_result {
             Ok(Ok(shots)) => shots,
             Ok(Err(e)) => {
-                return Err(BrowserError::ScreenshotError(
-                    format!("Screenshot capture failed: {}", e)
-                ));
+                return Err(BrowserError::ScreenshotError(format!(
+                    "Screenshot capture failed: {}",
+                    e
+                )));
             }
             Err(_) => {
                 return Err(BrowserError::ScreenshotError(
-                    "Screenshot capture timed out after 15 seconds".to_string()
+                    "Screenshot capture timed out after 15 seconds".to_string(),
                 ));
             }
         };
@@ -1060,19 +1056,19 @@ impl BrowserManager {
         let page = self.get_or_create_page().await?;
         page.move_mouse(x, y).await
     }
-    
+
     /// Move the mouse by relative offset from current position
     pub async fn move_mouse_relative(&self, dx: f64, dy: f64) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;
         page.move_mouse_relative(dx, dy).await
     }
-    
+
     /// Click at the specified coordinates
     pub async fn click(&self, x: f64, y: f64) -> Result<()> {
         let page = self.get_or_create_page().await?;
         page.click(x, y).await
     }
-    
+
     /// Click at the current mouse position
     pub async fn click_at_current(&self) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;
