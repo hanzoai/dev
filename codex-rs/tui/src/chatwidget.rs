@@ -45,6 +45,7 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
+use image::imageops::FilterType;
 use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
@@ -112,6 +113,9 @@ pub(crate) struct ChatWidget<'a> {
 
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
+    
+    // Terminal information from startup
+    terminal_info: crate::tui::TerminalInfo,
     // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
     scroll_offset: u16,
     // Cached max scroll from last render to prevent overscroll artifacts
@@ -423,6 +427,7 @@ impl ChatWidget<'_> {
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
         enhanced_keys_supported: bool,
+        terminal_info: crate::tui::TerminalInfo,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -515,8 +520,9 @@ impl ChatWidget<'_> {
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
-            cached_picker: RefCell::new(None),
+            cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
+            terminal_info,
             scroll_offset: 0,
             last_max_scroll: std::cell::Cell::new(0),
             active_agents: Vec::new(),
@@ -2773,13 +2779,8 @@ impl ChatWidget<'_> {
     }
 
     fn measured_font_size(&self) -> (u16, u16) {
-        let default_guess = if std::env::var("TERM_PROGRAM").unwrap_or_default() == "iTerm.app" {
-            (7, 15)
-        } else {
-            (8, 16)
-        };
         *self.cached_cell_size.get_or_init(|| {
-            let size = crate::terminal_info::get_cell_size_pixels().unwrap_or(default_guess);
+            let size = self.terminal_info.font_size;
 
             // HACK: On macOS Retina displays, terminals often report physical pixels
             // but ratatui-image expects logical pixels. If we detect suspiciously
@@ -2949,8 +2950,11 @@ impl ChatWidget<'_> {
         // picker (Retina 2x workaround preserved)
         let mut cached_picker = self.cached_picker.borrow_mut();
         if cached_picker.is_none() {
+            // If we didn't get a picker from terminal query at startup, create one from font size
             let (fw, fh) = self.measured_font_size();
-            *cached_picker = Some(Picker::from_fontsize((fw * 2, fh * 2)));
+            let p = Picker::from_fontsize((fw, fh));
+            
+            *cached_picker = Some(p);
         }
         let picker = cached_picker.as_ref().unwrap();
 
@@ -3022,7 +3026,7 @@ impl ChatWidget<'_> {
             }
         };
         if needs_recreate {
-            match picker.new_protocol(dyn_img, target, Resize::Fit(None)) {
+            match picker.new_protocol(dyn_img, target, Resize::Fit(Some(FilterType::Lanczos3))) {
                 Ok(protocol) => {
                     *self.cached_image_protocol.borrow_mut() =
                         Some((path.clone(), target, protocol))

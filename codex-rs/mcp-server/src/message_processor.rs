@@ -89,15 +89,15 @@ impl MessageProcessor {
     }
 
     pub(crate) async fn process_request(&mut self, request: JSONRPCRequest) {
-        if let Ok(request_json) = serde_json::to_value(request.clone())
-            && let Ok(codex_request) = serde_json::from_value::<ClientRequest>(request_json)
-        {
-            // If the request is a Codex request, handle it with the Codex
-            // message processor.
-            self.codex_message_processor
-                .process_request(codex_request)
-                .await;
-            return;
+        if let Ok(request_json) = serde_json::to_value(request.clone()) {
+            if let Ok(codex_request) = serde_json::from_value::<ClientRequest>(request_json) {
+                // If the request is a Codex request, handle it with the Codex
+                // message processor.
+                self.codex_message_processor
+                    .process_request(codex_request)
+                    .await;
+                return;
+            }
         }
 
         // Hold on to the ID so we can respond.
