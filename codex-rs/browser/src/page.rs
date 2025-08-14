@@ -253,7 +253,7 @@ impl Page {
     //   LAG            => how much the badge trails; lower = looser, higher = tighter
     //
     // To remove later: evaluate `window.__vc?.destroy()`
-let script = format!(r#"
+    let script = format!(r#"
 (function(x, y) {{
   const ns = 'http://www.w3.org/2000/svg';
   const VIEW_W = 40, VIEW_H = 30;       // original viewBox of your assets
@@ -294,6 +294,16 @@ let script = format!(r#"
     arrow.style.transformOrigin = '0 0';
     arrow.style.width = ARROW_SIZE_PX + 'px';
     arrow.style.height = 'auto';
+
+    // defs + drop-shadow filter (your values)
+    const defs = createSvg('defs');
+    const filt = createSvg('filter');
+    filt.setAttribute('id', 'vc-drop-shadow');
+    filt.setAttribute('color-interpolation-filters', 'sRGB');
+    filt.setAttribute('x', '-50%');
+    filt.setAttribute('y', '-50%');
+    filt.setAttribute('width', '200%');
+    filt.setAttribute('height', '200%');
 
     const blur = createSvg('feGaussianBlur'); blur.setAttribute('in', 'SourceAlpha'); blur.setAttribute('stdDeviation', '1');
     const off  = createSvg('feOffset');       off.setAttribute('dx', '0'); off.setAttribute('dy', '0');
