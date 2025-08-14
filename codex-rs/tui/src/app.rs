@@ -220,6 +220,15 @@ impl App<'_> {
             pending_redraw.store(false, Ordering::Release);
         });
     }
+    
+    /// Schedule a redraw after the specified duration
+    fn schedule_redraw_in(&self, duration: Duration) {
+        let tx = self.app_event_tx.clone();
+        thread::spawn(move || {
+            thread::sleep(duration);
+            tx.send(AppEvent::RequestRedraw);
+        });
+    }
 
     pub(crate) fn run(&mut self, terminal: &mut tui::Tui) -> Result<()> {
         // Insert an event to trigger the first render.
@@ -359,10 +368,6 @@ impl App<'_> {
                 }
                 AppEvent::CodexOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
-                    AppState::Onboarding { .. } => {}
-                },
-                AppEvent::LatestLog(line) => match &mut self.app_state {
-                    AppState::Chat { widget } => widget.update_latest_log(line),
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::DispatchCommand(command, command_text) => {
@@ -641,6 +646,10 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_chrome_launch_option(option, port);
                     }
+                }
+                AppEvent::ScheduleFrameIn(duration) => {
+                    // Schedule the next redraw with the requested duration
+                    self.schedule_redraw_in(duration);
                 }
             }
         }
