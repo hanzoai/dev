@@ -37,6 +37,7 @@ use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use image::imageops::FilterType;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -45,7 +46,6 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
-use image::imageops::FilterType;
 use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
@@ -113,7 +113,7 @@ pub(crate) struct ChatWidget<'a> {
 
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
-    
+
     // Terminal information from startup
     terminal_info: crate::tui::TerminalInfo,
     // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
@@ -2292,7 +2292,7 @@ impl ChatWidget<'_> {
 
         // Handle the case where just "/browser" was typed
         if trimmed.is_empty() {
-            let response = "Browser commands:\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser";
+            let response = "Browser commands:\n• /browser - Switch to internal browser mode\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser";
             let lines = response
                 .lines()
                 .map(|line| Line::from(line.to_string()))
@@ -2300,6 +2300,9 @@ impl ChatWidget<'_> {
             self.add_to_history(HistoryCell::BackgroundEvent {
                 view: TextBlock::new(lines),
             });
+
+            // Switch to internal browser mode when just "/browser" is typed
+            self.switch_to_internal_browser();
             return;
         }
 
@@ -2664,41 +2667,47 @@ impl ChatWidget<'_> {
         });
     }
 
-    pub(crate) fn handle_chrome_command(&mut self, command_text: String) {
-        // Parse the chrome command arguments
-        let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
+    fn switch_to_internal_browser(&mut self) {
+        // Switch to internal browser mode
+        let latest_screenshot = self.latest_browser_screenshot.clone();
+        let app_event_tx = self.app_event_tx.clone();
 
-        // Check if it's a status command
-        if !parts.is_empty() && parts[0] == "status" {
-            // Get status from BrowserManager - same as /browser status
-            let (status_tx, status_rx) = std::sync::mpsc::channel();
-            tokio::spawn(async move {
-                let browser_manager = ChatWidget::get_browser_manager().await;
-                let status = browser_manager.get_status_sync();
-                let _ = status_tx.send(status);
-            });
-            let status = status_rx
-                .recv()
-                .unwrap_or_else(|_| "Failed to get browser status.".to_string());
+        tokio::spawn(async move {
+            let browser_manager = ChatWidget::get_browser_manager().await;
 
-            // Add the response to the UI
-            let lines = status
-                .lines()
-                .map(|line| Line::from(line.to_string()))
-                .collect();
-            self.add_to_history(HistoryCell::BackgroundEvent {
-                view: TextBlock::new(lines),
-            });
-            return;
-        }
+            // First, close any existing Chrome connection
+            if browser_manager.is_enabled().await {
+                let _ = browser_manager.close().await;
+            }
 
-        // Extract port if provided (number as first argument)
-        let port = if !parts.is_empty() {
-            parts[0].parse::<u16>().ok()
-        } else {
-            None
-        };
+            // Configure for internal browser
+            {
+                let mut config = browser_manager.config.write().await;
+                config.connect_port = None;
+                config.headless = true;
+                config.persist_profile = false;
+                config.enabled = true;
+            }
 
+            // Enable internal browser
+            browser_manager.set_enabled_sync(true);
+
+            // Notify about successful switch
+            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                id: uuid::Uuid::new_v4().to_string(),
+                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                    message: "✅ Switched to internal browser mode".to_string(),
+                }),
+            }));
+
+            // Clear any existing screenshot
+            if let Ok(mut screenshot) = latest_screenshot.lock() {
+                *screenshot = None;
+            }
+        });
+    }
+
+    fn handle_chrome_connection(&mut self, port: Option<u16>) {
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
@@ -2743,6 +2752,46 @@ impl ChatWidget<'_> {
                 }
             }
         });
+    }
+
+    pub(crate) fn handle_chrome_command(&mut self, command_text: String) {
+        // Parse the chrome command arguments
+        let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
+
+        // Handle empty command - just "/chrome"
+        if parts.is_empty() || command_text.trim().is_empty() {
+            // Switch to external Chrome mode with default port
+            self.handle_chrome_connection(None);
+            return;
+        }
+
+        // Check if it's a status command
+        if parts[0] == "status" {
+            // Get status from BrowserManager - same as /browser status
+            let (status_tx, status_rx) = std::sync::mpsc::channel();
+            tokio::spawn(async move {
+                let browser_manager = ChatWidget::get_browser_manager().await;
+                let status = browser_manager.get_status_sync();
+                let _ = status_tx.send(status);
+            });
+            let status = status_rx
+                .recv()
+                .unwrap_or_else(|_| "Failed to get browser status.".to_string());
+
+            // Add the response to the UI
+            let lines = status
+                .lines()
+                .map(|line| Line::from(line.to_string()))
+                .collect();
+            self.add_to_history(HistoryCell::BackgroundEvent {
+                view: TextBlock::new(lines),
+            });
+            return;
+        }
+
+        // Extract port if provided (number as first argument)
+        let port = parts[0].parse::<u16>().ok();
+        self.handle_chrome_connection(port);
     }
 
     /// Programmatically submit a user text message as if typed in the
@@ -2953,7 +3002,7 @@ impl ChatWidget<'_> {
             // If we didn't get a picker from terminal query at startup, create one from font size
             let (fw, fh) = self.measured_font_size();
             let p = Picker::from_fontsize((fw, fh));
-            
+
             *cached_picker = Some(p);
         }
         let picker = cached_picker.as_ref().unwrap();

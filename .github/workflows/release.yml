@@ -103,6 +103,38 @@ jobs:
       uses: dtolnay/rust-toolchain@1.88
       with:
         targets: ${{ matrix.target }}
+    
+    # Cache cargo registry and build artifacts
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+    
+    # Cache target directory with matrix-specific key
+    - name: Cache target directory
+      uses: actions/cache@v4
+      with:
+        path: codex-rs/target
+        key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+        restore-keys: |
+          ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}-
+          ${{ runner.os }}-target-${{ matrix.target }}-
+    
+    # Use sccache for additional compilation caching
+    - name: Install sccache
+      uses: mozilla-actions/sccache-action@v0.0.3
+    
+    - name: Configure sccache
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
         
     - name: Install musl tools (Linux)
       if: contains(matrix.target, 'musl')
@@ -141,6 +173,10 @@ jobs:
     - name: Build binaries
       run: |
         cd codex-rs
+        # Use all available cores and enable incremental compilation
+        export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
+        export CARGO_INCREMENTAL=1
+        echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         cargo build --release --target ${{ matrix.target }} --bin coder --bin coder-tui --bin coder-exec
         
     - name: Prepare artifacts
