@@ -979,8 +979,10 @@ impl WidgetRef for &ChatComposer {
 
             // Mix bits so low bits aren't parity-biased
             fn mix(mut x: u64) -> u64 {
-                x ^= x >> 30; x = x.wrapping_mul(0xbf58476d1ce4e5b9);
-                x ^= x >> 27; x = x.wrapping_mul(0x94d049bb133111eb);
+                x ^= x >> 30;
+                x = x.wrapping_mul(0xbf58476d1ce4e5b9);
+                x ^= x >> 27;
+                x = x.wrapping_mul(0x94d049bb133111eb);
                 x ^ (x >> 31)
             }
 
@@ -992,7 +994,7 @@ impl WidgetRef for &ChatComposer {
             let selected_spinner: &[char] = if r < 2 {
                 &['✨']
             } else if r < 101 {
-                &['✧','✦','✧']
+                &['✧', '✦', '✧']
             } else {
                 match r % 3 {
                     0 => &['✶'],
@@ -1004,7 +1006,8 @@ impl WidgetRef for &ChatComposer {
             let frame_idx = (SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis() / 150) as usize;
+                .as_millis()
+                / 150) as usize;
 
             let spinner = selected_spinner[frame_idx % selected_spinner.len()];
 

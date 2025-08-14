@@ -462,7 +462,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            actual, expected,
+            actual,
+            expected,
             "Actual: {}",
             String::from_utf8_lossy(&actual)
         );
@@ -486,13 +487,33 @@ mod tests {
         assert_eq!(wrapped.len(), 2);
         assert_eq!(wrapped[0].spans.len(), 2);
         assert_eq!(wrapped[0].spans[0].content, "hello ");
-        assert!(!wrapped[0].spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert!(
+            !wrapped[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
         assert_eq!(wrapped[0].spans[1].content, "wo");
-        assert!(wrapped[0].spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert!(
+            wrapped[0].spans[1]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
         assert_eq!(wrapped[1].spans.len(), 2);
         assert_eq!(wrapped[1].spans[0].content, "rld");
-        assert!(wrapped[1].spans[0].style.add_modifier.contains(Modifier::BOLD));
+        assert!(
+            wrapped[1].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
         assert_eq!(wrapped[1].spans[1].content, " foo");
-        assert!(!wrapped[1].spans[1].style.add_modifier.contains(Modifier::BOLD));
+        assert!(
+            !wrapped[1].spans[1]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 }

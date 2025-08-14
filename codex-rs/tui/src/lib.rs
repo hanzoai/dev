@@ -285,8 +285,19 @@ fn run_ratatui_app(
     // Initialize high-fidelity session event logging if enabled.
     session_log::maybe_init(&config);
 
-    let Cli { prompt, images, debug, .. } = cli;
-    let mut app = App::new(config.clone(), prompt, images, should_show_trust_screen, debug);
+    let Cli {
+        prompt,
+        images,
+        debug,
+        ..
+    } = cli;
+    let mut app = App::new(
+        config.clone(),
+        prompt,
+        images,
+        should_show_trust_screen,
+        debug,
+    );
 
     // Bridge log receiver into the AppEvent channel so latest log lines update the UI.
     {

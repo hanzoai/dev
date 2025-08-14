@@ -66,7 +66,9 @@ pub(crate) fn shimmer_spans(text: &str, frame_idx: usize) -> Vec<Span<'static>> 
                 .fg(Color::Rgb(level, level, level))
                 .add_modifier(Modifier::BOLD)
         } else {
-            color_for_level(level)
+            Style::default()
+                .fg(color_for_level(level))
+                .add_modifier(Modifier::BOLD)
         };
         spans.push(Span::styled(ch.to_string(), style));
     }
@@ -74,12 +76,11 @@ pub(crate) fn shimmer_spans(text: &str, frame_idx: usize) -> Vec<Span<'static>> 
 }
 
 fn color_for_level(level: u8) -> Color {
-    // For shimmer effect, we need to use grayscale colors
-    // Theme colors wouldn't work well here as they're not grayscale
+    // For shimmer effect, we map brightness levels to theme colors
     if level < 128 {
-        Color::DarkGray
+        crate::colors::text_dim()
     } else if level < 192 {
-        Color::Gray
+        crate::colors::text()
     } else {
         crate::colors::text_bright()
     }

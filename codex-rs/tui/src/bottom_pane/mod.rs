@@ -313,7 +313,7 @@ impl BottomPane<'_> {
         self.status_view_active = false;
         self.request_redraw()
     }
-    
+
     /// Show the Chrome launch options UI
     pub fn show_chrome_selection(&mut self, port: Option<u16>) {
         use chrome_selection_view::ChromeSelectionView;
