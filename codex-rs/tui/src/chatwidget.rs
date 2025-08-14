@@ -1976,8 +1976,8 @@ impl ChatWidget<'_> {
         {
             let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".to_string(),
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe".to_string(),
                 format!(
                     "{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
                     std::env::var("USERPROFILE").unwrap_or_default()
@@ -2236,8 +2236,8 @@ impl ChatWidget<'_> {
         {
             let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".to_string(),
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe".to_string(),
                 format!(
                     "{}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
                     std::env::var("USERPROFILE").unwrap_or_default()
@@ -2426,11 +2426,11 @@ impl ChatWidget<'_> {
                             let latest_screenshot_inner = latest_screenshot_global.clone();
                             let app_event_tx_inner = app_event_tx_global.clone();
                             let url_inner = url.clone();
-                            
+
                             tokio::spawn(async move {
                                 // Wait a moment for the navigation to complete
                                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                                
+
                                 // Capture screenshot after navigation
                                 let browser_manager = codex_browser::global::get_browser_manager().await;
                                 if let Some(browser_manager) = browser_manager {
@@ -2438,12 +2438,12 @@ impl ChatWidget<'_> {
                                         Ok((paths, _url)) => {
                                             if let Some(first_path) = paths.first() {
                                                 tracing::info!("Auto-captured screenshot after global navigation: {}", first_path.display());
-                                                
+
                                                 // Update the latest screenshot
                                                 if let Ok(mut latest) = latest_screenshot_inner.lock() {
                                                     *latest = Some((first_path.clone(), url_inner.clone()));
                                                 }
-                                                
+
                                                 // Send update event
                                                 use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
                                                 let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
