@@ -9,6 +9,7 @@ use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::should_show_login_screen;
 use crate::slash_command::SlashCommand;
 use crate::tui;
+use crate::tui::TerminalInfo;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
@@ -66,6 +67,9 @@ pub(crate) struct App<'a> {
 
     /// Controls the animation thread that sends CommitTick events.
     commit_anim_running: Arc<AtomicBool>,
+    
+    /// Terminal information queried at startup
+    terminal_info: TerminalInfo,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -76,6 +80,7 @@ pub(crate) struct ChatWidgetArgs {
     initial_prompt: Option<String>,
     initial_images: Vec<PathBuf>,
     enhanced_keys_supported: bool,
+    terminal_info: TerminalInfo,
 }
 
 impl App<'_> {
@@ -85,6 +90,7 @@ impl App<'_> {
         initial_images: Vec<std::path::PathBuf>,
         show_trust_screen: bool,
         debug: bool,
+        terminal_info: TerminalInfo,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::default());
 
@@ -145,6 +151,7 @@ impl App<'_> {
                 initial_prompt,
                 initial_images,
                 enhanced_keys_supported,
+                terminal_info: terminal_info.clone(),
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -163,6 +170,7 @@ impl App<'_> {
                 initial_prompt,
                 initial_images,
                 enhanced_keys_supported,
+                terminal_info.clone(),
             );
             AppState::Chat {
                 widget: Box::new(chat_widget),
@@ -181,6 +189,7 @@ impl App<'_> {
             enhanced_keys_supported,
             _debug: debug,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
+            terminal_info,
         }
     }
 
@@ -378,6 +387,7 @@ impl App<'_> {
                                 None,
                                 Vec::new(),
                                 self.enhanced_keys_supported,
+                                self.terminal_info.clone(),
                             ));
                             self.app_state = AppState::Chat { widget: new_widget };
                             self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -589,6 +599,7 @@ impl App<'_> {
                     enhanced_keys_supported,
                     initial_images,
                     initial_prompt,
+                    terminal_info,
                 }) => {
                     self.app_state = AppState::Chat {
                         widget: Box::new(ChatWidget::new(
@@ -597,6 +608,7 @@ impl App<'_> {
                             initial_prompt,
                             initial_images,
                             enhanced_keys_supported,
+                            terminal_info,
                         )),
                     }
                 }
@@ -638,7 +650,9 @@ impl App<'_> {
         // subsequent re-init path will still leave the terminal in a good state.
         // We considered `nix`, but didn't think it was worth pulling in for this one call.
         unsafe { libc::kill(0, libc::SIGTSTP) };
-        *terminal = tui::init(&self.config)?;
+        let (new_terminal, new_terminal_info) = tui::init(&self.config)?;
+        *terminal = new_terminal;
+        self.terminal_info = new_terminal_info;
         terminal.clear()?;
         self.app_event_tx.send(AppEvent::RequestRedraw);
         Ok(())

@@ -689,20 +689,20 @@ fn try_parse_retry_after(err: &Error) -> Option<Duration> {
 
     // parse the Please try again in 1.898s format using regex
     let re = rate_limit_regex();
-    if let Some(message) = &err.message
-        && let Some(captures) = re.captures(message)
-    {
-        let seconds = captures.get(1);
-        let unit = captures.get(2);
+    if let Some(message) = &err.message {
+        if let Some(captures) = re.captures(message) {
+            let seconds = captures.get(1);
+            let unit = captures.get(2);
 
-        if let (Some(value), Some(unit)) = (seconds, unit) {
-            let value = value.as_str().parse::<f64>().ok()?;
-            let unit = unit.as_str();
+            if let (Some(value), Some(unit)) = (seconds, unit) {
+                let value = value.as_str().parse::<f64>().ok()?;
+                let unit = unit.as_str();
 
-            if unit == "s" {
-                return Some(Duration::from_secs_f64(value));
-            } else if unit == "ms" {
-                return Some(Duration::from_millis(value as u64));
+                if unit == "s" {
+                    return Some(Duration::from_secs_f64(value));
+                } else if unit == "ms" {
+                    return Some(Duration::from_millis(value as u64));
+                }
             }
         }
     }

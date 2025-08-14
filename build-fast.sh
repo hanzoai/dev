@@ -2,7 +2,8 @@
 # Fast build script for local development - optimized for speed
 set -euo pipefail
 
-# No need to cd, we're already in the Rust project root
+# Change to the Rust project root directory
+cd codex-rs
 
 # Use dev-fast profile by default for quick iteration
 # Can override with: PROFILE=release ./build-fast.sh
@@ -37,13 +38,13 @@ if [ $? -eq 0 ]; then
     ln -sf "../${PROFILE}/coder" "./target/release/coder"
     
     # Update the symlink in codex-cli/bin for npm wrapper
-    CODEX_CLI_BIN="./codex-cli/bin/coder-aarch64-apple-darwin"
+    CODEX_CLI_BIN="../codex-cli/bin/coder-aarch64-apple-darwin"
     mkdir -p "$(dirname "$CODEX_CLI_BIN")"
     if [ -e "$CODEX_CLI_BIN" ]; then
         rm -f "$CODEX_CLI_BIN"
     fi
     # Create relative symlink from codex-cli/bin to the actual binary
-    ln -sf "../../target/${PROFILE}/coder" "$CODEX_CLI_BIN"
+    ln -sf "../../codex-rs/target/${PROFILE}/coder" "$CODEX_CLI_BIN"
     
     echo "✅ Symlinks updated"
     echo ""
