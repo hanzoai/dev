@@ -245,9 +245,6 @@ impl App<'_> {
                         });
                     }
                 }
-                AppEvent::StartCommitAnimation => {
-                    // Animation handling - currently not used but needed for compilation
-                }
                 AppEvent::StopCommitAnimation => {
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
@@ -359,7 +356,20 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.update_latest_log(line),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::DispatchCommand(command, command_text) => match command {
+                AppEvent::DispatchCommand(command, command_text) => {
+                    // Extract command arguments by removing the slash command from the beginning
+                    // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"
+                    let command_args = {
+                        let cmd_with_slash = format!("/{}", command.command());
+                        if command_text.starts_with(&cmd_with_slash) {
+                            command_text[cmd_with_slash.len()..].trim().to_string()
+                        } else {
+                            // Fallback: if format doesn't match, use the full text
+                            command_text.clone()
+                        }
+                    };
+                    
+                    match command {
                     SlashCommand::New => {
                         // User accepted – switch to chat view.
                         let new_widget = Box::new(ChatWidget::new(
@@ -429,7 +439,7 @@ impl App<'_> {
                     }
                     SlashCommand::Reasoning => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_reasoning_command(command_text);
+                            widget.handle_reasoning_command(command_args);
                         }
                     }
                     SlashCommand::Theme => {
@@ -457,19 +467,13 @@ impl App<'_> {
                     }
                     SlashCommand::Browser => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_browser_command(command_text);
+                            widget.handle_browser_command(command_args);
                         }
                     }
                     SlashCommand::Chrome => {
                         if let AppState::Chat { widget } = &mut self.app_state {
-                            // For /chrome, just pass "chrome" plus any arguments
-                            // handle_browser_command expects everything after "/browser"
-                            let chrome_command = if command_text.trim().is_empty() {
-                                "chrome".to_string()
-                            } else {
-                                format!("chrome {}", command_text)
-                            };
-                            widget.handle_browser_command(chrome_command);
+                            // Call the dedicated chrome command handler
+                            widget.handle_chrome_command(command_args);
                         }
                     }
                     #[cfg(debug_assertions)]
@@ -511,6 +515,7 @@ impl App<'_> {
                                 },
                             ),
                         }));
+                    }
                     }
                 },
                 AppEvent::PrepareAgents => {
@@ -602,6 +607,16 @@ impl App<'_> {
                 AppEvent::FileSearchResult { query, matches } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_file_search_result(query, matches);
+                    }
+                }
+                AppEvent::ShowChromeOptions(port) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_chrome_options(port);
+                    }
+                }
+                AppEvent::ChromeLaunchOptionSelected(option, port) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_chrome_launch_option(option, port);
                     }
                 }
             }
