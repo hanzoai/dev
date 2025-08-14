@@ -60,7 +60,7 @@ pub(crate) struct App<'a> {
     pending_redraw: Arc<AtomicBool>,
 
     enhanced_keys_supported: bool,
-    
+
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
 
@@ -368,156 +368,157 @@ impl App<'_> {
                             command_text.clone()
                         }
                     };
-                    
+
                     match command {
-                    SlashCommand::New => {
-                        // User accepted – switch to chat view.
-                        let new_widget = Box::new(ChatWidget::new(
-                            self.config.clone(),
-                            self.app_event_tx.clone(),
-                            None,
-                            Vec::new(),
-                            self.enhanced_keys_supported,
-                        ));
-                        self.app_state = AppState::Chat { widget: new_widget };
-                        self.app_event_tx.send(AppEvent::RequestRedraw);
-                    }
-                    SlashCommand::Init => {
-                        // Guard: do not run if a task is active.
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
-                            widget.submit_text_message(INIT_PROMPT.to_string());
+                        SlashCommand::New => {
+                            // User accepted – switch to chat view.
+                            let new_widget = Box::new(ChatWidget::new(
+                                self.config.clone(),
+                                self.app_event_tx.clone(),
+                                None,
+                                Vec::new(),
+                                self.enhanced_keys_supported,
+                            ));
+                            self.app_state = AppState::Chat { widget: new_widget };
+                            self.app_event_tx.send(AppEvent::RequestRedraw);
                         }
-                    }
-                    SlashCommand::Compact => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.clear_token_usage();
-                            self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
+                        SlashCommand::Init => {
+                            // Guard: do not run if a task is active.
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                const INIT_PROMPT: &str =
+                                    include_str!("../prompt_for_init_command.md");
+                                widget.submit_text_message(INIT_PROMPT.to_string());
+                            }
                         }
-                    }
-                    SlashCommand::Quit => {
-                        break;
-                    }
-                    SlashCommand::Logout => {
-                        if let Err(e) = codex_login::logout(&self.config.codex_home) {
-                            tracing::error!("failed to logout: {e}");
+                        SlashCommand::Compact => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.clear_token_usage();
+                                self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
+                            }
                         }
-                        break;
-                    }
-                    SlashCommand::Diff => {
-                        let (is_git_repo, diff_text) = match get_git_diff() {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let msg = format!("Failed to compute diff: {e}");
-                                if let AppState::Chat { widget } = &mut self.app_state {
-                                    widget.add_diff_output(msg);
+                        SlashCommand::Quit => {
+                            break;
+                        }
+                        SlashCommand::Logout => {
+                            if let Err(e) = codex_login::logout(&self.config.codex_home) {
+                                tracing::error!("failed to logout: {e}");
+                            }
+                            break;
+                        }
+                        SlashCommand::Diff => {
+                            let (is_git_repo, diff_text) = match get_git_diff() {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    let msg = format!("Failed to compute diff: {e}");
+                                    if let AppState::Chat { widget } = &mut self.app_state {
+                                        widget.add_diff_output(msg);
+                                    }
+                                    continue;
                                 }
-                                continue;
-                            }
-                        };
-
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            let text = if is_git_repo {
-                                diff_text
-                            } else {
-                                "`/diff` — _not inside a git repository_".to_string()
                             };
-                            widget.add_diff_output(text);
-                        }
-                    }
-                    SlashCommand::Mention => {
-                        // The mention feature is handled differently in our fork
-                        // For now, just add @ to the composer
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.insert_str("@");
-                        }
-                    }
-                    SlashCommand::Status => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.add_status_output();
-                        }
-                    }
-                    SlashCommand::Reasoning => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_reasoning_command(command_args);
-                        }
-                    }
-                    SlashCommand::Theme => {
-                        // Theme selection is handled in submit_user_message
-                        // This case is here for completeness
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.show_theme_selection();
-                        }
-                    }
-                    SlashCommand::Prompts => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.add_prompts_output();
-                        }
-                    }
-                    // Prompt-expanding commands should have been handled in submit_user_message
-                    // but add a fallback just in case
-                    SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {
-                        // These should have been expanded already, but handle them anyway
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            let expanded = command.expand_prompt(&command_text);
-                            if let Some(prompt) = expanded {
-                                widget.submit_text_message(prompt);
+
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                let text = if is_git_repo {
+                                    diff_text
+                                } else {
+                                    "`/diff` — _not inside a git repository_".to_string()
+                                };
+                                widget.add_diff_output(text);
                             }
                         }
-                    }
-                    SlashCommand::Browser => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            widget.handle_browser_command(command_args);
+                        SlashCommand::Mention => {
+                            // The mention feature is handled differently in our fork
+                            // For now, just add @ to the composer
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.insert_str("@");
+                            }
+                        }
+                        SlashCommand::Status => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Reasoning => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_reasoning_command(command_args);
+                            }
+                        }
+                        SlashCommand::Theme => {
+                            // Theme selection is handled in submit_user_message
+                            // This case is here for completeness
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.show_theme_selection();
+                            }
+                        }
+                        SlashCommand::Prompts => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_prompts_output();
+                            }
+                        }
+                        // Prompt-expanding commands should have been handled in submit_user_message
+                        // but add a fallback just in case
+                        SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {
+                            // These should have been expanded already, but handle them anyway
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                let expanded = command.expand_prompt(&command_text);
+                                if let Some(prompt) = expanded {
+                                    widget.submit_text_message(prompt);
+                                }
+                            }
+                        }
+                        SlashCommand::Browser => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_browser_command(command_args);
+                            }
+                        }
+                        SlashCommand::Chrome => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                // Call the dedicated chrome command handler
+                                widget.handle_chrome_command(command_args);
+                            }
+                        }
+                        #[cfg(debug_assertions)]
+                        SlashCommand::TestApproval => {
+                            use codex_core::protocol::EventMsg;
+                            use std::collections::HashMap;
+
+                            use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+                            use codex_core::protocol::FileChange;
+
+                            self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                                id: "1".to_string(),
+                                // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+                                //     call_id: "1".to_string(),
+                                //     command: vec!["git".into(), "apply".into()],
+                                //     cwd: self.config.cwd.clone(),
+                                //     reason: Some("test".to_string()),
+                                // }),
+                                msg: EventMsg::ApplyPatchApprovalRequest(
+                                    ApplyPatchApprovalRequestEvent {
+                                        call_id: "1".to_string(),
+                                        changes: HashMap::from([
+                                            (
+                                                PathBuf::from("/tmp/test.txt"),
+                                                FileChange::Add {
+                                                    content: "test".to_string(),
+                                                },
+                                            ),
+                                            (
+                                                PathBuf::from("/tmp/test2.txt"),
+                                                FileChange::Update {
+                                                    unified_diff: "+test\n-test2".to_string(),
+                                                    move_path: None,
+                                                },
+                                            ),
+                                        ]),
+                                        reason: None,
+                                        grant_root: Some(PathBuf::from("/tmp")),
+                                    },
+                                ),
+                            }));
                         }
                     }
-                    SlashCommand::Chrome => {
-                        if let AppState::Chat { widget } = &mut self.app_state {
-                            // Call the dedicated chrome command handler
-                            widget.handle_chrome_command(command_args);
-                        }
-                    }
-                    #[cfg(debug_assertions)]
-                    SlashCommand::TestApproval => {
-                        use codex_core::protocol::EventMsg;
-                        use std::collections::HashMap;
-
-                        use codex_core::protocol::ApplyPatchApprovalRequestEvent;
-                        use codex_core::protocol::FileChange;
-
-                        self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: "1".to_string(),
-                            // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
-                            //     call_id: "1".to_string(),
-                            //     command: vec!["git".into(), "apply".into()],
-                            //     cwd: self.config.cwd.clone(),
-                            //     reason: Some("test".to_string()),
-                            // }),
-                            msg: EventMsg::ApplyPatchApprovalRequest(
-                                ApplyPatchApprovalRequestEvent {
-                                    call_id: "1".to_string(),
-                                    changes: HashMap::from([
-                                        (
-                                            PathBuf::from("/tmp/test.txt"),
-                                            FileChange::Add {
-                                                content: "test".to_string(),
-                                            },
-                                        ),
-                                        (
-                                            PathBuf::from("/tmp/test2.txt"),
-                                            FileChange::Update {
-                                                unified_diff: "+test\n-test2".to_string(),
-                                                move_path: None,
-                                            },
-                                        ),
-                                    ]),
-                                    reason: None,
-                                    grant_root: Some(PathBuf::from("/tmp")),
-                                },
-                            ),
-                        }));
-                    }
-                    }
-                },
+                }
                 AppEvent::PrepareAgents => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.prepare_agents();

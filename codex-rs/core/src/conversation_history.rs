@@ -42,7 +42,12 @@ impl ConversationHistory {
                     //    replace its text with the new content.
                     if let Some(id) = new_id.as_ref() {
                         if let Some(idx) = find_assistant_index_by_id(&self.items, id) {
-                            if let ResponseItem::Message { id: existing_id, content, .. } = &mut self.items[idx] {
+                            if let ResponseItem::Message {
+                                id: existing_id,
+                                content,
+                                ..
+                            } = &mut self.items[idx]
+                            {
                                 // Ensure the existing entry carries the id
                                 if existing_id.is_none() {
                                     *existing_id = Some(id.clone());
@@ -55,11 +60,18 @@ impl ConversationHistory {
 
                     // 2) Otherwise, attempt to merge with the immediately previous
                     //    assistant message (streamed deltas case).
-                    if let Some(ResponseItem::Message { id: last_id, role: last_role, content: last_content }) = self.items.last_mut() {
+                    if let Some(ResponseItem::Message {
+                        id: last_id,
+                        role: last_role,
+                        content: last_content,
+                    }) = self.items.last_mut()
+                    {
                         if last_role == "assistant" {
                             // If new item has an ID, propagate it to the existing entry
                             if last_id.is_none() {
-                                if let Some(id) = new_id.clone() { *last_id = Some(id); }
+                                if let Some(id) = new_id.clone() {
+                                    *last_id = Some(id);
+                                }
                             }
                             replace_or_append_text(last_content, new_content);
                             continue;
@@ -74,11 +86,17 @@ impl ConversationHistory {
                     let already_exists = self.items.iter().any(|existing| {
                         matches!(existing, ResponseItem::FunctionCallOutput { call_id: existing_id, .. } if existing_id == call_id)
                     });
-                    
+
                     if already_exists {
-                        debug!("Skipping duplicate FunctionCallOutput for call_id: {} (already in history)", call_id);
+                        debug!(
+                            "Skipping duplicate FunctionCallOutput for call_id: {} (already in history)",
+                            call_id
+                        );
                     } else {
-                        debug!("Recording FunctionCallOutput to history for call_id: {}", call_id);
+                        debug!(
+                            "Recording FunctionCallOutput to history for call_id: {}",
+                            call_id
+                        );
                         self.items.push(item.clone());
                     }
                 }
@@ -87,9 +105,12 @@ impl ConversationHistory {
                     let already_exists = self.items.iter().any(|existing| {
                         matches!(existing, ResponseItem::FunctionCall { call_id: existing_id, .. } if existing_id == call_id)
                     });
-                    
+
                     if already_exists {
-                        debug!("Skipping duplicate FunctionCall for call_id: {} (already in history)", call_id);
+                        debug!(
+                            "Skipping duplicate FunctionCall for call_id: {} (already in history)",
+                            call_id
+                        );
                     } else {
                         self.items.push(item.clone());
                     }
@@ -100,7 +121,6 @@ impl ConversationHistory {
             }
         }
     }
-
 
     pub(crate) fn keep_last_messages(&mut self, n: usize) {
         if n == 0 {
@@ -192,7 +212,10 @@ fn replace_text_content(content: &mut Vec<crate::models::ContentItem>, text: &st
 }
 
 /// Merge strategy: if the new text starts with the old, replace; otherwise append deltas.
-fn replace_or_append_text(existing: &mut Vec<crate::models::ContentItem>, new_content: &Vec<crate::models::ContentItem>) {
+fn replace_or_append_text(
+    existing: &mut Vec<crate::models::ContentItem>,
+    new_content: &Vec<crate::models::ContentItem>,
+) {
     let prev = collect_text_content(existing);
     let new_full = collect_text_content(new_content);
     if !prev.is_empty() && new_full.starts_with(&prev) {
@@ -205,7 +228,12 @@ fn replace_or_append_text(existing: &mut Vec<crate::models::ContentItem>, new_co
 fn find_assistant_index_by_id(items: &Vec<ResponseItem>, id: &str) -> Option<usize> {
     // Search from the end (most recent first) for better performance in practice.
     for (idx, it) in items.iter().enumerate().rev() {
-        if let ResponseItem::Message { id: Some(existing), role, .. } = it {
+        if let ResponseItem::Message {
+            id: Some(existing),
+            role,
+            ..
+        } = it
+        {
             if role == "assistant" && existing == id {
                 return Some(idx);
             }

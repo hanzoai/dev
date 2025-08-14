@@ -86,19 +86,21 @@ impl ChromeSelectionView {
     fn confirm_selection(&mut self) {
         let options = Self::get_options();
         let selected = options[self.selected_index].0;
-        
+
         // Send the selected option event
         self.app_event_tx
             .send(AppEvent::ChromeLaunchOptionSelected(selected, self.port));
-        
+
         self.is_complete = true;
     }
 
     fn cancel(&mut self) {
         // Send cancel event
-        self.app_event_tx
-            .send(AppEvent::ChromeLaunchOptionSelected(ChromeLaunchOption::Cancel, self.port));
-        
+        self.app_event_tx.send(AppEvent::ChromeLaunchOptionSelected(
+            ChromeLaunchOption::Cancel,
+            self.port,
+        ));
+
         self.is_complete = true;
     }
 }
@@ -142,14 +144,14 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
         block.render(area, buf);
 
         let mut lines = Vec::new();
-        
+
         // Add header
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Chrome is already running or CDP connection failed",
-                Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Chrome is already running or CDP connection failed",
+            Style::default()
+                .fg(crate::colors::warning())
+                .add_modifier(Modifier::BOLD),
+        )]));
         lines.push(Line::from(""));
         lines.push(Line::from("Select an option:"));
         lines.push(Line::from(""));
@@ -158,37 +160,29 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
         let options = Self::get_options();
         for (i, (_, label, description)) in options.iter().enumerate() {
             let is_selected = i == self.selected_index;
-            
+
             if is_selected {
                 // Highlighted option
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("▶ {}", label),
-                        Style::default()
-                            .fg(crate::colors::success())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {}", description),
-                        Style::default().fg(crate::colors::secondary()),
-                    ),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("▶ {}", label),
+                    Style::default()
+                        .fg(crate::colors::success())
+                        .add_modifier(Modifier::BOLD),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", description),
+                    Style::default().fg(crate::colors::secondary()),
+                )]));
             } else {
                 // Non-selected option
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {}", label),
-                        Style::default().fg(crate::colors::text()),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("  {}", description),
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", label),
+                    Style::default().fg(crate::colors::text()),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", description),
+                    Style::default().fg(crate::colors::text_dim()),
+                )]));
             }
         }
 
@@ -208,8 +202,7 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
             ),
         ]));
 
-        let paragraph = Paragraph::new(lines)
-            .alignment(Alignment::Left);
+        let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
         paragraph.render(inner, buf);
     }
 

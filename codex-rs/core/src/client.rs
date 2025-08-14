@@ -31,6 +31,7 @@ use crate::client_common::create_reasoning_param_for_request;
 use crate::config::Config;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::debug_logger::DebugLogger;
 use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::UsageLimitReachedError;
@@ -44,7 +45,6 @@ use crate::user_agent::get_codex_user_agent;
 use crate::util::backoff;
 use std::sync::Arc;
 use std::sync::Mutex;
-use crate::debug_logger::DebugLogger;
 
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
@@ -192,15 +192,13 @@ impl ModelClient {
         let max_retries = self.provider.request_max_retries();
 
         let endpoint = self.provider.get_full_url(&auth);
-        trace!(
-            "POST to {}: {}",
-            endpoint,
-            serde_json::to_string(&payload)?
-        );
+        trace!("POST to {}: {}", endpoint, serde_json::to_string(&payload)?);
 
         // Start logging the request and get a request_id to track the response
         let request_id = if let Ok(logger) = self.debug_logger.lock() {
-            logger.start_request_log(&endpoint, &serde_json::to_value(&payload)?).unwrap_or_default()
+            logger
+                .start_request_log(&endpoint, &serde_json::to_value(&payload)?)
+                .unwrap_or_default()
         } else {
             String::new()
         };
@@ -252,14 +250,18 @@ impl ModelClient {
                 Ok(resp) if resp.status().is_success() => {
                     // Log successful response initiation
                     if let Ok(logger) = self.debug_logger.lock() {
-                        let _ = logger.append_response_event(&request_id, "stream_initiated", &serde_json::json!({
-                            "status": "success",
-                            "status_code": resp.status().as_u16(),
-                            "x_request_id": resp.headers()
-                                .get("x-request-id")
-                                .and_then(|v| v.to_str().ok())
-                                .unwrap_or_default()
-                        }));
+                        let _ = logger.append_response_event(
+                            &request_id,
+                            "stream_initiated",
+                            &serde_json::json!({
+                                "status": "success",
+                                "status_code": resp.status().as_u16(),
+                                "x_request_id": resp.headers()
+                                    .get("x-request-id")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or_default()
+                            }),
+                        );
                     }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
@@ -299,10 +301,14 @@ impl ModelClient {
                         let body = res.text().await.unwrap_or_default();
                         // Log error response
                         if let Ok(logger) = self.debug_logger.lock() {
-                            let _ = logger.append_response_event(&request_id, "error", &serde_json::json!({
-                                "status": status.as_u16(),
-                                "body": body
-                            }));
+                            let _ = logger.append_response_event(
+                                &request_id,
+                                "error",
+                                &serde_json::json!({
+                                    "status": status.as_u16(),
+                                    "body": body
+                                }),
+                            );
                             let _ = logger.end_request_log(&request_id);
                         }
                         return Err(CodexErr::UnexpectedStatus(status, body));
@@ -424,6 +430,7 @@ async fn process_sse<S>(
     // If the stream stays completely silent for an extended period treat it as disconnected.
     // The response id returned from the "complete" message.
     let mut response_completed: Option<ResponseCompleted> = None;
+    let mut response_error: Option<CodexErr> = None;
     // Track the current item_id to include with delta events
     let mut current_item_id: Option<String> = None;
 
@@ -523,9 +530,9 @@ async fn process_sse<S>(
                 } else {
                     // Check within the parsed item structure
                     match &item {
-                        ResponseItem::Message { id, .. } |
-                        ResponseItem::FunctionCall { id, .. } |
-                        ResponseItem::LocalShellCall { id, .. } => {
+                        ResponseItem::Message { id, .. }
+                        | ResponseItem::FunctionCall { id, .. }
+                        | ResponseItem::LocalShellCall { id, .. } => {
                             if let Some(item_id) = id {
                                 current_item_id = Some(item_id.clone());
                             }
@@ -544,9 +551,9 @@ async fn process_sse<S>(
             }
             "response.output_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::OutputTextDelta { 
-                        delta, 
-                        item_id: current_item_id.clone() 
+                    let event = ResponseEvent::OutputTextDelta {
+                        delta,
+                        item_id: current_item_id.clone(),
                     };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
@@ -555,9 +562,9 @@ async fn process_sse<S>(
             }
             "response.reasoning_summary_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningSummaryDelta { 
-                        delta, 
-                        item_id: current_item_id.clone() 
+                    let event = ResponseEvent::ReasoningSummaryDelta {
+                        delta,
+                        item_id: current_item_id.clone(),
                     };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
@@ -566,9 +573,9 @@ async fn process_sse<S>(
             }
             "response.reasoning_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningContentDelta { 
-                        delta, 
-                        item_id: current_item_id.clone() 
+                    let event = ResponseEvent::ReasoningContentDelta {
+                        delta,
+                        item_id: current_item_id.clone(),
                     };
                     if tx_event.send(Ok(event)).await.is_err() {
                         return;
@@ -731,7 +738,13 @@ mod tests {
         let stream = ReaderStream::new(reader).map_err(CodexErr::Io);
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(16);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout(), debug_logger, String::new()));
+        tokio::spawn(process_sse(
+            stream,
+            tx,
+            provider.stream_idle_timeout(),
+            debug_logger,
+            String::new(),
+        ));
 
         let mut events = Vec::new();
         while let Some(ev) = rx.recv().await {
@@ -762,7 +775,13 @@ mod tests {
         let (tx, mut rx) = mpsc::channel::<Result<ResponseEvent>>(8);
         let stream = ReaderStream::new(std::io::Cursor::new(body)).map_err(CodexErr::Io);
         let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
-        tokio::spawn(process_sse(stream, tx, provider.stream_idle_timeout(), debug_logger, String::new()));
+        tokio::spawn(process_sse(
+            stream,
+            tx,
+            provider.stream_idle_timeout(),
+            debug_logger,
+            String::new(),
+        ));
 
         let mut out = Vec::new();
         while let Some(ev) = rx.recv().await {

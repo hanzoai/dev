@@ -121,7 +121,7 @@ impl UserApprovalWidget<'_> {
                 cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
                 let mut contents: Vec<Line> = vec![
                     Line::from(vec![
-                        "? ".fg(Color::Blue),
+                        "? ".fg(crate::colors::info()),
                         "Codex wants to run ".bold(),
                         cmd_span,
                     ]),
@@ -245,7 +245,7 @@ impl UserApprovalWidget<'_> {
                 match decision {
                     ReviewDecision::Approved => {
                         lines.push(Line::from(vec![
-                            "✔ ".fg(Color::Green),
+                            "✔ ".fg(crate::colors::success()),
                             "You ".into(),
                             "approved".bold(),
                             " codex to run ".into(),
@@ -256,7 +256,7 @@ impl UserApprovalWidget<'_> {
                     }
                     ReviewDecision::ApprovedForSession => {
                         lines.push(Line::from(vec![
-                            "✔ ".fg(Color::Green),
+                            "✔ ".fg(crate::colors::success()),
                             "You ".into(),
                             "approved".bold(),
                             " codex to run ".into(),
@@ -267,7 +267,7 @@ impl UserApprovalWidget<'_> {
                     }
                     ReviewDecision::Denied => {
                         lines.push(Line::from(vec![
-                            "✗ ".fg(Color::Red),
+                            "✗ ".fg(crate::colors::error()),
                             "You ".into(),
                             "did not approve".bold(),
                             " codex to run ".into(),
@@ -276,7 +276,7 @@ impl UserApprovalWidget<'_> {
                     }
                     ReviewDecision::Abort => {
                         lines.push(Line::from(vec![
-                            "✗ ".fg(Color::Red),
+                            "✗ ".fg(crate::colors::error()),
                             "You ".into(),
                             "canceled".bold(),
                             " the request to run ".into(),
@@ -340,7 +340,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
                 let style = if idx == self.selected_option {
                     Style::new()
                         .bg(crate::colors::light_blue())
-                        .fg(Color::Black)
+                        .fg(crate::colors::background())
                 } else {
                     Style::new().add_modifier(Modifier::DIM)
                 };

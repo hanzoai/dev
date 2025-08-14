@@ -928,25 +928,35 @@ fn create_browser_move_tool() -> OpenAiTool {
     properties.insert(
         "x".to_string(),
         JsonSchema::Number {
-            description: Some("The absolute X coordinate to move the mouse to (use with y)".to_string()),
+            description: Some(
+                "The absolute X coordinate to move the mouse to (use with y)".to_string(),
+            ),
         },
     );
     properties.insert(
         "y".to_string(),
         JsonSchema::Number {
-            description: Some("The absolute Y coordinate to move the mouse to (use with x)".to_string()),
+            description: Some(
+                "The absolute Y coordinate to move the mouse to (use with x)".to_string(),
+            ),
         },
     );
     properties.insert(
         "dx".to_string(),
         JsonSchema::Number {
-            description: Some("Relative (+/-) X movement in CSS pixels from current mouse position (use with dy)".to_string()),
+            description: Some(
+                "Relative (+/-) X movement in CSS pixels from current mouse position (use with dy)"
+                    .to_string(),
+            ),
         },
     );
     properties.insert(
         "dy".to_string(),
         JsonSchema::Number {
-            description: Some("Relative (+/-) Y movement in CSS pixels from current mouse position (use with dx)".to_string()),
+            description: Some(
+                "Relative (+/-) Y movement in CSS pixels from current mouse position (use with dx)"
+                    .to_string(),
+            ),
         },
     );
 
