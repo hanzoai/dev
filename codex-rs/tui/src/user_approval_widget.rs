@@ -342,7 +342,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
                         .bg(crate::colors::light_blue())
                         .fg(Color::Black)
                 } else {
-                    Style::new().bg(Color::DarkGray)
+                    Style::new().add_modifier(Modifier::DIM)
                 };
                 opt.label.clone().alignment(Alignment::Center).style(style)
             })
@@ -374,7 +374,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
         }
 
         Line::from(self.select_options[self.selected_option].description)
-            .style(Style::new().italic().fg(Color::DarkGray))
+            .style(Style::new().italic().add_modifier(Modifier::DIM))
             .render(description_area.inner(Margin::new(1, 0)), buf);
 
         Block::bordered()

@@ -66,7 +66,7 @@ pub(crate) fn shimmer_spans(text: &str, frame_idx: usize) -> Vec<Span<'static>> 
                 .fg(Color::Rgb(level, level, level))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(color_for_level(level))
+            color_for_level(level)
         };
         spans.push(Span::styled(ch.to_string(), style));
     }
