@@ -31,6 +31,7 @@ use crate::client_common::create_reasoning_param_for_request;
 use crate::config::Config;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::debug_logger::DebugLogger;
 use crate::error::CodexErr;
 use crate::error::Result;
@@ -67,6 +68,7 @@ pub struct ModelClient {
     session_id: Uuid,
     effort: ReasoningEffortConfig,
     summary: ReasoningSummaryConfig,
+    verbosity: TextVerbosityConfig,
     debug_logger: Arc<Mutex<DebugLogger>>,
 }
 
@@ -77,6 +79,7 @@ impl ModelClient {
         provider: ModelProviderInfo,
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
+        verbosity: TextVerbosityConfig,
         session_id: Uuid,
         debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
@@ -88,6 +91,7 @@ impl ModelClient {
             session_id,
             effort,
             summary,
+            verbosity,
             debug_logger,
         }
     }
@@ -95,6 +99,11 @@ impl ModelClient {
     /// Get the reasoning effort configuration
     pub fn get_reasoning_effort(&self) -> ReasoningEffortConfig {
         self.effort
+    }
+
+    /// Get the text verbosity configuration
+    pub fn get_text_verbosity(&self) -> TextVerbosityConfig {
+        self.verbosity
     }
 
     /// Dispatches to either the Responses or Chat implementation depending on
@@ -174,6 +183,15 @@ impl ModelClient {
 
         let input_with_instructions = prompt.get_formatted_input();
 
+        // Create text parameter with verbosity (not supported with ChatGPT auth)
+        let text = if auth_mode == Some(AuthMode::ChatGPT) {
+            None
+        } else {
+            Some(crate::client_common::Text {
+                verbosity: self.verbosity.into(),
+            })
+        };
+
         let payload = ResponsesApiRequest {
             model: &self.config.model,
             instructions: &full_instructions,
@@ -182,6 +200,7 @@ impl ModelClient {
             tool_choice: "auto",
             parallel_tool_calls: true,
             reasoning,
+            text,
             store,
             stream: true,
             include,

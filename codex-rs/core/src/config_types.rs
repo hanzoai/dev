@@ -399,3 +399,15 @@ pub enum ReasoningSummary {
     /// Option to disable reasoning summaries.
     None,
 }
+
+/// Text verbosity level for OpenAI API responses.
+/// Controls the level of detail in the model's text responses.
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum TextVerbosity {
+    Low,
+    #[default]
+    Medium,
+    High,
+}

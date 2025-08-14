@@ -73,6 +73,7 @@ pub(crate) struct ChatComposer {
     status_message: String,
     // Animation thread for spinning icon when task is running
     animation_running: Option<Arc<AtomicBool>>,
+    using_chatgpt_auth: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -87,6 +88,7 @@ impl ChatComposer {
         has_input_focus: bool,
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
+        using_chatgpt_auth: bool,
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
 
@@ -108,6 +110,7 @@ impl ChatComposer {
             is_task_running: false,
             status_message: String::from("coding"),
             animation_running: None,
+            using_chatgpt_auth,
         }
     }
 
@@ -811,7 +814,7 @@ impl ChatComposer {
             }
             _ => {
                 if input_starts_with_slash {
-                    let mut command_popup = CommandPopup::new();
+                    let mut command_popup = CommandPopup::new_with_filter(self.using_chatgpt_auth);
                     command_popup.on_composer_text_change(first_line.to_string());
                     self.active_popup = ActivePopup::Command(command_popup);
                 }

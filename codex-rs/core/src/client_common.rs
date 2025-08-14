@@ -1,5 +1,6 @@
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::error::Result;
 use crate::model_family::ModelFamily;
 use crate::models::ContentItem;
@@ -164,6 +165,10 @@ impl Prompt {
 
         // Add status items at the end so they're fresh for each request
         input_with_instructions.extend(self.status_items.clone());
+        
+        // Limit screenshots to maximum 5 (keep first and last 4)
+        limit_screenshots_in_input(&mut input_with_instructions);
+        
         input_with_instructions
     }
 }
@@ -242,6 +247,97 @@ impl From<ReasoningSummaryConfig> for Option<OpenAiReasoningSummary> {
     }
 }
 
+/// Text configuration for verbosity level in OpenAI API responses.
+#[derive(Debug, Serialize)]
+pub(crate) struct Text {
+    pub(crate) verbosity: OpenAiTextVerbosity,
+}
+
+/// OpenAI text verbosity level for serialization.
+#[derive(Debug, Serialize, Default, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum OpenAiTextVerbosity {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl From<TextVerbosityConfig> for OpenAiTextVerbosity {
+    fn from(verbosity: TextVerbosityConfig) -> Self {
+        match verbosity {
+            TextVerbosityConfig::Low => OpenAiTextVerbosity::Low,
+            TextVerbosityConfig::Medium => OpenAiTextVerbosity::Medium,
+            TextVerbosityConfig::High => OpenAiTextVerbosity::High,
+        }
+    }
+}
+
+/// Limits the number of screenshots in the input to a maximum of 5.
+/// Keeps the first screenshot and the last 4 screenshots.
+/// Replaces removed screenshots with a placeholder message.
+fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
+    // Find all screenshot positions
+    let mut screenshot_positions = Vec::new();
+    
+    for (idx, item) in input.iter().enumerate() {
+        if let ResponseItem::Message { content, .. } = item {
+            let has_screenshot = content
+                .iter()
+                .any(|c| matches!(c, ContentItem::InputImage { .. }));
+            if has_screenshot {
+                screenshot_positions.push(idx);
+            }
+        }
+    }
+    
+    // If we have 5 or fewer screenshots, no action needed
+    if screenshot_positions.len() <= 5 {
+        return;
+    }
+    
+    // Determine which screenshots to keep
+    let mut positions_to_keep = std::collections::HashSet::new();
+    
+    // Keep the first screenshot
+    if let Some(&first) = screenshot_positions.first() {
+        positions_to_keep.insert(first);
+    }
+    
+    // Keep the last 4 screenshots
+    let last_four_start = screenshot_positions.len().saturating_sub(4);
+    for &pos in &screenshot_positions[last_four_start..] {
+        positions_to_keep.insert(pos);
+    }
+    
+    // Replace screenshots that should be removed
+    for &pos in &screenshot_positions {
+        if !positions_to_keep.contains(&pos) {
+            if let Some(ResponseItem::Message { content, .. }) = input.get_mut(pos) {
+                // Replace image content with placeholder message
+                let mut new_content = Vec::new();
+                for item in content.iter() {
+                    match item {
+                        ContentItem::InputImage { .. } => {
+                            new_content.push(ContentItem::InputText {
+                                text: "[screenshot no longer available]".to_string(),
+                            });
+                        }
+                        other => new_content.push(other.clone()),
+                    }
+                }
+                *content = new_content;
+            }
+        }
+    }
+    
+    tracing::debug!(
+        "Limited screenshots from {} to {} (kept first and last 4)",
+        screenshot_positions.len(),
+        positions_to_keep.len()
+    );
+}
+
 /// Request object that is serialized as JSON and POST'ed when using the
 /// Responses API.
 #[derive(Debug, Serialize)]
@@ -256,6 +352,8 @@ pub(crate) struct ResponsesApiRequest<'a> {
     pub(crate) tool_choice: &'static str,
     pub(crate) parallel_tool_calls: bool,
     pub(crate) reasoning: Option<Reasoning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) text: Option<Text>,
     /// true when using the Responses API.
     pub(crate) store: bool,
     pub(crate) stream: bool,
