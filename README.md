@@ -52,13 +52,13 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 
 ### Browser
 ```bash
-# Connect coder to your Chrome browser (running CDP)
-/browser chrome
-# or simply:
-/chrome
+# Connect coder to external Chrome browser (running CDP)
+/chrome        # Connect with auto-detect port
+/chrome 9222   # Connect to specific port
 
-# Use a headless browser (Agent can also enable)
-/browser https://example.com
+# Switch to internal browser mode
+/browser       # Use internal headless browser
+/browser https://example.com  # Open URL in internal browser
 ```
 
 ### Agents

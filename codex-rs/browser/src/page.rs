@@ -275,33 +275,56 @@ impl Page {
                 };
             })()
         "#;
-        
+
         // Replace placeholders with actual expected values
         let script = check_script
             .replace("%EXPECTED_WIDTH%", &self.config.viewport.width.to_string())
-            .replace("%EXPECTED_HEIGHT%", &self.config.viewport.height.to_string())
-            .replace("%EXPECTED_DPR%", &self.config.viewport.device_scale_factor.to_string());
-        
+            .replace(
+                "%EXPECTED_HEIGHT%",
+                &self.config.viewport.height.to_string(),
+            )
+            .replace(
+                "%EXPECTED_DPR%",
+                &self.config.viewport.device_scale_factor.to_string(),
+            );
+
         let result = self.cdp_page.evaluate(script).await?;
-        
+
         if let Some(obj) = result.value() {
-            let needs_correction = obj.get("needsCorrection")
+            let needs_correction = obj
+                .get("needsCorrection")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            
+
             if needs_correction {
-                let current_width = obj.get("currentWidth").and_then(|v| v.as_u64()).unwrap_or(0);
-                let current_height = obj.get("currentHeight").and_then(|v| v.as_u64()).unwrap_or(0);
-                let current_dpr = obj.get("currentDpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
-                let current_zoom = obj.get("currentZoom").and_then(|v| v.as_f64()).unwrap_or(1.0);
-                
+                let current_width = obj
+                    .get("currentWidth")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let current_height = obj
+                    .get("currentHeight")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let current_dpr = obj
+                    .get("currentDpr")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0);
+                let current_zoom = obj
+                    .get("currentZoom")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(1.0);
+
                 debug!(
                     "Viewport needs correction: {}x{} @ {}x DPR (zoom: {}) -> {}x{} @ {}x DPR",
-                    current_width, current_height, current_dpr, current_zoom,
-                    self.config.viewport.width, self.config.viewport.height, 
+                    current_width,
+                    current_height,
+                    current_dpr,
+                    current_zoom,
+                    self.config.viewport.width,
+                    self.config.viewport.height,
                     self.config.viewport.device_scale_factor
                 );
-                
+
                 // Use CDP to set the correct viewport metrics
                 let params = SetDeviceMetricsOverrideParams::builder()
                     .width(self.config.viewport.width as i64)
@@ -309,10 +332,12 @@ impl Page {
                     .device_scale_factor(self.config.viewport.device_scale_factor)
                     .mobile(self.config.viewport.mobile)
                     .build()
-                    .map_err(|e| BrowserError::CdpError(format!("Failed to build viewport params: {}", e)))?;
-                
+                    .map_err(|e| {
+                        BrowserError::CdpError(format!("Failed to build viewport params: {}", e))
+                    })?;
+
                 self.cdp_page.execute(params).await?;
-                
+
                 // Also reset zoom if it's not 1.0
                 if (current_zoom - 1.0).abs() > 0.1 {
                     debug!("Resetting zoom from {} to 1.0", current_zoom);
@@ -325,14 +350,14 @@ impl Page {
                     "#;
                     let _ = self.cdp_page.evaluate(reset_zoom_script).await;
                 }
-                
+
                 info!("Viewport scaling corrected");
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// (NEW) Injects a virtual cursor element into the page at the current coordinates.
     pub async fn inject_virtual_cursor(&self) -> Result<()> {
         let cursor = self.cursor_state.lock().await.clone();
@@ -806,14 +831,17 @@ impl Page {
     pub async fn screenshot(&self, mode: ScreenshotMode) -> Result<Vec<Screenshot>> {
         // Check if this is an external Chrome connection
         let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        
+
         // First, check and fix viewport scaling if needed (skip for external Chrome)
         if !is_external {
             if let Err(e) = self.check_and_fix_scaling().await {
-                warn!("Failed to check/fix viewport scaling: {}, continuing anyway", e);
+                warn!(
+                    "Failed to check/fix viewport scaling: {}, continuing anyway",
+                    e
+                );
             }
         }
-        
+
         // Inject the virtual cursor before capturing
         if let Err(e) = self.inject_virtual_cursor().await {
             warn!("Failed to inject virtual cursor: {}", e);
@@ -1072,7 +1100,7 @@ impl Page {
             .y(move_y)
             .button(cursor.button.clone()) // Pass the button state
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(move_params).await?;
 
         // Update cursor position
@@ -1183,7 +1211,7 @@ impl Page {
             .button(MouseButton::Left)
             .click_count(1)
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
         // Add a small delay between press and release (Ported from TS)
@@ -1197,7 +1225,7 @@ impl Page {
             .button(MouseButton::Left)
             .click_count(1)
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
         // Wait briefly to allow potential event handlers (like navigation) to trigger (ported from TS)
@@ -1273,7 +1301,7 @@ impl Page {
             .button(MouseButton::Left)
             .click_count(1)
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
         // Add a small delay between press and release (Ported from TS)
@@ -1287,7 +1315,7 @@ impl Page {
             .button(MouseButton::Left)
             .click_count(1)
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
         // Wait briefly to allow potential event handlers (like navigation) to trigger (ported from TS)
@@ -1314,7 +1342,7 @@ impl Page {
                     .r#type(DispatchKeyEventType::Char)
                     .text(ch.to_string())
                     .build()
-                    .map_err(|e| BrowserError::CdpError(e))?;
+                    .map_err(BrowserError::CdpError)?;
                 self.cdp_page.execute(params).await?;
 
                 // Natural typing delay with slight randomization
@@ -1337,7 +1365,7 @@ impl Page {
                         .r#type(DispatchKeyEventType::Char)
                         .text(ch.to_string())
                         .build()
-                        .map_err(|e| BrowserError::CdpError(e))?;
+                        .map_err(BrowserError::CdpError)?;
                     self.cdp_page.execute(params).await?;
                 }
 
@@ -1361,7 +1389,7 @@ impl Page {
                         .r#type(DispatchKeyEventType::Char)
                         .text(ch.to_string())
                         .build()
-                        .map_err(|e| BrowserError::CdpError(e))?;
+                        .map_err(BrowserError::CdpError)?;
                     self.cdp_page.execute(params).await?;
                 }
 
@@ -1388,7 +1416,7 @@ impl Page {
             .r#type(DispatchKeyEventType::KeyDown)
             .key(key.to_string())
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
         // Key up
@@ -1396,7 +1424,7 @@ impl Page {
             .r#type(DispatchKeyEventType::KeyUp)
             .key(key.to_string())
             .build()
-            .map_err(|e| BrowserError::CdpError(e))?;
+            .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
         Ok(())
@@ -1410,7 +1438,7 @@ impl Page {
         );
 
         // Create the user code with sourceURL for better debugging
-        let user_code_with_source = format!("{}\n//# sourceURL=browser_js_user_code.js", code);
+        let user_code_with_source = format!("{code}\n//# sourceURL=browser_js_user_code.js");
 
         // Use the improved JavaScript harness
         let wrapped = format!(
@@ -1503,7 +1531,7 @@ impl Page {
     console.debug = __orig.debug;
   }}
 }})()"#,
-            serde_json::to_string(&user_code_with_source).unwrap()
+            serde_json::to_string(&user_code_with_source).expect("Failed to serialize user code")
         );
 
         tracing::debug!("Executing JavaScript code: {}", code);
