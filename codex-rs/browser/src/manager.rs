@@ -974,12 +974,12 @@ impl BrowserManager {
     async fn capture_screenshot_regular(&self) -> Result<(Vec<std::path::PathBuf>, String)> {
         // For launched Chrome, use the regular approach since it's already isolated
         let page = self.get_or_create_page().await?;
-        
+
         // For external Chrome connections, skip viewport correction to respect user settings
         let config = self.config.read().await;
         let is_external = config.connect_port.is_some() || config.connect_ws.is_some();
         drop(config);
-        
+
         if is_external {
             debug!("Skipping viewport correction for external Chrome connection");
         }

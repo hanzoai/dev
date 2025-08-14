@@ -67,7 +67,7 @@ pub(crate) struct App<'a> {
 
     /// Controls the animation thread that sends CommitTick events.
     commit_anim_running: Arc<AtomicBool>,
-    
+
     /// Terminal information queried at startup
     terminal_info: TerminalInfo,
 }

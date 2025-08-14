@@ -103,8 +103,7 @@ impl BrowserTools {
                     }))
                 }
                 Some(other) => Err(crate::BrowserError::ConfigError(format!(
-                    "Unknown close target: {}",
-                    other
+                    "Unknown close target: {other}"
                 ))),
             },
         }

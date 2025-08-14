@@ -50,7 +50,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
 
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    
+
     // Query terminal capabilities and font size after entering alternate screen
     // but before enabling raw mode
     let terminal_info = query_terminal_info();
@@ -105,7 +105,7 @@ fn query_terminal_info() -> TerminalInfo {
             None
         }
     };
-    
+
     // Get font size from picker if available, otherwise fall back to terminal_info query
     let font_size = if let Some(ref p) = picker {
         // The picker has font size information
@@ -123,7 +123,7 @@ fn query_terminal_info() -> TerminalInfo {
             }
         })
     };
-    
+
     TerminalInfo { picker, font_size }
 }
 
