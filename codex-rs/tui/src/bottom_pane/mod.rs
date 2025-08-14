@@ -9,6 +9,7 @@ use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 use ratatui::widgets::WidgetRef;
 
 mod approval_modal_view;
@@ -371,6 +372,11 @@ impl BottomPane<'_> {
 
     pub(crate) fn clear_live_ring(&mut self) {
         self.live_ring = None;
+    }
+    
+    /// Set the live ring rows and maximum rows to display
+    pub(crate) fn set_live_ring_rows(&mut self, max_rows: usize, rows: Vec<Line<'static>>) {
+        self.live_ring = Some(live_ring_widget::LiveRingWidget::new(max_rows, rows));
     }
 
     /// Ensure input focus is maintained, especially after redraws or content updates
