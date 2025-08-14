@@ -804,9 +804,14 @@ impl Page {
 
     // (UPDATED) Inject cursor before taking screenshot
     pub async fn screenshot(&self, mode: ScreenshotMode) -> Result<Vec<Screenshot>> {
-        // First, check and fix viewport scaling if needed
-        if let Err(e) = self.check_and_fix_scaling().await {
-            warn!("Failed to check/fix viewport scaling: {}, continuing anyway", e);
+        // Check if this is an external Chrome connection
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        
+        // First, check and fix viewport scaling if needed (skip for external Chrome)
+        if !is_external {
+            if let Err(e) = self.check_and_fix_scaling().await {
+                warn!("Failed to check/fix viewport scaling: {}, continuing anyway", e);
+            }
         }
         
         // Inject the virtual cursor before capturing
