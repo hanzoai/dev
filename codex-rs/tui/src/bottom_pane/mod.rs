@@ -25,6 +25,7 @@ mod scroll_state;
 mod selection_popup_common;
 mod textarea;
 mod theme_selection_view;
+mod verbosity_selection_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -37,9 +38,11 @@ pub(crate) use chat_composer::InputResult;
 
 use approval_modal_view::ApprovalModalView;
 use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use reasoning_selection_view::ReasoningSelectionView;
 use theme_selection_view::ThemeSelectionView;
+use verbosity_selection_view::VerbositySelectionView;
 
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
@@ -68,6 +71,7 @@ pub(crate) struct BottomPaneParams {
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) has_input_focus: bool,
     pub(crate) enhanced_keys_supported: bool,
+    pub(crate) using_chatgpt_auth: bool,
 }
 
 impl BottomPane<'_> {
@@ -79,6 +83,7 @@ impl BottomPane<'_> {
                 params.has_input_focus,
                 params.app_event_tx.clone(),
                 enhanced_keys_supported,
+                params.using_chatgpt_auth,
             ),
             active_view: None,
             app_event_tx: params.app_event_tx,
@@ -324,6 +329,15 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
+    /// Show the verbosity selection UI
+    pub fn show_verbosity_selection(&mut self, current_verbosity: TextVerbosity) {
+        let view = VerbositySelectionView::new(current_verbosity, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        // Status shown in composer title now
+        self.status_view_active = false;
+        self.request_redraw()
+    }
+
     /// Height (terminal rows) required by the current bottom pane.
     pub(crate) fn request_redraw(&self) {
         self.app_event_tx.send(AppEvent::RequestRedraw)
@@ -458,6 +472,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
         pane.push_approval_request(exec_request());
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());
@@ -473,6 +488,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         // Provide 4 rows with max_rows=3; only the last 3 should be visible.
@@ -510,6 +526,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         // Simulate task running which replaces composer with the status indicator.
@@ -572,6 +589,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         // Create an approval modal (active view).
@@ -652,6 +670,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         // Begin a task: show initial status.
@@ -685,6 +704,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         // Activate spinner (status view replaces composer) with no live ring.
@@ -737,6 +757,7 @@ mod tests {
             app_event_tx: tx,
             has_input_focus: true,
             enhanced_keys_supported: false,
+            using_chatgpt_auth: false,
         });
 
         pane.set_task_running(true);

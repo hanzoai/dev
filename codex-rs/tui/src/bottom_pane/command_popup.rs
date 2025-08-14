@@ -18,9 +18,18 @@ pub(crate) struct CommandPopup {
 
 impl CommandPopup {
     pub(crate) fn new() -> Self {
+        Self::new_with_filter(false)
+    }
+    
+    pub(crate) fn new_with_filter(hide_verbosity: bool) -> Self {
+        let mut commands = built_in_slash_commands();
+        if hide_verbosity {
+            // Filter out the verbosity command when using ChatGPT auth
+            commands.retain(|(_, cmd)| *cmd != SlashCommand::Verbosity);
+        }
         Self {
             command_filter: String::new(),
-            all_commands: built_in_slash_commands(),
+            all_commands: commands,
             state: ScrollState::new(),
         }
     }

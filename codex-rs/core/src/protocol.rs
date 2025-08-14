@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::parse_command::ParsedCommand;
@@ -49,6 +50,7 @@ pub enum Op {
 
         model_reasoning_effort: ReasoningEffortConfig,
         model_reasoning_summary: ReasoningSummaryConfig,
+        model_text_verbosity: TextVerbosityConfig,
 
         /// Model instructions that are appended to the base instructions.
         user_instructions: Option<String>,
