@@ -3869,7 +3869,7 @@ async fn handle_browser_move(
                         let has_dy = json.get("dy").is_some();
                         let has_x = json.get("x").is_some();
                         let has_y = json.get("y").is_some();
-                        
+
                         let result = if has_dx || has_dy {
                             // Relative movement
                             let dx = json.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -3884,7 +3884,7 @@ async fn handle_browser_move(
                             // No parameters provided, just return current position
                             browser_manager.get_cursor_position().await
                         };
-                        
+
                         match result {
                             Ok((x, y)) => {
                                 // Capture screenshot after moving mouse
@@ -3892,7 +3892,7 @@ async fn handle_browser_move(
                                 {
                                     add_pending_screenshot(sess_clone, screenshot_path, url);
                                 }
-                                
+
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
