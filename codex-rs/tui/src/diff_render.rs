@@ -142,7 +142,7 @@ pub(crate) fn create_diff_summary(
         spans.push(RtSpan::raw(")"));
 
         let mut line = RtLine::from(spans);
-        let prefix = if idx == 0 { "  ⎿ " } else { "    " };
+        let prefix = if idx == 0 { "  └ " } else { "    " };
         line.spans.insert(0, prefix.into());
         line.spans
             .iter_mut()
