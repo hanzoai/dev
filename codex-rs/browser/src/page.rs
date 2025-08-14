@@ -482,9 +482,9 @@ impl Page {
 
     // Motion configuration (distance-based durations)
     const MOTION = {{
-      pxPerSec: 1400,                          // base speed
-      min: 500,                                // ms clamp
-      max: 2000,                                // ms clamp
+      pxPerSec: 800,                          // base speed
+      min: 600,                                // ms clamp
+      max: 3000,                                // ms clamp
       easing: 'cubic-bezier(0.25, 1, 0.5, 1)', // easeOutQuart-ish
       badgeScale: 1.25,                         // badge longer than arrow
       badgeDelay: 100,                          // ms
@@ -556,13 +556,13 @@ impl Page {
     // --- Hover-to-dim (distance to tip) ---
     root.style.opacity = '1';
     root.style.transition = 'opacity 160ms ease-out';
-    const HOVER = {{ opacity: 0.2, radius: 12, enabled: true }};
+    const HOVER = {{ opacity: 0.2, offset: 20, radius: 55, enabled: true }};
 
     let _mx = 0, _my = 0, _rafHover = 0, _dimmed = false;
     function hoverTick() {{
       _rafHover = 0;
-      const tipX = state.arrowX + TIP_X;
-      const tipY = state.arrowY + TIP_Y;
+      const tipX = state.arrowX + TIP_X + HOVER.offset;
+      const tipY = state.arrowY + TIP_Y + HOVER.offset;
       const dx = _mx - tipX, dy = _my - tipY;
       const over = (dx*dx + dy*dy) <= (HOVER.radius * HOVER.radius);
       const shouldDim = HOVER.enabled && over;
