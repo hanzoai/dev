@@ -9,6 +9,7 @@ use crate::config_types::SandboxMode;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
+use crate::config_types::TextVerbosity;
 use crate::config_types::Tui;
 use crate::config_types::UriBasedFileOpener;
 use crate::model_family::ModelFamily;
@@ -152,6 +153,9 @@ pub struct Config {
     /// request using the Responses API.
     pub model_reasoning_summary: ReasoningSummary,
 
+    /// The value to use for `text.verbosity` when making a request using the Responses API.
+    pub model_text_verbosity: TextVerbosity,
+
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: String,
 
@@ -166,6 +170,9 @@ pub struct Config {
 
     /// Enable debug logging of LLM requests and responses
     pub debug: bool,
+    
+    /// Whether we're using ChatGPT authentication (affects feature availability)
+    pub using_chatgpt_auth: bool,
 }
 
 impl Config {
@@ -402,6 +409,7 @@ pub struct ConfigToml {
 
     pub model_reasoning_effort: Option<ReasoningEffort>,
     pub model_reasoning_summary: Option<ReasoningSummary>,
+    pub model_text_verbosity: Option<TextVerbosity>,
 
     /// Override to force-enable reasoning summaries for the configured model.
     pub model_supports_reasoning_summaries: Option<bool>,
@@ -624,6 +632,9 @@ impl Config {
             Self::get_base_instructions(experimental_instructions_path, &resolved_cwd)?;
         let base_instructions = base_instructions.or(file_base_instructions);
 
+        // Check if we're using ChatGPT auth before moving codex_home
+        let using_chatgpt_auth = Self::is_using_chatgpt_auth(&codex_home);
+
         let config = Self {
             model,
             model_family,
@@ -669,6 +680,10 @@ impl Config {
                 .model_reasoning_summary
                 .or(cfg.model_reasoning_summary)
                 .unwrap_or_default(),
+            model_text_verbosity: config_profile
+                .model_text_verbosity
+                .or(cfg.model_text_verbosity)
+                .unwrap_or_default(),
 
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
@@ -679,10 +694,23 @@ impl Config {
             include_plan_tool: include_plan_tool.unwrap_or(false),
             internal_originator: cfg.internal_originator,
             debug: debug.unwrap_or(false),
+            // Already computed before moving codex_home
+            using_chatgpt_auth,
         };
         Ok(config)
     }
 
+    /// Check if we're using ChatGPT authentication
+    fn is_using_chatgpt_auth(codex_home: &Path) -> bool {
+        use codex_login::AuthMode;
+        use codex_login::CodexAuth;
+        
+        match CodexAuth::from_codex_home(codex_home) {
+            Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
+            _ => false,
+        }
+    }
+    
     fn load_instructions(codex_dir: Option<&Path>) -> Option<String> {
         let mut p = match codex_dir {
             Some(p) => p.to_path_buf(),
@@ -1053,11 +1081,14 @@ disable_response_storage = true
                 show_raw_agent_reasoning: false,
                 model_reasoning_effort: ReasoningEffort::High,
                 model_reasoning_summary: ReasoningSummary::Detailed,
+                model_text_verbosity: TextVerbosity::default(),
                 chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
                 experimental_resume: None,
                 base_instructions: None,
                 include_plan_tool: false,
                 internal_originator: None,
+                debug: false,
+                using_chatgpt_auth: false,
             },
             o3_profile_config
         );
@@ -1104,11 +1135,14 @@ disable_response_storage = true
             show_raw_agent_reasoning: false,
             model_reasoning_effort: ReasoningEffort::default(),
             model_reasoning_summary: ReasoningSummary::default(),
+            model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             internal_originator: None,
+            debug: false,
+            using_chatgpt_auth: false,
         };
 
         assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
@@ -1170,11 +1204,14 @@ disable_response_storage = true
             show_raw_agent_reasoning: false,
             model_reasoning_effort: ReasoningEffort::default(),
             model_reasoning_summary: ReasoningSummary::default(),
+            model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
             experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             internal_originator: None,
+            debug: false,
+            using_chatgpt_auth: false,
         };
 
         assert_eq!(expected_zdr_profile_config, zdr_profile_config);

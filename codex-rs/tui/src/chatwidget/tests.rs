@@ -126,6 +126,7 @@ fn make_chatwidget_manual() -> (
         app_event_tx: app_event_tx.clone(),
         has_input_focus: true,
         enhanced_keys_supported: false,
+        using_chatgpt_auth: false,
     });
     let widget = ChatWidget {
         app_event_tx,

@@ -1,4 +1,5 @@
 use codex_core::config_types::ReasoningEffort;
+use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
 use codex_file_search::FileMatch;
@@ -47,6 +48,9 @@ pub(crate) enum AppEvent {
 
     /// Update the reasoning effort level
     UpdateReasoningEffort(ReasoningEffort),
+
+    /// Update the text verbosity level
+    UpdateTextVerbosity(TextVerbosity),
 
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),

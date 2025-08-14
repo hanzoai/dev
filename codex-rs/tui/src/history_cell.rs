@@ -155,7 +155,7 @@ pub(crate) enum HistoryCell {
     PatchApplyResult { view: TextBlock },
 }
 
-const TOOL_CALL_MAX_LINES: usize = 5;
+const TOOL_CALL_MAX_LINES: usize = 50;
 
 fn shlex_join_safe(command: &[String]) -> String {
     match shlex::try_join(command.iter().map(|s| s.as_str())) {
@@ -308,7 +308,6 @@ impl HistoryCell {
             }) => HistoryCell::exec_command_lines(command, parsed, output.as_ref()),
             HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => vec![
                 Line::from("tool result (image output omitted)"),
-                Line::from(""),
             ],
         }
     }
@@ -384,6 +383,9 @@ impl HistoryCell {
                 Line::from("".dim()),
                 Line::from("Popular commands:".dim()),
                 Line::from(
+                    format!(" /chrome - {}", SlashCommand::Chrome.description()).dim(),
+                ),
+                Line::from(
                     format!(" /browser <url> - {}", SlashCommand::Browser.description()).dim(),
                 ),
                 Line::from(format!(" /plan - {}", SlashCommand::Plan.description()).dim()),
@@ -406,7 +408,6 @@ impl HistoryCell {
                 Line::from("model changed:".magenta().bold()),
                 Line::from(format!("requested: {}", config.model)),
                 Line::from(format!("used: {model}")),
-                Line::from(""),
             ];
             HistoryCell::SessionInfo {
                 view: TextBlock::new(lines),
@@ -545,7 +546,6 @@ impl HistoryCell {
         let lines: Vec<Line> = vec![
             title_line,
             format_mcp_invocation(invocation.clone()),
-            Line::from(""),
         ];
 
         HistoryCell::ActiveMcpToolCall {
@@ -648,7 +648,6 @@ impl HistoryCell {
         match result {
             Ok(mcp_types::CallToolResult { content, .. }) => {
                 if !content.is_empty() {
-                    lines.push(Line::from(""));
 
                     for tool_call_result in content {
                         let line_text = match tool_call_result {
@@ -687,8 +686,6 @@ impl HistoryCell {
                         ));
                     }
                 }
-
-                lines.push(Line::from(""));
             }
             Err(e) => {
                 lines.push(Line::from(vec![
@@ -817,8 +814,6 @@ impl HistoryCell {
             "  • Sandbox: ".into(),
             sandbox_name.into(),
         ]));
-
-        lines.push(Line::from(""));
 
         // 👤 Account (only if ChatGPT tokens exist), shown under the first block
         let auth_file = get_auth_file(&config.codex_home);
@@ -1066,8 +1061,6 @@ impl HistoryCell {
         };
 
         let mut lines: Vec<Line<'static>> = create_diff_summary(title, &changes, event_type);
-
-        lines.push(Line::from(""));
 
         HistoryCell::PendingPatch {
             view: TextBlock::new(lines),

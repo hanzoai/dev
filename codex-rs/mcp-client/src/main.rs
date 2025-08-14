@@ -61,9 +61,9 @@ async fn main() -> Result<()> {
             elicitation: None,
         },
         client_info: Implementation {
-            name: "codex-mcp-client".to_owned(),
+            name: "coder-mcp-client".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            title: Some("Codex".to_string()),
+            title: Some("Coder".to_string()),
         },
         protocol_version: MCP_SCHEMA_VERSION.to_owned(),
     };

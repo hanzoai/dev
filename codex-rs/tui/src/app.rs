@@ -453,6 +453,11 @@ impl App<'_> {
                                 widget.handle_reasoning_command(command_args);
                             }
                         }
+                        SlashCommand::Verbosity => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_verbosity_command(command_args);
+                            }
+                        }
                         SlashCommand::Theme => {
                             // Theme selection is handled in submit_user_message
                             // This case is here for completeness
@@ -537,6 +542,11 @@ impl App<'_> {
                 AppEvent::UpdateReasoningEffort(new_effort) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_reasoning_effort(new_effort);
+                    }
+                }
+                AppEvent::UpdateTextVerbosity(new_verbosity) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_text_verbosity(new_verbosity);
                     }
                 }
                 AppEvent::UpdateTheme(new_theme) => {
