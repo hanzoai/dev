@@ -103,7 +103,20 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             ${{ github.workspace }}/codex-rs/target/
-          key: cargo-release-${{ matrix.runner }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-release-${{ matrix.runner }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          restore-keys: |
+            cargo-release-${{ matrix.runner }}-${{ matrix.target }}-release-${{ hashFiles('**/Cargo.lock') }}-
+            cargo-release-${{ matrix.runner }}-${{ matrix.target }}-release-
+      
+      # Use sccache for additional compilation caching
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.3
+      
+      - name: Configure sccache
+        shell: bash
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
 
       - if: ${{ matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl'}}
         name: Install musl build tools
@@ -111,7 +124,13 @@ jobs:
           sudo apt install -y musl-tools pkg-config
 
       - name: Cargo build
-        run: cargo build --target ${{ matrix.target }} --release --bin coder
+        shell: bash
+        run: |
+          # Use all available cores and enable incremental compilation
+          export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
+          export CARGO_INCREMENTAL=1
+          echo "Building with $CARGO_BUILD_JOBS parallel jobs"
+          cargo build --target ${{ matrix.target }} --release --bin coder
 
       - name: Stage artifacts
         shell: bash
