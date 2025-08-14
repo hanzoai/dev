@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::markdown_stream::AnimatedLineStreamer;
 use crate::markdown_stream::MarkdownStreamCollector;
 pub(crate) mod controller;
