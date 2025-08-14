@@ -58,7 +58,7 @@ fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
     None
 }
 
-async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
+async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
     let mut jar = EphemeralJar::new();
 
     // Collect environment context
@@ -66,9 +66,17 @@ async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
     let branch = get_git_branch(&sess.cwd).unwrap_or_else(|| "unknown".to_string());
     let reasoning_effort = sess.client.get_reasoning_effort();
 
+    // Build current system status
+    let mut current_status = format!(r#"== System Status ==
+[automatic message added by system]
+
+cwd: {}
+branch: {}
+reasoning: {:?}"#, cwd, branch, reasoning_effort);
+
     // Prepare browser context + optional screenshot
-    let mut browser_text = None::<String>;
     let mut screenshot_content: Option<ContentItem> = None;
+    let mut include_screenshot = false;
 
     if let Some(browser_manager) = codex_browser::global::get_browser_manager().await {
         if browser_manager.is_enabled().await {
@@ -86,23 +94,67 @@ async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
 
             // Get browser type description
             let browser_type = browser_manager.get_browser_type().await;
+            
+            // Get viewport dimensions
+            let (viewport_width, viewport_height) = browser_manager.get_viewport_size().await;
+            let viewport_info = format!(" | Viewport: {}x{}", viewport_width, viewport_height);
+            
+            // Get cursor position
+            let cursor_info = match browser_manager.get_cursor_position().await {
+                Ok((x, y)) => format!(" | Mouse position: ({:.0}, {:.0}) [shown as a blue cursor in the screenshot]", x, y),
+                Err(_) => String::new(),
+            };
 
-            // Try to capture screenshot
+            // Try to capture screenshot and compare with last one
             let screenshot_status = match capture_browser_screenshot(sess).await {
                 Ok((screenshot_path, _url)) => {
-                    if let Ok(bytes) = std::fs::read(&screenshot_path) {
-                        let mime = mime_guess::from_path(&screenshot_path)
-                            .first()
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| "image/png".to_string());
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                        screenshot_content = Some(ContentItem::InputImage {
-                            image_url: format!("data:{mime};base64,{encoded}"),
-                            detail: Some("high".to_string()),
-                        });
-                        ""
+                    // Check if screenshot has changed using image hashing
+                    let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
+                    
+                    // Compute hash for current screenshot
+                    let current_hash = crate::image_comparison::compute_image_hash(&screenshot_path).ok();
+                    
+                    let should_include_screenshot = if let (Some((_last_path, last_phash, last_dhash)), Some((cur_phash, cur_dhash))) = 
+                        (last_screenshot_info.as_ref(), current_hash.as_ref()) {
+                        // Compare hashes to see if screenshots are similar
+                        let similar = crate::image_comparison::are_hashes_similar(
+                            last_phash, last_dhash, cur_phash, cur_dhash
+                        );
+                        
+                        if !similar {
+                            // Screenshot has changed, include it
+                            *last_screenshot_info = Some((screenshot_path.clone(), cur_phash.clone(), cur_dhash.clone()));
+                            true
+                        } else {
+                            // Screenshot unchanged
+                            false
+                        }
                     } else {
-                        " [Screenshot file read failed]"
+                        // No previous screenshot or hash computation failed, include it
+                        if let Some((phash, dhash)) = current_hash {
+                            *last_screenshot_info = Some((screenshot_path.clone(), phash, dhash));
+                        }
+                        true
+                    };
+
+                    if should_include_screenshot {
+                        if let Ok(bytes) = std::fs::read(&screenshot_path) {
+                            let mime = mime_guess::from_path(&screenshot_path)
+                                .first()
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| "image/png".to_string());
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            screenshot_content = Some(ContentItem::InputImage {
+                                image_url: format!("data:{mime};base64,{encoded}"),
+                                detail: Some("high".to_string()),
+                            });
+                            include_screenshot = true;
+                            ""
+                        } else {
+                            " [Screenshot file read failed]"
+                        }
+                    } else {
+                        " [Screenshot unchanged]"
                     }
                 }
                 Err(err_msg) => {
@@ -113,34 +165,40 @@ async fn build_turn_ephemeral_items(sess: &Session) -> Vec<ResponseItem> {
 
             let status_line = if let Some(t) = title {
                 format!(
-                    "Browser is open at {} — {} ({}){}. You can interact with it using browser_* tools.",
-                    url, t, browser_type, screenshot_status
+                    "Browser url: {} — {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                    url, t, browser_type, viewport_info, cursor_info, screenshot_status
                 )
             } else {
                 format!(
-                    "Browser is open at {} ({}){}. You can interact with it using browser_* tools.",
-                    url, browser_type, screenshot_status
+                    "Browser url: {} ({}){}{}{}. You can interact with it using browser_* tools.",
+                    url, browser_type, viewport_info, cursor_info, screenshot_status
                 )
             };
-            browser_text = Some(status_line);
+            current_status.push_str("\n");
+            current_status.push_str(&status_line);
         }
     }
 
-    let mut content: Vec<ContentItem> = Vec::new();
-    content.push(ContentItem::InputText {
-        text: format!(r#"== System Status ==
-[ephemeral message - added automatically by system]
-
-cwd: {}
-branch: {}
-reasoning: {:?}
-"#, cwd, branch, reasoning_effort),
-    });
-    if let Some(text) = browser_text {
-        content.push(ContentItem::InputText { text });
+    // Check if system status has changed
+    let mut last_status = sess.last_system_status.lock().unwrap();
+    let status_changed = last_status.as_ref() != Some(&current_status);
+    
+    if status_changed {
+        // Update last status
+        *last_status = Some(current_status.clone());
     }
-    if let Some(image) = screenshot_content {
-        content.push(image);
+
+    // Only include items if something has changed or is new
+    let mut content: Vec<ContentItem> = Vec::new();
+    
+    if status_changed {
+        content.push(ContentItem::InputText { text: current_status });
+    }
+    
+    if include_screenshot {
+        if let Some(image) = screenshot_content {
+            content.push(image);
+        }
     }
 
     if !content.is_empty() {
@@ -374,6 +432,10 @@ pub(crate) struct Session {
     /// Pending browser screenshots to include in the next model request
     #[allow(dead_code)]
     pending_browser_screenshots: Mutex<Vec<PathBuf>>,
+    /// Track the last system status to detect changes
+    last_system_status: Mutex<Option<String>>,
+    /// Track the last screenshot path and hash to detect changes
+    last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
 }
 
 impl Session {
@@ -491,6 +553,125 @@ impl Session {
         self.record_state_snapshot(items).await;
 
         self.state.lock().unwrap().history.record_items(items);
+    }
+
+    /// Clean up old screenshots and system status messages from conversation history
+    /// This is called when a new user message arrives to keep history manageable
+    async fn cleanup_old_status_items(&self) {
+        let mut state = self.state.lock().unwrap();
+        
+        // Get current history items
+        let current_items = state.history.contents();
+        
+        // Track various message types and their positions
+        let mut real_user_messages = Vec::new(); // Non-status user messages
+        let mut status_messages = Vec::new(); // Messages with screenshots or status
+        
+        for (idx, item) in current_items.iter().enumerate() {
+            match item {
+                ResponseItem::Message { role, content, .. } if role == "user" => {
+                    // Check message content
+                    let has_status = content.iter().any(|c| {
+                        if let ContentItem::InputText { text } = c {
+                            text.contains("== System Status ==") || 
+                            text.contains("Current working directory:") ||
+                            text.contains("Git branch:")
+                        } else {
+                            false
+                        }
+                    });
+                    
+                    let has_screenshot = content.iter().any(|c| {
+                        matches!(c, ContentItem::InputImage { .. })
+                    });
+                    
+                    let has_real_text = content.iter().any(|c| {
+                        if let ContentItem::InputText { text } = c {
+                            // Real user text doesn't contain system status markers
+                            !text.contains("== System Status ==") && 
+                            !text.contains("Current working directory:") &&
+                            !text.contains("Git branch:") &&
+                            !text.trim().is_empty()
+                        } else {
+                            false
+                        }
+                    });
+                    
+                    if has_real_text && !has_status && !has_screenshot {
+                        // This is a real user message
+                        real_user_messages.push(idx);
+                    } else if has_status || has_screenshot {
+                        // This is a status/screenshot message
+                        status_messages.push(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // Find screenshots to keep: last 2 that directly follow real user commands
+        let mut screenshots_to_keep = std::collections::HashSet::new();
+        
+        // Work backwards through real user messages
+        for &user_idx in real_user_messages.iter().rev().take(2) {
+            // Find the first status message after this user message
+            for &status_idx in status_messages.iter() {
+                if status_idx > user_idx {
+                    // Check if this status message contains a screenshot
+                    if let Some(ResponseItem::Message { content, .. }) = current_items.get(status_idx) {
+                        let has_screenshot = content.iter().any(|c| {
+                            matches!(c, ContentItem::InputImage { .. })
+                        });
+                        if has_screenshot {
+                            screenshots_to_keep.insert(status_idx);
+                            break; // Only keep one screenshot per user message
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Build the filtered history
+        let mut items_to_keep = Vec::new();
+        let mut removed_screenshots = 0;
+        let mut removed_status = 0;
+        
+        for (idx, item) in current_items.iter().enumerate() {
+            let should_keep = if status_messages.contains(&idx) {
+                // This is a status/screenshot message
+                if screenshots_to_keep.contains(&idx) {
+                    true // Keep this screenshot
+                } else {
+                    // Count what we're removing
+                    if let ResponseItem::Message { content, .. } = item {
+                        let has_screenshot = content.iter().any(|c| {
+                            matches!(c, ContentItem::InputImage { .. })
+                        });
+                        if has_screenshot {
+                            removed_screenshots += 1;
+                        } else {
+                            removed_status += 1;
+                        }
+                    }
+                    false // Remove this status/screenshot
+                }
+            } else {
+                true // Keep all non-status messages (real user messages, assistant messages, etc.)
+            };
+            
+            if should_keep {
+                items_to_keep.push(item.clone());
+            }
+        }
+        
+        // Replace the history with cleaned items
+        state.history = ConversationHistory::new();
+        state.history.record_items(&items_to_keep);
+        
+        if removed_screenshots > 0 || removed_status > 0 {
+            info!("Cleaned up history: removed {} old screenshots and {} status messages, kept {} recent screenshots", 
+                   removed_screenshots, removed_status, screenshots_to_keep.len());
+        }
     }
 
     async fn record_state_snapshot(&self, items: &[ResponseItem]) {
@@ -1150,6 +1331,8 @@ async fn submission_loop(
                     user_shell: default_shell,
                     show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                     pending_browser_screenshots: Mutex::new(Vec::new()),
+                    last_system_status: Mutex::new(None),
+                    last_screenshot_info: Mutex::new(None),
                 }));
 
                 // Patch restored state into the newly created session.
@@ -1189,6 +1372,10 @@ async fn submission_loop(
                         continue;
                     }
                 };
+
+                // Clean up old status items when new user input arrives
+                // This prevents token buildup from old screenshots/status messages
+                sess.cleanup_old_status_items().await;
 
                 // attempt to inject input into current agent
                 if let Err(items) = sess.inject_input(items) {
@@ -1576,8 +1763,9 @@ async fn run_turn(
 
     let mut retries = 0;
     loop {
-        // Build ephemeral items fresh for each attempt
-        let ephemeral_items = build_turn_ephemeral_items(sess).await;
+        // Build status items (screenshots, system status) fresh for each attempt
+        let status_items = build_turn_status_items(sess).await;
+        
         let prompt = Prompt {
             input: input.clone(),
             user_instructions: sess.user_instructions.clone(),
@@ -1589,11 +1777,18 @@ async fn run_turn(
                 approval_policy: sess.approval_policy,
                 sandbox_policy: sess.sandbox_policy.clone(),
             }),
-            ephemeral_items,
+            status_items, // Include status items with this request
         };
 
         match try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt).await {
-            Ok(output) => return Ok(output),
+            Ok(output) => {
+                // Record status items to conversation history after successful turn
+                // This ensures they persist for future requests in the right chronological order
+                if !prompt.status_items.is_empty() {
+                    sess.record_conversation_items(&prompt.status_items).await;
+                }
+                return Ok(output);
+            }
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
             Err(e @ (CodexErr::UsageLimitReached(_) | CodexErr::UsageNotIncluded)) => {
@@ -1828,8 +2023,9 @@ async fn run_compact_agent(
     let mut retries = 0;
 
     loop {
-        // Build ephemeral items fresh for each attempt
-        let ephemeral_items = build_turn_ephemeral_items(&sess).await;
+        // Build status items (screenshots, system status) fresh for each attempt
+        let status_items = build_turn_status_items(&sess).await;
+        
         let prompt = Prompt {
             input: turn_input.clone(),
             user_instructions: None,
@@ -1837,13 +2033,19 @@ async fn run_compact_agent(
             environment_context: None,
             tools: Vec::new(),
             base_instructions_override: Some(compact_instructions.clone()),
-            ephemeral_items,
+            status_items, // Include status items with this request
         };
         
         let attempt_result = drain_to_completed(&sess, &sub_id, &prompt).await;
 
         match attempt_result {
-            Ok(()) => break,
+            Ok(()) => {
+                // Record status items to conversation history after successful turn
+                if !prompt.status_items.is_empty() {
+                    sess.record_conversation_items(&prompt.status_items).await;
+                }
+                break;
+            }
             Err(CodexErr::Interrupted) => return,
             Err(e) => {
                 if retries < max_retries {
@@ -2049,6 +2251,7 @@ async fn handle_function_call(
         "browser_close" => handle_browser_close(sess, sub_id, call_id).await,
         "browser_status" => handle_browser_status(sess, sub_id, call_id).await,
         "browser_click" => handle_browser_click(sess, arguments, sub_id, call_id).await,
+        "browser_move" => handle_browser_move(sess, arguments, sub_id, call_id).await,
         "browser_type" => handle_browser_type(sess, arguments, sub_id, call_id).await,
         "browser_key" => handle_browser_key(sess, arguments, sub_id, call_id).await,
         "browser_javascript" => handle_browser_javascript(sess, arguments, sub_id, call_id).await,
@@ -3363,7 +3566,7 @@ async fn handle_browser_open(
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
                                 content: format!(
-                                    "Browser opened to: {}. Screenshots will be automatically attached to messages.",
+                                    "Browser opened to: {} [new page shown in screenshot]",
                                     url
                                 ),
                                 success: Some(true),
@@ -3518,7 +3721,6 @@ async fn handle_browser_click(
 ) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
-    let arguments_clone = arguments.clone();
     let call_id_clone = call_id.clone();
     
     execute_custom_tool(
@@ -3531,14 +3733,9 @@ async fn handle_browser_click(
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
             if let Some(browser_manager) = browser_manager {
-                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
-        match args {
-            Ok(json) => {
-                let x = json.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let y = json.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-
-                match browser_manager.click(x, y).await {
-                    Ok(_) => {
+                // No arguments needed - click at current position
+                match browser_manager.click_at_current().await {
+                    Ok((x, y)) => {
                         // Capture screenshot after clicking
                         if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
                         {
@@ -3548,7 +3745,7 @@ async fn handle_browser_click(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("Clicked at ({}, {})", x, y),
+                                content: format!("Clicked at current mouse position ({}, {}) [updated status shown in screenshot]", x, y),
                                 success: Some(true),
                             },
                         }
@@ -3561,15 +3758,6 @@ async fn handle_browser_click(
                         },
                     },
                 }
-            }
-            Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id: call_id_clone.clone(),
-                output: FunctionCallOutputPayload {
-                    content: format!("Failed to parse browser_click arguments: {}", e),
-                    success: Some(false),
-                },
-            },
-        }
     } else {
         ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
@@ -3580,6 +3768,99 @@ async fn handle_browser_click(
             },
         }
     }
+        },
+    )
+    .await
+}
+
+async fn handle_browser_move(
+    sess: &Session,
+    arguments: String,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_move".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        // Check if we have relative movement (dx, dy) or absolute (x, y)
+                        let has_dx = json.get("dx").is_some();
+                        let has_dy = json.get("dy").is_some();
+                        let has_x = json.get("x").is_some();
+                        let has_y = json.get("y").is_some();
+                        
+                        let result = if has_dx || has_dy {
+                            // Relative movement
+                            let dx = json.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            let dy = json.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            browser_manager.move_mouse_relative(dx, dy).await
+                        } else if has_x || has_y {
+                            // Absolute movement
+                            let x = json.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            let y = json.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            browser_manager.move_mouse(x, y).await.map(|_| (x, y))
+                        } else {
+                            // No parameters provided, just return current position
+                            browser_manager.get_cursor_position().await
+                        };
+                        
+                        match result {
+                            Ok((x, y)) => {
+                                // Capture screenshot after moving mouse
+                                if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
+                                {
+                                    add_pending_screenshot(sess_clone, screenshot_path, url);
+                                }
+                                
+                                ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone.clone(),
+                                    output: FunctionCallOutputPayload {
+                                        content: format!("Moved mouse position to ({}, {}) [updated mouse shown in screenshot]", x, y),
+                                        success: Some(true),
+                                    },
+                                }
+                            }
+                            Err(e) => ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone.clone(),
+                                output: FunctionCallOutputPayload {
+                                    content: format!("Failed to move mouse: {}", e),
+                                    success: Some(false),
+                                },
+                            },
+                        }
+                    }
+                    Err(e) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone.clone(),
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to parse browser_move arguments: {}", e),
+                            success: Some(false),
+                        },
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not initialized. Use browser_open to start the browser."
+                            .to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
         },
     )
     .await
@@ -3621,7 +3902,7 @@ async fn handle_browser_type(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("Typed: {}", text),
+                                content: format!("Typed: {} [updated page shown in screenshot]", text),
                                 success: Some(true),
                             },
                         }
@@ -3661,75 +3942,102 @@ async fn handle_browser_type(
 async fn handle_browser_key(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
-        match args {
-            Ok(json) => {
-                let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("");
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_key".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("");
 
-                match browser_manager.press_key(key).await {
-                    Ok(_) => {
-                        // Capture screenshot after pressing key
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
-                        {
-                            add_pending_screenshot(sess, screenshot_path, url);
-                        }
+                        match browser_manager.press_key(key).await {
+                            Ok(_) => {
+                                // Capture screenshot after pressing key
+                                if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
+                                {
+                                    add_pending_screenshot(sess_clone, screenshot_path, url);
+                                }
 
-                        ResponseInputItem::FunctionCallOutput {
-                            call_id,
-                            output: FunctionCallOutputPayload {
-                                content: format!("Pressed key: {}", key),
-                                success: Some(true),
+                                ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone.clone(),
+                                    output: FunctionCallOutputPayload {
+                                        content: format!("Pressed key: {} [updated page shown in screenshot]", key),
+                                        success: Some(true),
+                                    },
+                                }
+                            }
+                            Err(e) => ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone.clone(),
+                                output: FunctionCallOutputPayload {
+                                    content: format!("Failed to press key: {}", e),
+                                    success: Some(false),
+                                },
                             },
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            content: format!("Failed to press key: {}", e),
+                            content: format!("Failed to parse browser_key arguments: {}", e),
                             success: Some(false),
                         },
                     },
                 }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not initialized. Use browser_open to start the browser."
+                            .to_string(),
+                        success: Some(false),
+                    },
+                }
             }
-            Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
-                output: FunctionCallOutputPayload {
-                    content: format!("Failed to parse browser_key arguments: {}", e),
-                    success: Some(false),
-                },
-            },
-        }
-    } else {
-        ResponseInputItem::FunctionCallOutput {
-            call_id,
-            output: FunctionCallOutputPayload {
-                content: "Browser is not initialized. Use browser_open to start the browser."
-                    .to_string(),
-                success: Some(false),
-            },
-        }
-    }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_javascript(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
-        match args {
-            Ok(json) => {
-                let code = json.get("code").and_then(|v| v.as_str()).unwrap_or("");
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_javascript".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        let code = json.get("code").and_then(|v| v.as_str()).unwrap_or("");
 
-                match browser_manager.execute_javascript(code).await {
+                        match browser_manager.execute_javascript(code).await {
                     Ok(result) => {
                         // Log the JavaScript execution result
                         tracing::info!("JavaScript execution returned: {:?}", result);
@@ -3781,30 +4089,30 @@ async fn handle_browser_javascript(
                         tracing::info!("Returning to LLM: {}", formatted_result);
 
                         // Capture screenshot after executing JavaScript
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
                         {
-                            add_pending_screenshot(sess, screenshot_path, url);
+                            add_pending_screenshot(sess_clone, screenshot_path, url);
                         }
 
                         ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: formatted_result,
+                                content: format!("{} [updated page shown in screenshot]", formatted_result),
                                 success: Some(true),
                             },
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to execute JavaScript: {}", e),
                             success: Some(false),
                         },
                     },
-                }
+                } 
             }
             Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
                     content: format!("Failed to parse browser_javascript arguments: {}", e),
                     success: Some(false),
@@ -3813,7 +4121,7 @@ async fn handle_browser_javascript(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not initialized. Use browser_open to start the browser."
                     .to_string(),
@@ -3821,39 +4129,54 @@ async fn handle_browser_javascript(
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_scroll(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
-        match args {
-            Ok(json) => {
-                let dx = json.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let dy = json.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_scroll".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        let dx = json.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let dy = json.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-                match browser_manager.scroll_by(dx, dy).await {
+                        match browser_manager.scroll_by(dx, dy).await {
                     Ok(_) => {
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
                         {
-                            add_pending_screenshot(sess, screenshot_path, url);
+                            add_pending_screenshot(sess_clone, screenshot_path, url);
                         }
 
                         ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("Scrolled by ({}, {})", dx, dy),
+                                content: format!("Scrolled by ({}, {}) [scrolled page shown in screenshot]", dx, dy),
                                 success: Some(true),
                             },
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to scroll: {}", e),
                             success: Some(false),
@@ -3862,7 +4185,7 @@ async fn handle_browser_scroll(
                 }
             }
             Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
                     content: format!("Failed to parse browser_scroll arguments: {}", e),
                     success: Some(false),
@@ -3871,89 +4194,107 @@ async fn handle_browser_scroll(
         }
     } else {
         ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
                 success: Some(false),
             },
         }
     }
+        },
+    )
+    .await
 }
 
 async fn handle_browser_history(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let browser_manager = get_browser_manager_for_session(sess).await;
-    if let Some(browser_manager) = browser_manager {
-        let args: Result<Value, _> = serde_json::from_str(&arguments);
-        match args {
-            Ok(json) => {
-                let direction = json
-                    .get("direction")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_history".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        let direction = json
+                            .get("direction")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
-                if direction != "back" && direction != "forward" {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id,
-                        output: FunctionCallOutputPayload {
-                            content: format!(
-                                "Unsupported direction: {} (expected 'back' or 'forward')",
-                                direction
-                            ),
-                            success: Some(false),
-                        },
-                    };
-                }
-
-                let action_res = if direction == "back" {
-                    browser_manager.history_back().await
-                } else {
-                    browser_manager.history_forward().await
-                };
-
-                match action_res {
-                    Ok(_) => {
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess).await
-                        {
-                            add_pending_screenshot(sess, screenshot_path, url);
+                        if direction != "back" && direction != "forward" {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: format!(
+                                        "Unsupported direction: {} (expected 'back' or 'forward')",
+                                        direction
+                                    ),
+                                    success: Some(false),
+                                },
+                            };
                         }
 
-                        ResponseInputItem::FunctionCallOutput {
-                            call_id,
-                            output: FunctionCallOutputPayload {
-                                content: format!("History {} triggered", direction),
-                                success: Some(true),
+                        let action_res = if direction == "back" {
+                            browser_manager.history_back().await
+                        } else {
+                            browser_manager.history_forward().await
+                        };
+
+                        match action_res {
+                            Ok(_) => {
+                                if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
+                                {
+                                    add_pending_screenshot(sess_clone, screenshot_path, url);
+                                }
+
+                                ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone.clone(),
+                                    output: FunctionCallOutputPayload {
+                                        content: format!("History {} triggered [new page shown in screenshot]", direction),
+                                        success: Some(true),
+                                    },
+                                }
+                            }
+                            Err(e) => ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone.clone(),
+                                output: FunctionCallOutputPayload {
+                                    content: format!("Failed to navigate history: {}", e),
+                                    success: Some(false),
+                                },
                             },
                         }
                     }
                     Err(e) => ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
-                            content: format!("Failed to navigate history: {}", e),
+                            content: format!("Failed to parse browser_history arguments: {}", e),
                             success: Some(false),
                         },
                     },
                 }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                        success: Some(false),
+                    },
+                }
             }
-            Err(e) => ResponseInputItem::FunctionCallOutput {
-                call_id,
-                output: FunctionCallOutputPayload {
-                    content: format!("Failed to parse browser_history arguments: {}", e),
-                    success: Some(false),
-                },
-            },
-        }
-    } else {
-        ResponseInputItem::FunctionCallOutput {
-            call_id,
-            output: FunctionCallOutputPayload {
-                content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
-                success: Some(false),
-            },
-        }
-    }
+        },
+    )
+    .await
 }

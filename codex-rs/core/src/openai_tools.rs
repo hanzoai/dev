@@ -466,6 +466,7 @@ pub(crate) fn get_openai_tools(
     tools.push(create_browser_close_tool());
     tools.push(create_browser_status_tool());
     tools.push(create_browser_click_tool());
+    tools.push(create_browser_move_tool());
     tools.push(create_browser_type_tool());
     tools.push(create_browser_key_tool());
     tools.push(create_browser_javascript_tool());
@@ -908,27 +909,54 @@ fn create_browser_status_tool() -> OpenAiTool {
 }
 
 fn create_browser_click_tool() -> OpenAiTool {
+    let properties = BTreeMap::new();
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_click".to_string(),
+        description: "Clicks at the current mouse position in the browser window. Note: Use browser_move first to position the mouse at the desired coordinates.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_move_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(
         "x".to_string(),
         JsonSchema::Number {
-            description: Some("The X coordinate to click at".to_string()),
+            description: Some("The absolute X coordinate to move the mouse to (use with y)".to_string()),
         },
     );
     properties.insert(
         "y".to_string(),
         JsonSchema::Number {
-            description: Some("The Y coordinate to click at".to_string()),
+            description: Some("The absolute Y coordinate to move the mouse to (use with x)".to_string()),
+        },
+    );
+    properties.insert(
+        "dx".to_string(),
+        JsonSchema::Number {
+            description: Some("Relative (+/-) X movement in CSS pixels from current mouse position (use with dy)".to_string()),
+        },
+    );
+    properties.insert(
+        "dy".to_string(),
+        JsonSchema::Number {
+            description: Some("Relative (+/-) Y movement in CSS pixels from current mouse position (use with dx)".to_string()),
         },
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "browser_click".to_string(),
-        description: "Clicks at the specified coordinates in the browser window.".to_string(),
+        name: "browser_move".to_string(),
+        description: "Moves your mouse [shown as a blue cursor in your screenshots] to specified coordinates in the browser window (x,y) or by relative offset to your current mouse position (dx,dy). If the mouse is close to where it should be then dx,dy provides finer movement control.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
-            required: Some(vec!["x".to_string(), "y".to_string()]),
+            required: Some(vec![]),
             additional_properties: Some(false),
         },
     })

@@ -191,6 +191,85 @@ impl BrowserManager {
         }
     }
 
+    /// Try to connect to Chrome via CDP only - no fallback to internal browser
+    pub async fn connect_to_chrome_only(&self) -> Result<()> {
+        let mut browser_guard = self.browser.lock().await;
+        if browser_guard.is_some() {
+            return Ok(());
+        }
+
+        let config = self.config.read().await.clone();
+
+        // Only try CDP connection, no fallback
+        if let Some(port) = config.connect_port {
+            let actual_port = if port == 0 {
+                info!("Auto-scanning for Chrome debug ports...");
+                let start = tokio::time::Instant::now();
+                let result = scan_for_chrome_debug_port().await.unwrap_or(0);
+                info!(
+                    "Auto-scan completed in {:?}, found port: {}",
+                    start.elapsed(),
+                    result
+                );
+                result
+            } else {
+                info!("Using specified Chrome debug port: {}", port);
+                port
+            };
+
+            if actual_port > 0 {
+                info!(
+                    "Discovering Chrome WebSocket URL via port {}...",
+                    actual_port
+                );
+                let discover_start = tokio::time::Instant::now();
+                match discover_ws_via_port(actual_port).await {
+                    Ok(ws) => {
+                        info!(
+                            "WebSocket URL discovered in {:?}: {}",
+                            discover_start.elapsed(),
+                            ws
+                        );
+
+                        info!("Connecting to Chrome via WebSocket...");
+                        let connect_start = tokio::time::Instant::now();
+                        let (browser, mut handler) = Browser::connect(ws).await?;
+                        info!(
+                            "Connected to Chrome in {:?}",
+                            connect_start.elapsed()
+                        );
+
+                        let task =
+                            tokio::spawn(
+                                async move { while let Some(_evt) = handler.next().await {} },
+                            );
+                        *self.event_task.lock().await = Some(task);
+                        *browser_guard = Some(browser);
+                        *self.cleanup_profile_on_drop.lock().await = false;
+
+                        self.start_idle_monitor().await;
+                        self.update_activity().await;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        return Err(BrowserError::CdpError(format!(
+                            "Failed to connect to Chrome on port {}: {}",
+                            actual_port, e
+                        )));
+                    }
+                }
+            } else {
+                return Err(BrowserError::CdpError(
+                    "No Chrome instance found with debug port".to_string()
+                ));
+            }
+        } else {
+            return Err(BrowserError::CdpError(
+                "No CDP port configured for Chrome connection".to_string()
+            ));
+        }
+    }
+
     pub async fn start(&self) -> Result<()> {
         let mut browser_guard = self.browser.lock().await;
         if browser_guard.is_some() {
@@ -310,7 +389,23 @@ impl BrowserManager {
         builder = builder
             .arg("--disable-blink-features=AutomationControlled")
             .arg("--no-first-run")
-            .arg("--no-default-browser-check");
+            .arg("--no-default-browser-check")
+            .arg("--disable-component-extensions-with-background-pages")
+            .arg("--disable-background-networking")
+            .arg("--silent-debugger-extension-api")
+            .arg("--remote-allow-origins=*")
+            .arg("--disable-features=ChromeWhatsNewUI,TriggerFirstRunUI")
+            // Disable timeout for slow networks/pages
+            .arg("--disable-hang-monitor")
+            .arg("--disable-background-timer-throttling")
+            // Redirect Chrome logging to a file to keep terminal clean
+            .arg("--enable-logging")
+            .arg("--log-level=1")  // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
+            .arg(format!("--log-file={}/coder-chrome.log", std::env::temp_dir().display()))
+            // Suppress console output
+            .arg("--silent-launch")
+            // Set a longer timeout for CDP requests (60 seconds instead of default 30)
+            .request_timeout(Duration::from_secs(60));
 
         let browser_config = builder
             .build()
@@ -395,7 +490,26 @@ impl BrowserManager {
 
         let mut page_guard = self.page.lock().await;
         if let Some(page) = page_guard.as_ref() {
-            return Ok(Arc::clone(page));
+            // Verify the page is still responsive
+            let check_result = tokio::time::timeout(
+                Duration::from_secs(2),
+                page.get_current_url()
+            ).await;
+            
+            match check_result {
+                Ok(Ok(_)) => {
+                    // Page is responsive
+                    return Ok(Arc::clone(page));
+                }
+                Ok(Err(e)) => {
+                    warn!("Existing page returned error: {}, will create new page", e);
+                    *page_guard = None;
+                }
+                Err(_) => {
+                    warn!("Existing page timed out, likely disconnected. Will create new page");
+                    *page_guard = None;
+                }
+            }
         }
 
         let browser_guard = self.browser.lock().await;
@@ -484,6 +598,13 @@ impl BrowserManager {
 
         let page = Arc::new(Page::new(cdp_page, config.clone()));
         *page_guard = Some(Arc::clone(&page));
+
+        // Inject the virtual cursor when page is created
+        debug!("Injecting virtual cursor for new page");
+        if let Err(e) = page.inject_virtual_cursor().await {
+            warn!("Failed to inject virtual cursor on page creation: {}", e);
+            // Continue even if cursor injection fails
+        }
 
         // Start navigation monitoring for this page
         self.start_navigation_monitor(Arc::clone(&page)).await;
@@ -647,11 +768,36 @@ impl BrowserManager {
     }
 
     async fn ensure_browser(&self) -> Result<()> {
-        let browser_guard = self.browser.lock().await;
-        if browser_guard.is_none() {
-            drop(browser_guard);
-            self.start().await?;
+        let mut browser_guard = self.browser.lock().await;
+        
+        // Check if we have a browser instance
+        if let Some(browser) = browser_guard.as_ref() {
+            // Try to verify it's still connected with a simple operation
+            let check_result = tokio::time::timeout(
+                Duration::from_secs(2),
+                browser.version()
+            ).await;
+            
+            match check_result {
+                Ok(Ok(_)) => {
+                    // Browser is responsive
+                    return Ok(());
+                }
+                Ok(Err(e)) => {
+                    warn!("Browser check failed: {}, will restart", e);
+                    *browser_guard = None;
+                }
+                Err(_) => {
+                    warn!("Browser check timed out, likely disconnected. Will restart");
+                    *browser_guard = None;
+                }
+            }
         }
+        
+        // Need to start or restart the browser
+        drop(browser_guard);
+        info!("Starting/restarting browser connection...");
+        self.start().await?;
         Ok(())
     }
 
@@ -853,14 +999,37 @@ impl BrowserManager {
             crate::page::ScreenshotMode::Viewport
         };
 
-        // Get current URL
-        let current_url = page
-            .get_current_url()
-            .await
-            .unwrap_or_else(|_| "about:blank".to_string());
+        // Get current URL with timeout
+        let current_url = match tokio::time::timeout(
+            Duration::from_secs(3),
+            page.get_current_url()
+        ).await {
+            Ok(Ok(url)) => url,
+            Ok(Err(_)) | Err(_) => {
+                warn!("Failed to get current URL, using default");
+                "about:blank".to_string()
+            }
+        };
 
-        // Capture screenshots
-        let screenshots = page.screenshot(mode).await?;
+        // Capture screenshots with timeout
+        let screenshot_result = tokio::time::timeout(
+            Duration::from_secs(15), // Allow up to 15 seconds for screenshot
+            page.screenshot(mode)
+        ).await;
+        
+        let screenshots = match screenshot_result {
+            Ok(Ok(shots)) => shots,
+            Ok(Err(e)) => {
+                return Err(BrowserError::ScreenshotError(
+                    format!("Screenshot capture failed: {}", e)
+                ));
+            }
+            Err(_) => {
+                return Err(BrowserError::ScreenshotError(
+                    "Screenshot capture timed out after 15 seconds".to_string()
+                ));
+            }
+        };
 
         // Store screenshots and get paths
         let mut paths = Vec::new();
@@ -886,10 +1055,28 @@ impl BrowserManager {
         self.stop().await
     }
 
+    /// Move the mouse to the specified coordinates
+    pub async fn move_mouse(&self, x: f64, y: f64) -> Result<()> {
+        let page = self.get_or_create_page().await?;
+        page.move_mouse(x, y).await
+    }
+    
+    /// Move the mouse by relative offset from current position
+    pub async fn move_mouse_relative(&self, dx: f64, dy: f64) -> Result<(f64, f64)> {
+        let page = self.get_or_create_page().await?;
+        page.move_mouse_relative(dx, dy).await
+    }
+    
     /// Click at the specified coordinates
     pub async fn click(&self, x: f64, y: f64) -> Result<()> {
         let page = self.get_or_create_page().await?;
         page.click(x, y).await
+    }
+    
+    /// Click at the current mouse position
+    pub async fn click_at_current(&self) -> Result<(f64, f64)> {
+        let page = self.get_or_create_page().await?;
+        page.click_at_current().await
     }
 
     /// Type text into the currently focused element
@@ -926,6 +1113,18 @@ impl BrowserManager {
     pub async fn history_forward(&self) -> Result<()> {
         let page = self.get_or_create_page().await?;
         page.go_forward().await
+    }
+
+    /// Get the current cursor position
+    pub async fn get_cursor_position(&self) -> Result<(f64, f64)> {
+        let page = self.get_or_create_page().await?;
+        page.get_cursor_position().await
+    }
+
+    /// Get the current viewport dimensions
+    pub async fn get_viewport_size(&self) -> (u32, u32) {
+        let config = self.config.read().await;
+        (config.viewport.width, config.viewport.height)
     }
 
     /// Set a callback to be called when navigation occurs

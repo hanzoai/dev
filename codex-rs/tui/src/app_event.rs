@@ -7,6 +7,7 @@ use crossterm::event::MouseEvent;
 use ratatui::text::Line;
 
 use crate::app::ChatWidgetArgs;
+use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 
 #[allow(clippy::large_enum_variant)]
@@ -68,11 +69,19 @@ pub(crate) enum AppEvent {
 
     InsertHistory(Vec<Line<'static>>),
 
+    #[allow(dead_code)]
     StartCommitAnimation,
+    #[allow(dead_code)]
     StopCommitAnimation,
     CommitTick,
 
     /// Onboarding: result of login_with_chatgpt.
     OnboardingAuthComplete(Result<(), String>),
     OnboardingComplete(ChatWidgetArgs),
+    
+    /// Show Chrome launch options dialog
+    ShowChromeOptions(Option<u16>),
+    
+    /// Chrome launch option selected by user
+    ChromeLaunchOptionSelected(ChromeLaunchOption, Option<u16>),
 }

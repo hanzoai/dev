@@ -1,11 +1,16 @@
-# JustEvery Coder
+# JustEvery_ Coder
+
+&ensp;
 
 <p align="center">
   <img src="docs/logo.png" alt="Coder Logo" width="400">
 </p>
 
+&ensp;
+
 **Coder** is a fast, local coding agent for your terminal. It's a community-driven fork  of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control - all while staying compatible with upstream.
 
+&ensp;
 ## Why Coder
 
   - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
@@ -16,6 +21,7 @@
   - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
   - 🔁 **Backwards compatible** – Supports `~/.codex/*` or default `~/.coder/*`
 
+&ensp;
 ## Quickstart
 
 ### Install Coder
@@ -37,15 +43,11 @@ coder
 Coder supports orchestrating other AI CLI tools. Install these and config to use alongside coder.
 
 ```bash
-npm install -g @anthropic-ai/claude-code
-claude
 
-npm install -g @google/gemini-cli
-gemini
+npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just checking you're working! Let me know how I can exit." && gemini -i "Just checking you're working! Let me know how I can exit."
 ```
 
-
-
+&ensp;
 ## Commands
 
 ### Browser
@@ -76,7 +78,7 @@ gemini
 
 ### General
 ```bash
-# Try a new theme
+# Try a new theme!
 /themes
 
 # Change reasoning level
@@ -99,9 +101,11 @@ Options:
   --oss                Use local open source models
   --sandbox <mode>     Set sandbox level (read-only, workspace-write, etc.)
   --help              Show help information
+  --debug             Log API requests and responses to file
   --version           Show version number
 ```
 
+&ensp;
 ## Memory & project docs
 
 Coder can remember context across sessions:
@@ -123,6 +127,7 @@ This is a React TypeScript application with:
 2. **Session memory**: Coder maintains conversation history
 3. **Codebase analysis**: Automatically understands project structure
 
+&ensp;
 ## Non-interactive / CI mode
 
 For automation and CI/CD:
@@ -138,6 +143,7 @@ coder --read-only "analyze code quality and generate report"
 coder --config output_format=json "list all TODO comments"
 ```
 
+&ensp;
 ## Model Context Protocol (MCP)
 
 Coder supports MCP for extended capabilities:
@@ -156,6 +162,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
 ```
 
+&ensp;
 ## Configuration
 
 Main config file: `~/.codex/config.toml`
@@ -175,8 +182,8 @@ sandbox_mode = "workspace_write"
 name = "light-photon"
 
 # Add config for specific models
-[profiles.o3]
-model = "o3"
+[profiles.gpt-5]
+model = "gpt-5"
 model_provider = "openai"
 approval_policy = "never"
 model_reasoning_effort = "high"
@@ -189,20 +196,22 @@ model_reasoning_summary = "detailed"
 - `OPENAI_API_KEY`: Use API key instead of ChatGPT auth
 - `OPENAI_BASE_URL`: Use alternative API endpoints
 
+&ensp;
 ## FAQ
 
-**Q: How is this different from the original?**
-A: This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
+**How is this different from the original?**
+> This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
 
-**Q: Can I use my existing Codex configuration?**
-A: Yes! This fork is fully backward compatible with existing `~/.codex/` configurations.
+**Can I use my existing Codex configuration?**
+> Yes! This fork is fully backward compatible with existing `~/.codex/` configurations.
 
-**Q: Does this work with ChatGPT Plus?**
-A: Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
+**Does this work with ChatGPT Plus?**
+> Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
 
-**Q: Is my data secure?**
-A: Yes. Authentication stays on your machine, and we don't proxy your credentials or conversations.
+**Is my data secure?**
+> Yes. Authentication stays on your machine, and we don't proxy your credentials or conversations.
 
+&ensp;
 ## Contributing
 
 We welcome contributions! This fork maintains compatibility with upstream while adding community-requested features.
@@ -231,29 +240,20 @@ npm install
 5. Build successfully: `./build-fast.sh`
 6. Submit a pull request
 
-## Security & responsible AI
 
-- **Sandbox protection**: Commands run in restricted environments
-- **Approval prompts**: Review before execution of significant changes
-- **No credential access**: Coder can't access your passwords or API keys
-- **Local processing**: No data sent to third parties beyond chosen AI provider
-
+&ensp;
 ## Legal & Use
 
 ### License & attribution
-- This project is a community fork of [`openai/codex`] under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
+- This project is a community fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
 - **Coder** is **not** affiliated with, sponsored by, or endorsed by OpenAI.
 
 ### Your responsibilities
-Using AI services through Coder means you agree to **their Terms and policies**. In particular:
+Using OpenAI, Anthropic or Google services through Coder means you agree to **their Terms and policies**. In particular:
 - **Don't** programmatically scrape/extract content outside intended flows.
 - **Don't** bypass or interfere with rate limits, quotas, or safety mitigations.
 - Use your **own** account; don't share or rotate accounts to evade limits.
 - If you configure other model providers, you're responsible for their terms.
-
-### Branding
-- Third-party model names and trademarks belong to their respective owners. Don't use model names in your app/product name, domain, or logo.
-- It's fine to **describe compatibility** truthfully (e.g., "Sign in with ChatGPT" or "uses the API"). Avoid implying partnership or endorsement.
 
 ### Privacy
 - Your auth file lives at `~/.codex/auth.json`.
@@ -262,12 +262,13 @@ Using AI services through Coder means you agree to **their Terms and policies**.
 ### Subject to change
 AI providers can change eligibility, limits, models, or authentication flows. Coder supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
 
+&ensp;
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) file for details.
 
 This project is a community fork of the original Codex CLI. We maintain compatibility while adding enhanced features requested by the developer community.
 
+&ensp;
 ---
-
 **Need help?** Open an issue on [GitHub](https://github.com/just-every/coder/issues) or check our documentation.
