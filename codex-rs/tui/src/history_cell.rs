@@ -65,11 +65,18 @@ pub(crate) trait HistoryCell {
     
     fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Check if this cell has custom rendering
-        if self.has_custom_render() && skip_rows == 0 {
-            // Use custom render for cells that need it (like animations)
-            self.custom_render(area, buf);
+        if self.has_custom_render() {
+            tracing::info!("render_with_skip: has_custom_render=true, skip_rows={}, area={:?}", skip_rows, area);
+            if skip_rows == 0 {
+                tracing::info!(">>> CALLING custom_render, area={:?}", area);
+                // Use custom render for cells that need it (like animations)
+                self.custom_render(area, buf);
+            } else {
+                tracing::warn!("!!! SKIPPING custom render due to skip_rows={} > 0", skip_rows);
+            }
         } else {
             // Default: render using display_lines
+            tracing::trace!("render_with_skip: using display_lines (no custom render)");
             let lines = self.display_lines();
             
             // Skip the specified number of rows
@@ -102,6 +109,21 @@ pub(crate) trait HistoryCell {
     fn is_animating(&self) -> bool {
         false // Default: most cells don't animate
     }
+    
+    /// Returns true if this is a loading cell that should be removed when streaming starts
+    fn is_loading_cell(&self) -> bool {
+        false // Default: most cells are not loading cells
+    }
+    
+    /// Trigger fade-out animation (for AnimatedWelcomeCell)
+    fn trigger_fade(&self) {
+        // Default: do nothing (only AnimatedWelcomeCell implements this)
+    }
+    
+    /// Check if this cell should be removed (e.g., fully faded out)
+    fn should_remove(&self) -> bool {
+        false // Default: most cells should not be removed
+    }
 }
 
 // Allow Box<dyn HistoryCell> to implement HistoryCell
@@ -112,6 +134,34 @@ impl HistoryCell for Box<dyn HistoryCell> {
     
     fn desired_height(&self, width: u16) -> u16 {
         self.as_ref().desired_height(width)
+    }
+    
+    fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        self.as_ref().render_with_skip(area, buf, skip_rows)
+    }
+    
+    fn has_custom_render(&self) -> bool {
+        self.as_ref().has_custom_render()
+    }
+    
+    fn custom_render(&self, area: Rect, buf: &mut Buffer) {
+        self.as_ref().custom_render(area, buf)
+    }
+    
+    fn is_animating(&self) -> bool {
+        self.as_ref().is_animating()
+    }
+    
+    fn is_loading_cell(&self) -> bool {
+        self.as_ref().is_loading_cell()
+    }
+    
+    fn trigger_fade(&self) {
+        self.as_ref().trigger_fade()
+    }
+    
+    fn should_remove(&self) -> bool {
+        self.as_ref().should_remove()
     }
 }
 
@@ -170,11 +220,17 @@ impl HistoryCell for AnimatedWelcomeCell {
         ]
     }
     
+    fn desired_height(&self, _width: u16) -> u16 {
+        // With scale of 6, we need 7 * 6 = 42 rows
+        42
+    }
+    
     fn has_custom_render(&self) -> bool {
         true // AnimatedWelcomeCell uses custom rendering for the glitch animation
     }
     
     fn custom_render(&self, area: Rect, buf: &mut Buffer) {
+        tracing::debug!("AnimatedWelcomeCell::custom_render called, area: {:?}", area);
         let fade_duration = std::time::Duration::from_millis(800);
         
         // Check if we're in fade-out phase
@@ -185,6 +241,7 @@ impl HistoryCell for AnimatedWelcomeCell {
                 let fade_progress = fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
                 let alpha = 1.0 - fade_progress; // From 1.0 to 0.0
                 
+                tracing::debug!("Rendering fade-out animation, alpha: {}", alpha);
                 crate::glitch_animation::render_intro_animation_with_alpha(
                     area, buf, 1.0, // Full animation progress (static state)
                     alpha,
@@ -193,6 +250,7 @@ impl HistoryCell for AnimatedWelcomeCell {
                 // Fade-out complete - mark as faded out
                 self.faded_out.set(true);
                 // Don't render anything (invisible)
+                tracing::debug!("Fade-out complete, not rendering");
             }
         } else {
             // Normal animation phase
@@ -204,12 +262,14 @@ impl HistoryCell for AnimatedWelcomeCell {
                 let progress = elapsed.as_secs_f32() / animation_duration.as_secs_f32();
                 
                 // Render the animation
+                tracing::debug!("Rendering animation, progress: {}", progress);
                 crate::glitch_animation::render_intro_animation(area, buf, progress);
             } else {
                 // Animation complete - mark it and render final static state
                 self.completed.set(true);
                 
                 // Render the final static state
+                tracing::debug!("Animation complete, rendering static state");
                 crate::glitch_animation::render_intro_animation(
                     area, buf, 1.0, // Full progress = static final state
                 );
@@ -243,6 +303,55 @@ impl HistoryCell for AnimatedWelcomeCell {
         }
         
         false
+    }
+    
+    fn trigger_fade(&self) {
+        // Only trigger fade if not already fading or faded
+        if self.fade_start.get().is_none() {
+            tracing::info!("Triggering fade-out animation for AnimatedWelcomeCell");
+            self.fade_start.set(Some(Instant::now()));
+        }
+    }
+    
+    fn should_remove(&self) -> bool {
+        // Remove only after fade-out is complete
+        self.faded_out.get()
+    }
+}
+
+// ==================== LoadingCell ====================
+
+pub(crate) struct LoadingCell {
+    #[allow(dead_code)] // May be used for displaying status alongside animation
+    pub(crate) message: String,
+}
+
+impl HistoryCell for LoadingCell {
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("⟳ ", Style::default().fg(Color::Cyan)),
+                Span::from("Loading..."),
+            ]),
+            Line::from(""),
+        ]
+    }
+    
+    fn desired_height(&self, _width: u16) -> u16 {
+        3 // Just 3 lines for the loading message
+    }
+    
+    fn has_custom_render(&self) -> bool {
+        false // No custom rendering needed, just use display_lines
+    }
+    
+    fn is_animating(&self) -> bool {
+        false // Not animating - no need for constant redraws
+    }
+    
+    fn is_loading_cell(&self) -> bool {
+        true // This is a loading cell
     }
 }
 
@@ -455,6 +564,12 @@ pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
         completed: std::cell::Cell::new(false),
         fade_start: std::cell::Cell::new(None),
         faded_out: std::cell::Cell::new(false),
+    }
+}
+
+pub(crate) fn new_loading_cell(message: String) -> LoadingCell {
+    LoadingCell {
+        message,
     }
 }
 

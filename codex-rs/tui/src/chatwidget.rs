@@ -189,6 +189,13 @@ impl ChatWidget<'_> {
         
         // Begin stream if not already active
         if !self.stream.is_write_cycle_active() {
+            // Remove the loading cell if present when streaming starts
+            if let Some(last_cell) = self.history_cells.last() {
+                if last_cell.is_loading_cell() {
+                    self.history_cells.pop();
+                }
+            }
+            
             self.stream.begin(kind, &sink);
         }
         
@@ -214,6 +221,9 @@ impl ChatWidget<'_> {
 
     /// Mark that the widget needs to be redrawn
     fn mark_needs_redraw(&mut self) {
+        // Clean up fully faded cells before redraw
+        self.history_cells.retain(|cell| !cell.should_remove());
+        
         // Send a redraw event to trigger UI update
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
@@ -602,11 +612,16 @@ impl ChatWidget<'_> {
 
         // Add initial animated welcome message to history
         let mut history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
-        history_cells.push(Box::new(history_cell::new_animated_welcome()));
+        let welcome_cell = Box::new(history_cell::new_animated_welcome());
+        tracing::info!("Adding AnimatedWelcomeCell to history");
+        tracing::info!("AnimatedWelcomeCell is_animating: {}", welcome_cell.is_animating());
+        tracing::info!("AnimatedWelcomeCell has_custom_render: {}", welcome_cell.has_custom_render());
+        tracing::info!("AnimatedWelcomeCell desired_height: {}", welcome_cell.desired_height(80));
+        history_cells.push(welcome_cell);
 
         // Initialize image protocol for rendering screenshots
 
-        Self {
+        let new_widget = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
             bottom_pane: BottomPane::new(BottomPaneParams {
@@ -649,9 +664,22 @@ impl ChatWidget<'_> {
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
             interrupts: interrupts::InterruptManager::new(),
-        }
+        };
+        
+        // Note: Initial redraw needs to be triggered after widget is added to app_state
+        tracing::info!("AnimatedWelcomeCell ready, needs initial redraw after app initialization");
+        
+        new_widget
     }
 
+    /// Check if there are any animations and trigger redraw if needed
+    pub fn check_for_initial_animations(&mut self) {
+        if self.history_cells.iter().any(|cell| cell.is_animating()) {
+            tracing::info!("Initial animation detected, triggering redraw");
+            self.mark_needs_redraw();
+        }
+    }
+    
     /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
     fn format_model_name(&self, model_name: &str) -> String {
         if model_name.to_lowercase().starts_with("gpt-") {
@@ -808,6 +836,13 @@ impl ChatWidget<'_> {
 
         // Store in memory for local rendering
         self.history_cells.push(Box::new(cell));
+        
+        // Log animation cells
+        let animation_count = self.history_cells.iter().filter(|c| c.is_animating()).count();
+        if animation_count > 0 {
+            tracing::info!("History has {} animating cells out of {} total", animation_count, self.history_cells.len());
+        }
+        
         // Auto-follow if we're at or near the bottom (preserve position if scrolled up)
         self.autoscroll_if_near_bottom();
         // If user has scrolled up (scroll_offset > 0), don't change their position
@@ -1068,6 +1103,25 @@ impl ChatWidget<'_> {
         }
 
         if !original_text.is_empty() {
+            // Check if this is the first user prompt to trigger fade-out animation
+            let has_existing_user_prompts = self.history_cells.iter().any(|cell| {
+                // Check if it's a user prompt by looking at display lines
+                // This is a bit indirect but works with the trait-based system
+                let lines = cell.display_lines();
+                !lines.is_empty() && lines[0].spans.iter().any(|span| 
+                    span.content == "user" || span.content.contains("user")
+                )
+            });
+            
+            if !has_existing_user_prompts {
+                // This is the first user prompt - trigger fade-out on AnimatedWelcomeCell
+                tracing::info!("First user message detected - triggering welcome animation fade");
+                for cell in &self.history_cells {
+                    // Trigger fade on the AnimatedWelcomeCell
+                    cell.trigger_fade();
+                }
+            }
+            
             self.add_to_history(history_cell::new_user_prompt(original_text.clone()));
         }
     }
@@ -1174,6 +1228,10 @@ impl ChatWidget<'_> {
                 self.bottom_pane.clear_ctrl_c_quit_hint();
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane.update_status_text("waiting for model".to_string());
+                
+                // Add loading animation to history
+                self.add_to_history(history_cell::new_loading_cell("waiting for model".to_string()));
+                
                 self.mark_needs_redraw();
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: _ }) => {
@@ -2784,6 +2842,32 @@ impl ChatWidget<'_> {
         );
     }
 
+    /// Clear the conversation and start fresh with a new welcome animation
+    pub(crate) fn new_conversation(&mut self, enhanced_keys_supported: bool) {
+        // Clear all history cells
+        self.history_cells.clear();
+        
+        // Reset various state
+        self.active_exec_cell = None;
+        self.clear_token_usage();
+        
+        // Add a new animated welcome cell
+        let welcome_cell = Box::new(history_cell::new_animated_welcome());
+        self.history_cells.push(welcome_cell);
+        
+        // Reset the bottom pane with a new composer
+        // (This effectively clears the text input)
+        self.bottom_pane = BottomPane::new(BottomPaneParams {
+            app_event_tx: self.app_event_tx.clone(),
+            has_input_focus: true,
+            enhanced_keys_supported,
+            using_chatgpt_auth: self.config.using_chatgpt_auth,
+        });
+        
+        // Request redraw for the new animation
+        self.mark_needs_redraw();
+    }
+
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let layout_areas = self.layout_areas(area);
         let bottom_pane_area = if layout_areas.len() == 4 {
@@ -3488,7 +3572,18 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut all_content: Vec<&dyn HistoryCell> = Vec::new();
 
         // Add all history cells
-        for cell in &self.history_cells {
+        tracing::debug!("=== RENDER START: {} history cells ===", self.history_cells.len());
+        for (idx, cell) in self.history_cells.iter().enumerate() {
+            let is_animating = cell.is_animating();
+            let has_custom = cell.has_custom_render();
+            let height = cell.desired_height(content_area.width);
+            
+            if is_animating || has_custom {
+                tracing::info!(
+                    "Cell[{}]: animating={}, custom_render={}, height={}",
+                    idx, is_animating, has_custom, height
+                );
+            }
             all_content.push(cell);
         }
 
@@ -3535,7 +3630,10 @@ impl WidgetRef for &ChatWidget<'_> {
         let has_active_animation = self.history_cells.iter().any(|cell| cell.is_animating());
 
         if has_active_animation {
+            tracing::debug!("Active animation detected, requesting redraw");
             self.app_event_tx.send(AppEvent::RequestRedraw);
+        } else {
+            tracing::trace!("No active animations, total cells: {}", self.history_cells.len());
         }
 
         // Calculate scroll position and vertical alignment
@@ -3601,6 +3699,23 @@ impl WidgetRef for &ChatWidget<'_> {
 
                 // Render only the visible window of the item using vertical skip
                 let skip_rows = skip_top;
+                
+                // Log all cells being rendered
+                let is_animating = item.is_animating();
+                let has_custom = item.has_custom_render();
+                
+                tracing::debug!(
+                    "RENDER Cell[{}]: area={:?}, skip_rows={}, animating={}, custom={}",
+                    idx, item_area, skip_rows, is_animating, has_custom
+                );
+                
+                if is_animating || has_custom {
+                    tracing::info!(
+                        ">>> RENDERING ANIMATION Cell[{}]: area={:?}, skip_rows={}",
+                        idx, item_area, skip_rows
+                    );
+                }
+                
                 item.render_with_skip(item_area, buf, skip_rows);
                 screen_y += visible_height;
             }

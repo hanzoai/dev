@@ -5,6 +5,7 @@ use ratatui::widgets::Widget;
 
 // Render the outline-fill animation
 pub fn render_intro_animation(area: Rect, buf: &mut Buffer, t: f32) {
+    tracing::info!("render_intro_animation called: area={:?}, t={}", area, t);
     render_intro_outline_fill(area, buf, t)
 }
 
@@ -15,9 +16,12 @@ pub fn render_intro_animation_with_alpha(area: Rect, buf: &mut Buffer, t: f32, a
 
 // Outline fill animation - inline, no borders
 pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
+    tracing::info!("render_intro_outline_fill: area={:?}, checking size...", area);
     if area.width < 40 || area.height < 10 {
+        tracing::warn!("!!! Area too small for animation: {}x{} (need 40x10)", area.width, area.height);
         return;
     }
+    tracing::info!("Area size OK, proceeding with animation render");
 
     let t = t.clamp(0.0, 1.0);
     let outline_p = smoothstep(0.00, 0.60, t); // outline draws L->R
@@ -27,10 +31,11 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
     let frame = (t * 60.0) as u32;
 
     // Build scaled mask + border map
+    // Don't reduce the area size - use full available space
     let (scale, mask, w, h) = scaled_mask(
         "CODER",
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(2),
+        area.width,
+        area.height,
     );
     let border = compute_border(&mask);
 
@@ -59,6 +64,8 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
     Paragraph::new(lines)
         .alignment(Alignment::Left)
         .render(r, buf);
+    
+    tracing::info!("✓ Animation rendered successfully at {:?}", r);
 }
 
 // Outline fill animation with alpha blending - inline, no borders
@@ -76,10 +83,11 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
     let frame = (t * 60.0) as u32;
 
     // Build scaled mask + border map
+    // Don't reduce the area size - use full available space
     let (scale, mask, w, h) = scaled_mask(
         "CODER",
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(2),
+        area.width,
+        area.height,
     );
     let border = compute_border(&mask);
 
@@ -109,6 +117,8 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
     Paragraph::new(lines)
         .alignment(Alignment::Left)
         .render(r, buf);
+    
+    tracing::info!("✓ Animation rendered successfully at {:?}", r);
 }
 
 /* ---------------- outline fill renderer ---------------- */
@@ -346,7 +356,9 @@ fn scaled_mask(word: &str, max_w: u16, max_h: u16) -> (usize, Vec<Vec<bool>>, us
     let letters: Vec<[&'static str; 7]> = word.chars().map(glyph_5x7).collect();
     let cols = letters.len() * w + (letters.len().saturating_sub(1)) * gap;
 
-    let mut scale = 16usize;
+    // Start with a more reasonable scale - 6 gives us 42 rows height which looks good
+    // This is about 60-70% of the previous size (was 16, now 6)
+    let mut scale = 6usize;
     while scale > 1 && (cols * scale > max_w as usize || rows * scale > max_h as usize) {
         scale -= 1;
     }
