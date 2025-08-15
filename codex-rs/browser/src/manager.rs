@@ -1083,6 +1083,18 @@ impl BrowserManager {
         let page = self.get_or_create_page().await?;
         page.click_at_current().await
     }
+    
+    /// Perform mouse down at the current position
+    pub async fn mouse_down_at_current(&self) -> Result<(f64, f64)> {
+        let page = self.get_or_create_page().await?;
+        page.mouse_down_at_current().await
+    }
+    
+    /// Perform mouse up at the current position
+    pub async fn mouse_up_at_current(&self) -> Result<(f64, f64)> {
+        let page = self.get_or_create_page().await?;
+        page.mouse_up_at_current().await
+    }
 
     /// Type text into the currently focused element
     pub async fn type_text(&self, text: &str) -> Result<()> {
