@@ -264,7 +264,10 @@ impl App<'_> {
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
                 AppEvent::CommitTick => {
-                    // CommitTick handling removed - no longer needed
+                    // Advance streaming animation: commit at most one queued line
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_commit_tick();
+                    }
                 }
                 AppEvent::KeyEvent(key_event) => {
                     match key_event {
@@ -319,25 +322,34 @@ impl App<'_> {
                             // No-op on non-Unix platforms.
                         }
                         KeyEvent {
+                            code: KeyCode::Char('r') | KeyCode::Char('t'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press,
+                            ..
+                        }
+                        | KeyEvent {
+                            code: KeyCode::Char('r') | KeyCode::Char('t'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Repeat,
+                            ..
+                        } => {
+                            // Toggle reasoning/thinking visibility (Ctrl+R or Ctrl+T)
+                            match &mut self.app_state {
+                                AppState::Chat { widget } => {
+                                    widget.toggle_reasoning_visibility();
+                                }
+                                AppState::Onboarding { .. } => {}
+                            }
+                        }
+                        KeyEvent {
                             code: KeyCode::Char('d'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
                             kind: KeyEventKind::Press,
                             ..
                         } => {
-                            match &mut self.app_state {
-                                AppState::Chat { widget } => {
-                                    if widget.composer_is_empty() {
-                                        self.app_event_tx.send(AppEvent::ExitRequest);
-                                    } else {
-                                        // Treat Ctrl+D as a normal key event when the composer
-                                        // is not empty so that it doesn't quit the application
-                                        // prematurely.
-                                        self.dispatch_key_event(key_event);
-                                    }
-                                }
-                                AppState::Onboarding { .. } => {
-                                    self.app_event_tx.send(AppEvent::ExitRequest);
-                                }
+                            // Show diffs popup
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.show_diffs_popup();
                             }
                         }
                         KeyEvent {

@@ -115,6 +115,10 @@ pub struct Tui {
     /// Theme configuration for the TUI
     #[serde(default)]
     pub theme: ThemeConfig,
+    
+    /// Whether to show reasoning content expanded by default (can be toggled with Ctrl+R/T)
+    #[serde(default)]
+    pub show_reasoning: bool,
 }
 
 /// Theme configuration for the TUI

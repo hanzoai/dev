@@ -60,6 +60,7 @@ pub(crate) struct ChatComposer {
     app_event_tx: AppEventSender,
     history: ChatComposerHistory,
     ctrl_c_quit_hint: bool,
+    #[allow(dead_code)]
     use_shift_enter_hint: bool,
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
@@ -74,6 +75,8 @@ pub(crate) struct ChatComposer {
     // Animation thread for spinning icon when task is running
     animation_running: Option<Arc<AtomicBool>>,
     using_chatgpt_auth: bool,
+    // Ephemeral footer notice and its expiry
+    footer_notice: Option<(String, std::time::Instant)>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -111,6 +114,7 @@ impl ChatComposer {
             status_message: String::from("coding"),
             animation_running: None,
             using_chatgpt_auth,
+            footer_notice: None,
         }
     }
 
@@ -147,6 +151,11 @@ impl ChatComposer {
 
     pub fn update_status_message(&mut self, message: String) {
         self.status_message = Self::map_status_message(&message);
+    }
+
+    pub fn flash_footer_notice(&mut self, text: String) {
+        let expiry = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        self.footer_notice = Some((text, expiry));
     }
 
     // Map technical status messages to user-friendly ones
@@ -261,6 +270,7 @@ impl ChatComposer {
     }
 
     /// Returns true if the composer currently contains no user input.
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.textarea.is_empty()
     }
@@ -908,7 +918,7 @@ impl WidgetRef for &ChatComposer {
             }
             ActivePopup::None => {
                 let bottom_line_rect = hint_area;
-                let key_hint_style = Style::default().fg(crate::colors::light_blue());
+                let key_hint_style = Style::default().fg(crate::colors::function());
                 let mut hint = if self.ctrl_c_quit_hint {
                     vec![
                         Span::from(" "),
@@ -916,21 +926,27 @@ impl WidgetRef for &ChatComposer {
                         Span::from(" to quit"),
                     ]
                 } else {
-                    let newline_hint_key = if self.use_shift_enter_hint {
-                        "Shift+⏎"
-                    } else {
-                        "Ctrl+J"
-                    };
                     vec![
                         Span::from(" "),
-                        "⏎".set_style(key_hint_style),
-                        Span::from(" send   "),
-                        newline_hint_key.set_style(key_hint_style),
-                        Span::from(" newline   "),
+                        "Ctrl+R".set_style(key_hint_style),
+                        Span::from(" reasoning   "),
+                        "Ctrl+D".set_style(key_hint_style),
+                        Span::from(" diffs   "),
                         "Ctrl+C".set_style(key_hint_style),
                         Span::from(" quit"),
                     ]
                 };
+
+                // Append ephemeral footer notice if present and not expired
+                if let Some((msg, until)) = &self.footer_notice {
+                    if std::time::Instant::now() <= *until {
+                        hint.push(Span::from("   "));
+                        hint.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
+                    } else {
+                        // Expired – clear it
+                        // SAFETY: mutable borrow not allowed here; cleared by caller on next update
+                    }
+                }
 
                 // Append token/context usage info to the footer hints when available.
                 if let Some(token_usage_info) = &self.token_usage_info {

@@ -39,6 +39,7 @@ mod history_cell;
 mod insert_history;
 pub mod live_wrap;
 mod markdown;
+mod markdown_renderer;
 mod markdown_stream;
 pub mod onboarding;
 mod render;
