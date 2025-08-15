@@ -432,11 +432,11 @@ impl Page {
     filt.setAttribute('width', '200%');
     filt.setAttribute('height', '200%');
 
-    const blur = createSvg('feGaussianBlur'); blur.setAttribute('in', 'SourceAlpha'); blur.setAttribute('stdDeviation', '1');
+    const blur = createSvg('feGaussianBlur'); blur.setAttribute('in', 'SourceAlpha'); blur.setAttribute('stdDeviation', '1.5');
     const off  = createSvg('feOffset');       off.setAttribute('dx', '0'); off.setAttribute('dy', '0');
     const ct   = createSvg('feComponentTransfer'); ct.setAttribute('result', 'offsetblur');
-    const fa   = createSvg('feFuncA'); fa.setAttribute('type', 'linear'); fa.setAttribute('slope', '1'); ct.appendChild(fa);
-    const flood = createSvg('feFlood'); flood.setAttribute('flood-color', '#000'); flood.setAttribute('flood-opacity', '0.3');
+    const fa   = createSvg('feFuncA'); fa.setAttribute('type', 'linear'); fa.setAttribute('slope', '0.35'); ct.appendChild(fa);
+    const flood = createSvg('feFlood'); flood.setAttribute('flood-color', '#000'); flood.setAttribute('flood-opacity', '0.35');
     const comp  = createSvg('feComposite'); comp.setAttribute('in2', 'offsetblur'); comp.setAttribute('operator', 'in');
     const merge = createSvg('feMerge');
     const m1 = createSvg('feMergeNode');

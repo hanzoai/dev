@@ -164,7 +164,7 @@ impl App<'_> {
                 }),
             }
         } else {
-            let chat_widget = ChatWidget::new(
+            let mut chat_widget = ChatWidget::new(
                 config.clone(),
                 app_event_tx.clone(),
                 initial_prompt,
@@ -172,6 +172,8 @@ impl App<'_> {
                 enhanced_keys_supported,
                 terminal_info.clone(),
             );
+            // Check for initial animations after widget is created
+            chat_widget.check_for_initial_animations();
             AppState::Chat {
                 widget: Box::new(chat_widget),
             }
@@ -380,16 +382,21 @@ impl App<'_> {
 
                     match command {
                         SlashCommand::New => {
-                            // User accepted – switch to chat view.
-                            let new_widget = Box::new(ChatWidget::new(
-                                self.config.clone(),
-                                self.app_event_tx.clone(),
-                                None,
-                                Vec::new(),
-                                self.enhanced_keys_supported,
-                                self.terminal_info.clone(),
-                            ));
-                            self.app_state = AppState::Chat { widget: new_widget };
+                            // Clear the current conversation and start fresh
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.new_conversation(self.enhanced_keys_supported);
+                            } else {
+                                // If we're not in chat state, create a new chat widget
+                                let new_widget = Box::new(ChatWidget::new(
+                                    self.config.clone(),
+                                    self.app_event_tx.clone(),
+                                    None,
+                                    Vec::new(),
+                                    self.enhanced_keys_supported,
+                                    self.terminal_info.clone(),
+                                ));
+                                self.app_state = AppState::Chat { widget: new_widget };
+                            }
                             self.app_event_tx.send(AppEvent::RequestRedraw);
                         }
                         SlashCommand::Init => {
