@@ -193,11 +193,6 @@ impl App<'_> {
         }
     }
 
-    /// Clone of the internal event sender so external tasks (e.g. log bridge)
-    /// can inject `AppEvent`s.
-    pub fn event_sender(&self) -> AppEventSender {
-        self.app_event_tx.clone()
-    }
 
     /// Schedule a redraw if one is not already pending.
     #[allow(clippy::unwrap_used)]

@@ -36,10 +36,6 @@ pub(crate) fn border() -> Color {
     current_theme().border
 }
 
-pub(crate) fn border_focused() -> Color {
-    current_theme().border_focused
-}
-
 pub(crate) fn text() -> Color {
     current_theme().text
 }

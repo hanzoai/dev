@@ -11,6 +11,7 @@ pub(crate) struct LiveRingWidget {
 }
 
 impl LiveRingWidget {
+    #[cfg(test)]
     pub fn new(max_rows: usize, rows: Vec<Line<'static>>) -> Self {
         Self {
             max_rows: max_rows as u16,

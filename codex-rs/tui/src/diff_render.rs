@@ -11,16 +11,19 @@ use codex_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
 
+#[allow(dead_code)]
 const SPACES_AFTER_LINE_NUMBER: usize = 6;
 
 // Internal representation for diff line rendering
+#[allow(dead_code)]
 enum DiffLineType {
     Insert,
     Delete,
     Context,
 }
 
-pub(crate) fn create_diff_summary(
+#[allow(dead_code)]
+pub(super) fn create_diff_summary(
     title: &str,
     changes: &HashMap<PathBuf, FileChange>,
     event_type: PatchEventType,
@@ -164,6 +167,7 @@ pub(crate) fn create_diff_summary(
     out
 }
 
+#[allow(dead_code)]
 fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
     // Use terminal width or a reasonable fallback
@@ -256,6 +260,7 @@ fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'s
     out
 }
 
+#[allow(dead_code)]
 fn push_wrapped_diff_line(
     line_number: usize,
     kind: DiffLineType,
@@ -343,14 +348,17 @@ fn push_wrapped_diff_line(
     lines
 }
 
+#[allow(dead_code)]
 fn style_dim() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
+#[allow(dead_code)]
 fn style_add() -> Style {
     Style::default().fg(Color::Green)
 }
 
+#[allow(dead_code)]
 fn style_del() -> Style {
     Style::default().fg(Color::Red)
 }
