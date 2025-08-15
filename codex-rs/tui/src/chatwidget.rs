@@ -271,9 +271,127 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn on_apply_patch_approval_request(&mut self, id: String, ev: ApplyPatchApprovalRequestEvent) {
+        let id2 = id.clone();
+        let ev2 = ev.clone();
+        self.defer_or_handle(
+            |q| q.push_apply_patch_approval(id, ev),
+            |s| s.handle_apply_patch_approval_now(id2, ev2),
+        );
+    }
+
+    fn on_exec_command_begin(&mut self, ev: ExecCommandBeginEvent) {
+        self.flush_answer_stream_with_separator();
+        let ev2 = ev.clone();
+        self.defer_or_handle(|q| q.push_exec_begin(ev), |s| s.handle_exec_begin_now(ev2));
+    }
+
+    fn on_exec_command_output_delta(
+        &mut self,
+        _ev: codex_core::protocol::ExecCommandOutputDeltaEvent,
+    ) {
+        // TODO: Handle streaming exec output if/when implemented
+    }
+
+    fn on_patch_apply_begin(&mut self, event: PatchApplyBeginEvent) {
+        self.add_to_history(&history_cell::new_patch_event(
+            PatchEventType::ApplyBegin {
+                auto_approved: event.auto_approved,
+            },
+            event.changes,
+        ));
+    }
+
+    fn on_patch_apply_end(&mut self, event: codex_core::protocol::PatchApplyEndEvent) {
+        let ev2 = event.clone();
+        self.defer_or_handle(
+            |q| q.push_patch_end(event),
+            |s| s.handle_patch_apply_end_now(ev2),
+        );
+    }
+
+    fn on_exec_command_end(&mut self, ev: ExecCommandEndEvent) {
+        let ev2 = ev.clone();
+        self.defer_or_handle(|q| q.push_exec_end(ev), |s| s.handle_exec_end_now(ev2));
+    }
+
+    fn on_mcp_tool_call_begin(&mut self, ev: McpToolCallBeginEvent) {
+        let ev2 = ev.clone();
+        self.defer_or_handle(|q| q.push_mcp_begin(ev), |s| s.handle_mcp_begin_now(ev2));
+    }
+
+    fn on_mcp_tool_call_end(&mut self, ev: McpToolCallEndEvent) {
+        let ev2 = ev.clone();
+        self.defer_or_handle(|q| q.push_mcp_end(ev), |s| s.handle_mcp_end_now(ev2));
+    }
+
+    fn on_get_history_entry_response(
+        &mut self,
+        event: codex_core::protocol::GetHistoryEntryResponseEvent,
+    ) {
+        let codex_core::protocol::GetHistoryEntryResponseEvent {
+            offset,
+            log_id,
+            entry,
+        } = event;
+        self.bottom_pane
+            .on_history_entry_response(log_id, offset, entry.map(|e| e.text));
+    }
+
+    fn on_shutdown_complete(&mut self) {
+        self.app_event_tx.send(AppEvent::ExitRequest);
+    }
+
+    fn on_turn_diff(&mut self, unified_diff: String) {
+        debug!("TurnDiffEvent: {unified_diff}");
+    }
+
+    fn on_background_event(&mut self, message: String) {
+        debug!("BackgroundEvent: {message}");
+    }
+    /// Periodic tick to commit at most one queued line to history with a small delay,
+    /// animating the output.
+    pub(crate) fn on_commit_tick(&mut self) {
+        let sink = AppEventHistorySink(self.app_event_tx.clone());
+        let finished = self.stream.on_commit_tick(&sink);
+        self.handle_if_stream_finished(finished);
+    }
+    fn is_write_cycle_active(&self) -> bool {
+        self.stream.is_write_cycle_active()
+    }
+
+    fn flush_interrupt_queue(&mut self) {
+        let mut mgr = std::mem::take(&mut self.interrupts);
+        mgr.flush_all(self);
+        self.interrupts = mgr;
+    }
+
+    fn on_token_count(&mut self, token_usage: TokenUsage) {
+        self.total_token_usage = add_token_usage(&self.total_token_usage, &token_usage);
+        self.last_token_usage = token_usage;
+        self.bottom_pane.set_token_usage(
+            self.total_token_usage.clone(),
+            self.last_token_usage.clone(),
+            self.config.model_context_window,
+        );
+    }
+
+    fn on_error(&mut self, message: String) {
+        self.add_to_history(&history_cell::new_error_event(message));
+        self.bottom_pane.set_task_running(false);
+        self.running_commands.clear();
+        self.stream.clear_all();
+        self.mark_needs_redraw();
+    }
+
+    fn on_plan_update(&mut self, update: codex_core::plan_tool::UpdatePlanArgs) {
+        self.add_to_history(&history_cell::new_plan_update(update));
+    }
+
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
             self.active_history_cell = None;
+            self.running_commands.clear();
             self.bottom_pane.clear_ctrl_c_quit_hint();
             self.submit_op(Op::Interrupt);
             self.bottom_pane.set_task_running(false);
