@@ -1,6 +1,9 @@
+use crate::diff_render::create_diff_summary;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::scroll_view::ScrollView;
 use crate::slash_command::SlashCommand;
+use crate::text_block::TextBlock;
 use crate::text_formatting::format_and_truncate_tool_result;
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
@@ -14,8 +17,11 @@ use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::McpInvocation;
+use codex_core::protocol::SandboxPolicy;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
+use codex_login::get_auth_file;
+use codex_login::try_read_auth_json;
 use image::DynamicImage;
 use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
@@ -62,64 +68,13 @@ pub(crate) trait HistoryCell {
             .try_into()
             .unwrap_or(0)
     }
-    
-    fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        // Check if this cell has custom rendering
-        if self.has_custom_render() && skip_rows == 0 {
-            // Use custom render for cells that need it (like animations)
-            self.custom_render(area, buf);
-        } else {
-            // Default: render using display_lines
-            let lines = self.display_lines();
-            
-            // Skip the specified number of rows
-            let visible_lines: Vec<Line<'static>> = lines
-                .into_iter()
-                .skip(skip_rows as usize)
-                .take(area.height as usize)
-                .collect();
-            
-            if !visible_lines.is_empty() {
-                let text = Text::from(visible_lines);
-                Paragraph::new(text)
-                    .wrap(Wrap { trim: false })
-                    .render(area, buf);
-            }
-        }
-    }
-    
-    /// Returns true if this cell has custom rendering (e.g., animations)
-    fn has_custom_render(&self) -> bool {
-        false // Default: most cells use display_lines
-    }
-    
-    /// Custom render implementation for cells that need it
-    fn custom_render(&self, _area: Rect, _buf: &mut Buffer) {
-        // Default: do nothing (cells with custom rendering will override)
-    }
-    
-    /// Returns true if this cell is currently animating and needs redraws
-    fn is_animating(&self) -> bool {
-        false // Default: most cells don't animate
-    }
-}
-
-// Allow Box<dyn HistoryCell> to implement HistoryCell
-impl HistoryCell for Box<dyn HistoryCell> {
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        self.as_ref().display_lines()
-    }
-    
-    fn desired_height(&self, width: u16) -> u16 {
-        self.as_ref().desired_height(width)
-    }
 }
 
 // ==================== PlainHistoryCell ====================
 // For simple cells that just store lines
 
 pub(crate) struct PlainHistoryCell {
-    pub(crate) lines: Vec<Line<'static>>,
+    lines: Vec<Line<'static>>,
 }
 
 impl HistoryCell for PlainHistoryCell {
@@ -169,87 +124,11 @@ impl HistoryCell for AnimatedWelcomeCell {
             Line::from(""),
         ]
     }
-    
-    fn has_custom_render(&self) -> bool {
-        true // AnimatedWelcomeCell uses custom rendering for the glitch animation
-    }
-    
-    fn custom_render(&self, area: Rect, buf: &mut Buffer) {
-        let fade_duration = std::time::Duration::from_millis(800);
-        
-        // Check if we're in fade-out phase
-        if let Some(fade_time) = self.fade_start.get() {
-            let fade_elapsed = fade_time.elapsed();
-            if fade_elapsed < fade_duration && !self.faded_out.get() {
-                // Fade-out animation
-                let fade_progress = fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
-                let alpha = 1.0 - fade_progress; // From 1.0 to 0.0
-                
-                crate::glitch_animation::render_intro_animation_with_alpha(
-                    area, buf, 1.0, // Full animation progress (static state)
-                    alpha,
-                );
-            } else {
-                // Fade-out complete - mark as faded out
-                self.faded_out.set(true);
-                // Don't render anything (invisible)
-            }
-        } else {
-            // Normal animation phase
-            let elapsed = self.start_time.elapsed();
-            let animation_duration = std::time::Duration::from_secs(2);
-            
-            if elapsed < animation_duration && !self.completed.get() {
-                // Calculate animation progress
-                let progress = elapsed.as_secs_f32() / animation_duration.as_secs_f32();
-                
-                // Render the animation
-                crate::glitch_animation::render_intro_animation(area, buf, progress);
-            } else {
-                // Animation complete - mark it and render final static state
-                self.completed.set(true);
-                
-                // Render the final static state
-                crate::glitch_animation::render_intro_animation(
-                    area, buf, 1.0, // Full progress = static final state
-                );
-            }
-        }
-    }
-    
-    fn is_animating(&self) -> bool {
-        // Check for initial animation
-        if !self.completed.get() {
-            let elapsed = self.start_time.elapsed();
-            let animation_duration = std::time::Duration::from_secs(2);
-            if elapsed < animation_duration {
-                return true;
-            }
-            // Mark as completed if animation time has passed
-            self.completed.set(true);
-        }
-        
-        // Check for fade-out animation
-        if let Some(fade_time) = self.fade_start.get() {
-            if !self.faded_out.get() {
-                let fade_elapsed = fade_time.elapsed();
-                let fade_duration = std::time::Duration::from_millis(800);
-                if fade_elapsed < fade_duration {
-                    return true;
-                }
-                // Mark as faded out if fade time has passed
-                self.faded_out.set(true);
-            }
-        }
-        
-        false
-    }
 }
 
 // ==================== ImageOutputCell ====================
 
 pub(crate) struct ImageOutputCell {
-    #[allow(dead_code)] // Will be used for terminal image protocol support
     pub(crate) image: DynamicImage,
 }
 
@@ -280,6 +159,27 @@ impl HistoryCell for StreamingContentCell {
 const LIGHT_BLUE: Color = Color::Rgb(173, 216, 230);
 const TOOL_CALL_MAX_LINES: usize = 5;
 
+fn span_to_static(span: &Span) -> Span<'static> {
+    Span {
+        style: span.style,
+        content: std::borrow::Cow::Owned(span.content.clone().into_owned()),
+    }
+}
+
+fn line_to_static(line: &Line) -> Line<'static> {
+    Line {
+        style: line.style,
+        alignment: line.alignment,
+        spans: line.spans.iter().map(span_to_static).collect(),
+    }
+}
+
+fn shlex_join_safe(command: &[String]) -> String {
+    match shlex::try_join(command.iter().map(|s| s.as_str())) {
+        Ok(cmd) => cmd,
+        Err(_) => command.join(" "),
+    }
+}
 
 fn output_lines(
     output: Option<&CommandOutput>,
@@ -306,17 +206,15 @@ fn output_lines(
                 tracing::warn!("Slow ansi_escape_line took {:?}", elapsed);
             }
             if include_angle_pipe {
-                let mut line_spans = vec![
+                lines.push(Line::from(vec![
                     Span::styled(
                         "> ",
                         Style::default()
                             .add_modifier(Modifier::DIM)
                             .fg(Color::Gray),
                     ),
-                ];
-                let escaped_line = ansi_escape_line(line);
-                line_spans.extend(escaped_line.spans);
-                lines.push(Line::from(line_spans));
+                    ansi_escape_line(line),
+                ]));
             } else {
                 lines.push(ansi_escape_line(line));
             }
@@ -343,11 +241,11 @@ fn output_lines(
 }
 
 fn format_mcp_invocation(invocation: McpInvocation) -> Line<'static> {
-    let provider_name = pretty_provider_name(&invocation.server);
+    let provider_name = pretty_provider_name(&invocation.provider_id);
     let invocation_str = if let Some(args) = invocation.arguments {
-        format!("{}.{}({})", provider_name, invocation.tool, args)
+        format!("{}.{}({})", provider_name, invocation.tool_name, args)
     } else {
-        format!("{}.{}()", provider_name, invocation.tool)
+        format!("{}.{}()", provider_name, invocation.tool_name)
     };
 
     Line::styled(
@@ -444,6 +342,24 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
     PlainHistoryCell { lines: vec![line] }
 }
 
+pub(crate) fn new_styled_text_line(line: Line<'static>) -> PlainHistoryCell {
+    PlainHistoryCell { lines: vec![line] }
+}
+
+pub(crate) fn new_dimmed_reasoning_line(line: Line<'static>) -> PlainHistoryCell {
+    // Apply dimming to the entire line
+    let dimmed_line = Line {
+        style: line.style.add_modifier(Modifier::DIM),
+        alignment: line.alignment,
+        spans: line.spans.into_iter().map(|span| {
+            Span {
+                style: span.style.add_modifier(Modifier::DIM),
+                content: span.content,
+            }
+        }).collect(),
+    };
+    PlainHistoryCell { lines: vec![dimmed_line] }
+}
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
     StreamingContentCell { lines }
@@ -478,12 +394,11 @@ fn new_exec_cell(
     parsed: Vec<ParsedCommand>,
     output: Option<CommandOutput>,
 ) -> ExecCell {
-    let start_time = if output.is_none() { Some(Instant::now()) } else { None };
     ExecCell {
         command,
         parsed,
         output,
-        start_time,
+        start_time: if output.is_none() { Some(Instant::now()) } else { None },
     }
 }
 
@@ -523,19 +438,18 @@ fn new_parsed_command(
             ParsedCommand::Read { name, .. } => format!("📖 {name}"),
             ParsedCommand::ListFiles { cmd, path } => match path {
                 Some(p) => format!("📂 {p}"),
-                None => format!("📂 {}", cmd),
+                None => format!("📂 {}", shlex_join_safe(cmd)),
             },
             ParsedCommand::Search { query, path, cmd } => match (query, path) {
                 (Some(q), Some(p)) => format!("🔎 {q} in {p}"),
                 (Some(q), None) => format!("🔎 {q}"),
                 (None, Some(p)) => format!("🔎 {p}"),
-                (None, None) => format!("🔎 {}", cmd),
+                (None, None) => format!("🔎 {}", shlex_join_safe(cmd)),
             },
             ParsedCommand::Format { .. } => "✨ Formatting".to_string(),
-            ParsedCommand::Test { cmd } => format!("🧪 {}", cmd),
-            ParsedCommand::Lint { cmd, .. } => format!("🧹 {}", cmd),
-            ParsedCommand::Unknown { cmd } => format!("⌨️ {}", cmd),
-            ParsedCommand::Noop { .. } => continue, // Skip noop commands
+            ParsedCommand::Test { cmd } => format!("🧪 {}", shlex_join_safe(cmd)),
+            ParsedCommand::Lint { cmd, .. } => format!("🧹 {}", shlex_join_safe(cmd)),
+            ParsedCommand::Unknown { cmd } => format!("⌨️ {}", shlex_join_safe(cmd)),
         };
 
         let first_prefix = if i == 0 { "  └ " } else { "    " };
@@ -797,20 +711,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
 }
 
 pub(crate) fn new_diff_output(diff_output: String) -> PlainHistoryCell {
-    // Parse the diff output into lines
-    let mut lines = vec![Line::from("/diff".magenta())];
-    for line in diff_output.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            lines.push(Line::from(line.to_string().green()));
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            lines.push(Line::from(line.to_string().red()));
-        } else if line.starts_with("@@") {
-            lines.push(Line::from(line.to_string().cyan()));
-        } else {
-            lines.push(Line::from(line.to_string()));
-        }
-    }
-    lines.push(Line::from(""));
+    let lines = create_diff_summary(diff_output);
     PlainHistoryCell { lines }
 }
 
@@ -839,7 +740,7 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     let summary_entries = create_config_summary_entries(config);
     let summary_map: HashMap<String, String> = summary_entries
         .iter()
-        .map(|(key, value)| (key.to_string(), value.clone()))
+        .map(|e| (e.key.clone(), e.value.clone()))
         .collect();
     
     let lookup = |key: &str| -> String { summary_map.get(key).unwrap_or(&String::new()).clone() };
@@ -1052,15 +953,15 @@ pub(crate) fn new_patch_event(
     for (path, change) in sorted_changes {
         let path_str = path.display().to_string();
         let line = match change {
-            FileChange::Add { .. } => Line::from(vec![
+            FileChange::Create { .. } => Line::from(vec![
                 Span::styled("A ", Style::default().fg(Color::Green)),
                 Span::raw(path_str),
             ]),
-            FileChange::Update { .. } => Line::from(vec![
+            FileChange::Modify { .. } => Line::from(vec![
                 Span::styled("M ", Style::default().fg(Color::Yellow)),
                 Span::raw(path_str),
             ]),
-            FileChange::Delete => Line::from(vec![
+            FileChange::Delete { .. } => Line::from(vec![
                 Span::styled("D ", Style::default().fg(Color::Red)),
                 Span::raw(path_str),
             ]),
@@ -1086,3 +987,18 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     PlainHistoryCell { lines }
 }
 
+pub(crate) fn new_patch_apply_success(stdout: String) -> PlainHistoryCell {
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from("✅ Patch applied successfully".green().bold()),
+    ];
+    
+    if !stdout.is_empty() {
+        lines.push(Line::from(""));
+        for line in stdout.lines() {
+            lines.push(ansi_escape_line(line));
+        }
+    }
+    
+    lines.push(Line::from(""));
+    PlainHistoryCell { lines }
+}

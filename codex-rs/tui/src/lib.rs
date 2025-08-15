@@ -42,13 +42,13 @@ mod markdown;
 mod markdown_stream;
 pub mod onboarding;
 mod render;
-mod scroll_view;
+// mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
 mod shimmer;
 mod slash_command;
 mod streaming;
 mod terminal_info;
-mod text_block;
+// mod text_block; // Orphaned after trait-based HistoryCell migration
 mod text_formatting;
 mod text_processing;
 mod theme;
