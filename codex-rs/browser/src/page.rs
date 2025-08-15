@@ -33,6 +33,8 @@ pub struct CursorState {
     pub y: f64,
     // Include button state, mirroring the TS implementation
     pub button: MouseButton,
+    // Track whether mouse button is currently pressed
+    pub is_mouse_down: bool,
 }
 
 pub struct Page {
@@ -50,6 +52,7 @@ impl Page {
             x: (config.viewport.width as f64 / 2.0).floor(),
             y: (config.viewport.height as f64 / 4.0).floor(),
             button: MouseButton::None,
+            is_mouse_down: false,
         };
 
         let page = Self {
@@ -1236,14 +1239,89 @@ impl Page {
         Ok(())
     }
 
+    /// Perform mouse down at the current position
+    pub async fn mouse_down_at_current(&self) -> Result<(f64, f64)> {
+        let cursor = self.cursor_state.lock().await;
+        let x = cursor.x;
+        let y = cursor.y;
+        let is_down = cursor.is_mouse_down;
+        drop(cursor);
+        
+        if is_down {
+            debug!("Mouse is already down at ({}, {})", x, y);
+            return Ok((x, y));
+        }
+        
+        debug!("Mouse down at current position ({}, {})", x, y);
+        
+        let down_params = DispatchMouseEventParams::builder()
+            .r#type(DispatchMouseEventType::MousePressed)
+            .x(x)
+            .y(y)
+            .button(MouseButton::Left)
+            .click_count(1)
+            .build()
+            .map_err(BrowserError::CdpError)?;
+        self.cdp_page.execute(down_params).await?;
+        
+        // Update mouse state
+        let mut cursor = self.cursor_state.lock().await;
+        cursor.is_mouse_down = true;
+        drop(cursor);
+        
+        Ok((x, y))
+    }
+    
+    /// Perform mouse up at the current position
+    pub async fn mouse_up_at_current(&self) -> Result<(f64, f64)> {
+        let cursor = self.cursor_state.lock().await;
+        let x = cursor.x;
+        let y = cursor.y;
+        let is_down = cursor.is_mouse_down;
+        drop(cursor);
+        
+        if !is_down {
+            debug!("Mouse is already up at ({}, {})", x, y);
+            return Ok((x, y));
+        }
+        
+        debug!("Mouse up at current position ({}, {})", x, y);
+        
+        let up_params = DispatchMouseEventParams::builder()
+            .r#type(DispatchMouseEventType::MouseReleased)
+            .x(x)
+            .y(y)
+            .button(MouseButton::Left)
+            .click_count(1)
+            .build()
+            .map_err(BrowserError::CdpError)?;
+        self.cdp_page.execute(up_params).await?;
+        
+        // Update mouse state
+        let mut cursor = self.cursor_state.lock().await;
+        cursor.is_mouse_down = false;
+        drop(cursor);
+        
+        Ok((x, y))
+    }
+
     /// Click at the current mouse position without moving the cursor
     pub async fn click_at_current(&self) -> Result<(f64, f64)> {
-        // Get the current cursor position
+        // Get the current cursor position and check if mouse is down
         let cursor = self.cursor_state.lock().await;
         let click_x = cursor.x;
         let click_y = cursor.y;
-        debug!("Clicking at current position ({}, {})", click_x, click_y);
+        let was_down = cursor.is_mouse_down;
+        debug!("Clicking at current position ({}, {}), mouse was_down: {}", click_x, click_y, was_down);
         drop(cursor); // Release lock before async calls
+        
+        // If mouse is already down, release it first
+        if was_down {
+            debug!("Mouse was down, releasing first before click");
+            self.mouse_up_at_current().await?;
+            // Small delay between release and new click
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
 
         // Trigger click animation on the virtual cursor
         // The animation scales from 1.0 to 0.7 and back over 3 seconds with transform-origin at top-left
