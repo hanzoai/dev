@@ -247,11 +247,11 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
 
         ThemeName::LightPhoton => Theme {
             // Light default - clean professional light theme
-            primary: Color::Rgb(0, 95, 204),        // #005FCC
+            primary: Color::Rgb(0, 162, 255),       // #00A2FF
             secondary: Color::Rgb(110, 89, 203),    // #6E59CB
             background: Color::Rgb(250, 250, 250),  // #FAFAFA
             foreground: Color::Rgb(31, 35, 40),     // #1F2328
-            border: Color::Rgb(156, 156, 156),      // #9C9C9C  (↑ contrast)
+            border: Color::Rgb(206, 206, 206),      // #CECECE  (↑ contrast)
             border_focused: Color::Rgb(0, 95, 204), // #005FCC
             selection: Color::Rgb(234, 242, 255),   // #EAF2FF
             cursor: Color::Rgb(31, 35, 40),         // #1F2328
@@ -259,8 +259,8 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             warning: Color::Rgb(154, 103, 0),       // #9A6700
             error: Color::Rgb(207, 34, 46),         // #CF222E
             info: Color::Rgb(9, 105, 218),          // #0969DA
-            text: Color::Rgb(31, 35, 40),           // #1F2328
-            text_dim: Color::Rgb(102, 112, 133),    // #667085
+            text: Color::Rgb(68, 78, 91),           // #444e5bff
+            text_dim: Color::Rgb(158, 168, 188),    // #9ea8bcff
             text_bright: Color::Black,              // #000000
             keyword: Color::Rgb(110, 89, 203),      // #6E59CB
             string: Color::Rgb(11, 125, 105),       // #0B7D69

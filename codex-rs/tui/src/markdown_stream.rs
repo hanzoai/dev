@@ -14,6 +14,7 @@ use crate::render::markdown_utils::strip_empty_fenced_code_blocks;
 pub(crate) struct MarkdownStreamCollector {
     buffer: String,
     committed_line_count: usize,
+    bold_first_sentence: bool,
 }
 
 impl MarkdownStreamCollector {
@@ -21,7 +22,20 @@ impl MarkdownStreamCollector {
         Self {
             buffer: String::new(),
             committed_line_count: 0,
+            bold_first_sentence: false,
         }
+    }
+    
+    pub fn new_with_bold_first() -> Self {
+        Self {
+            buffer: String::new(),
+            committed_line_count: 0,
+            bold_first_sentence: true,
+        }
+    }
+    
+    pub fn set_bold_first_sentence(&mut self, bold: bool) {
+        self.bold_first_sentence = bold;
     }
 
     /// Returns the number of logical lines that have already been committed
@@ -33,6 +47,7 @@ impl MarkdownStreamCollector {
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.committed_line_count = 0;
+        // Keep bold_first_sentence setting
     }
 
     /// Replace the buffered content and mark that the first `committed_count`
@@ -53,13 +68,13 @@ impl MarkdownStreamCollector {
         if self.buffer.is_empty() {
             return;
         }
-        if self.buffer.ends_with("\n\n") {
-            return;
-        }
-        if self.buffer.ends_with('\n') {
-            self.buffer.push('\n');
-        } else {
-            self.buffer.push_str("\n\n");
+        // For reasoning content, ensure we have a double newline for section separation
+        if !self.buffer.ends_with("\n\n") {
+            if self.buffer.ends_with('\n') {
+                self.buffer.push('\n');
+            } else {
+                self.buffer.push_str("\n\n");
+            }
         }
     }
 
@@ -73,7 +88,11 @@ impl MarkdownStreamCollector {
         let source = strip_empty_fenced_code_blocks(&source);
 
         let mut rendered: Vec<Line<'static>> = Vec::new();
-        markdown::append_markdown(&source, &mut rendered, config);
+        if self.bold_first_sentence {
+            markdown::append_markdown_with_bold_first(&source, &mut rendered, config);
+        } else {
+            markdown::append_markdown(&source, &mut rendered, config);
+        }
 
         let mut complete_line_count = rendered.len();
         if complete_line_count > 0
@@ -122,7 +141,11 @@ impl MarkdownStreamCollector {
         let source = strip_empty_fenced_code_blocks(&source);
 
         let mut rendered: Vec<Line<'static>> = Vec::new();
-        markdown::append_markdown(&source, &mut rendered, config);
+        if self.bold_first_sentence {
+            markdown::append_markdown_with_bold_first(&source, &mut rendered, config);
+        } else {
+            markdown::append_markdown(&source, &mut rendered, config);
+        }
 
         let out = if self.committed_line_count >= rendered.len() {
             Vec::new()
