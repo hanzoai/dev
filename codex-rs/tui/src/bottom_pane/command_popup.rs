@@ -17,6 +17,7 @@ pub(crate) struct CommandPopup {
 }
 
 impl CommandPopup {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::new_with_filter(false)
     }
