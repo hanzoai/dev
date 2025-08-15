@@ -5,7 +5,7 @@ use ratatui::widgets::Widget;
 
 // Render the outline-fill animation
 pub fn render_intro_animation(area: Rect, buf: &mut Buffer, t: f32) {
-    tracing::info!("render_intro_animation called: area={:?}, t={}", area, t);
+    tracing::debug!("render_intro_animation called: area={:?}, t={}", area, t);
     render_intro_outline_fill(area, buf, t)
 }
 
@@ -356,9 +356,8 @@ fn scaled_mask(word: &str, max_w: u16, max_h: u16) -> (usize, Vec<Vec<bool>>, us
     let letters: Vec<[&'static str; 7]> = word.chars().map(glyph_5x7).collect();
     let cols = letters.len() * w + (letters.len().saturating_sub(1)) * gap;
 
-    // Start with a more reasonable scale - 6 gives us 42 rows height which looks good
-    // This is about 60-70% of the previous size (was 16, now 6)
-    let mut scale = 6usize;
+    // Start with an even smaller scale to prevent it from getting massive on wide terminals
+    let mut scale = 3usize;
     while scale > 1 && (cols * scale > max_w as usize || rows * scale > max_h as usize) {
         scale -= 1;
     }

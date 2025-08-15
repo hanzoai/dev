@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::citation_regex::CITATION_REGEX;
+use crate::markdown_renderer::MarkdownRenderer;
 use codex_core::config::Config;
 use codex_core::config_types::UriBasedFileOpener;
 use ratatui::text::Line;
@@ -16,11 +17,29 @@ pub(crate) fn append_markdown(
     append_markdown_with_opener_and_cwd(markdown_source, lines, config.file_opener, &config.cwd);
 }
 
+pub(crate) fn append_markdown_with_bold_first(
+    markdown_source: &str,
+    lines: &mut Vec<Line<'static>>,
+    config: &Config,
+) {
+    append_markdown_with_opener_and_cwd_and_bold(markdown_source, lines, config.file_opener, &config.cwd, true);
+}
+
 fn append_markdown_with_opener_and_cwd(
     markdown_source: &str,
     lines: &mut Vec<Line<'static>>,
     file_opener: UriBasedFileOpener,
     cwd: &Path,
+) {
+    append_markdown_with_opener_and_cwd_and_bold(markdown_source, lines, file_opener, cwd, false);
+}
+
+fn append_markdown_with_opener_and_cwd_and_bold(
+    markdown_source: &str,
+    lines: &mut Vec<Line<'static>>,
+    file_opener: UriBasedFileOpener,
+    cwd: &Path,
+    bold_first_sentence: bool,
 ) {
     // Historically, we fed the entire `markdown_source` into the renderer in
     // one pass. However, fenced code blocks sometimes lost leading whitespace
@@ -33,8 +52,12 @@ fn append_markdown_with_opener_and_cwd(
         match seg {
             Segment::Text(s) => {
                 let processed = rewrite_file_citations(&s, file_opener, cwd);
-                let rendered = tui_markdown::from_str(&processed);
-                crate::render::line_utils::push_owned_lines(&rendered.lines, lines);
+                let rendered = if bold_first_sentence {
+                    MarkdownRenderer::render_with_bold_first_sentence(&processed)
+                } else {
+                    MarkdownRenderer::render(&processed)
+                };
+                lines.extend(rendered);
             }
             Segment::Code { content, .. } => {
                 // Emit the code content exactly as-is, line by line.
