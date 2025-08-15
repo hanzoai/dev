@@ -232,6 +232,7 @@ impl StreamController {
     }
 
     /// Step animation: commit at most one queued line and handle end-of-drain cleanup.
+    #[cfg(test)]
     pub(crate) fn on_commit_tick(&mut self, sink: &impl HistorySink) -> bool {
         let Some(kind) = self.current_stream else {
             return false;

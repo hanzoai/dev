@@ -3,6 +3,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 
 /// Process text with basic markdown support
+#[allow(dead_code)]
 pub(crate) fn process_markdown_text(text: &str, _width: u16) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -15,6 +16,7 @@ pub(crate) fn process_markdown_text(text: &str, _width: u16) -> Vec<Line<'static
 }
 
 /// Process text with markdown support and apply dimming to all text
+#[allow(dead_code)]
 pub(crate) fn process_dimmed_markdown_text(text: &str, width: u16) -> Vec<Line<'static>> {
     let lines = process_markdown_text(text, width);
 
@@ -65,6 +67,7 @@ pub(crate) fn process_dimmed_markdown_text(text: &str, width: u16) -> Vec<Line<'
 }
 
 /// Parse a single line with markdown formatting
+#[allow(dead_code)]
 fn parse_markdown_line(text: &str) -> Line<'static> {
     let mut spans = Vec::new();
     let mut current_text = String::new();

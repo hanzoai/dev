@@ -33,10 +33,6 @@ impl InterruptManager {
         }
     }
 
-    #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.queue.is_empty()
-    }
 
     pub(crate) fn push_exec_approval(&mut self, id: String, ev: ExecApprovalRequestEvent) {
         self.queue.push_back(QueuedInterrupt::ExecApproval(id, ev));

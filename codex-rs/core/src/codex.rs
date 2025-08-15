@@ -1177,23 +1177,8 @@ async fn submission_loop(
     rx_sub: Receiver<Submission>,
     tx_event: Sender<Event>,
 ) {
-    // Initialize agent manager with event sender
-    {
-        let mut manager = AGENT_MANAGER.write().await;
-        let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel();
-        manager.set_event_sender(agent_tx);
-        drop(manager);
-
-        // Forward agent events to the main event channel
-        let tx_event_clone = tx_event.clone();
-        tokio::spawn(async move {
-            while let Some(event) = agent_rx.recv().await {
-                let _ = tx_event_clone.send(event).await;
-            }
-        });
-    }
-
     let mut sess: Option<Arc<Session>> = None;
+    let mut agent_manager_initialized = false;
     // shorthand - send an event when there is no active session
     let send_no_session_event = |sub_id: String| async {
         let event = Event {
@@ -1396,7 +1381,7 @@ async fn submission_loop(
 
                 // ack
                 let events = std::iter::once(Event {
-                    id: sub.id.clone(),
+                    id: INITIAL_SUBMIT_ID.to_string(),
                     msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                         session_id,
                         model,
@@ -1409,6 +1394,23 @@ async fn submission_loop(
                     if let Err(e) = tx_event.send(event).await {
                         error!("failed to send event: {e:?}");
                     }
+                }
+                
+                // Initialize agent manager after SessionConfigured is sent
+                if !agent_manager_initialized {
+                    let mut manager = AGENT_MANAGER.write().await;
+                    let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel();
+                    manager.set_event_sender(agent_tx);
+                    drop(manager);
+
+                    // Forward agent events to the main event channel
+                    let tx_event_clone = tx_event.clone();
+                    tokio::spawn(async move {
+                        while let Some(event) = agent_rx.recv().await {
+                            let _ = tx_event_clone.send(event).await;
+                        }
+                    });
+                    agent_manager_initialized = true;
                 }
             }
             Op::UserInput { items } => {
