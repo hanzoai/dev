@@ -922,11 +922,17 @@ fn create_browser_status_tool() -> OpenAiTool {
 }
 
 fn create_browser_click_tool() -> OpenAiTool {
-    let properties = BTreeMap::new();
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "type".to_string(),
+        JsonSchema::String {
+            description: Some("Optional type of mouse event: 'click' (default), 'mousedown', or 'mouseup'. Use mousedown, browser_move, mouseup sequence to enable dragging.".to_string()),
+        },
+    );
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_click".to_string(),
-        description: "Clicks at the current mouse position in the browser window. Note: Use browser_move first to position the mouse at the desired coordinates.".to_string(),
+        description: "Performs a mouse action at the current position. Defaults to 'click' if type not specified. Use browser_move first to position the mouse. For dragging: use type='mousedown', then browser_move to drag position, then type='mouseup'. If 'click' is triggered while mouse is still down, a 'mouseup' will be fired first.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,

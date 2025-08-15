@@ -102,6 +102,7 @@ impl ModelClient {
     }
 
     /// Get the text verbosity configuration
+    #[allow(dead_code)]
     pub fn get_text_verbosity(&self) -> TextVerbosityConfig {
         self.verbosity
     }
