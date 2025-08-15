@@ -16,6 +16,7 @@ mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
 pub mod chrome_selection_view;
+mod diff_popup;
 mod command_popup;
 mod file_search_popup;
 mod live_ring_widget;
@@ -128,7 +129,7 @@ impl BottomPane<'_> {
             let y_offset = 1u16;
 
             // Adjust composer area to account for empty line and padding
-            let horizontal_padding = 2u16; // Message input uses 2 chars padding
+            let horizontal_padding = 1u16; // Message input uses 1 char padding
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,
@@ -257,6 +258,7 @@ impl BottomPane<'_> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn composer_is_empty(&self) -> bool {
         self.composer.is_empty()
     }
@@ -329,6 +331,15 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
+    /// Show the diffs popup with tabs for each file.
+    #[allow(dead_code)]
+    pub fn show_diff_popup(&mut self, tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)>) {
+        let view = diff_popup::DiffPopupView::new(tabs);
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw()
+    }
+
     /// Show the verbosity selection UI
     pub fn show_verbosity_selection(&mut self, current_verbosity: TextVerbosity) {
         let view = VerbositySelectionView::new(current_verbosity, self.app_event_tx.clone());
@@ -341,6 +352,14 @@ impl BottomPane<'_> {
     /// Height (terminal rows) required by the current bottom pane.
     pub(crate) fn request_redraw(&self) {
         self.app_event_tx.send(AppEvent::RequestRedraw)
+    }
+
+    pub(crate) fn flash_footer_notice(&mut self, text: String) {
+        self.composer.flash_footer_notice(text);
+        // Ask app to schedule a redraw shortly to clear the notice automatically
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(2100)));
+        self.request_redraw();
     }
 
     // --- History helpers ---
@@ -426,7 +445,7 @@ impl WidgetRef for &BottomPane<'_> {
                 let avail = area.height - y_offset;
                 let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
                 // Add horizontal padding (2 chars on each side) for views
-                let horizontal_padding = 2u16;
+                let horizontal_padding = 1u16;
                 let view_rect = Rect {
                     x: area.x + horizontal_padding,
                     y: area.y + y_offset,
@@ -440,7 +459,7 @@ impl WidgetRef for &BottomPane<'_> {
             y_offset = y_offset.saturating_add(1);
 
             // Add horizontal padding (2 chars on each side) for Message input
-            let horizontal_padding = 2u16;
+            let horizontal_padding = 1u16;
             let composer_rect = Rect {
                 x: area.x + horizontal_padding,
                 y: area.y + y_offset,

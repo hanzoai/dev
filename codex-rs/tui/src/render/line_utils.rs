@@ -2,6 +2,7 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 
 /// Clone a borrowed ratatui `Line` into an owned `'static` line.
+#[allow(dead_code)]
 pub fn line_to_static(line: &Line<'_>) -> Line<'static> {
     Line {
         style: line.style,
@@ -18,6 +19,7 @@ pub fn line_to_static(line: &Line<'_>) -> Line<'static> {
 }
 
 /// Append owned copies of borrowed lines to `out`.
+#[allow(dead_code)]
 pub fn push_owned_lines<'a>(src: &[Line<'a>], out: &mut Vec<Line<'static>>) {
     for l in src {
         out.push(line_to_static(l));

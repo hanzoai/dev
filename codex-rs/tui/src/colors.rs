@@ -60,3 +60,8 @@ pub(crate) fn dim() -> Color {
 pub(crate) fn background() -> Color {
     current_theme().background
 }
+
+// Syntax/special helpers
+pub(crate) fn function() -> Color {
+    current_theme().function
+}

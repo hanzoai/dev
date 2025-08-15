@@ -1491,20 +1491,67 @@ impl Page {
     pub async fn press_key(&self, key: &str) -> Result<()> {
         debug!("Pressing key: {}", key);
 
+        // Map key names to their proper codes and virtual key codes
+        let (code, text, windows_virtual_key_code, native_virtual_key_code) = match key {
+            "Enter" => ("Enter", Some("\r"), Some(13), Some(13)),
+            "Tab" => ("Tab", Some("\t"), Some(9), Some(9)),
+            "Escape" => ("Escape", None, Some(27), Some(27)),
+            "Backspace" => ("Backspace", None, Some(8), Some(8)),
+            "Delete" => ("Delete", None, Some(46), Some(46)),
+            "ArrowUp" => ("ArrowUp", None, Some(38), Some(38)),
+            "ArrowDown" => ("ArrowDown", None, Some(40), Some(40)),
+            "ArrowLeft" => ("ArrowLeft", None, Some(37), Some(37)),
+            "ArrowRight" => ("ArrowRight", None, Some(39), Some(39)),
+            "Home" => ("Home", None, Some(36), Some(36)),
+            "End" => ("End", None, Some(35), Some(35)),
+            "PageUp" => ("PageUp", None, Some(33), Some(33)),
+            "PageDown" => ("PageDown", None, Some(34), Some(34)),
+            "Space" => ("Space", Some(" "), Some(32), Some(32)),
+            _ => (key, None, None, None), // Default fallback
+        };
+
         // Key down
-        let down_params = DispatchKeyEventParams::builder()
+        let mut down_builder = DispatchKeyEventParams::builder()
             .r#type(DispatchKeyEventType::KeyDown)
             .key(key.to_string())
-            .build()
-            .map_err(BrowserError::CdpError)?;
+            .code(code.to_string());
+        
+        if let Some(vk) = windows_virtual_key_code {
+            down_builder = down_builder.windows_virtual_key_code(vk);
+        }
+        if let Some(nvk) = native_virtual_key_code {
+            down_builder = down_builder.native_virtual_key_code(nvk);
+        }
+        
+        let down_params = down_builder.build().map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
+        // Send char event for keys that produce text
+        if let Some(text_str) = text {
+            let char_params = DispatchKeyEventParams::builder()
+                .r#type(DispatchKeyEventType::Char)
+                .key(key.to_string())
+                .code(code.to_string())
+                .text(text_str.to_string())
+                .build()
+                .map_err(BrowserError::CdpError)?;
+            self.cdp_page.execute(char_params).await?;
+        }
+
         // Key up
-        let up_params = DispatchKeyEventParams::builder()
+        let mut up_builder = DispatchKeyEventParams::builder()
             .r#type(DispatchKeyEventType::KeyUp)
             .key(key.to_string())
-            .build()
-            .map_err(BrowserError::CdpError)?;
+            .code(code.to_string());
+        
+        if let Some(vk) = windows_virtual_key_code {
+            up_builder = up_builder.windows_virtual_key_code(vk);
+        }
+        if let Some(nvk) = native_virtual_key_code {
+            up_builder = up_builder.native_virtual_key_code(nvk);
+        }
+        
+        let up_params = up_builder.build().map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
         Ok(())

@@ -24,7 +24,20 @@ impl StreamState {
             has_seen_delta: false,
         }
     }
+    
+    pub(crate) fn new_for_kind(kind: StreamKind) -> Self {
+        let collector = match kind {
+            StreamKind::Answer => MarkdownStreamCollector::new_with_bold_first(),
+            StreamKind::Reasoning => MarkdownStreamCollector::new(),
+        };
+        Self {
+            collector,
+            streamer: AnimatedLineStreamer::new(),
+            has_seen_delta: false,
+        }
+    }
     pub(crate) fn clear(&mut self) {
+        // Preserve bold_first_sentence setting in collector
         self.collector.clear();
         self.streamer.clear();
         self.has_seen_delta = false;
@@ -48,6 +61,7 @@ pub(crate) struct HeaderEmitter {
     answer_emitted_this_turn: bool,
     reasoning_emitted_in_stream: bool,
     answer_emitted_in_stream: bool,
+    just_emitted_header: bool,
 }
 
 impl HeaderEmitter {
@@ -57,6 +71,7 @@ impl HeaderEmitter {
             answer_emitted_this_turn: false,
             reasoning_emitted_in_stream: false,
             answer_emitted_in_stream: false,
+            just_emitted_header: false,
         }
     }
 
@@ -65,6 +80,7 @@ impl HeaderEmitter {
         self.answer_emitted_this_turn = false;
         self.reasoning_emitted_in_stream = false;
         self.answer_emitted_in_stream = false;
+        self.just_emitted_header = false;
     }
 
     pub(crate) fn reset_for_stream(&mut self, kind: StreamKind) {
@@ -72,6 +88,7 @@ impl HeaderEmitter {
             StreamKind::Reasoning => self.reasoning_emitted_in_stream = false,
             StreamKind::Answer => self.answer_emitted_in_stream = false,
         }
+        self.just_emitted_header = false;
     }
 
     pub(crate) fn has_emitted_for_stream(&self, kind: StreamKind) -> bool {
@@ -119,17 +136,32 @@ impl HeaderEmitter {
                     self.reasoning_emitted_this_turn = false;
                 }
             }
+            self.just_emitted_header = true;
             true
         } else {
+            self.just_emitted_header = false;
             false
         }
+    }
+    
+    pub(crate) fn consume_header_flag(&mut self) -> bool {
+        let was_just_emitted = self.just_emitted_header;
+        self.just_emitted_header = false;
+        was_just_emitted
     }
 }
 
 fn render_header_line(kind: StreamKind) -> ratatui::text::Line<'static> {
-    use ratatui::style::Stylize;
     match kind {
-        StreamKind::Reasoning => ratatui::text::Line::from("thinking".magenta().italic()),
-        StreamKind::Answer => ratatui::text::Line::from("codex".magenta().bold()),
+        // Reasoning header in dim text
+        StreamKind::Reasoning => ratatui::text::Line::styled(
+            "thinking",
+            ratatui::style::Style::default().fg(crate::colors::text_dim()),
+        ),
+        // Agent/Codex header in bright text
+        StreamKind::Answer => ratatui::text::Line::styled(
+            "codex",
+            ratatui::style::Style::default().fg(crate::colors::text_bright()),
+        ),
     }
 }
