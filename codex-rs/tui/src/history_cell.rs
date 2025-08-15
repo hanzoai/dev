@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
 use tracing::error;
 
 #[derive(Clone)]
@@ -49,6 +50,7 @@ pub(crate) struct ExecCell {
     pub(crate) command: Vec<String>,
     pub(crate) parsed: Vec<ParsedCommand>,
     pub(crate) output: Option<CommandOutput>,
+    pub(crate) start_time: Option<Instant>,
 }
 
 pub(crate) enum PatchEventType {
@@ -305,7 +307,8 @@ impl HistoryCell {
                 command,
                 parsed,
                 output,
-            }) => HistoryCell::exec_command_lines(command, parsed, output.as_ref()),
+                start_time,
+            }) => HistoryCell::exec_command_lines(command, parsed, output.as_ref(), *start_time),
             HistoryCell::CompletedMcpToolCallWithImageOutput { .. } => vec![
                 Line::from("tool result (image output omitted)"),
                 Line::from(""),
@@ -449,10 +452,12 @@ impl HistoryCell {
         parsed: Vec<ParsedCommand>,
         output: Option<CommandOutput>,
     ) -> Self {
+        let start_time = if output.is_none() { Some(Instant::now()) } else { None };
         HistoryCell::Exec(ExecCell {
             command,
             parsed,
             output,
+            start_time,
         })
     }
 
@@ -460,10 +465,11 @@ impl HistoryCell {
         command: &[String],
         parsed: &[ParsedCommand],
         output: Option<&CommandOutput>,
+        start_time: Option<Instant>,
     ) -> Vec<Line<'static>> {
         match parsed.is_empty() {
-            true => HistoryCell::new_exec_command_generic(command, output),
-            false => HistoryCell::new_parsed_command(command, parsed, output),
+            true => HistoryCell::new_exec_command_generic(command, output, start_time),
+            false => HistoryCell::new_parsed_command(command, parsed, output, start_time),
         }
     }
 
@@ -471,12 +477,25 @@ impl HistoryCell {
         _command: &[String],
         parsed_commands: &[ParsedCommand],
         output: Option<&CommandOutput>,
+        start_time: Option<Instant>,
     ) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line> = vec![match output {
-            None => Line::from("⚙︎ Working".magenta().bold()),
-            Some(o) if o.exit_code == 0 => Line::from("✓ Completed".green().bold()),
-            Some(o) => Line::from(format!("✗ Failed (exit {})", o.exit_code).red().bold()),
-        }];
+        let mut lines: Vec<Line> = Vec::new();
+        match output {
+            None => {
+                let mut spans = vec!["⚙︎ Working".magenta().bold()];
+                if let Some(st) = start_time {
+                    let dur = format!("{}s", st.elapsed().as_secs());
+                    spans.push(format!(" • {dur}").dim());
+                }
+                lines.push(Line::from(spans));
+            }
+            Some(o) if o.exit_code == 0 => {
+                lines.push(Line::from("✓ Completed".green().bold()));
+            }
+            Some(o) => {
+                lines.push(Line::from(format!("✗ Failed (exit {})", o.exit_code).red().bold()));
+            }
+        };
 
         for (i, parsed) in parsed_commands.iter().enumerate() {
             let text = match parsed {
@@ -519,25 +538,49 @@ impl HistoryCell {
     fn new_exec_command_generic(
         command: &[String],
         output: Option<&CommandOutput>,
+        start_time: Option<Instant>,
     ) -> Vec<Line<'static>> {
-        let command_escaped = strip_bash_lc_and_escape(command);
         let mut lines: Vec<Line<'static>> = Vec::new();
-
+        let command_escaped = strip_bash_lc_and_escape(command);
         let mut cmd_lines = command_escaped.lines();
+        
         if let Some(first) = cmd_lines.next() {
-            lines.push(Line::from(vec![
-                "⚡ Ran command ".magenta(),
-                first.to_string().into(),
-            ]));
+            if start_time.is_some() {
+                // Still running - show timer
+                let mut spans: Vec<Span> = vec!["⚡ Running".magenta()];
+                if let Some(st) = start_time {
+                    let dur = format!("{}s", st.elapsed().as_secs());
+                    spans.push(format!(" • {dur}").dim());
+                }
+                spans.push(" ".into());
+                spans.push(first.to_string().into());
+                lines.push(Line::from(spans));
+            } else {
+                // Completed - no timer
+                lines.push(Line::from(vec![
+                    "⚡ Ran command ".magenta(),
+                    first.to_string().into(),
+                ]));
+            }
         } else {
-            lines.push(Line::from("⚡ Ran command".magenta()));
+            if start_time.is_some() {
+                let mut spans: Vec<Span> = vec!["⚡ Running".magenta()];
+                if let Some(st) = start_time {
+                    let dur = format!("{}s", st.elapsed().as_secs());
+                    spans.push(format!(" • {dur}").dim());
+                }
+                lines.push(Line::from(spans));
+            } else {
+                lines.push(Line::from("⚡ Ran command".magenta()));
+            }
         }
+        
         for cont in cmd_lines {
             lines.push(Line::from(cont.to_string()));
         }
-
+        
         lines.extend(output_lines(output, false, true));
-
+        
         lines
     }
 
@@ -1464,7 +1507,7 @@ mod tests {
         let parsed = vec![ParsedCommand::Unknown {
             cmd: vec!["printf".into(), "foo\nbar".into()],
         }];
-        let lines = HistoryCell::exec_command_lines(&[], &parsed, None);
+        let lines = HistoryCell::exec_command_lines(&[], &parsed, None, None);
         assert!(lines.len() >= 3);
         assert_eq!(lines[1].spans[0].content, "  └ ");
         assert_eq!(lines[2].spans[0].content, "    ");
