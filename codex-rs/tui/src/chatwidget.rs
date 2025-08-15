@@ -9,6 +9,8 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
+
+mod interrupts;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -33,6 +35,7 @@ use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
 use codex_core::protocol::PatchApplyBeginEvent;
+use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
@@ -65,6 +68,8 @@ use crate::history_cell::PatchEventType;
 use crate::live_wrap::RowBuilder;
 use crate::text_block::TextBlock;
 use crate::user_approval_widget::ApprovalRequest;
+use crate::streaming::controller::AppEventHistorySink;
+use tracing::debug;
 use codex_browser::BrowserManager;
 use codex_file_search::FileMatch;
 use ratatui::style::Stylize;
@@ -132,6 +137,10 @@ pub(crate) struct ChatWidget<'a> {
     // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
     sparkline_data: std::cell::RefCell<Vec<(u64, bool)>>,
     last_sparkline_update: std::cell::RefCell<std::time::Instant>,
+    // Stream controller for managing streaming content
+    stream: crate::streaming::controller::StreamController,
+    // Interrupt manager for handling cancellations
+    interrupts: interrupts::InterruptManager,
 }
 
 struct UserMessage {
@@ -184,6 +193,158 @@ impl ChatWidget<'_> {
             self.scroll_offset = 0;
         }
     }
+
+    /// Defer or handle an interrupt based on whether we're streaming
+    fn defer_or_handle<F1, F2>(&mut self, defer_fn: F1, handle_fn: F2)
+    where
+        F1: FnOnce(&mut interrupts::InterruptManager),
+        F2: FnOnce(&mut Self),
+    {
+        if self.is_write_cycle_active() {
+            defer_fn(&mut self.interrupts);
+        } else {
+            handle_fn(self);
+        }
+    }
+
+    /// Flush answer stream with separator if needed
+    fn flush_answer_stream_with_separator(&mut self) {
+        // Implementation for flushing the answer stream
+        // This might involve adding a separator to the history or clearing buffers
+        if !self.answer_buffer.is_empty() {
+            // Add any buffered answer content to history before adding separator
+            self.flush_answer_buffer();
+        }
+    }
+
+    /// Flush the answer buffer to history
+    fn flush_answer_buffer(&mut self) {
+        if !self.answer_buffer.is_empty() {
+            let content = std::mem::take(&mut self.answer_buffer);
+            // Add the buffered content to history
+            self.add_to_history(HistoryCell::UserPrompt {
+                view: TextBlock::new(vec![Line::from(content)]),
+            });
+        }
+    }
+
+    /// Mark that the widget needs to be redrawn
+    fn mark_needs_redraw(&mut self) {
+        // Send a redraw event to trigger UI update
+        self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    /// Handle when streaming is finished
+    fn handle_if_stream_finished(&mut self, finished: bool) {
+        if finished {
+            self.current_stream = None;
+            self.stream_header_emitted = false;
+        }
+    }
+
+    /// Handle exec approval request immediately
+    pub(crate) fn handle_exec_approval_now(&mut self, id: String, ev: ExecApprovalRequestEvent) {
+        // Implementation for handling exec approval request
+        self.bottom_pane.push_approval_request(ApprovalRequest::Exec {
+            id,
+            command: ev.command,
+            reason: ev.reason,
+        });
+    }
+
+    /// Handle apply patch approval request immediately
+    pub(crate) fn handle_apply_patch_approval_now(&mut self, _id: String, ev: ApplyPatchApprovalRequestEvent) {
+        // Implementation for handling patch approval request
+        // Handle patch approval - need to check what fields are available
+        // For now, just log it
+        tracing::debug!("Patch approval request: {:?}", ev);
+    }
+
+    /// Handle exec command begin immediately
+    pub(crate) fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
+        // Create a new exec cell for the command
+        let parsed_command = ev.parsed_cmd.clone();
+        let cell = HistoryCell::new_active_exec_command(ev.command.clone(), parsed_command);
+        self.active_history_cell = Some(cell);
+        
+        // Store in running commands
+        self.running_commands.insert(ev.call_id.clone(), RunningCommand {
+            command: ev.command,
+            parsed: ev.parsed_cmd.clone(),
+        });
+    }
+
+    /// Handle exec command end immediately
+    pub(crate) fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent) {
+        // Remove from running commands
+        self.running_commands.remove(&ev.call_id);
+        
+        // Update the active exec cell if it exists
+        if let Some(HistoryCell::Exec(ref mut exec_cell)) = self.active_history_cell {
+            exec_cell.output = Some(CommandOutput {
+                stdout: ev.stdout.clone(),
+                stderr: ev.stderr.clone(),
+                exit_code: ev.exit_code,
+            });
+        }
+        
+        // Move active cell to history
+        if let Some(cell) = self.active_history_cell.take() {
+            self.add_to_history(cell);
+        }
+    }
+
+    /// Handle MCP tool call begin immediately
+    pub(crate) fn handle_mcp_begin_now(&mut self, ev: McpToolCallBeginEvent) {
+        // Create active MCP tool call
+        let view = TextBlock::new(vec![
+            Line::from(vec![
+                "🔧 ".cyan(),
+                format!("MCP: {}", ev.invocation.tool).into(),
+            ]),
+        ]);
+        self.active_history_cell = Some(HistoryCell::ActiveMcpToolCall { view });
+    }
+
+    /// Handle MCP tool call end immediately
+    pub(crate) fn handle_mcp_end_now(&mut self, ev: McpToolCallEndEvent) {
+        // Convert active MCP to completed
+        if let Some(HistoryCell::ActiveMcpToolCall { .. }) = self.active_history_cell {
+            let result_text = if let Ok(result) = ev.result {
+                serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+            } else {
+                "No result".to_string()
+            };
+            
+            let view = TextBlock::new(vec![
+                Line::from(vec![
+                    "✅ ".green(),
+                    format!("MCP: {}", ev.invocation.tool).into(),
+                ]),
+                Line::from(result_text),
+            ]);
+            
+            self.active_history_cell = Some(HistoryCell::CompletedMcpToolCall { view });
+        }
+        
+        // Move to history
+        if let Some(cell) = self.active_history_cell.take() {
+            self.add_to_history(cell);
+        }
+    }
+
+    /// Handle patch apply end immediately
+    pub(crate) fn handle_patch_apply_end_now(&mut self, ev: PatchApplyEndEvent) {
+        // Add patch result to history
+        let view = if ev.success {
+            TextBlock::new(vec![Line::from("✅ Patch applied successfully".green())])
+        } else {
+            TextBlock::new(vec![Line::from(format!("❌ Patch failed: stderr: {}", ev.stderr).red())])
+        };
+        
+        self.add_to_history(HistoryCell::PatchApplyResult { view });
+    }
+
     /// Get or create the global browser manager
     async fn get_browser_manager() -> Arc<BrowserManager> {
         codex_browser::global::get_or_create_browser_manager().await
@@ -294,7 +455,7 @@ impl ChatWidget<'_> {
     }
 
     fn on_patch_apply_begin(&mut self, event: PatchApplyBeginEvent) {
-        self.add_to_history(&history_cell::new_patch_event(
+        self.add_to_history(HistoryCell::new_patch_event(
             PatchEventType::ApplyBegin {
                 auto_approved: event.auto_approved,
             },
@@ -377,7 +538,7 @@ impl ChatWidget<'_> {
     }
 
     fn on_error(&mut self, message: String) {
-        self.add_to_history(&history_cell::new_error_event(message));
+        self.add_to_history(HistoryCell::new_error_event(message));
         self.bottom_pane.set_task_running(false);
         self.running_commands.clear();
         self.stream.clear_all();
@@ -385,7 +546,7 @@ impl ChatWidget<'_> {
     }
 
     fn on_plan_update(&mut self, update: codex_core::plan_tool::UpdatePlanArgs) {
-        self.add_to_history(&history_cell::new_plan_update(update));
+        self.add_to_history(HistoryCell::new_plan_update(update));
     }
 
     fn interrupt_running_task(&mut self) {
@@ -488,7 +649,7 @@ impl ChatWidget<'_> {
             }
             StreamKind::Answer => {
                 // Add space above GPT-5 header only if the last item isn't already a blank line
-                let needs_space = if self.history_cells.is_empty() {
+                let _needs_space = if self.history_cells.is_empty() {
                     false
                 } else {
                     // Check if the last item is a blank line (from any cell type that could be empty)
@@ -608,7 +769,7 @@ impl ChatWidget<'_> {
             }),
             active_history_cell: None,
             history_cells,
-            config,
+            config: config.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
                 initial_images,
@@ -645,6 +806,8 @@ impl ChatWidget<'_> {
             overall_task_status: "preparing".to_string(),
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
+            stream: crate::streaming::controller::StreamController::new(config.clone()),
+            interrupts: interrupts::InterruptManager::new(),
         }
     }
 

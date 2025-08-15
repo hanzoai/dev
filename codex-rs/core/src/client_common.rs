@@ -141,6 +141,7 @@ impl Prompt {
     }
 
     /// Creates a formatted user instructions message from a string
+    #[allow(dead_code)]
     pub(crate) fn format_user_instructions_message(ui: &str) -> ResponseItem {
         ResponseItem::Message {
             id: None,
