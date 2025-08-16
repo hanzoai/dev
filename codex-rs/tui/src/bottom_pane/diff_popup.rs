@@ -59,7 +59,7 @@ impl<'a> BottomPaneView<'a> for DiffPopupView {
         Clear.render(inner, buf);
         let block = Block::default()
             .borders(Borders::ALL)
-            .title("Diffs – Esc to close, ◄ ► to change file")
+            .title("Diffs – Esc close, ◂ ▸ change tabs")
             .border_style(Style::default().fg(crate::colors::border()));
         block.clone().render(inner, buf);
         let content = block.inner(inner);

@@ -33,16 +33,29 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
     // Build scaled mask + border map
     // Don't reduce the area size - use full available space
     let (scale, mask, w, h) = scaled_mask(
-        "CODER",
+        "CODE",
         area.width,
         area.height,
     );
     let border = compute_border(&mask);
 
-    // Use area directly for inline rendering
+    // Use full available width; align animation one column to the right
     let mut r = area;
     r.height = h.min(area.height as usize) as u16;
-    r.width = w.min(area.width as usize) as u16;
+    // Shift by one column to the right and shrink width accordingly
+    if r.width > 0 {
+        r.x = r.x.saturating_add(1);
+        r.width = r.width.saturating_sub(1);
+    }
+
+    // Ensure background matches theme for the animation area
+    let bg = crate::colors::background();
+    for y in r.y..r.y.saturating_add(r.height) {
+        for x in r.x..r.x.saturating_add(r.width) {
+            let cell = &mut buf[(x, y)];
+            cell.set_bg(bg);
+        }
+    }
 
     let reveal_x_outline = (w as f32 * outline_p).round() as isize;
     let reveal_x_fill = (w as f32 * fill_p).round() as isize;
@@ -85,16 +98,29 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
     // Build scaled mask + border map
     // Don't reduce the area size - use full available space
     let (scale, mask, w, h) = scaled_mask(
-        "CODER",
+        "CODE",
         area.width,
         area.height,
     );
     let border = compute_border(&mask);
 
-    // Use area directly for inline rendering
+    // Use full available width; align animation one column to the right
     let mut r = area;
     r.height = h.min(area.height as usize) as u16;
-    r.width = w.min(area.width as usize) as u16;
+    // Shift by one column to the right and shrink width accordingly
+    if r.width > 0 {
+        r.x = r.x.saturating_add(1);
+        r.width = r.width.saturating_sub(1);
+    }
+
+    // Ensure background matches theme for the animation area
+    let bg = crate::colors::background();
+    for y in r.y..r.y.saturating_add(r.height) {
+        for x in r.x..r.x.saturating_add(r.width) {
+            let cell = &mut buf[(x, y)];
+            cell.set_bg(bg);
+        }
+    }
 
     let reveal_x_outline = (w as f32 * outline_p).round() as isize;
     let reveal_x_fill = (w as f32 * fill_p).round() as isize;
@@ -348,7 +374,7 @@ fn bump_rgb(c: Color, amt: f32) -> Color {
     }
 }
 
-// Scale a 5×7 "CODER" bitmap to fill `max_w` x `max_h`, returning (scale, grid, w, h)
+// Scale a 5×7 word bitmap (e.g., "CODE") to fill `max_w` x `max_h`, returning (scale, grid, w, h)
 fn scaled_mask(word: &str, max_w: u16, max_h: u16) -> (usize, Vec<Vec<bool>>, usize, usize) {
     let rows = 7usize;
     let w = 5usize;

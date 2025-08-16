@@ -107,50 +107,58 @@ pub(super) fn create_diff_summary(
 
     // Header
     let mut header_spans: Vec<RtSpan<'static>> = Vec::new();
-    header_spans.push(RtSpan::styled(
-        title.to_owned(),
-        Style::default()
-            .fg(Color::Magenta)
+    // Colorize title: success for apply events, keep primary for approval requests
+    let title_style = match event_type {
+        PatchEventType::ApplyBegin { .. } => Style::default()
+            .fg(crate::colors::success())
             .add_modifier(Modifier::BOLD),
-    ));
-    header_spans.push(RtSpan::raw(" to "));
+        PatchEventType::ApprovalRequest => Style::default()
+            .fg(crate::colors::primary())
+            .add_modifier(Modifier::BOLD),
+    };
+    header_spans.push(RtSpan::styled(title.to_owned(), title_style));
+    header_spans.push(RtSpan::raw(" "));
     header_spans.push(RtSpan::raw(format!("{file_count} {noun} ")));
     header_spans.push(RtSpan::raw("("));
     header_spans.push(RtSpan::styled(
         format!("+{total_added}"),
-        Style::default().fg(Color::Green),
+        Style::default().fg(crate::colors::success()),
     ));
     header_spans.push(RtSpan::raw(" "));
     header_spans.push(RtSpan::styled(
         format!("-{total_removed}"),
-        Style::default().fg(Color::Red),
+        Style::default().fg(crate::colors::error()),
     ));
     header_spans.push(RtSpan::raw(")"));
     out.push(RtLine::from(header_spans));
 
-    // Dimmed per-file lines with prefix
+    // Per-file lines with prefix
     for (idx, f) in files.iter().enumerate() {
         let mut spans: Vec<RtSpan<'static>> = Vec::new();
-        spans.push(RtSpan::raw(f.display_path.clone()));
-        spans.push(RtSpan::raw(" ("));
+        // Prefix
+        let prefix = if idx == 0 { "└ " } else { "  " };
+        spans.push(RtSpan::styled(
+            prefix.to_string(),
+            Style::default().add_modifier(Modifier::DIM),
+        ));
+        // File path
+        spans.push(RtSpan::styled(
+            f.display_path.clone(),
+            Style::default().fg(crate::colors::text_dim()),
+        ));
+        // Counts
+        spans.push(RtSpan::styled(" (".to_string(), Style::default().fg(crate::colors::text_dim())));
         spans.push(RtSpan::styled(
             format!("+{}", f.added),
-            Style::default().fg(Color::Green),
+            Style::default().fg(crate::colors::success()),
         ));
         spans.push(RtSpan::raw(" "));
         spans.push(RtSpan::styled(
             format!("-{}", f.removed),
-            Style::default().fg(Color::Red),
+            Style::default().fg(crate::colors::error()),
         ));
-        spans.push(RtSpan::raw(")"));
-
-        let mut line = RtLine::from(spans);
-        let prefix = if idx == 0 { "  └ " } else { "    " };
-        line.spans.insert(0, prefix.into());
-        line.spans
-            .iter_mut()
-            .for_each(|span| span.style = span.style.add_modifier(Modifier::DIM));
-        out.push(line);
+        spans.push(RtSpan::styled(")".to_string(), Style::default().fg(crate::colors::text_dim())));
+        out.push(RtLine::from(spans));
     }
 
     let show_details = matches!(

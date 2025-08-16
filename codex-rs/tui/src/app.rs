@@ -30,7 +30,11 @@ use std::thread;
 use std::time::Duration;
 
 /// Time window for debouncing redraw requests.
-const REDRAW_DEBOUNCE: Duration = Duration::from_millis(1);
+///
+/// Raising this slightly helps coalesce bursts of updates during typing and
+/// reduces render thrash, improving perceived input latency while staying
+/// comfortably under a 60 FPS refresh budget.
+const REDRAW_DEBOUNCE: Duration = Duration::from_millis(16);
 
 /// Top-level application state: which full-screen view is currently active.
 #[allow(clippy::large_enum_variant)]
@@ -238,8 +242,16 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.insert_history_lines(lines),
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::InsertHistoryWithKind { kind, lines } => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.insert_history_lines_with_kind(kind, lines),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
+                }
+                AppEvent::ImmediateRedraw => {
+                    // Draw immediately; no debounce
+                    std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
                 }
                 AppEvent::Redraw => {
                     std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
@@ -347,9 +359,9 @@ impl App<'_> {
                             kind: KeyEventKind::Press,
                             ..
                         } => {
-                            // Show diffs popup
+                            // Toggle diffs overlay
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.show_diffs_popup();
+                                widget.toggle_diffs_popup();
                             }
                         }
                         KeyEvent {

@@ -145,6 +145,11 @@ pub(crate) struct ChatWidget<'a> {
     // Accumulated patch change sets for this session (latest last)
     session_patch_sets: Vec<HashMap<PathBuf, codex_core::protocol::FileChange>>,
     diff_overlay: Option<DiffOverlay>,
+
+    // Cache for expensive height calculations per cell and width
+    height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
+    // Track last width used to opportunistically clear cache when layout changes
+    height_cache_last_width: std::cell::Cell<u16>,
 }
 
 struct DiffOverlay {
@@ -202,6 +207,24 @@ impl ChatWidget<'_> {
     fn autoscroll_if_near_bottom(&mut self) {
         if self.scroll_offset <= 3 {
             self.scroll_offset = 0;
+            // Restore spacer above input when at bottom
+            self.bottom_pane.set_compact_compose(false);
+        }
+    }
+
+    fn clear_reasoning_in_progress(&mut self) {
+        let mut changed = false;
+        for cell in &self.history_cells {
+            if let Some(reasoning_cell) = cell
+                .as_any()
+                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+            {
+                reasoning_cell.set_in_progress(false);
+                changed = true;
+            }
+        }
+        if changed {
+            self.invalidate_height_cache();
         }
     }
     
@@ -245,6 +268,11 @@ impl ChatWidget<'_> {
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
+    /// Clear memoized cell heights (called when history/content changes)
+    fn invalidate_height_cache(&mut self) {
+        self.height_cache.borrow_mut().clear();
+    }
+
 
     /// Handle exec approval request immediately
     fn handle_exec_approval_now(&mut self, id: String, ev: ExecApprovalRequestEvent) {
@@ -274,6 +302,8 @@ impl ChatWidget<'_> {
         ));
         // Record change set for session diff popup (latest last)
         self.session_patch_sets.push(changes_clone);
+        // Enable Ctrl+D footer hint now that we have diffs to show
+        self.bottom_pane.set_diffs_hint(true);
         
         // Push the approval request to the bottom pane
         let request = ApprovalRequest::ApplyPatch {
@@ -290,6 +320,8 @@ impl ChatWidget<'_> {
         let parsed_command = ev.parsed_cmd.clone();
         let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command);
         self.active_exec_cell = Some(cell);
+        // Exec cell content changed; clear height cache
+        self.invalidate_height_cache();
         
         // Store in running commands
         self.running_commands.insert(ev.call_id.clone(), RunningCommand {
@@ -311,6 +343,8 @@ impl ChatWidget<'_> {
         // Get command info and remove from tracking
         let cmd = self.running_commands.remove(&call_id);
         self.active_exec_cell = None;
+        // Exec cell content changed; clear height cache
+        self.invalidate_height_cache();
         
         // Get command and parsed info
         let (command, parsed) = cmd
@@ -365,8 +399,30 @@ impl ChatWidget<'_> {
 
     /// Handle patch apply end immediately
     fn handle_patch_apply_end_now(&mut self, ev: PatchApplyEndEvent) {
-        // Only add failure to history (success is already tracked)
-        if !ev.success {
+        if ev.success {
+            // Update the most recent patch cell header from "Updating..." to "Updated"
+            // without creating a new history section.
+            if let Some(last) = self.history_cells.iter_mut().rev().find(|c| {
+                matches!(c.kind(), crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplyBegin } | crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::Proposed })
+            }) {
+                // Downcast to PlainHistoryCell to mutate its lines
+                if let Some(plain) = last.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
+                    if let Some(first_line) = plain.lines.first_mut() {
+                        // Replace the title span content with "Updated" and apply success style
+                        if let Some(first_span) = first_line.spans.get_mut(0) {
+                            first_span.content = "Updated".into();
+                            first_span.style = Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD);
+                        }
+                    }
+                    // Update the kind so gutter color reflects success
+                    plain.kind = history_cell::HistoryCellType::Patch { kind: history_cell::PatchKind::ApplySuccess };
+                }
+                // Don't surface stdout on success – keep UI concise
+                self.request_redraw();
+                return;
+            }
+            // Fallback: if no prior cell found, do nothing (avoid extra section)
+        } else {
             self.add_to_history(history_cell::new_patch_apply_failure(ev.stderr));
         }
     }
@@ -446,11 +502,13 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Clean up extra whitespace
+        // Preserve user formatting (retain newlines). Normalize CRLF -> LF and trim trailing spaces per line.
+        cleaned_text = cleaned_text.replace("\r\n", "\n");
         cleaned_text = cleaned_text
-            .split_whitespace()
+            .lines()
+            .map(|l| l.trim_end())
             .collect::<Vec<_>>()
-            .join(" ");
+            .join("\n");
 
         UserMessage {
             text: cleaned_text,
@@ -509,7 +567,13 @@ impl ChatWidget<'_> {
         // Check if there are active agents or if agents are ready to start
         let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
 
-        let bottom_height = 6u16
+        // Ensure the bottom pane height can shrink by exactly one row when
+        // compact compose mode is enabled (spacer removed). The minimum
+        // height with no spacer is 5 rows (3-line input + 1-line hints + 1 pad).
+        // Using 5 here keeps the input pinned in place when scrolling up,
+        // allowing history to extend into the reclaimed spacer row without
+        // shifting the input area upward.
+        let bottom_height = 5u16
             .max(self.bottom_pane.desired_height(area.width))
             .min(15);
 
@@ -691,6 +755,8 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             session_patch_sets: Vec::new(),
             diff_overlay: None,
+            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            height_cache_last_width: std::cell::Cell::new(0),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -805,14 +871,29 @@ impl ChatWidget<'_> {
                     .saturating_add(3)
                     .min(self.last_max_scroll.get());
                 self.scroll_offset = new_offset;
+                // Enable compact mode so history can use the spacer line
+                if self.scroll_offset > 0 {
+                    self.bottom_pane.set_compact_compose(true);
+                }
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             InputResult::ScrollDown => {
                 // Scroll down in chat history (decrease offset, towards bottom)
-                if self.scroll_offset >= 3 {
+                if self.scroll_offset == 0 {
+                    // Already at bottom: ensure spacer above input is enabled.
+                    // This avoids the input shifting while "landing" on the
+                    // reclaimed line above the input.
+                    self.bottom_pane.set_compact_compose(false);
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                } else if self.scroll_offset >= 3 {
+                    // Move towards bottom but do NOT toggle spacer yet; wait until
+                    // the user confirms by pressing Down again at bottom.
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 } else if self.scroll_offset > 0 {
+                    // Land exactly at bottom without toggling spacer yet; require
+                    // a subsequent Down to re-enable the spacer so the input
+                    // doesn't move when scrolling into the line above it.
                     self.scroll_offset = 0;
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
@@ -911,9 +992,76 @@ impl ChatWidget<'_> {
         // Note: We diverge from upstream here - upstream takes &dyn HistoryCell
         // and sends display_lines() through events. We store the actual cells
         // for our terminal rendering and theming system.
+        // Invalidate height cache since content has changed
+        self.invalidate_height_cache();
+        // Any new history item means reasoning is no longer at the bottom
+        self.clear_reasoning_in_progress();
+        let new_cell: Box<dyn HistoryCell> = Box::new(cell);
+
+        // Attempt to merge consecutive exec outputs of the same type (e.g., multiple Read or Search)
+        if let Some(last_box) = self.history_cells.last_mut() {
+            // Try to merge consecutive Exec summaries of the same action/phase
+            if let (Some(last_exec), Some(new_exec)) = (
+                last_box.as_any().downcast_ref::<history_cell::ExecCell>(),
+                (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>(),
+            ) {
+                // Compute header label based on parsed action and status
+                let exec_label = |e: &history_cell::ExecCell| -> &'static str {
+                    let action = history_cell::action_from_parsed(&e.parsed);
+                    match (&e.output, action) {
+                        (None, "read") => "Reading...",
+                        (None, "search") => "Searching...",
+                        (None, "list") => "Listing...",
+                        (None, _) => "Running...",
+                        (Some(o), "read") if o.exit_code == 0 => "Read",
+                        (Some(o), "search") if o.exit_code == 0 => "Searched",
+                        (Some(o), "list") if o.exit_code == 0 => "Listed",
+                        (Some(o), _) if o.exit_code == 0 => "Ran",
+                        _ => "",
+                    }
+                };
+                let last_label = exec_label(last_exec);
+                let new_label = exec_label(new_exec);
+                let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
+                if !last_label.is_empty() && last_label == new_label && is_joinable_label(last_label) {
+                    // Merge by rendered lines to preserve formatting
+                    let last_lines = last_box.display_lines();
+                    let new_lines = new_cell.display_lines();
+                    let mut combined = last_lines.clone();
+                    while combined
+                        .last()
+                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+                        .unwrap_or(false)
+                    {
+                        combined.pop();
+                    }
+                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                        body.remove(0);
+                    }
+                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                        body.pop();
+                    }
+                    if let Some(first_line) = body.first_mut() {
+                        if let Some(first_span) = first_line.spans.get_mut(0) {
+                            if first_span.content == "  └ " || first_span.content == "└ " {
+                                first_span.content = "  ".into();
+                            }
+                        }
+                    }
+                    combined.extend(body);
+                    *last_box = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
+                    self.autoscroll_if_near_bottom();
+                    self.bottom_pane.set_has_chat_history(true);
+                    self.process_animation_cleanup();
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                    return;
+                }
+            }
+        }
 
         // Store in memory for local rendering
-        self.history_cells.push(Box::new(cell));
+        self.history_cells.push(new_cell);
         
         // Log animation cells
         let animation_count = self.history_cells.iter().filter(|c| c.is_animating()).count();
@@ -1416,6 +1564,8 @@ impl ChatWidget<'_> {
             }) => {
                 // Store for session diff popup (clone before moving into history)
                 self.session_patch_sets.push(changes.clone());
+                // Enable Ctrl+D footer hint now that we have diffs to show
+                self.bottom_pane.set_diffs_hint(true);
                 self.add_to_history(history_cell::new_patch_event(
                     PatchEventType::ApplyBegin { auto_approved },
                     changes,
@@ -1658,6 +1808,15 @@ impl ChatWidget<'_> {
         }
         self.diff_overlay = Some(DiffOverlay::new(tabs));
         self.request_redraw();
+    }
+
+    pub(crate) fn toggle_diffs_popup(&mut self) {
+        if self.diff_overlay.is_some() {
+            self.diff_overlay = None;
+            self.request_redraw();
+        } else {
+            self.show_diffs_popup();
+        }
     }
 
     pub(crate) fn handle_reasoning_command(&mut self, command_args: String) {
@@ -2011,61 +2170,124 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
+        let kind = self.current_stream_kind.unwrap_or(StreamKind::Answer);
+        self.insert_history_lines_with_kind(kind, lines);
+    }
+
+    pub(crate) fn insert_history_lines_with_kind(
+        &mut self,
+        kind: StreamKind,
+        mut lines: Vec<ratatui::text::Line<'static>>,
+    ) {
         // Insert all lines as a single streaming content cell to preserve spacing
-        if !lines.is_empty() {
-            // Debug logging to understand what's being inserted
-            tracing::debug!("insert_history_lines: {} lines", lines.len());
-            if let Some(first_line) = lines.first() {
-                let first_line_text: String = first_line.spans.iter()
-                    .map(|s| s.content.to_string())
-                    .collect();
-                tracing::debug!("First line content: {:?}", first_line_text);
-            }
-            
-            // Check if this is reasoning content by looking for "thinking" header
-            // The header could be styled with magenta color
-            let is_reasoning = lines.first().map(|l| {
-                // Check all spans in the first line
-                l.spans.iter().any(|span| {
-                    let text = span.content.to_lowercase();
-                    let is_thinking = text == "thinking" || text.trim() == "thinking";
-                    if is_thinking {
-                        tracing::debug!("Detected reasoning content!");
+        if lines.is_empty() {
+            return;
+        }
+
+        tracing::debug!("insert_history_lines(k={:?}): {} lines", kind, lines.len());
+        if let Some(first_line) = lines.first() {
+            let first_line_text: String = first_line
+                .spans
+                .iter()
+                .map(|s| s.content.to_string())
+                .collect();
+            tracing::debug!("First line content: {:?}", first_line_text);
+        }
+
+        match kind {
+            StreamKind::Reasoning => {
+                // This reasoning block is the bottom-most; show progress indicator here only
+                self.clear_reasoning_in_progress();
+                // Ensure footer shows Ctrl+R hint when reasoning content is present
+                self.bottom_pane.set_reasoning_hint(true);
+                // Append to last reasoning cell if present; else create a new one
+                if let Some(last) = self.history_cells.last_mut() {
+                    if let Some(reasoning_cell) = last
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::CollapsibleReasoningCell>()
+                    {
+                        tracing::debug!(
+                            "Appending {} lines to CollapsibleReasoningCell",
+                            lines.len()
+                        );
+                        reasoning_cell.lines.extend(lines);
+                        // Mark in-progress on the bottom-most reasoning cell
+                        reasoning_cell.set_in_progress(true);
+                        // Content height changed; clear memoized heights
+                        self.invalidate_height_cache();
+                        self.autoscroll_if_near_bottom();
+                        self.request_redraw();
+                        return;
                     }
-                    is_thinking
-                })
-            }).unwrap_or(false);
-            
-            if is_reasoning {
-                tracing::debug!("Creating CollapsibleReasoningCell with show_reasoning={}", self.config.tui.show_reasoning);
-                // Create a collapsible reasoning cell with the initial collapsed state from config
+                }
+                tracing::debug!("Creating new CollapsibleReasoningCell");
                 let cell = history_cell::CollapsibleReasoningCell::new(lines);
-                // Set initial state based on config
                 if self.config.tui.show_reasoning {
                     cell.set_collapsed(false);
                 } else {
                     cell.set_collapsed(true);
                 }
+                cell.set_in_progress(true);
                 self.history_cells.push(Box::new(cell));
-            } else {
-                // If we're in a reasoning stream, append to the last reasoning cell
-                if matches!(self.current_stream_kind, Some(StreamKind::Reasoning)) {
-                    if let Some(last) = self.history_cells.last_mut() {
-                        if let Some(reasoning_cell) = last.as_any_mut().downcast_mut::<history_cell::CollapsibleReasoningCell>() {
-                            tracing::debug!("Appending {} lines to CollapsibleReasoningCell", lines.len());
-                            reasoning_cell.lines.extend(lines);
-                            // Auto-follow and request redraw
-                            self.autoscroll_if_near_bottom();
-                            self.request_redraw();
-                            return;
+            }
+            StreamKind::Answer => {
+                // Any incoming Answer means reasoning is no longer bottom-most
+                self.clear_reasoning_in_progress();
+                // Keep a single StreamingContentCell and append to it
+                if let Some(last) = self.history_cells.last_mut() {
+                    if let Some(stream_cell) = last
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::StreamingContentCell>()
+                    {
+                        tracing::debug!(
+                            "Appending {} lines to StreamingContentCell (Answer)",
+                            lines.len()
+                        );
+                        // Guard against stray header sneaking into a later chunk
+                        if lines.first().map(|l| {
+                            l.spans
+                                .iter()
+                                .map(|s| s.content.as_ref())
+                                .collect::<String>()
+                                .trim()
+                                .eq_ignore_ascii_case("codex")
+                        }).unwrap_or(false) {
+                            if lines.len() == 1 {
+                                return;
+                            } else {
+                                lines.remove(0);
+                            }
                         }
+                        stream_cell.lines.extend(lines);
+                        // Content height changed; clear memoized heights
+                        self.invalidate_height_cache();
+                        self.autoscroll_if_near_bottom();
+                        self.request_redraw();
+                        return;
                     }
                 }
                 tracing::debug!("Creating regular StreamingContentCell");
-                // Create a regular streaming content cell
-                self.history_cells.push(Box::new(history_cell::new_streaming_content(lines)));
+                // Ensure a hidden 'codex' header is present
+                let has_header = lines.first().map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                        .trim()
+                        .eq_ignore_ascii_case("codex")
+                }).unwrap_or(false);
+                if !has_header {
+                    let mut with_header: Vec<ratatui::text::Line<'static>> =
+                        Vec::with_capacity(lines.len() + 1);
+                    with_header.push(ratatui::text::Line::from("codex"));
+                    with_header.extend(lines);
+                    lines = with_header;
+                }
+                self.history_cells
+                    .push(Box::new(history_cell::new_streaming_content(lines)));
             }
         }
+
         // Auto-follow if near bottom so new inserts are visible
         self.autoscroll_if_near_bottom();
         self.request_redraw();
@@ -2096,7 +2318,8 @@ impl ChatWidget<'_> {
             // No reasoning cells exist; inform the user
             self.bottom_pane.update_status_text("No reasoning to toggle".to_string());
         }
-        
+        // Collapsed state changes affect heights; clear cache
+        self.invalidate_height_cache();
         self.request_redraw();
     }
     
@@ -2267,6 +2490,7 @@ impl ChatWidget<'_> {
         // Add status message
         self.add_to_history(history_cell::PlainHistoryCell { 
             lines: vec![Line::from("✅ Chrome launched with user profile")],
+            kind: history_cell::HistoryCellType::BackgroundEvent,
         });
     }
 
@@ -2531,6 +2755,7 @@ impl ChatWidget<'_> {
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
             ))],
+            kind: history_cell::HistoryCellType::BackgroundEvent,
         });
     }
 
@@ -2545,9 +2770,7 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.add_to_history(history_cell::PlainHistoryCell {
-                lines,
-            });
+            self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::Notice });
 
             // Switch to internal browser mode when just "/browser" is typed
             self.switch_to_internal_browser();
@@ -2579,9 +2802,7 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.add_to_history(history_cell::PlainHistoryCell {
-                    lines: vec![Line::from(status_msg)],
-                });
+                self.add_to_history(history_cell::PlainHistoryCell { lines: vec![Line::from(status_msg)], kind: history_cell::HistoryCellType::BackgroundEvent });
 
                 // Connect immediately, don't wait for message send
                 tokio::spawn(async move {
@@ -2910,9 +3131,7 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.add_to_history(history_cell::PlainHistoryCell {
-            lines,
-        });
+        self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
     }
 
     fn switch_to_internal_browser(&mut self) {
@@ -2966,9 +3185,7 @@ impl ChatWidget<'_> {
             "🔗 Connecting to Chrome DevTools Protocol (port: {})...",
             port_display
         );
-        self.add_to_history(history_cell::PlainHistoryCell {
-            lines: vec![Line::from(status_msg)],
-        });
+        self.add_to_history(history_cell::PlainHistoryCell { lines: vec![Line::from(status_msg)], kind: history_cell::HistoryCellType::BackgroundEvent });
 
         // Connect in background - first try to connect, show dialog on failure
         tokio::spawn(async move {
@@ -3031,9 +3248,7 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.add_to_history(history_cell::PlainHistoryCell {
-                lines,
-            });
+            self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
             return;
         }
 
@@ -3255,29 +3470,20 @@ impl ChatWidget<'_> {
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
-        use image::GenericImageView; // for dimensions()
         use ratatui::widgets::Widget;
         use ratatui_image::Image;
         use ratatui_image::Resize;
         use ratatui_image::picker::Picker;
         use ratatui_image::picker::ProtocolType;
 
-        // open + decode
-        let reader = match image::ImageReader::open(path) {
-            Ok(r) => r,
+        // First, cheaply read image dimensions without decoding the full image
+        let (img_w, img_h) = match image::image_dimensions(path) {
+            Ok(dim) => dim,
             Err(_) => {
                 self.render_screenshot_placeholder(path, area, buf);
                 return;
             }
         };
-        let dyn_img = match reader.decode() {
-            Ok(img) => img,
-            Err(_) => {
-                self.render_screenshot_placeholder(path, area, buf);
-                return;
-            }
-        };
-        let (img_w, img_h) = dyn_img.dimensions();
 
         // picker (Retina 2x workaround preserved)
         let mut cached_picker = self.cached_picker.borrow_mut();
@@ -3358,6 +3564,20 @@ impl ChatWidget<'_> {
             }
         };
         if needs_recreate {
+            // Only decode when we actually need to (path/target changed)
+            let dyn_img = match image::ImageReader::open(path) {
+                Ok(r) => match r.decode() {
+                    Ok(img) => img,
+                    Err(_) => {
+                        self.render_screenshot_placeholder(path, area, buf);
+                        return;
+                    }
+                },
+                Err(_) => {
+                    self.render_screenshot_placeholder(path, area, buf);
+                    return;
+                }
+            };
             match picker.new_protocol(dyn_img, target, Resize::Fit(Some(FilterType::Lanczos3))) {
                 Ok(protocol) => {
                     *self.cached_image_protocol.borrow_mut() =
@@ -3798,6 +4018,8 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Collect all content items into a single list
         let mut all_content: Vec<&dyn HistoryCell> = Vec::new();
+        // Track welcome animation cell separately for overlay rendering
+        let mut welcome_overlay: Option<&dyn HistoryCell> = None;
 
         // Add all history cells
         for (idx, cell) in self.history_cells.iter().enumerate() {
@@ -3811,7 +4033,17 @@ impl WidgetRef for &ChatWidget<'_> {
                     idx, is_animating, has_custom, height
                 );
             }
-            all_content.push(cell);
+            // If this is the animated welcome cell, render it as an overlay instead
+            let is_welcome = cell
+                .as_any()
+                .downcast_ref::<crate::history_cell::AnimatedWelcomeCell>()
+                .is_some();
+            if is_welcome {
+                welcome_overlay = Some(cell.as_ref());
+                // Skip adding to normal content flow so it doesn't shift layout
+            } else {
+                all_content.push(cell);
+            }
         }
 
         // Add active/streaming cell if present
@@ -3840,13 +4072,46 @@ impl WidgetRef for &ChatWidget<'_> {
         // Calculate total content height including spacing between cells
         let mut total_height = 0u16;
         let mut item_heights = Vec::new();
+        let mut cacheable_flags: Vec<bool> = Vec::new();
         let spacing = 1u16; // Standard spacing between cells
         const GUTTER_WIDTH: u16 = 2; // Same as in render loop
+
+        // Opportunistically clear height cache if width changed
+        if self.height_cache_last_width.get() != content_area.width {
+            self.height_cache.borrow_mut().clear();
+            self.height_cache_last_width.set(content_area.width);
+        }
 
         for (idx, item) in all_content.iter().enumerate() {
             // Calculate height with reduced width due to gutter
             let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-            let h = item.desired_height(content_width);
+            // Determine if this item is safe to memoize (stable content)
+            // Cells with custom renders/animations or transient streaming content should not be cached.
+            let is_cacheable = !item.has_custom_render()
+                && !item.is_animating()
+                && item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::ExecCell>()
+                    .is_none()
+                && item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::StreamingContentCell>()
+                    .is_none();
+
+            let h = if is_cacheable {
+                // Use pointer identity + width as a cache key
+                let key = (item as *const _ as usize, content_width);
+                if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
+                    cached
+                } else {
+                    let computed = item.desired_height(content_width);
+                    self.height_cache.borrow_mut().insert(key, computed);
+                    computed
+                }
+            } else {
+                item.desired_height(content_width)
+            };
+            cacheable_flags.push(is_cacheable);
             item_heights.push(h);
             total_height += h;
 
@@ -3872,7 +4137,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate scroll position and vertical alignment
         let (start_y, scroll_pos) = if total_height <= content_area.height {
-            // Content fits - align to bottom of container
+            // Content fits - always align to bottom so "Popular commands" stays at the bottom
             let start_y = content_area.y + content_area.height.saturating_sub(total_height);
             // Update last_max_scroll cache
             self.last_max_scroll.set(0);
@@ -3945,12 +4210,28 @@ impl WidgetRef for &ChatWidget<'_> {
                     height: visible_height,
                 };
 
-                // Render gutter symbol on the first visible line of this cell
+                // Render gutter symbol
                 if let Some(symbol) = item.gutter_symbol() {
-                    // Only show symbol if we're at the start of the cell (skip_top == 0)
-                    if skip_top == 0 && gutter_area.width >= 2 {
-                        // Choose color based on symbol/type
-                        let color = match symbol {
+                    // Choose color based on symbol/type
+                    let color = if symbol == "➤" {
+                        // Executed arrow – color reflects exec state
+                        if let Some(exec) = item.as_any().downcast_ref::<crate::history_cell::ExecCell>() {
+                            match &exec.output {
+                                None => crate::colors::primary(),          // Running...
+                                Some(o) if o.exit_code == 0 => crate::colors::primary(), // Ran
+                                Some(_) => crate::colors::error(),
+                            }
+                        } else {
+                            crate::colors::primary()
+                        }
+                    } else if symbol == "↯" {
+                        // Patch/Updated arrow color from explicit type
+                        match item.kind() {
+                            crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplySuccess } => crate::colors::success(),
+                            _ => crate::colors::primary(),
+                        }
+                    } else {
+                        match symbol {
                             "›" => crate::colors::text(),        // user
                             "⋮" => crate::colors::text_dim(),     // thinking
                             "•" => crate::colors::text_bright(),  // codex/agent
@@ -3959,7 +4240,12 @@ impl WidgetRef for &ChatWidget<'_> {
                             "✖" => crate::colors::error(),        // error
                             "★" => crate::colors::primary(),      // notice/popular
                             _ => crate::colors::text_dim(),
-                        };
+                        }
+                    };
+
+                    // Draw the symbol at the top of this cell only when the first line is visible
+                    if skip_top == 0 && gutter_area.width >= 2 {
+                        // Choose color based on symbol/type
                         let symbol_style = Style::default().fg(color);
                         buf.set_string(gutter_area.x, gutter_area.y, symbol, symbol_style);
                     }
@@ -4004,25 +4290,84 @@ impl WidgetRef for &ChatWidget<'_> {
         // The composer has its own layout with hints at the bottom
         (&self.bottom_pane).render(bottom_pane_area, buf);
 
-        // Render diff overlay (centered over history area) if active
-        if let Some(overlay) = &self.diff_overlay {
-            // Compute popup area within the history area
-            let popup_w = (history_area.width.saturating_mul(9) / 10).max(20);
-            let popup_h = (history_area.height.saturating_mul(8) / 10).max(10);
-            let popup_x = history_area.x + (history_area.width.saturating_sub(popup_w)) / 2;
-            let popup_y = history_area.y + (history_area.height.saturating_sub(popup_h)) / 2;
-            let area = Rect { x: popup_x, y: popup_y, width: popup_w, height: popup_h };
+        // Render the welcome animation as a centered overlay so it doesn't affect layout
+        if let Some(cell) = welcome_overlay {
+            // Only render if the cell isn't marked for removal
+            let should_render = !cell.should_remove();
+            if should_render {
+                // The animation wants ~21 rows; center within the history area
+                let animation_height: u16 = 21;
+                let h = animation_height.min(history_area.height);
+                let y_center = history_area.y + (history_area.height.saturating_sub(h)) / 2;
+                let overlay_area = Rect {
+                    x: content_area.x, // align with content padding
+                    y: y_center,
+                    width: content_area.width,
+                    height: h,
+                };
+                // Clear the overlay area to avoid artifacts
+                Clear.render(overlay_area, buf);
+                // Let the cell handle its own custom rendering (includes fade/alpha)
+                cell.custom_render(overlay_area, buf);
+            }
+        }
 
+        // Render diff overlay (covering the history area, aligned with padding) if active
+        if let Some(overlay) = &self.diff_overlay {
+            // Match the horizontal padding used by status bar and input
+            let padding = 1u16;
+            let area = Rect {
+                x: history_area.x + padding,
+                y: history_area.y,
+                width: history_area.width.saturating_sub(padding * 2),
+                height: history_area.height,
+            };
+
+            // Clear and repaint the overlay area with theme background
             Clear.render(area, buf);
+            let bg_style = Style::default().bg(crate::colors::background());
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    buf[(x, y)].set_style(bg_style);
+                }
+            }
+
+            // Build a styled title: keys/icons in normal text color; descriptors and dividers dim
+            let t_dim = Style::default().fg(crate::colors::text_dim());
+            let t_fg = Style::default().fg(crate::colors::text());
+            let title_spans: Vec<ratatui::text::Span<'static>> = vec![
+                ratatui::text::Span::styled(" ", t_dim),
+                ratatui::text::Span::styled("Diff viewer", t_fg),
+                ratatui::text::Span::styled(" ——— ", t_dim),
+                ratatui::text::Span::styled("◂ ▸", t_fg),
+                ratatui::text::Span::styled(" change tabs ", t_dim),
+                ratatui::text::Span::styled("——— ", t_dim),
+                ratatui::text::Span::styled("e", t_fg),
+                ratatui::text::Span::styled(" explain ", t_dim),
+                ratatui::text::Span::styled("——— ", t_dim),
+                ratatui::text::Span::styled("u", t_fg),
+                ratatui::text::Span::styled(" undo ", t_dim),
+                ratatui::text::Span::styled("——— ", t_dim),
+                ratatui::text::Span::styled("Esc", t_fg),
+                ratatui::text::Span::styled(" close ", t_dim),
+            ];
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title("Diffs — ◄ ► tabs • ↑ ↓ scroll • u undo • Esc close")
-                .border_style(Style::default().fg(crate::colors::border()));
+                .title(ratatui::text::Line::from(title_spans))
+                .style(Style::default().bg(crate::colors::background()))
+                .border_style(
+                    Style::default()
+                        .fg(crate::colors::border())
+                        .bg(crate::colors::background()),
+                );
             let inner = block.inner(area);
             block.render(area, buf);
 
             // Split into header tabs and body/footer
-            let [tabs_area, body_area] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
+            // Add one cell padding around the entire inside of the window
+            let padded_inner = inner.inner(ratatui::layout::Margin::new(1, 1));
+            let [tabs_area, body_area] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(padded_inner);
 
             // Render tabs
             let titles = overlay.tabs.iter().map(|(t, _)| ratatui::text::Line::from(format!(" {t} "))).collect::<Vec<_>>();
@@ -4037,7 +4382,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let mut visible_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                 let skip = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
 
-                // Keep 1 line for top padding inside body
+                // Use full body area for content
                 let body_inner = body_area;
                 let visible_rows = body_inner.height as usize;
                 for l in lines.iter().skip(skip).take(visible_rows) {

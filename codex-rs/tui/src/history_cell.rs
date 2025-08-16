@@ -47,6 +47,39 @@ pub(crate) enum PatchEventType {
     ApplyBegin { auto_approved: bool },
 }
 
+// ==================== HistoryCellType ====================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HistoryCellType {
+    Plain,
+    User,
+    Assistant,
+    Reasoning,
+    Error,
+    Exec { kind: ExecKind, status: ExecStatus },
+    Tool { status: ToolStatus },
+    Patch { kind: PatchKind },
+    PlanUpdate,
+    BackgroundEvent,
+    Notice,
+    Diff,
+    Image,
+    AnimatedWelcome,
+    Loading,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExecKind { Read, Search, List, Run }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExecStatus { Running, Success, Error }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolStatus { Running, Success, Failed }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PatchKind { Proposed, ApplyBegin, ApplySuccess, ApplyFailure }
+
 // ==================== HistoryCell Trait ====================
 
 /// Represents an event to display in the conversation history.
@@ -54,6 +87,8 @@ pub(crate) enum PatchEventType {
 /// to display in a scrollable list.
 pub(crate) trait HistoryCell {
     fn display_lines(&self) -> Vec<Line<'static>>;
+    /// A required, explicit type descriptor for the history cell.
+    fn kind(&self) -> HistoryCellType;
     
     /// Allow downcasting to concrete types
     fn as_any(&self) -> &dyn std::any::Any {
@@ -146,7 +181,34 @@ pub(crate) trait HistoryCell {
     /// Returns the gutter symbol for this cell type
     /// Returns None if no symbol should be displayed
     fn gutter_symbol(&self) -> Option<&'static str> {
-        None // Default: no symbol
+        match self.kind() {
+            HistoryCellType::Plain => None,
+            HistoryCellType::User => Some("›"),
+            HistoryCellType::Assistant => Some("•"),
+            HistoryCellType::Reasoning => None,
+            HistoryCellType::Error => Some("✖"),
+            HistoryCellType::Tool { status } => Some(match status {
+                ToolStatus::Running => "⚙",
+                ToolStatus::Success => "✔",
+                ToolStatus::Failed => "✖",
+            }),
+            HistoryCellType::Exec { kind, status } => {
+                // Show ➤ only for Run executions; hide for read/search/list summaries
+                match (kind, status) {
+                    (ExecKind::Run, ExecStatus::Error) => Some("✖"),
+                    (ExecKind::Run, _) => Some("➤"),
+                    _ => None,
+                }
+            }
+            HistoryCellType::Patch { .. } => Some("↯"),
+            HistoryCellType::PlanUpdate => Some("◔"), // final glyph will be chosen in header line
+            HistoryCellType::BackgroundEvent => Some("»"),
+            HistoryCellType::Notice => Some("★"),
+            HistoryCellType::Diff => Some("↯"),
+            HistoryCellType::Image => None,
+            HistoryCellType::AnimatedWelcome => None,
+            HistoryCellType::Loading => None,
+        }
     }
 }
 
@@ -158,6 +220,7 @@ impl HistoryCell for Box<dyn HistoryCell> {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self.as_mut().as_any_mut()
     }
+    fn kind(&self) -> HistoryCellType { self.as_ref().kind() }
     
     fn display_lines(&self) -> Vec<Line<'static>> {
         self.as_ref().display_lines()
@@ -213,46 +276,30 @@ impl HistoryCell for Box<dyn HistoryCell> {
 
 pub(crate) struct PlainHistoryCell {
     pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) kind: HistoryCellType,
 }
 
 impl HistoryCell for PlainHistoryCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { self.kind }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        // If we have a gutter symbol, handle title line appropriately
-        if let Some(_) = self.gutter_symbol() {
-            if self.lines.len() == 1 {
-                // Single-line cell with gutter symbol = just a header, hide it completely
-                Vec::new()
-            } else {
-                // Multi-line cell with gutter symbol = skip the title line
-                self.lines[1..].to_vec()
-            }
+        // If a gutter symbol implies a standard header line (user, assistant, tool, etc.),
+        // hide that first title line and show only the content.
+        let hide_header = matches!(
+            self.kind,
+            HistoryCellType::User
+                | HistoryCellType::Assistant
+                | HistoryCellType::Tool { .. }
+                | HistoryCellType::Error
+                | HistoryCellType::BackgroundEvent
+                | HistoryCellType::Notice
+        );
+        if hide_header && self.lines.len() > 1 {
+            self.lines[1..].to_vec()
+        } else if hide_header {
+            Vec::new()
         } else {
             self.lines.clone()
-        }
-    }
-    
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        // Detect type from first line content
-        if let Some(first_line) = self.lines.first() {
-            let text: String = first_line.spans.iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>()
-                .trim()
-                .to_lowercase();
-            
-            match text.as_str() {
-                "user" => Some("›"),
-                "codex" => Some("•"),
-                "thinking" | "thinking..." => Some("⋮"),
-                "tool" => Some("⚙"),
-                "error" => Some("✖"),
-                "event" => Some("»"),
-                "notice" => Some("★"),
-                _ => None,
-            }
-        } else {
-            None
         }
     }
 }
@@ -267,18 +314,24 @@ pub(crate) struct ExecCell {
 }
 
 impl HistoryCell for ExecCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType {
+        let kind = match action_from_parsed(&self.parsed) {
+            "read" => ExecKind::Read,
+            "search" => ExecKind::Search,
+            "list" => ExecKind::List,
+            _ => ExecKind::Run,
+        };
+        let status = match &self.output {
+            None => ExecStatus::Running,
+            Some(o) if o.exit_code == 0 => ExecStatus::Success,
+            Some(_) => ExecStatus::Error,
+        };
+        HistoryCellType::Exec { kind, status }
+    }
     fn display_lines(&self) -> Vec<Line<'static>> {
         exec_command_lines(&self.command, &self.parsed, self.output.as_ref(), self.start_time)
-    }
-    
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        // Dynamic gutter: working=⚙, success=✔, error=✖
-        match &self.output {
-            None => Some("⚙"),
-            Some(o) if o.exit_code == 0 => Some("✔"),
-            Some(_) => Some("✖"),
-        }
     }
 }
 
@@ -300,7 +353,9 @@ pub(crate) struct AnimatedWelcomeCell {
 }
 
 impl HistoryCell for AnimatedWelcomeCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::AnimatedWelcome }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // For plain lines, just show a simple welcome message
         vec![
@@ -324,20 +379,21 @@ impl HistoryCell for AnimatedWelcomeCell {
         tracing::debug!("AnimatedWelcomeCell::custom_render called, area: {:?}, elapsed: {:?}, completed: {}", 
                       area, elapsed, self.completed.get());
         
-        // Position the animation at the bottom of the available area
+        // Center the animation within the provided area
         // The actual animation needs 21 rows
         let animation_height = 21u16;
-        let positioned_area = if area.height > animation_height {
-            // Position at bottom with a small margin
-            let top_offset = area.height.saturating_sub(animation_height + 2); // 2 rows margin from bottom
-            Rect {
-                x: area.x,
-                y: area.y + top_offset,
-                width: area.width,
-                height: animation_height,
-            }
+        let height = animation_height.min(area.height);
+        let vertical_offset = if area.height > height {
+            (area.height - height) / 2
         } else {
-            area
+            0
+        };
+        // Use full width so the renderer can horizontally center
+        let positioned_area = Rect {
+            x: area.x,
+            y: area.y.saturating_add(vertical_offset),
+            width: area.width,
+            height: height,
         };
         
         let fade_duration = std::time::Duration::from_millis(800);
@@ -440,6 +496,7 @@ pub(crate) struct LoadingCell {
 
 impl HistoryCell for LoadingCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Loading }
     fn display_lines(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
@@ -477,6 +534,7 @@ pub(crate) struct ImageOutputCell {
 
 impl HistoryCell for ImageOutputCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Image }
     fn display_lines(&self) -> Vec<Line<'static>> {
         vec![
             Line::from("tool result (image output omitted)"),
@@ -500,6 +558,15 @@ pub(crate) struct ToolCallCell {
 
 impl HistoryCell for ToolCallCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Tool {
+            status: match self.state {
+                ToolState::Running => ToolStatus::Running,
+                ToolState::Success => ToolStatus::Success,
+                ToolState::Failed => ToolStatus::Failed,
+            },
+        }
+    }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Hide header line if gutter is present
         if self.lines.len() > 1 {
@@ -507,13 +574,6 @@ impl HistoryCell for ToolCallCell {
         } else {
             Vec::new()
         }
-    }
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        Some(match self.state {
-            ToolState::Running => "⚙",
-            ToolState::Success => "✔",
-            ToolState::Failed => "✖",
-        })
     }
 }
 
@@ -523,6 +583,7 @@ impl HistoryCell for ToolCallCell {
 pub(crate) struct CollapsibleReasoningCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) collapsed: std::cell::Cell<bool>,
+    pub(crate) in_progress: std::cell::Cell<bool>,
 }
 
 impl CollapsibleReasoningCell {
@@ -530,6 +591,7 @@ impl CollapsibleReasoningCell {
         Self {
             lines,
             collapsed: std::cell::Cell::new(true), // Default to collapsed
+            in_progress: std::cell::Cell::new(false),
         }
     }
     
@@ -544,6 +606,10 @@ impl CollapsibleReasoningCell {
     #[allow(dead_code)]
     pub fn is_collapsed(&self) -> bool {
         self.collapsed.get()
+    }
+
+    pub fn set_in_progress(&self, in_progress: bool) {
+        self.in_progress.set(in_progress);
     }
 
     /// Normalize reasoning content lines by splitting any line that begins
@@ -611,12 +677,11 @@ impl CollapsibleReasoningCell {
     fn extract_section_titles(&self) -> Vec<Line<'static>> {
         let lines = self.normalized_lines();
         let mut titles: Vec<Line<'static>> = Vec::new();
-        for l in lines.iter() {
-            // Skip the "thinking" header and blank lines
+        for (idx, l) in lines.iter().enumerate() {
+            // Skip blank lines
             let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
             let trimmed = text.trim();
             if trimmed.is_empty() { continue; }
-            if trimmed.eq_ignore_ascii_case("thinking") { continue; }
 
             // Title heuristics:
             // 1) Entire line bold
@@ -633,18 +698,26 @@ impl CollapsibleReasoningCell {
             // 3) Markdown heading (begins with '#') - renderer includes hashes in content
             let is_md_heading = trimmed.starts_with('#');
 
-            if all_bold || (leading_bold && ends_colon) || is_md_heading {
+            // 4) Title-like plain line: reasonably short, no terminal punctuation, and
+            //    either first line or preceded by a blank separator.
+            let prev_blank = idx == 0 || lines.get(idx.saturating_sub(1)).map(|pl| {
+                pl.spans.iter().all(|s| s.content.trim().is_empty())
+            }).unwrap_or(true);
+            let len_ok = trimmed.chars().count() >= 3 && trimmed.chars().count() <= 80;
+            let no_terminal_punct = !trimmed.ends_with('.') && !trimmed.ends_with('!') && !trimmed.ends_with('?');
+            let plain_title_like = prev_blank && len_ok && no_terminal_punct;
+
+            if all_bold || (leading_bold && ends_colon) || is_md_heading || plain_title_like {
                 titles.push(l.clone());
             }
         }
 
         if titles.is_empty() {
-            // Fallback: first non-empty non-header line as summary
+            // Fallback: first non-empty line as summary
             for l in lines.iter() {
                 let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
                 let trimmed = text.trim();
                 if trimmed.is_empty() { continue; }
-                if trimmed.eq_ignore_ascii_case("thinking") { continue; }
                 titles.push(l.clone());
                 break;
             }
@@ -671,6 +744,7 @@ impl HistoryCell for CollapsibleReasoningCell {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Reasoning }
     
     fn display_lines(&self) -> Vec<Line<'static>> {
         if self.lines.is_empty() {
@@ -680,27 +754,38 @@ impl HistoryCell for CollapsibleReasoningCell {
         // Normalize to improve section splitting and spacing
         let normalized = self.normalized_lines();
         
-        // Skip the "thinking" header if present
-        let start_idx = if normalized.first()
-            .and_then(|l| l.spans.first())
-            .map(|s| s.content.to_lowercase() == "thinking")
-            .unwrap_or(false) {
-            1
-        } else {
-            0
-        };
+        // There is no explicit 'thinking' header; show all lines
+        let start_idx = 0;
         
         if self.collapsed.get() {
             // When collapsed, show extracted section titles (or at least one summary)
-            return self.extract_section_titles();
+            let mut titles = self.extract_section_titles();
+            if self.in_progress.get() {
+                if let Some(last) = titles.pop() {
+                    let mut spans = last.spans;
+                    spans.push(Span::styled(
+                        "…",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                    titles.push(Line::from(spans));
+                } else {
+                    titles.push(Line::from("…"));
+                }
+            }
+            titles
         } else {
-            // When expanded, show all lines except the header
-            normalized[start_idx..].to_vec()
+            // When expanded, show all lines; append an ellipsis if in progress
+            let mut out = normalized[start_idx..].to_vec();
+            if self.in_progress.get() {
+                out.push(Line::from("…".dim()));
+            }
+            out
         }
     }
     
     fn gutter_symbol(&self) -> Option<&'static str> {
-        Some("⋮")
+        // No gutter icon for reasoning/thinking
+        None
     }
 }
 
@@ -713,9 +798,10 @@ pub(crate) struct StreamingContentCell {
 
 impl HistoryCell for StreamingContentCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Assistant }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        // If we have a gutter symbol, handle title line appropriately
-        if let Some(_) = self.gutter_symbol() {
+        // Hide the header line (e.g., "codex") when using a gutter symbol
+        if self.gutter_symbol().is_some() {
             if self.lines.len() == 1 {
                 // Single-line cell with gutter symbol = just a header, hide it completely
                 Vec::new()
@@ -725,30 +811,6 @@ impl HistoryCell for StreamingContentCell {
             }
         } else {
             self.lines.clone()
-        }
-    }
-    
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        // Detect type from first line content (same as PlainHistoryCell)
-        if let Some(first_line) = self.lines.first() {
-            let text: String = first_line.spans.iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>()
-                .trim()
-                .to_lowercase();
-            
-            match text.as_str() {
-                "user" => Some("›"),
-                "codex" => Some("•"),
-                "thinking" | "thinking..." => Some("⋮"),
-                "tool" => Some("⚙"),
-                "error" => Some("✖"),
-                "event" => Some("»"),
-                "notice" => Some("★"),
-                _ => None,
-            }
-        } else {
-            None
         }
     }
 }
@@ -856,7 +918,7 @@ pub(crate) fn new_background_event(message: String) -> PlainHistoryCell {
     lines.push(Line::from("event".dim()));
     lines.extend(message.lines().map(|line| ansi_escape_line(line).dim()));
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::BackgroundEvent }
 }
 
 pub(crate) fn new_session_info(
@@ -879,39 +941,39 @@ pub(crate) fn new_session_info(
                 Style::default().fg(crate::colors::primary()),
             ),
             Line::from(vec![
-                Span::styled("/chrome", Style::default().fg(crate::colors::function())),
+                Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Chrome.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
             Line::from(vec![
-                Span::styled("/browser <url>", Style::default().fg(crate::colors::function())),
+                Span::styled("/browser <url>", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Browser.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
             Line::from(vec![
-                Span::styled("/plan", Style::default().fg(crate::colors::function())),
+                Span::styled("/plan", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Plan.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
             Line::from(vec![
-                Span::styled("/solve", Style::default().fg(crate::colors::function())),
+                Span::styled("/solve", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Solve.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
             Line::from(vec![
-                Span::styled("/code", Style::default().fg(crate::colors::function())),
+                Span::styled("/code", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Code.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
             Line::from(vec![
-                Span::styled("/reasoning", Style::default().fg(crate::colors::function())),
+                Span::styled("/reasoning", Style::default().fg(crate::colors::primary())),
                 Span::from(" - "),
                 Span::from(SlashCommand::Reasoning.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
         ];
-        PlainHistoryCell { lines }
+        PlainHistoryCell { lines, kind: HistoryCellType::Notice }
     } else if config.model == model {
-        PlainHistoryCell { lines: Vec::new() }
+        PlainHistoryCell { lines: Vec::new(), kind: HistoryCellType::Notice }
     } else {
         let lines = vec![
             Line::from("model changed:".magenta().bold()),
@@ -919,7 +981,7 @@ pub(crate) fn new_session_info(
             Line::from(format!("used: {model}")),
             // No empty line at end - trimming and spacing handled by renderer
         ];
-        PlainHistoryCell { lines }
+        PlainHistoryCell { lines, kind: HistoryCellType::Notice }
     }
 }
 
@@ -928,12 +990,12 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     lines.push(Line::from("user"));
     lines.extend(message.lines().map(|l| Line::from(l.to_string())));
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::User }
 }
 
 #[allow(dead_code)]
 pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
-    PlainHistoryCell { lines: vec![line] }
+    PlainHistoryCell { lines: vec![line], kind: HistoryCellType::Notice }
 }
 
 
@@ -998,7 +1060,7 @@ fn exec_command_lines(
     }
 }
 
-fn action_from_parsed(parsed_commands: &[ParsedCommand]) -> &'static str {
+pub(crate) fn action_from_parsed(parsed_commands: &[ParsedCommand]) -> &'static str {
     for parsed in parsed_commands.iter() {
         match parsed {
             ParsedCommand::Search { .. } => return "search",
@@ -1096,31 +1158,49 @@ fn new_parsed_command(
             let header = match action {
                 "read" => "Reading...".to_string(),
                 "search" => "Searching...".to_string(),
-                "list" => "Listing...".to_string(),
+                "list" => "Listing files...".to_string(),
                 _ => match &ctx_path {
                     Some(p) => format!("Running... in {p}"),
                     None => "Running...".to_string(),
                 },
             };
-            Line::styled(
-                format!("{}{}", header, duration_str),
-                Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
-            )
+            // Use non-bold styling for informational actions; keep primary color
+            if matches!(action, "read" | "search" | "list") {
+                Line::styled(
+                    format!("{}{}", header, duration_str),
+                    Style::default().fg(crate::colors::primary()),
+                )
+            } else {
+                Line::styled(
+                    format!("{}{}", header, duration_str),
+                    Style::default()
+                        .fg(crate::colors::primary())
+                        .add_modifier(Modifier::BOLD),
+                )
+            }
         }
         Some(o) if o.exit_code == 0 => {
             let done = match action {
                 "read" => "Read".to_string(),
                 "search" => "Searched".to_string(),
-                "list" => "Listed".to_string(),
+                "list" => "List Files".to_string(),
                 _ => match &ctx_path {
                     Some(p) => format!("Ran in {p}"),
                     None => "Ran".to_string(),
                 },
             };
-            Line::styled(
-                done,
-                Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD),
-            )
+            // Color by action: informational (Read/Search/List) use normal text; execution uses primary
+            if matches!(action, "read" | "search" | "list") {
+                Line::styled(
+                    done,
+                    Style::default().fg(crate::colors::text()),
+                )
+            } else {
+                Line::styled(
+                    done,
+                    Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
+                )
+            }
         }
         Some(o) => Line::styled(
             format!("Error (exit {})", o.exit_code),
@@ -1128,39 +1208,152 @@ fn new_parsed_command(
         ),
     }];
 
-    for (i, parsed) in parsed_commands.iter().enumerate() {
-        let text = match parsed {
+    // Collect any paths referenced by search commands to suppress redundant directory lines
+    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for pc in parsed_commands.iter() {
+        if let ParsedCommand::Search { path: Some(p), .. } = pc {
+            search_paths.insert(p.to_string());
+        }
+    }
+
+    // We'll emit only content lines here; the header above already communicates the action.
+    // Use a single leading "└ " for the very first content line, then indent subsequent ones.
+    let mut any_content_emitted = false;
+
+    for parsed in parsed_commands.iter() {
+        // Produce a logical label and content string without icons
+        let (label, content) = match parsed {
             ParsedCommand::Read { name, cmd, .. } => {
+                let mut c = name.clone();
                 if let Some(ann) = parse_read_line_annotation(cmd) {
-                    format!("📖 {name} {ann}")
-                } else {
-                    format!("📖 {name}")
+                    c = format!("{c} {ann}");
                 }
+                ("Read".to_string(), c)
             }
             ParsedCommand::ListFiles { cmd, path } => match path {
-                Some(p) => format!("📂 {p}"),
-                None => format!("📂 {}", cmd),
+                Some(p) => {
+                    if search_paths.contains(p) {
+                        (String::new(), String::new()) // suppressed
+                    } else {
+                        let display_p = if p.ends_with('/') { p.to_string() } else { format!("{p}/") };
+                        ("List".to_string(), display_p)
+                    }
+                }
+                None => ("List".to_string(), cmd.clone()),
             },
-            ParsedCommand::Search { query, path, cmd } => match (query, path) {
-                (Some(q), Some(p)) => format!("🔎 {q} in {p}"),
-                (Some(q), None) => format!("🔎 {q}"),
-                (None, Some(p)) => format!("🔎 {p}"),
-                (None, None) => format!("🔎 {}", cmd),
+            ParsedCommand::Search { query, path, cmd } => {
+                // Format query: split on '|' and join with commas + 'and' for readability
+                let fmt_query = |q: &str| -> String {
+                    let parts: Vec<String> = q
+                        .split('|')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    match parts.len() {
+                        0 => String::new(),
+                        1 => parts[0].clone(),
+                        2 => format!("{} and {}", parts[0], parts[1]),
+                        _ => {
+                            let last = parts.last().cloned().unwrap_or_default();
+                            let head = &parts[..parts.len() - 1];
+                            format!("{} and {}", head.join(", "), last)
+                        }
+                    }
+                };
+                match (query, path) {
+                    (Some(q), Some(p)) => {
+                        let display_p = if p.ends_with('/') { p.to_string() } else { format!("{p}/") };
+                        ("Search".to_string(), format!("{} in {}", fmt_query(q), display_p))
+                    }
+                    (Some(q), None) => ("Search".to_string(), format!("{}", fmt_query(q))),
+                    (None, Some(p)) => {
+                        let display_p = if p.ends_with('/') { p.to_string() } else { format!("{p}/") };
+                        ("Search".to_string(), format!("in {}", display_p))
+                    }
+                    (None, None) => ("Search".to_string(), cmd.clone()),
+                }
             },
-            ParsedCommand::Format { .. } => "✨ Formatting".to_string(),
-            ParsedCommand::Test { cmd } => format!("🧪 {}", cmd),
-            ParsedCommand::Lint { cmd, .. } => format!("🧹 {}", cmd),
-            ParsedCommand::Unknown { cmd } => format!("⌨️ {}", cmd),
-            ParsedCommand::Noop { .. } => continue, // Skip noop commands
+            ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
+            ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
+            ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
+            ParsedCommand::Unknown { cmd } => ("Run".to_string(), cmd.clone()),
+            ParsedCommand::Noop { .. } => continue,
         };
 
-        let first_prefix = if i == 0 { "  └ " } else { "    " };
-        for (j, line_text) in text.lines().enumerate() {
-            let prefix = if j == 0 { first_prefix } else { "    " };
-            lines.push(Line::from(vec![
+        // Skip suppressed entries
+        if label.is_empty() && content.is_empty() {
+            continue;
+        }
+
+        // Split content into lines and push without repeating the action label
+        for line_text in content.lines() {
+            if line_text.is_empty() { continue; }
+            let prefix = if !any_content_emitted { "└ " } else { "  " };
+            let mut spans: Vec<Span<'static>> = vec![
                 Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
-                Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text_dim())),
-            ]));
+            ];
+
+            match label.as_str() {
+                // Highlight searched terms in normal text color; keep connectors/path dim
+                "Search" => {
+                    let remaining = line_text.to_string();
+                    // Split off optional path suffix " (in ...)"
+                    let (terms_part, path_part) = match remaining.rfind(" (in ") {
+                        Some(idx) => (remaining[..idx].to_string(), Some(remaining[idx..].to_string())),
+                        None => (remaining.clone(), None),
+                    };
+                    // Tokenize terms by ", " and " and " while preserving separators
+                    let tmp = terms_part.clone();
+                    // First, split by ", "
+                    let chunks: Vec<String> = if tmp.contains(", ") { tmp.split(", ").map(|s| s.to_string()).collect() } else { vec![tmp.clone()] };
+                    for (i, chunk) in chunks.iter().enumerate() {
+                        if i > 0 {
+                            // Add comma separator between items (dim)
+                            spans.push(Span::styled(", ", Style::default().fg(crate::colors::text_dim())));
+                        }
+                        // Within each chunk, if it contains " and ", split into left and right with dimmed " and "
+                        if let Some((left, right)) = chunk.rsplit_once(" and ") {
+                            if !left.is_empty() {
+                                spans.push(Span::styled(left.to_string(), Style::default().fg(crate::colors::text())));
+                                spans.push(Span::styled(" and ", Style::default().fg(crate::colors::text_dim())));
+                                spans.push(Span::styled(right.to_string(), Style::default().fg(crate::colors::text())));
+                            } else {
+                                spans.push(Span::styled(chunk.to_string(), Style::default().fg(crate::colors::text())));
+                            }
+                        } else {
+                            spans.push(Span::styled(chunk.to_string(), Style::default().fg(crate::colors::text())));
+                        }
+                    }
+                    if let Some(p) = path_part {
+                        spans.push(Span::styled(p, Style::default().fg(crate::colors::text_dim())));
+                    }
+                }
+                // Highlight filenames in Read; keep line ranges dim
+                "Read" => {
+                    if let Some(idx) = line_text.find(" (") {
+                        let (fname, rest) = line_text.split_at(idx);
+                        spans.push(Span::styled(fname.to_string(), Style::default().fg(crate::colors::text())));
+                        spans.push(Span::styled(rest.to_string(), Style::default().fg(crate::colors::text_dim())));
+                    } else {
+                        spans.push(Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text())));
+                    }
+                }
+                // List Files: highlight directory names
+                "List" => {
+                    spans.push(Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text())));
+                }
+                _ => {
+                    // For executed commands (Run/Test/Lint/etc.), show the command text
+                    // in normal text color rather than dimmed.
+                    spans.push(Span::styled(
+                        line_text.to_string(),
+                        Style::default().fg(crate::colors::text()),
+                    ));
+                }
+            }
+
+            lines.push(Line::from(spans));
+            any_content_emitted = true;
         }
     }
 
@@ -1210,13 +1403,20 @@ fn new_exec_command_generic(
         };
 
         lines.push(header_line.clone());
-        lines.push(Line::from(vec![first.to_string().into(), duration_str.dim()]));
+        // Show the command itself in standard text color; keep the duration dimmed
+        lines.push(Line::from(vec![
+            Span::styled(first.to_string(), Style::default().fg(crate::colors::text())),
+            duration_str.dim(),
+        ]));
     } else {
         lines.push(header_line);
     }
     
     for cont in cmd_lines {
-        lines.push(Line::from(cont.to_string()));
+        lines.push(Line::styled(
+            cont.to_string(),
+            Style::default().fg(crate::colors::text()),
+        ));
     }
 
     lines.extend(output_lines(output, false, true));
@@ -1441,7 +1641,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
             .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
     );
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Error }
 }
 
 pub(crate) fn new_diff_output(diff_output: String) -> PlainHistoryCell {
@@ -1459,7 +1659,7 @@ pub(crate) fn new_diff_output(diff_output: String) -> PlainHistoryCell {
         }
     }
     lines.push(Line::from(""));
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Diff }
 }
 
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
@@ -1469,7 +1669,7 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
         Line::from(format!("Current: {}", reasoning_effort)),
         Line::from(""),
     ];
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
 }
 
 // Continue with more factory functions...
@@ -1562,7 +1762,7 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
         usage.blended_total().to_string().into(),
     ]));
     
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
@@ -1577,7 +1777,7 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
         Line::from(" 6. Improve documentation in @filename"),
         Line::from(""),
     ];
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
 }
 
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
@@ -1599,11 +1799,18 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
     };
     let empty = width.saturating_sub(filled);
     
+    // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
-    header.push(Span::raw("📋"));
+    let total = plan.len();
+    let completed = plan
+        .iter()
+        .filter(|p| matches!(p.status, StepStatus::Completed))
+        .count();
     header.push(Span::styled(
         " Update plan",
-        Style::default().add_modifier(Modifier::BOLD).magenta(),
+        Style::default()
+            .fg(crate::colors::primary())
+            .add_modifier(Modifier::BOLD),
     ));
     header.push(Span::raw(" ["));
     if filled > 0 {
@@ -1660,11 +1867,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
                     Span::styled(step, Style::default().add_modifier(Modifier::DIM)),
                 ),
             };
-            let prefix = if idx == 0 {
-                Span::raw("  └ ")
-            } else {
-                Span::raw("    ")
-            };
+            let prefix = if idx == 0 { Span::raw("└ ") } else { Span::raw("  ") };
             lines.push(Line::from(vec![
                 prefix,
                 box_span,
@@ -1674,7 +1877,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
         }
     }
     
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::PlanUpdate }
 }
 
 pub(crate) fn new_patch_event(
@@ -1683,14 +1886,18 @@ pub(crate) fn new_patch_event(
 ) -> PlainHistoryCell {
     let title = match event_type {
         PatchEventType::ApprovalRequest => "proposed patch",
-        PatchEventType::ApplyBegin { auto_approved: true } => "✏️ Applying patch",
-        PatchEventType::ApplyBegin { auto_approved: false } => "✏️ Applying approved patch",
+        PatchEventType::ApplyBegin { auto_approved: true } => "Updating...",
+        PatchEventType::ApplyBegin { auto_approved: false } => "Updating...",
     };
 
     let lines: Vec<Line<'static>> = create_diff_summary(title, &changes, event_type)
         .into_iter()
         .collect();
-    PlainHistoryCell { lines }
+    let kind = match title {
+        "proposed patch" => HistoryCellType::Patch { kind: PatchKind::Proposed },
+        _ => HistoryCellType::Patch { kind: PatchKind::ApplyBegin },
+    };
+    PlainHistoryCell { lines, kind }
 }
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
@@ -1704,8 +1911,10 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     }
     
     lines.push(Line::from(""));
-    PlainHistoryCell { lines }
+    PlainHistoryCell { lines, kind: HistoryCellType::Patch { kind: PatchKind::ApplyFailure } }
 }
+
+// new_patch_apply_success was removed in favor of in-place header mutation and type update in chatwidget
 
 // ==================== Spacing Helper ====================
 
@@ -1723,13 +1932,13 @@ fn is_title_line(line: &Line) -> bool {
         .trim()
         .to_lowercase();
     
-    // Check for common title patterns
+    // Check for common title patterns (fallback heuristic only; primary logic uses explicit cell types)
     matches!(text.as_str(), 
         "codex" | "user" | "thinking" | "event" | 
         "tool" | "/diff" | "/status" | "/prompts" |
         "reasoning effort" | "error"
     ) || text.starts_with("⚡") || text.starts_with("⚙") || text.starts_with("✓") || text.starts_with("✗") ||
-        text.starts_with("📋") || text.starts_with("proposed patch") || text.starts_with("✏️")
+        text.starts_with("↯") || text.starts_with("proposed patch") || text.starts_with("applying patch") || text.starts_with("updating") || text.starts_with("updated")
 }
 
 /// Check if a line is empty (no content or just whitespace)

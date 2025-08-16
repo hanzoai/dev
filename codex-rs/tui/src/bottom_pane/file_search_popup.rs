@@ -128,6 +128,8 @@ impl WidgetRef for &FileSearchPopup {
                         .map(|v| v.iter().map(|&i| i as usize).collect()),
                     is_current: false,
                     description: None,
+                    // Use default text color for file matches
+                    name_color: None,
                 })
                 .collect()
         };
