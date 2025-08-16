@@ -1,0 +1,293 @@
+//! Centralized vertical layout management for the chat UI.
+//!
+//! This module provides a HeightManager that stabilizes per-frame layout by
+//! applying small-change hysteresis and quantized HUD heights. It is designed
+//! to be minimally invasive and can be enabled via an environment flag.
+
+use ratatui::layout::{Constraint, Layout, Rect};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeightEvent {
+    Resize,
+    HudToggle(bool),
+    ComposerModeChange,
+    HistoryAppend,
+    HistoryFinalize,
+    RunBegin,
+    RunEnd,
+    UserScroll,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HeightManagerConfig {
+    /// Number of consecutive frames to tolerate +/-1 row changes.
+    pub hysteresis_n: u8,
+    /// HUD height is rounded to this quantum (rows).
+    pub hud_quantum: u16,
+    /// Frames that a quantized HUD change must persist before applying.
+    pub hud_confirm_frames: u8,
+}
+
+impl Default for HeightManagerConfig {
+    fn default() -> Self {
+        Self {
+            hysteresis_n: 2,
+            hud_quantum: 2,
+            hud_confirm_frames: 2,
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Default)]
+struct DevCounters {
+    frames: u64,
+    hysteresis_applied: u64,
+    hud_quantized: u64,
+}
+
+pub(crate) struct HeightManager {
+    cfg: HeightManagerConfig,
+    last_area: Option<Rect>,
+    last_bottom: Option<u16>,
+    last_hud: Option<u16>,
+    /// Tracks frames where a small (+/-1) change was ignored.
+    small_change_count: u8,
+    /// Pending HUD value with confirmation counter.
+    hud_pending: Option<(u16, u8)>,
+    /// When set by an explicit event, bypass hysteresis once.
+    bypass_once: bool,
+    #[cfg(debug_assertions)]
+    counters: DevCounters,
+}
+
+impl HeightManager {
+    pub(crate) fn new(cfg: HeightManagerConfig) -> Self {
+        Self {
+            cfg,
+            last_area: None,
+            last_bottom: None,
+            last_hud: None,
+            small_change_count: 0,
+            hud_pending: None,
+            bypass_once: false,
+            #[cfg(debug_assertions)]
+            counters: DevCounters::default(),
+        }
+    }
+
+    pub(crate) fn record_event(&mut self, event: HeightEvent) {
+        match event {
+            HeightEvent::Resize
+            | HeightEvent::HudToggle(_)
+            | HeightEvent::ComposerModeChange
+            | HeightEvent::HistoryAppend
+            | HeightEvent::HistoryFinalize
+            | HeightEvent::RunBegin
+            | HeightEvent::RunEnd => {
+                // Next begin_frame applies new values immediately.
+                self.bypass_once = true;
+                // Clear lingering small-change counters so we do not suppress real updates.
+                self.small_change_count = 0;
+                // Also clear HUD pending confirmation on explicit events.
+                self.hud_pending = None;
+            }
+            HeightEvent::UserScroll => {
+                // Scrolling should not force a jump, but do clear small-change accumulation.
+                self.small_change_count = 0;
+            }
+        }
+    }
+
+    /// Compute the vertical layout for this frame. The bottom pane desired
+    /// height is provided by the caller. If `hud_present` is true, a HUD area
+    /// will be included with a quantized and stabilized height.
+    pub(crate) fn begin_frame(
+        &mut self,
+        area: Rect,
+        hud_present: bool,
+        bottom_desired_height: u16,
+        font_cell: (u16, u16),
+    ) -> Vec<Rect> {
+        #[cfg(debug_assertions)]
+        {
+            self.counters.frames += 1;
+        }
+
+        // Detect resize and treat as an explicit event.
+        if self.last_area.map(|r| (r.width, r.height)) != Some((area.width, area.height)) {
+            self.record_event(HeightEvent::Resize);
+            self.last_area = Some(area);
+        }
+
+        // Status bar height is fixed at 3.
+        let status_h = 3u16;
+
+        // Cap the bottom pane to 30% of screen height, with a minimum of 5 rows.
+        let percent_cap: u16 = ((area.height as u32).saturating_mul(30) / 100) as u16;
+        let bottom_cap = percent_cap.max(5);
+        let mut bottom_h = bottom_desired_height.max(5).min(bottom_cap);
+
+        // Apply small-change hysteresis to the bottom pane unless bypassed by event.
+        bottom_h = self.apply_hysteresis(self.last_bottom, bottom_h);
+        self.last_bottom = Some(bottom_h);
+
+        // Determine HUD height if present.
+        let mut hud_h: u16 = 0;
+        if hud_present {
+            // This mirrors the existing preview logic while centralizing its decision.
+            // Compute HUD target height using 16:9 aspect on inner width.
+            let padded_area = Rect { x: area.x + 1, y: area.y, width: area.width.saturating_sub(2), height: area.height };
+            let right = Layout::horizontal([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ]).split(padded_area)[1];
+            let inner_cols = right.width.saturating_sub(2);
+            let (cw, ch) = font_cell;
+            let number = (inner_cols as u32) * 3 * (cw as u32);
+            let denom = 4 * (ch as u32);
+            let mut target = ((number / denom) as u16).saturating_add(2); // add borders
+            target = target.saturating_sub(1); // tighten by one line as in current code
+
+            // Keep within budget: reserve space for status + bottom + >=1 row history.
+            let vertical_budget = area
+                .height
+                .saturating_sub(status_h)
+                .saturating_sub(bottom_h)
+                .saturating_sub(1);
+            target = target.min(vertical_budget);
+            target = target.clamp(4, vertical_budget.max(4));
+
+            // Quantize to configured row quantum.
+            let q = self.cfg.hud_quantum.max(1);
+            let quantized = (target / q) * q; // floor to bucket
+
+            // Require consecutive-frame confirmation for HUD changes unless bypassed.
+            hud_h = self.apply_hud_confirmation(quantized);
+        } else {
+            // Clear HUD state when not present.
+            self.hud_pending = None;
+            self.last_hud = None;
+            hud_h = 0;
+        }
+
+        // Ensure the history area has at least one row; reduce HUD first if needed.
+        let min_history = 1u16;
+        let total_non_history = status_h + bottom_h + hud_h;
+        if total_non_history.saturating_add(min_history) > area.height {
+            let overflow = total_non_history.saturating_add(min_history) - area.height;
+            if hud_h > 0 {
+                let reduce = hud_h.min(overflow);
+                hud_h -= reduce;
+            }
+        }
+
+        // Build rects in the same order used by ChatWidget::layout_areas.
+        if hud_h > 0 {
+            Layout::vertical([
+                Constraint::Length(status_h),
+                Constraint::Length(hud_h),
+                Constraint::Fill(1),
+                Constraint::Length(bottom_h),
+            ])
+            .areas::<4>(area)
+            .to_vec()
+        } else {
+            Layout::vertical([
+                Constraint::Length(status_h),
+                Constraint::Fill(1),
+                Constraint::Length(bottom_h),
+            ])
+            .areas::<3>(area)
+            .to_vec()
+        }
+    }
+
+    fn apply_hysteresis(&mut self, last: Option<u16>, new_val: u16) -> u16 {
+        if self.bypass_once {
+            self.bypass_once = false;
+            self.small_change_count = 0;
+            return new_val;
+        }
+
+        if let Some(prev) = last {
+            let diff = prev.abs_diff(new_val);
+            if diff == 1 {
+                // Suppress small +/-1 oscillation up to hysteresis_n frames.
+                if self.small_change_count < self.cfg.hysteresis_n {
+                    self.small_change_count += 1;
+                    #[cfg(debug_assertions)]
+                    {
+                        self.counters.hysteresis_applied += 1;
+                    }
+                    return prev;
+                } else {
+                    // After N frames, accept the change and reset.
+                    self.small_change_count = 0;
+                    return new_val;
+                }
+            } else {
+                // Larger changes apply immediately.
+                self.small_change_count = 0;
+                return new_val;
+            }
+        }
+        new_val
+    }
+
+    fn apply_hud_confirmation(&mut self, quantized: u16) -> u16 {
+        if self.bypass_once {
+            self.bypass_once = false;
+            self.hud_pending = None;
+            self.last_hud = Some(quantized);
+            return quantized;
+        }
+
+        match (self.last_hud, self.hud_pending) {
+            (Some(last), None) if last == quantized => last,
+            (Some(last), None) if last != quantized => {
+                // Start confirmation window.
+                self.hud_pending = Some((quantized, 1));
+                last
+            }
+            // Fallback for guarded patterns above to satisfy exhaustiveness.
+            (Some(last), None) => last,
+            (Some(last), Some((pending, n))) => {
+                if pending == quantized {
+                    if n + 1 >= self.cfg.hud_confirm_frames {
+                        // Apply and clear pending.
+                        #[cfg(debug_assertions)]
+                        {
+                            self.counters.hud_quantized += 1;
+                        }
+                        self.hud_pending = None;
+                        self.last_hud = Some(quantized);
+                        quantized
+                    } else {
+                        self.hud_pending = Some((pending, n + 1));
+                        last
+                    }
+                } else {
+                    // Changed again; restart confirmation.
+                    self.hud_pending = Some((quantized, 1));
+                    last
+                }
+            }
+            (None, _) => {
+                // First value applies immediately.
+                self.hud_pending = None;
+                self.last_hud = Some(quantized);
+                quantized
+            }
+        }
+    }
+}
+
+/// Returns true when the centralized HeightManager should be used.
+pub(crate) fn height_manager_enabled() -> bool {
+    match std::env::var("CODEX_TUI_HEIGHT_MANAGER_V1") {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "ON"),
+        Err(_) => false,
+    }
+}
+
