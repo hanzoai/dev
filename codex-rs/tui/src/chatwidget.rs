@@ -3481,7 +3481,6 @@ impl ChatWidget<'_> {
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
-        let launch_port = port.unwrap_or(9222);
 
         // Add status message to chat
         let status_msg = format!(
@@ -4304,10 +4303,7 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut welcome_overlay: Option<&dyn HistoryCell> = None;
 
         // Add all history cells
-        for (idx, cell) in self.history_cells.iter().enumerate() {
-            let is_animating = cell.is_animating();
-            let has_custom = cell.has_custom_render();
-            let height = cell.desired_height(content_area.width);
+        for cell in self.history_cells.iter() {
             
             // suppress noisy per-cell animation logs
             // If this is the animated welcome cell, render it as an overlay instead

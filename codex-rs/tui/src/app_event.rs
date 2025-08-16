@@ -92,6 +92,7 @@ pub(crate) enum AppEvent {
     OnboardingComplete(ChatWidgetArgs),
 
     /// Show Chrome launch options dialog
+    #[allow(dead_code)]
     ShowChromeOptions(Option<u16>),
 
     /// Chrome launch option selected by user
