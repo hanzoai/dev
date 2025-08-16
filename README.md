@@ -1,17 +1,17 @@
-# JustEvery_ Coder
+# JustEvery_ Code
 
 &ensp;
 
 <p align="center">
-  <img src="docs/logo.png" alt="Coder Logo" width="400">
+  <img src="docs/logo.png" alt="Code Logo" width="400">
 </p>
 
 &ensp;
 
-**Coder** is a fast, local coding agent for your terminal. It's a community-driven fork  of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control - all while staying compatible with upstream.
+**Code** is a fast, local coding agent for your terminal. It's a community-driven fork of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream.
 
 &ensp;
-## Why Coder
+## Why Code
 
   - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
   - 🤖 **Multi-Agent Commands** - /plan, /solve, /code with agent panels
@@ -24,7 +24,7 @@
 &ensp;
 ## Quickstart
 
-### Install Coder
+### Install Code
 
 ```bash
 npm install -g @just-every/coder
@@ -40,7 +40,7 @@ coder
 
 ### Install Claude & Gemini (optional)
 
-Coder supports orchestrating other AI CLI tools. Install these and config to use alongside coder.
+Code supports orchestrating other AI CLI tools. Install these and config to use alongside coder.
 
 ```bash
 
@@ -108,7 +108,7 @@ Options:
 &ensp;
 ## Memory & project docs
 
-Coder can remember context across sessions:
+Code can remember context across sessions:
 
 1. **Create an `AGENTS.md` or `CLAUDE.md` file** in your project root:
 ```markdown
@@ -124,7 +124,7 @@ This is a React TypeScript application with:
 - `/server/` - Backend services
 ```
 
-2. **Session memory**: Coder maintains conversation history
+2. **Session memory**: Code maintains conversation history
 3. **Codebase analysis**: Automatically understands project structure
 
 &ensp;
@@ -146,7 +146,7 @@ coder --config output_format=json "list all TODO comments"
 &ensp;
 ## Model Context Protocol (MCP)
 
-Coder supports MCP for extended capabilities:
+Code supports MCP for extended capabilities:
 
 - **File operations**: Advanced file system access
 - **Database connections**: Query and modify databases
@@ -220,8 +220,8 @@ We welcome contributions! This fork maintains compatibility with upstream while 
 
 ```bash
 # Clone and setup
-git clone https://github.com/just-every/coder.git
-cd coder
+git clone https://github.com/just-every/code.git
+cd code
 npm install
 
 # Build (use fast build for development)
@@ -246,10 +246,10 @@ npm install
 
 ### License & attribution
 - This project is a community fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
-- **Coder** is **not** affiliated with, sponsored by, or endorsed by OpenAI.
+- **Code** is **not** affiliated with, sponsored by, or endorsed by OpenAI.
 
 ### Your responsibilities
-Using OpenAI, Anthropic or Google services through Coder means you agree to **their Terms and policies**. In particular:
+Using OpenAI, Anthropic or Google services through Code means you agree to **their Terms and policies**. In particular:
 - **Don't** programmatically scrape/extract content outside intended flows.
 - **Don't** bypass or interfere with rate limits, quotas, or safety mitigations.
 - Use your **own** account; don't share or rotate accounts to evade limits.
@@ -260,7 +260,7 @@ Using OpenAI, Anthropic or Google services through Coder means you agree to **th
 - Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
 
 ### Subject to change
-AI providers can change eligibility, limits, models, or authentication flows. Coder supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
+AI providers can change eligibility, limits, models, or authentication flows. Code supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
 
 &ensp;
 ## License
@@ -271,4 +271,4 @@ This project is a community fork of the original Codex CLI. We maintain compatib
 
 &ensp;
 ---
-**Need help?** Open an issue on [GitHub](https://github.com/just-every/coder/issues) or check our documentation.
+**Need help?** Open an issue on [GitHub](https://github.com/just-every/code/issues) or check our documentation.

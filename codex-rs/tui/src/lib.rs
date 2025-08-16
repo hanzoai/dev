@@ -227,7 +227,7 @@ pub async fn run_main(
 
         eprintln!(
             "{} {current_version} -> {latest_version}.",
-            "Coder update available!".blue()
+            "Code update available!".blue()
         );
 
         if managed_by_npm {
@@ -241,7 +241,7 @@ pub async fn run_main(
         } else {
             eprintln!(
                 "See {} for the latest releases and installation options.",
-                "https://github.com/just-every/coder/releases/latest"
+                "https://github.com/just-every/code/releases/latest"
                     .cyan()
                     .on_black()
             );
