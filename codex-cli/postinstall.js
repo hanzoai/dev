@@ -69,7 +69,7 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Binary names to download
+  // Binary names to download (Rust artifacts remain named 'coder*')
   const binaries = ['coder', 'coder-tui', 'coder-exec'];
   
   console.log(`Installing @just-every/coder v${version} for ${targetTriple}...`);
@@ -127,84 +127,91 @@ async function main() {
     console.warn('⚠ Main coder binary not found. You may need to build from source.');
   }
 
-  // Optional: offer a 'code' alias if safe. Do not override existing 'code'.
+  // With bin name = 'code', handle collisions with existing 'code' (e.g., VS Code)
   try {
     const isTTY = process.stdout && process.stdout.isTTY;
-    // Best-effort detection of global install
-    const isGlobal = process.env.npm_config_global === 'true' || (() => {
-      try {
-        const p = execSync('npm bin -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-        return p.length > 0;
-      } catch { return false; }
-    })();
+    const isWindows = platform() === 'win32';
 
-    // Resolve global bin dir
     let globalBin = '';
     try {
       globalBin = execSync('npm bin -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
     } catch {}
 
-    // Helper: does a command exist on PATH
-    const commandExists = (cmd) => {
+    const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
+
+    // Resolve which 'code' is currently on PATH
+    const resolveOnPath = (cmd) => {
       try {
-        if (platform() === 'win32') {
-          execSync(`where ${cmd}`, { stdio: 'ignore' });
+        if (isWindows) {
+          const out = execSync(`where ${cmd}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split(/\r?\n/)[0]?.trim();
+          return out || '';
         } else {
-          execSync(`command -v ${cmd}`, { stdio: 'ignore' });
+          return execSync(`command -v ${cmd}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
         }
-        return true;
-      } catch { return false; }
+      } catch { return ''; }
     };
 
-    const codeOnPath = commandExists('code');
+    const codeResolved = resolveOnPath('code');
+    const collision = codeResolved && ourShim && codeResolved !== ourShim;
 
-    if (isGlobal && isTTY) {
-      if (codeOnPath) {
-        console.log('⚠ Detected an existing `code` command on your PATH (e.g., VS Code).');
-        console.log('   We will keep the CLI command name as `coder` to avoid collisions.');
-        // Optionally, offer to create a shell alias suggestion
-        console.log('   Tip: add `alias code=coder` to your shell rc if you prefer.');
-      } else if (globalBin) {
-        // Offer to create a non-conflicting `code` shim that invokes coder.js
-        const prompt = (msg) => {
-          process.stdout.write(msg);
-          try {
-            const buf = Buffer.alloc(1024);
-            const bytes = readSync(0, buf, 0, 1024, null);
-            const ans = buf.slice(0, bytes).toString('utf8').trim().toLowerCase();
-            return ans;
-          } catch { return 'n'; }
-        };
-        const answer = prompt('No existing `code` found. Create a `code` alias for this tool? [y/N] ');
-        if (answer === 'y' || answer === 'yes') {
-          try {
-            const shimPath = join(globalBin, platform() === 'win32' ? 'code.cmd' : 'code');
-            if (platform() === 'win32') {
-              // cmd shim that forwards to existing `coder`
-              const content = `@echo off\r\n"%~dp0coder" %*\r\n`;
-              writeFileSync(shimPath, content);
-            } else {
-              const content = `#!/bin/sh\nexec "$(dirname \"$0\")/coder" "$@"\n`;
-              writeFileSync(shimPath, content);
-              chmodSync(shimPath, 0o755);
-            }
-            console.log(`✓ Created \`${shimPath}\` that forwards to \`coder\``);
-          } catch (e) {
-            console.log(`⚠ Failed to create 'code' alias automatically: ${e.message}`);
-            console.log('   You can add `alias code=coder` to your shell instead.');
+    if (collision) {
+      console.log('⚠ Detected an existing `code` command on your PATH (likely VS Code).');
+      if (globalBin) {
+        // Create a 'coder' shim that forwards to our installed 'code' in the same dir
+        try {
+          const coderShim = join(globalBin, isWindows ? 'coder.cmd' : 'coder');
+          if (isWindows) {
+            const content = `@echo off\r\n"%~dp0code" %*\r\n`;
+            writeFileSync(coderShim, content);
+          } else {
+            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/code" "$@"\n`;
+            writeFileSync(coderShim, content);
+            chmodSync(coderShim, 0o755);
           }
-        } else {
-          console.log('Skipping `code` alias creation. Use `coder` to run the CLI.');
+          console.log(`✓ Created fallback command \`coder\` -> our \`code\``);
+        } catch (e) {
+          console.log(`⚠ Failed to create 'coder' fallback: ${e.message}`);
         }
-      }
-    } else {
-      // Non-interactive or local install; just print guidance
-      if (!codeOnPath) {
-        console.log('Note: You can add an alias `code=coder` in your shell if desired.');
+
+        // Offer to create a 'vscode' alias that points to the existing system VS Code
+        if (isTTY && codeResolved) {
+          const prompt = (msg) => {
+            process.stdout.write(msg);
+            try {
+              const buf = Buffer.alloc(1024);
+              const bytes = readSync(0, buf, 0, 1024, null);
+              const ans = buf.slice(0, bytes).toString('utf8').trim().toLowerCase();
+              return ans;
+            } catch { return 'n'; }
+          };
+          const ans = prompt('Create a `vscode` alias for your existing editor? [y/N] ');
+          if (ans === 'y' || ans === 'yes') {
+            try {
+              const vscodeShim = join(globalBin, isWindows ? 'vscode.cmd' : 'vscode');
+              if (isWindows) {
+                const content = `@echo off\r\n"${codeResolved}" %*\r\n`;
+                writeFileSync(vscodeShim, content);
+              } else {
+                const content = `#!/bin/sh\nexec "${codeResolved}" "$@"\n`;
+                writeFileSync(vscodeShim, content);
+                chmodSync(vscodeShim, 0o755);
+              }
+              console.log('✓ Created `vscode` alias for your editor');
+            } catch (e) {
+              console.log(`⚠ Failed to create 'vscode' alias: ${e.message}`);
+            }
+          } else {
+            console.log('Skipping creation of `vscode` alias.');
+          }
+        }
+
+        console.log('→ Use `coder` to run this tool, and `vscode` (if created) for your editor.');
+      } else {
+        console.log('Note: could not determine npm global bin; skipping alias creation.');
       }
     }
   } catch {
-    // Non-fatal; continue silently
+    // non-fatal
   }
 }
 
