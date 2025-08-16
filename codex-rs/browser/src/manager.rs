@@ -224,7 +224,7 @@ impl BrowserManager {
                 let ws_clone = ws.clone();
                 let handle = tokio::spawn(async move { Browser::connect(ws_clone).await });
                 match tokio::time::timeout(attempt_timeout, handle).await {
-                    Ok(Ok(Ok((mut browser, mut handler)))) => {
+                    Ok(Ok(Ok((browser, mut handler)))) => {
                         info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
 
                         // Start event handler loop
@@ -338,7 +338,7 @@ impl BrowserManager {
                     let handle = tokio::spawn(async move { Browser::connect(ws_clone).await });
 
                     match tokio::time::timeout(attempt_timeout, handle).await {
-                        Ok(Ok(Ok((mut browser, mut handler)))) => {
+                        Ok(Ok(Ok((browser, mut handler)))) => {
                             info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
                             info!("[cdp/bm] Connected to Chrome in {:?}", connect_start.elapsed());
 
@@ -435,7 +435,7 @@ impl BrowserManager {
                 let ws_clone = ws.clone();
                 let handle = tokio::spawn(async move { Browser::connect(ws_clone).await });
             match tokio::time::timeout(attempt_timeout, handle).await {
-                Ok(Ok(Ok((mut browser, mut handler)))) => {
+                Ok(Ok(Ok((browser, mut handler)))) => {
                     info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
                     // Start event handler loop
                     let task = tokio::spawn(async move { while let Some(_evt) = handler.next().await {} });
@@ -546,7 +546,7 @@ impl BrowserManager {
                     let ws_clone = ws.clone();
                     let handle = tokio::spawn(async move { Browser::connect(ws_clone).await });
                     match tokio::time::timeout(attempt_timeout, handle).await {
-                        Ok(Ok(Ok((mut browser, mut handler)))) => {
+                        Ok(Ok(Ok((browser, mut handler)))) => {
                             info!("[cdp/bm] WS connect attempt {} succeeded", attempt);
                             info!(
                                 "Step 4: Connected to Chrome in {:?}",
