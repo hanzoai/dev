@@ -474,7 +474,9 @@ pub(crate) fn get_openai_tools(
         tools.push(create_browser_javascript_tool());
         tools.push(create_browser_scroll_tool());
         tools.push(create_browser_history_tool());
+        tools.push(create_browser_inspect_tool());
         tools.push(create_browser_console_tool());
+        tools.push(create_browser_cdp_tool());
     } else {
         // Only include browser_open and browser_status when browser is disabled
         tools.push(create_browser_open_tool());
@@ -926,13 +928,25 @@ fn create_browser_click_tool() -> OpenAiTool {
     properties.insert(
         "type".to_string(),
         JsonSchema::String {
-            description: Some("Optional type of mouse event: 'click' (default), 'mousedown', or 'mouseup'. Use mousedown, browser_move, mouseup sequence to enable dragging.".to_string()),
+            description: Some("Optional type of mouse event: 'click' (default), 'mousedown', or 'mouseup'. Use mousedown, browser_move, mouseup sequence to drag.".to_string()),
+        },
+    );
+    properties.insert(
+        "x".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional absolute X coordinate to click. If provided (with y), the cursor will first move to (x,y).".to_string()),
+        },
+    );
+    properties.insert(
+        "y".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional absolute Y coordinate to click. If provided (with x), the cursor will first move to (x,y).".to_string()),
         },
     );
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_click".to_string(),
-        description: "Performs a mouse action at the current position. Defaults to 'click' if type not specified. Use browser_move first to position the mouse. For dragging: use type='mousedown', then browser_move to drag position, then type='mouseup'. If 'click' is triggered while mouse is still down, a 'mouseup' will be fired first.".to_string(),
+        description: "Performs a mouse action. By default acts at the current cursor; if x,y are provided, moves there (briefly waits for animation) then clicks.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -981,7 +995,7 @@ fn create_browser_move_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_move".to_string(),
-        description: "Moves your mouse [shown as a blue cursor in your screenshots] to specified coordinates in the browser window (x,y) or by relative offset to your current mouse position (dx,dy). If the mouse is close to where it should be then dx,dy provides finer movement control.".to_string(),
+        description: "Move your mouse [as shown as a blue cursor in your screenshot] to new coordinates in the browser window (x,y - top left origin) or by relative offset to your current mouse position (dx,dy). If the mouse is close to where it should be then dx,dy may be easier to judge. Always confirm your mouse is where you expected it to be in the next screenshot after a move, otherwise try again.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1073,7 +1087,7 @@ fn create_browser_scroll_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_scroll".to_string(),
-        description: "Scrolls the page by the specified pixel deltas.".to_string(),
+        description: "Scrolls the page by the specified CSS pixel deltas.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1104,6 +1118,39 @@ fn create_browser_history_tool() -> OpenAiTool {
     })
 }
 
+fn create_browser_inspect_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "x".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional absolute X coordinate to inspect.".to_string()),
+        },
+    );
+    properties.insert(
+        "y".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional absolute Y coordinate to inspect.".to_string()),
+        },
+    );
+    properties.insert(
+        "id".to_string(),
+        JsonSchema::String {
+            description: Some("Optional element id attribute value. If provided, looks up '#id' and inspects that element.".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_inspect".to_string(),
+        description: "Inspects a DOM element by coordinates or id, returns attributes, outerHTML, box model, matched styles, and briefly highlights the node with a screenshot.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
 fn create_browser_console_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(
@@ -1120,6 +1167,41 @@ fn create_browser_console_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_cdp_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "method".to_string(),
+        JsonSchema::String {
+            description: Some("CDP method name, e.g. 'Page.navigate' or 'Input.dispatchKeyEvent'".to_string()),
+        },
+    );
+    properties.insert(
+        "params".to_string(),
+        JsonSchema::Object {
+            properties: BTreeMap::new(),
+            required: None,
+            additional_properties: Some(true),
+        },
+    );
+    properties.insert(
+        "target".to_string(),
+        JsonSchema::String {
+            description: Some("Target for the command: 'page' (default) or 'browser'".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_cdp".to_string(),
+        description: "Executes an arbitrary Chrome DevTools Protocol command with a JSON payload against the active page session.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["method".to_string()]),
             additional_properties: Some(false),
         },
     })

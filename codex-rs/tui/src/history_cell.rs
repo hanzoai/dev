@@ -1526,7 +1526,9 @@ fn browser_tool_title(tool_name: &str) -> &'static str {
         "browser_close" => "Browser Close",
         "browser_status" => "Browser Status",
         "browser_history" => "Browser History",
+        "browser_inspect" => "Browser Inspect",
         "browser_console" => "Browser Console",
+        "browser_cdp" => "Browser CDP",
         "browser_move" => "Browser Move",
         _ => "Browser Tool",
     }

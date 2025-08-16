@@ -16,6 +16,7 @@ async-trait = "0.1"
 base64 = "0.22"
 bytes = "1"
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+chromiumoxide_types = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 image = "0.25"
