@@ -1168,23 +1168,22 @@ impl WidgetRef for &ChatComposer {
 
                 // Right side: command key hints (Ctrl+R/D/C) followed by token usage if available
                 let mut right_spans: Vec<Span> = Vec::new();
-                let mut first_right = true;
 
                 // Only show command hints on the right when not in the special Ctrl+C confirmation state
                 if !self.ctrl_c_quit_hint {
                     if self.show_reasoning_hint {
-                        if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                        if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
                         right_spans.push(Span::from("Ctrl+R").style(key_hint_style));
                         let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
                         right_spans.push(Span::from(label).style(label_style));
                     }
                     if self.show_diffs_hint {
-                        if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                        if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
                         right_spans.push(Span::from("Ctrl+D").style(key_hint_style));
                         right_spans.push(Span::from(" diff viewer").style(label_style));
                     }
                     // Always show quit at the end of the command hints
-                    if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                    if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
                     right_spans.push(Span::from("Ctrl+C").style(key_hint_style));
                     right_spans.push(Span::from(" quit").style(label_style));
                 }
@@ -1295,11 +1294,11 @@ impl WidgetRef for &ChatComposer {
                 Span::raw(" "), // Space before spinner
                 Span::styled(
                     spinner.to_string(),
-                    Style::default().fg(crate::colors::secondary()),
+                    Style::default().fg(crate::colors::primary()),
                 ),
                 Span::styled(
                     format!(" {}... ", self.status_message),
-                    Style::default().fg(crate::colors::secondary()),
+                    Style::default().fg(crate::colors::primary()),
                 ), // Space after spinner and after text
             ])
             .centered();

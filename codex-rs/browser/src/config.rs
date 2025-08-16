@@ -58,6 +58,15 @@ pub struct BrowserConfig {
 
     #[serde(default)]
     pub user_agent: Option<String>, // leave None to let Chrome decide
+
+    // --- Connection tuning (CDP attach) ---
+    /// Per-attempt timeout for WS connect to Chrome (milliseconds)
+    #[serde(default = "default_connect_attempt_timeout_ms")]
+    pub connect_attempt_timeout_ms: u64,
+
+    /// Number of WS connect attempts before giving up
+    #[serde(default = "default_connect_attempts")]
+    pub connect_attempts: u32,
 }
 
 impl Default for BrowserConfig {
@@ -79,6 +88,8 @@ impl Default for BrowserConfig {
             timezone: Some("Australia/Brisbane".into()),
             accept_language: Some("en-AU,en;q=0.9".into()),
             user_agent: None,
+            connect_attempt_timeout_ms: default_connect_attempt_timeout_ms(),
+            connect_attempts: default_connect_attempts(),
         }
     }
 }
@@ -140,4 +151,12 @@ fn default_format() -> ImageFormat {
 
 fn default_persist_profile() -> bool {
     true
+}
+
+fn default_connect_attempt_timeout_ms() -> u64 {
+    3000
+}
+
+fn default_connect_attempts() -> u32 {
+    3
 }

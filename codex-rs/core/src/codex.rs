@@ -2306,20 +2306,14 @@ async fn handle_function_call(
                 .await
         }
         "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id).await,
-        // New agent_* names
+        // agent_* tools
         "agent_run" => handle_run_agent(sess, arguments, sub_id, call_id).await,
         "agent_check" => handle_check_agent_status(sess, arguments, sub_id, call_id).await,
         "agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id).await,
         "agent_cancel" => handle_cancel_agent(sess, arguments, sub_id, call_id).await,
         "agent_wait" => handle_wait_for_agent(sess, arguments, sub_id, call_id).await,
         "agent_list" => handle_list_agents(sess, arguments, sub_id, call_id).await,
-        // Back-compat for older tool names
-        "run_agent" => handle_run_agent(sess, arguments, sub_id, call_id).await,
-        "check_agent_status" => handle_check_agent_status(sess, arguments, sub_id, call_id).await,
-        "get_agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id).await,
-        "cancel_agent" => handle_cancel_agent(sess, arguments, sub_id, call_id).await,
-        "wait_for_agent" => handle_wait_for_agent(sess, arguments, sub_id, call_id).await,
-        "list_agents" => handle_list_agents(sess, arguments, sub_id, call_id).await,
+        // browser_* tools
         "browser_open" => handle_browser_open(sess, arguments, sub_id, call_id).await,
         "browser_close" => handle_browser_close(sess, sub_id, call_id).await,
         "browser_status" => handle_browser_status(sess, sub_id, call_id).await,
@@ -2523,7 +2517,7 @@ async fn handle_run_agent(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid run_agent arguments: {}", e),
+                content: format!("Invalid agent_run arguments: {}", e),
                 success: None,
             },
         },
@@ -2586,7 +2580,7 @@ async fn handle_check_agent_status(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid check_agent_status arguments: {}", e),
+                content: format!("Invalid agent_check arguments: {}", e),
                 success: None,
             },
         },
@@ -2663,7 +2657,7 @@ async fn handle_get_agent_result(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid get_agent_result arguments: {}", e),
+                content: format!("Invalid agent_result arguments: {}", e),
                 success: None,
             },
         },
@@ -2732,7 +2726,7 @@ async fn handle_cancel_agent(
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid cancel_agent arguments: {}", e),
+                content: format!("Invalid agent_cancel arguments: {}", e),
                 success: None,
             },
         },
@@ -3879,7 +3873,7 @@ async fn handle_browser_click(
     sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let params = serde_json::from_str(&arguments).ok();
+    let params = serde_json::from_str::<serde_json::Value>(&arguments).ok();
     let sess_clone = sess;
     let call_id_clone = call_id.clone();
 
@@ -3888,24 +3882,51 @@ async fn handle_browser_click(
         &sub_id,
         call_id,
         "browser_click".to_string(),
-        params,
+        params.clone(),
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
             if let Some(browser_manager) = browser_manager {
-                // No arguments needed - click at current position
-                match browser_manager.click_at_current().await {
-                    Ok((x, y)) => {
-                        // Capture screenshot after clicking
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
-                        {
+                // Determine click type: default 'click', or 'mousedown'/'mouseup'
+                let click_type = params
+                    .as_ref()
+                    .and_then(|v| v.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("click")
+                    .to_lowercase();
+
+                let action_result = match click_type.as_str() {
+                    "mousedown" => {
+                        match browser_manager.mouse_down_at_current().await {
+                            Ok((x, y)) => Ok((x, y, "Mouse down".to_string())),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    "mouseup" => {
+                        match browser_manager.mouse_up_at_current().await {
+                            Ok((x, y)) => Ok((x, y, "Mouse up".to_string())),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    "click" | _ => {
+                        match browser_manager.click_at_current().await {
+                            Ok((x, y)) => Ok((x, y, "Clicked".to_string())),
+                            Err(e) => Err(e),
+                        }
+                    }
+                };
+
+                match action_result {
+                    Ok((x, y, label)) => {
+                        // Capture screenshot after action
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await {
                             add_pending_screenshot(sess_clone, screenshot_path, url);
                         }
 
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("Clicked at current mouse position ({}, {}) [updated status shown in screenshot]", x, y),
+                                content: format!("{} at current mouse position ({}, {}) [updated status shown in screenshot]", label, x, y),
                                 success: Some(true),
                             },
                         }
@@ -3913,7 +3934,7 @@ async fn handle_browser_click(
                     Err(e) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone.clone(),
                         output: FunctionCallOutputPayload {
-                            content: format!("Failed to click: {}", e),
+                            content: format!("Failed to perform mouse action: {}", e),
                             success: Some(false),
                         },
                     },

@@ -78,3 +78,6 @@ agent_run {
   "read_only": false // Allow changes - will launch every agent in a separate worktree
 }
 agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } // Long timeout or you can do separate work and check back later.
+
+# Warnings
+- Do not create new branches or make changes to git unless requested.
