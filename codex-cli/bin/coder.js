@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the Coder CLI (fork of OpenAI Codex).
+// Unified entry point for the Code CLI (fork of OpenAI Codex).
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -142,4 +142,3 @@ if (childResult.type === "signal") {
 } else {
   process.exit(childResult.exitCode);
 }
-

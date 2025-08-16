@@ -140,7 +140,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         const VERSION: &str = env!("CARGO_PKG_VERSION");
         ts_println!(
             self,
-            "Coder v{}\n--------",
+            "Code v{}\n--------",
             VERSION
         );
 

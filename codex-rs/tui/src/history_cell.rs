@@ -360,7 +360,7 @@ impl HistoryCell for AnimatedWelcomeCell {
         // For plain lines, just show a simple welcome message
         vec![
             Line::from(""),
-            Line::from("Welcome to Coder"),
+            Line::from("Welcome to Code"),
             Line::from(""),
         ]
     }

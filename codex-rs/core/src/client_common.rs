@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 /// with this content.
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 
-/// Additional prompt for Coder. Can not edit Codex instructions.
+/// Additional prompt for Code. Can not edit Codex instructions.
 const ADDITIONAL_INSTRUCTIONS: &str = include_str!("../prompt_coder.md");
 
 /// wraps environment context message in a tag for the model to parse more easily.

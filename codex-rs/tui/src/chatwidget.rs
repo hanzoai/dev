@@ -3411,7 +3411,7 @@ impl ChatWidget<'_> {
 
         // Build status line spans
         let mut status_spans = vec![
-            Span::styled("Coder", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("Code", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" •  "),
             Span::styled("Model: ", Style::default().dim()),
             Span::styled(
