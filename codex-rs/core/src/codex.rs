@@ -2817,7 +2817,8 @@ async fn handle_wait_for_agent(
                     });
 
                     if params.return_all.unwrap_or(false) {
-                        if !completed_agents.is_empty() {
+                        // Wait for ALL agents in the batch to reach a terminal state
+                        if !any_in_progress {
                             let response = serde_json::json!({
                                 "batch_id": batch_id,
                                 "completed_agents": completed_agents.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
