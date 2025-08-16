@@ -9,7 +9,6 @@ use ratatui::layout::Margin;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use ratatui::style::Styled;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -53,6 +52,21 @@ struct TokenUsageInfo {
     model_context_window: Option<u64>,
 }
 
+// Format an integer with thousands separators (e.g., 125,654).
+fn format_with_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    let mut count = 0usize;
+    for ch in s.chars().rev() {
+        if count != 0 && count % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out.chars().rev().collect()
+}
+
 pub(crate) struct ChatComposer {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
@@ -77,6 +91,9 @@ pub(crate) struct ChatComposer {
     using_chatgpt_auth: bool,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(String, std::time::Instant)>,
+    // Footer hint visibility flags
+    show_reasoning_hint: bool,
+    show_diffs_hint: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -115,6 +132,8 @@ impl ChatComposer {
             animation_running: None,
             using_chatgpt_auth,
             footer_notice: None,
+            show_reasoning_hint: false,
+            show_diffs_hint: false,
         }
     }
 
@@ -158,6 +177,19 @@ impl ChatComposer {
         self.footer_notice = Some((text, expiry));
     }
 
+    // Control footer hint visibility
+    pub fn set_show_reasoning_hint(&mut self, show: bool) {
+        if self.show_reasoning_hint != show {
+            self.show_reasoning_hint = show;
+        }
+    }
+
+    pub fn set_show_diffs_hint(&mut self, show: bool) {
+        if self.show_diffs_hint != show {
+            self.show_diffs_hint = show;
+        }
+    }
+
     // Map technical status messages to user-friendly ones
     fn map_status_message(technical_message: &str) -> String {
         let lower = technical_message.to_lowercase();
@@ -175,7 +207,7 @@ impl ChatComposer {
         else if lower.contains("tool")
             || lower.contains("command")
             || lower.contains("running command")
-            || lower.contains("executing")
+            || lower.contains("running")
             || lower.contains("bash")
             || lower.contains("shell")
         {
@@ -408,6 +440,10 @@ impl ChatComposer {
                     if !starts_with_cmd {
                         self.textarea.set_text(&format!("/{} ", cmd.command()));
                     }
+                    // After completing, place the cursor at the end of the
+                    // slash command so the user can immediately type args.
+                    let new_cursor = self.textarea.text().len();
+                    self.textarea.set_cursor(new_cursor);
                 }
                 (InputResult::None, true)
             }
@@ -700,10 +736,37 @@ impl ChatComposer {
                     // If history navigation didn't happen, just ignore the key
                     (InputResult::None, false)
                 } else {
-                    // No Shift modifier - trigger chat scrolling
+                    // No Shift modifier — move cursor within the input first.
+                    // Only when already at the top-left/bottom-right should Up/Down scroll chat.
+                    if self.textarea.is_empty() {
+                        return match key_event.code {
+                            KeyCode::Up => (InputResult::ScrollUp, false),
+                            KeyCode::Down => (InputResult::ScrollDown, false),
+                            _ => (InputResult::None, false),
+                        };
+                    }
+
+                    let before = self.textarea.cursor();
+                    let len = self.textarea.text().len();
                     match key_event.code {
-                        KeyCode::Up => (InputResult::ScrollUp, false),
-                        KeyCode::Down => (InputResult::ScrollDown, false),
+                        KeyCode::Up => {
+                            if before == 0 {
+                                (InputResult::ScrollUp, false)
+                            } else {
+                                // Move up a visual/logical line; if already on first line, TextArea moves to start.
+                                self.textarea.input(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+                                (InputResult::None, true)
+                            }
+                        }
+                        KeyCode::Down => {
+                            if before == len {
+                                (InputResult::ScrollDown, false)
+                            } else {
+                                // Move down a visual/logical line; if already on last line, TextArea moves to end.
+                                self.textarea.input(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+                                (InputResult::None, true)
+                            }
+                        }
                         _ => (InputResult::None, false),
                     }
                 }
@@ -850,7 +913,9 @@ impl ChatComposer {
             return;
         }
 
-        if !query.is_empty() {
+        // Only trigger file search when the token has at least 2 characters to
+        // reduce churn while typing the first character.
+        if query.chars().count() >= 2 {
             self.app_event_tx
                 .send(AppEvent::StartFileSearch(query.clone()));
         }
@@ -918,44 +983,59 @@ impl WidgetRef for &ChatComposer {
             }
             ActivePopup::None => {
                 let bottom_line_rect = hint_area;
+
                 let key_hint_style = Style::default().fg(crate::colors::function());
-                let mut hint = if self.ctrl_c_quit_hint {
-                    vec![
-                        Span::from(" "),
-                        "Ctrl+C again".set_style(key_hint_style),
-                        Span::from(" to quit"),
-                    ]
-                } else {
-                    vec![
-                        Span::from(" "),
-                        "Ctrl+R".set_style(key_hint_style),
-                        Span::from(" reasoning   "),
-                        "Ctrl+D".set_style(key_hint_style),
-                        Span::from(" diffs   "),
-                        "Ctrl+C".set_style(key_hint_style),
-                        Span::from(" quit"),
-                    ]
-                };
+                let label_style = Style::default().fg(crate::colors::text_dim());
+                // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
+                let mut left_spans: Vec<Span> = Vec::new();
+                left_spans.push(Span::from(" "));
+
+                if self.ctrl_c_quit_hint {
+                    // Treat as a notice; keep on the left
+                    left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                    left_spans.push(Span::from(" again to quit").style(label_style));
+                }
 
                 // Append ephemeral footer notice if present and not expired
                 if let Some((msg, until)) = &self.footer_notice {
                     if std::time::Instant::now() <= *until {
-                        hint.push(Span::from("   "));
-                        hint.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
-                    } else {
-                        // Expired – clear it
-                        // SAFETY: mutable borrow not allowed here; cleared by caller on next update
+                        if !self.ctrl_c_quit_hint { left_spans.push(Span::from("   ")); }
+                        left_spans.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
                     }
                 }
 
-                // Append token/context usage info to the footer hints when available.
+                // Right side: command key hints (Ctrl+R/D/C) followed by token usage if available
+                let mut right_spans: Vec<Span> = Vec::new();
+                let mut first_right = true;
+
+                // Only show command hints on the right when not in the special Ctrl+C confirmation state
+                if !self.ctrl_c_quit_hint {
+                    if self.show_reasoning_hint {
+                        if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                        right_spans.push(Span::from("Ctrl+R").style(key_hint_style));
+                        right_spans.push(Span::from(" toggle reasoning").style(label_style));
+                    }
+                    if self.show_diffs_hint {
+                        if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                        right_spans.push(Span::from("Ctrl+D").style(key_hint_style));
+                        right_spans.push(Span::from(" diff viewer").style(label_style));
+                    }
+                    // Always show quit at the end of the command hints
+                    if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
+                    right_spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                    right_spans.push(Span::from(" quit").style(label_style));
+                }
+
+                // Token usage (always shown to the far right when available)
                 if let Some(token_usage_info) = &self.token_usage_info {
+                    if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
+
                     let token_usage = &token_usage_info.total_token_usage;
-                    hint.push(Span::from("   "));
-                    hint.push(
-                        Span::from(format!("{} tokens used", token_usage.blended_total()))
-                            .style(Style::default().add_modifier(Modifier::DIM)),
-                    );
+                    let used_str = format_with_thousands(token_usage.blended_total());
+                    right_spans.push(Span::from(used_str).style(Style::default().add_modifier(Modifier::BOLD)));
+                    right_spans.push(Span::from(" tokens used").style(Style::default()));
+
+                    // Context remaining, if known
                     let last_token_usage = &token_usage_info.last_token_usage;
                     if let Some(context_window) = token_usage_info.model_context_window {
                         let percent_remaining: u8 = if context_window > 0 {
@@ -967,15 +1047,31 @@ impl WidgetRef for &ChatComposer {
                         } else {
                             100
                         };
-                        hint.push(Span::from("   "));
-                        hint.push(
-                            Span::from(format!("{percent_remaining}% context left"))
-                                .style(Style::default().add_modifier(Modifier::DIM)),
+                        right_spans.push(Span::from("  •  ").style(Style::default()));
+                        right_spans.push(
+                            Span::from(percent_remaining.to_string()).style(Style::default().add_modifier(Modifier::BOLD)),
                         );
+                        right_spans.push(Span::from("% context left").style(Style::default()));
                     }
                 }
 
-                Line::from(hint)
+                // Compute spacer between left and right to make right content right-aligned
+                let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
+                let total_width = bottom_line_rect.width as usize;
+                let trailing_pad = 1usize; // one space on the right edge
+                let spacer = if total_width > left_len + right_len + trailing_pad {
+                    " ".repeat(total_width - left_len - right_len - trailing_pad)
+                } else {
+                    String::from(" ")
+                };
+
+                let mut line_spans = left_spans;
+                line_spans.push(Span::from(spacer));
+                line_spans.extend(right_spans);
+                line_spans.push(Span::from(" "));
+
+                Line::from(line_spans)
                     .style(Style::default().dim())
                     .render_ref(bottom_line_rect, buf);
             }

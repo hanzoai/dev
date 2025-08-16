@@ -26,6 +26,7 @@ impl StreamState {
     }
     
     pub(crate) fn new_for_kind(kind: StreamKind) -> Self {
+        // Bold the first sentence for assistant answers; reasoning stays normal.
         let collector = match kind {
             StreamKind::Answer => MarkdownStreamCollector::new_with_bold_first(),
             StreamKind::Reasoning => MarkdownStreamCollector::new(),
@@ -121,7 +122,10 @@ impl HeaderEmitter {
         };
         let already_emitted_in_stream = self.has_emitted_for_stream(kind);
         if !already_emitted_in_stream && !already_emitted_this_turn {
-            out_lines.push(render_header_line(kind));
+            // Do not render a visible header for Reasoning; only mark emission.
+            if matches!(kind, StreamKind::Answer) {
+                out_lines.push(render_header_line(kind));
+            }
             match kind {
                 StreamKind::Reasoning => {
                     self.reasoning_emitted_in_stream = true;

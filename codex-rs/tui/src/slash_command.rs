@@ -38,13 +38,13 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to 🌐 Chrome",
-            SlashCommand::Browser => "connect to 🌐 internal browser",
-            SlashCommand::Plan => "create a comprehensive 🚀 plan (multiple agents)",
-            SlashCommand::Solve => "solve a challenging 🧠 problem (multiple agents)",
-            SlashCommand::Code => "perform a 👩‍💻 coding task (multiple agents)",
-            SlashCommand::Reasoning => "change 🤔 reasoning effort (high/medium/low/none)",
-            SlashCommand::Verbosity => "change 📝 text verbosity (high/medium/low)",
+            SlashCommand::Chrome => "connect to Chrome",
+            SlashCommand::Browser => "open internal browser",
+            SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
+            SlashCommand::Solve => "solve a challenging problem (multiple agents)",
+            SlashCommand::Code => "perform a coding task (multiple agents)",
+            SlashCommand::Reasoning => "change reasoning effort (high/medium/low/none)",
+            SlashCommand::Verbosity => "change text verbosity (high/medium/low)",
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",

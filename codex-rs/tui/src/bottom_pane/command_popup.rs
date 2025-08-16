@@ -1,5 +1,6 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::layout::Margin;
 use ratatui::widgets::WidgetRef;
 
 use super::popup_consts::MAX_POPUP_ROWS;
@@ -124,6 +125,11 @@ impl CommandPopup {
 
 impl WidgetRef for CommandPopup {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        // Add two spaces of left padding so suggestions align with the
+        // slash command typed inside the composer (which has 1px border +
+        // 1 space inner padding). This keeps the popup visually lined up
+        // with the input text.
+        let indented_area = area.inner(Margin::new(2, 0));
         let matches = self.filtered();
         let rows_all: Vec<GenericDisplayRow> = if matches.is_empty() {
             Vec::new()
@@ -135,10 +141,12 @@ impl WidgetRef for CommandPopup {
                     match_indices: indices.map(|v| v.into_iter().map(|i| i + 1).collect()),
                     is_current: false,
                     description: Some(cmd.description().to_string()),
+                    // Slash command names should use theme primary color
+                    name_color: Some(crate::colors::primary()),
                 })
                 .collect()
         };
-        render_rows(area, buf, &rows_all, &self.state, MAX_POPUP_ROWS);
+        render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS);
     }
 }
 

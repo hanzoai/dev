@@ -10,6 +10,7 @@ use super::StreamState;
 /// Sink for history insertions and animation control.
 pub(crate) trait HistorySink {
     fn insert_history(&self, lines: Vec<Line<'static>>);
+    fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>);
     fn start_commit_animation(&self);
     fn stop_commit_animation(&self);
 }
@@ -30,6 +31,11 @@ impl HistorySink for AppEventHistorySink {
         }
         self.0
             .send(crate::app_event::AppEvent::InsertHistory(lines))
+    }
+    fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>) {
+        tracing::debug!("insert_history_with_kind({:?}) {} lines", kind, lines.len());
+        self.0
+            .send(crate::app_event::AppEvent::InsertHistoryWithKind { kind, lines })
     }
     fn start_commit_animation(&self) {
         self.0
@@ -131,7 +137,7 @@ impl StreamController {
                     self.emit_header_if_needed(current, &mut lines);
                     lines.extend(step.history);
                     // Don't add extra blank line - markdown renderer handles spacing
-                    sink.insert_history(lines);
+                    sink.insert_history_with_kind(current, lines);
                 }
                 self.current_stream = None;
             }
@@ -165,8 +171,8 @@ impl StreamController {
         tracing::debug!("push_and_maybe_commit for {:?}, delta={:?}", kind, delta);
         let cfg = self.config.clone();
         
-        // Check header flag before borrowing state
-        let should_skip_blank = self.header.consume_header_flag();
+        // Check header flag before borrowing state (used only to avoid double headers)
+        let _just_emitted_header = self.header.consume_header_flag();
         
         let state = self.state_mut(kind);
         // Record that at least one delta was received for this stream
@@ -176,37 +182,30 @@ impl StreamController {
         state.collector.push_delta(delta);
         if delta.contains('\n') {
             let mut newly_completed = state.collector.commit_complete_lines(&cfg);
-            // Always skip leading blank lines after headers to avoid double spacing
-            // This handles both our headers and markdown headers that start content
+            // Reduce leading blanks to at most one across commits
             if !newly_completed.is_empty() {
-                // Skip ALL leading blank lines - markdown adds them before headers
                 let mut skip_count = 0;
                 while skip_count < newly_completed.len()
                     && crate::render::line_utils::is_blank_line_trim(&newly_completed[skip_count]) {
                     skip_count += 1;
                 }
-                // Keep at most 1 blank line if we're not right after a header
-                if !should_skip_blank && skip_count > 1 {
-                    skip_count = skip_count - 1; // Keep one blank line
-                }
-                for _ in 0..skip_count {
-                    newly_completed.remove(0);
+                if skip_count > 1 {
+                    for _ in 0..(skip_count - 1) {
+                        newly_completed.remove(0);
+                    }
                 }
             }
             if !newly_completed.is_empty() {
-                // Color reasoning as text_dim and answers as text_bright
+                // Color reasoning as text_dim and answers as text_bright, preserving span modifiers (e.g., bold)
                 let color = match kind {
                     StreamKind::Reasoning => crate::colors::text_dim(),
                     StreamKind::Answer => crate::colors::text_bright(),
                 };
                 let mut styled: Vec<Line<'static>> = Vec::with_capacity(newly_completed.len());
                 for mut line in newly_completed {
-                    let spans = line
-                        .spans
-                        .into_iter()
-                        .map(|s| s.style(ratatui::style::Style::default().fg(color)))
-                        .collect();
-                    line.spans = spans;
+                    line.style = line
+                        .style
+                        .patch(ratatui::style::Style::default().fg(color));
                     styled.push(line);
                 }
                 state.enqueue(styled);
@@ -222,13 +221,24 @@ impl StreamController {
         }
         let cfg = self.config.clone();
         let state = self.state_mut(StreamKind::Reasoning);
-        // Don't insert section break - markdown renderer handles spacing automatically
-        // state.collector.insert_section_break();
+        // Insert an explicit section break so upcoming section titles are
+        // rendered on a fresh line. Without this, bold titles that arrive
+        // mid-line can be glued to the previous sentence and fail to be
+        // recognized as titles in collapsed view.
+        state.collector.insert_section_break();
         let mut newly_completed = state.collector.commit_complete_lines(&cfg);
-        // Strip excessive blank lines after section breaks
-        while !newly_completed.is_empty()
-            && crate::render::line_utils::is_blank_line_trim(&newly_completed[0]) {
-            newly_completed.remove(0);
+        // Reduce leading blanks to at most one after section breaks
+        if !newly_completed.is_empty() {
+            let mut skip_count = 0;
+            while skip_count < newly_completed.len()
+                && crate::render::line_utils::is_blank_line_trim(&newly_completed[skip_count]) {
+                skip_count += 1;
+            }
+            if skip_count > 1 {
+                for _ in 0..(skip_count - 1) {
+                    newly_completed.remove(0);
+                }
+            }
         }
         if !newly_completed.is_empty() {
             // Reasoning sections use dim text
@@ -277,20 +287,17 @@ impl StreamController {
             }
             if !out_lines.is_empty() {
                 let mut lines_with_header: Lines = Vec::new();
-                let emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
-                // Always handle excessive blank lines
+                let _emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
+                // Reduce leading blanks to at most one
                 let mut skip_count = 0;
                 while skip_count < out_lines.len()
                     && crate::render::line_utils::is_blank_line_trim(&out_lines[skip_count]) {
                     skip_count += 1;
                 }
-                // If we emitted a header, skip all leading blank lines
-                // Otherwise keep at most one
-                if !emitted_header && skip_count > 1 {
-                    skip_count = skip_count - 1;
-                }
-                for _ in 0..skip_count {
-                    out_lines.remove(0);
+                if skip_count > 1 {
+                    for _ in 0..(skip_count - 1) {
+                        out_lines.remove(0);
+                    }
                 }
                 // Apply stream-specific color to body lines
                 let color = match kind {
@@ -300,19 +307,16 @@ impl StreamController {
                 let out_lines: Vec<Line<'static>> = out_lines
                     .into_iter()
                     .map(|mut line| {
-                        let spans = line
-                            .spans
-                            .into_iter()
-                            .map(|s| s.style(ratatui::style::Style::default().fg(color)))
-                            .collect();
-                        line.spans = spans;
+                        line.style = line
+                            .style
+                            .patch(ratatui::style::Style::default().fg(color));
                         line
                     })
                     .collect();
 
                 lines_with_header.extend(out_lines);
                 // Don't add extra blank line - markdown renderer handles spacing
-                sink.insert_history(lines_with_header);
+                sink.insert_history_with_kind(kind, lines_with_header);
             }
 
             // Cleanup
@@ -348,26 +352,24 @@ impl StreamController {
         };
         if !step.history.is_empty() {
             let mut lines: Lines = Vec::new();
-            let emitted_header = self.emit_header_if_needed(kind, &mut lines);
+            // Emit header if needed for this stream; ignore return value
+            self.emit_header_if_needed(kind, &mut lines);
             let mut out = lines;
             let mut history = step.history;
-            // Always skip excessive blank lines after headers
+            // Reduce leading blanks to at most one
             if !history.is_empty() {
                 let mut skip_count = 0;
                 while skip_count < history.len()
                     && crate::render::line_utils::is_blank_line_trim(&history[skip_count]) {
                     skip_count += 1;
                 }
-                // If we just emitted a header, skip all blank lines
-                // Otherwise keep at most one
-                if !emitted_header && skip_count > 1 {
-                    skip_count = skip_count - 1;
-                }
-                for _ in 0..skip_count {
-                    history.remove(0);
+                if skip_count > 1 {
+                    for _ in 0..(skip_count - 1) {
+                        history.remove(0);
+                    }
                 }
             }
-            // Apply stream-specific color to body lines
+            // Apply stream-specific color to body lines while preserving modifiers
             let color = match kind {
                 StreamKind::Reasoning => crate::colors::text_dim(),
                 StreamKind::Answer => crate::colors::text_bright(),
@@ -375,17 +377,14 @@ impl StreamController {
             let history: Vec<Line<'static>> = history
                 .into_iter()
                 .map(|mut line| {
-                    let spans = line
-                        .spans
-                        .into_iter()
-                        .map(|s| s.style(ratatui::style::Style::default().fg(color)))
-                        .collect();
-                    line.spans = spans;
+                    line.style = line
+                        .style
+                        .patch(ratatui::style::Style::default().fg(color));
                     line
                 })
                 .collect();
             out.extend(history);
-            sink.insert_history(out);
+            sink.insert_history_with_kind(kind, out);
         }
 
         let is_idle = self.state(kind).is_idle();
