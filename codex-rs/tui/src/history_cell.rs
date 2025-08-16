@@ -375,7 +375,7 @@ impl HistoryCell for AnimatedWelcomeCell {
     }
     
     fn custom_render(&self, area: Rect, buf: &mut Buffer) {
-        let elapsed = self.start_time.elapsed();
+        let _elapsed = self.start_time.elapsed();
         
         // Center the animation within the provided area
         // The actual animation needs 21 rows
