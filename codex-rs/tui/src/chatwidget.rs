@@ -150,6 +150,8 @@ pub(crate) struct ChatWidget<'a> {
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
     // Track last width used to opportunistically clear cache when layout changes
     height_cache_last_width: std::cell::Cell<u16>,
+    // Track last viewport height of the history content area to stabilize scrolling
+    last_history_viewport_height: std::cell::Cell<u16>,
 }
 
 struct DiffOverlay {
@@ -757,6 +759,7 @@ impl ChatWidget<'_> {
             diff_overlay: None,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
+            last_history_viewport_height: std::cell::Cell::new(0),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -4136,7 +4139,14 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Calculate scroll position and vertical alignment
-        let (start_y, scroll_pos) = if total_height <= content_area.height {
+        // Stabilize viewport when input area height changes while scrolled up.
+        let prev_viewport_h = self.last_history_viewport_height.get();
+        if prev_viewport_h == 0 {
+            // Initialize on first render
+            self.last_history_viewport_height.set(content_area.height);
+        }
+
+        let (start_y, mut scroll_pos) = if total_height <= content_area.height {
             // Content fits - always align to bottom so "Popular commands" stays at the bottom
             let start_y = content_area.y + content_area.height.saturating_sub(total_height);
             // Update last_max_scroll cache
@@ -4150,9 +4160,28 @@ impl WidgetRef for &ChatWidget<'_> {
             // Update cache and clamp for display only
             self.last_max_scroll.set(max_scroll);
             let clamped_scroll_offset = self.scroll_offset.min(max_scroll);
-            let scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
+            let mut scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
+
+            // Viewport stabilization: when user is scrolled up (offset > 0) and the
+            // history viewport height changes due to the input area growing/shrinking,
+            // adjust the scroll_from_top to keep the top line steady on screen.
+            if clamped_scroll_offset > 0 {
+                let prev_h = prev_viewport_h as i32;
+                let curr_h = content_area.height as i32;
+                let delta_h = prev_h - curr_h; // positive if viewport shrank
+                if delta_h != 0 {
+                    // Adjust in the opposite direction to keep the same top anchor
+                    let sft = scroll_from_top as i32 - delta_h;
+                    let sft = sft.clamp(0, max_scroll as i32) as u16;
+                    scroll_from_top = sft;
+                }
+            }
+
             (content_area.y, scroll_from_top)
         };
+
+        // Record current viewport height for the next frame
+        self.last_history_viewport_height.set(content_area.height);
 
         // Render the scrollable content with spacing
         let mut content_y = 0u16; // Position within the content
