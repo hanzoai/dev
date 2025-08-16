@@ -519,7 +519,7 @@ impl App<'_> {
                         }
                         SlashCommand::Chrome => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                // Call the dedicated chrome command handler
+                                tracing::info!("[cdp] /chrome invoked, args='{}'", command_args);
                                 widget.handle_chrome_command(command_args);
                             }
                         }

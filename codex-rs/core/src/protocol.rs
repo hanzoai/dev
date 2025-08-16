@@ -601,7 +601,7 @@ impl McpToolCallEndEvent {
 pub struct CustomToolCallBeginEvent {
     /// Identifier so this can be paired with the CustomToolCallEnd event.
     pub call_id: String,
-    /// Name of the tool (e.g., "browser_navigate", "run_agent")
+    /// Name of the tool (e.g., "browser_navigate", "agent_run")
     pub tool_name: String,
     /// Parameters passed to the tool as JSON
     pub parameters: Option<serde_json::Value>,

@@ -77,6 +77,36 @@ use codex_file_search::FileMatch;
 use ratatui::style::Stylize;
 use ratatui::text::Text as RtText;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use serde::{Deserialize, Serialize};
+use codex_core::config::find_codex_home;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedConnection {
+    port: Option<u16>,
+    ws: Option<String>,
+}
+
+async fn read_cached_connection() -> Option<(Option<u16>, Option<String>)> {
+    let codex_home = find_codex_home().ok()?;
+    let path = codex_home.join("cache.json");
+    let bytes = tokio::fs::read(path).await.ok()?;
+    let parsed: CachedConnection = serde_json::from_slice(&bytes).ok()?;
+    Some((parsed.port, parsed.ws))
+}
+
+async fn write_cached_connection(port: Option<u16>, ws: Option<String>) -> std::io::Result<()> {
+    if port.is_none() && ws.is_none() {
+        return Ok(());
+    }
+    if let Ok(codex_home) = find_codex_home() {
+        let path = codex_home.join("cache.json");
+        let obj = CachedConnection { port, ws };
+        let data = serde_json::to_vec_pretty(&obj).unwrap_or_else(|_| b"{}".to_vec());
+        if let Some(dir) = path.parent() { let _ = tokio::fs::create_dir_all(dir).await; }
+        tokio::fs::write(path, data).await?;
+    }
+    Ok(())
+}
 
 
 struct RunningCommand {
@@ -718,10 +748,7 @@ impl ChatWidget<'_> {
         // Add initial animated welcome message to history
         let mut history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
         let welcome_cell = Box::new(history_cell::new_animated_welcome());
-        tracing::info!("Adding AnimatedWelcomeCell to history");
-        tracing::info!("AnimatedWelcomeCell is_animating: {}", welcome_cell.is_animating());
-        tracing::info!("AnimatedWelcomeCell has_custom_render: {}", welcome_cell.has_custom_render());
-        tracing::info!("AnimatedWelcomeCell desired_height: {}", welcome_cell.desired_height(80));
+        // add AnimatedWelcomeCell silently
         history_cells.push(welcome_cell);
 
         // Initialize image protocol for rendering screenshots
@@ -780,7 +807,7 @@ impl ChatWidget<'_> {
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
-        tracing::info!("AnimatedWelcomeCell ready, needs initial redraw after app initialization");
+        // ready; trigger initial redraw
         
         new_widget
     }
@@ -1241,10 +1268,7 @@ impl ChatWidget<'_> {
         self.history_cells.push(new_cell);
         
         // Log animation cells
-        let animation_count = self.history_cells.iter().filter(|c| c.is_animating()).count();
-        if animation_count > 0 {
-            tracing::info!("History has {} animating cells out of {} total", animation_count, self.history_cells.len());
-        }
+        // suppress noisy animation logging
         
         // Auto-follow if we're at or near the bottom (preserve position if scrolled up)
         self.autoscroll_if_near_bottom();
@@ -2593,7 +2617,6 @@ impl ChatWidget<'_> {
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg("--no-first-run")
                 .arg("--no-default-browser-check")
-                .arg("--disable-blink-features=AutomationControlled")
                 .arg("--disable-component-extensions-with-background-pages")
                 .arg("--disable-background-networking")
                 .arg("--silent-debugger-extension-api")
@@ -2617,7 +2640,6 @@ impl ChatWidget<'_> {
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg("--no-first-run")
                 .arg("--no-default-browser-check")
-                .arg("--disable-blink-features=AutomationControlled")
                 .arg("--disable-component-extensions-with-background-pages")
                 .arg("--disable-background-networking")
                 .arg("--silent-debugger-extension-api")
@@ -2652,7 +2674,6 @@ impl ChatWidget<'_> {
                     cmd.arg(format!("--remote-debugging-port={}", port))
                         .arg("--no-first-run")
                         .arg("--no-default-browser-check")
-                        .arg("--disable-blink-features=AutomationControlled")
                         .arg("--disable-component-extensions-with-background-pages")
                         .arg("--disable-background-networking")
                         .arg("--silent-debugger-extension-api")
@@ -2699,139 +2720,197 @@ impl ChatWidget<'_> {
         latest_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
         app_event_tx: AppEventSender,
     ) {
+        tracing::info!("[cdp] connect_to_cdp_chrome() begin, port={:?}", port);
         let browser_manager = ChatWidget::get_browser_manager().await;
         browser_manager.set_enabled_sync(true);
 
-        // Configure for CDP connection
+        // Configure for CDP connection (prefer cached ws/port on auto-detect)
         {
             let mut config = browser_manager.config.write().await;
-            config.connect_port = Some(port.unwrap_or(0)); // 0 means auto-detect
             config.headless = false;
             config.persist_profile = true;
             config.enabled = true;
+
+            if let Some(p) = port {
+                config.connect_ws = None;
+                config.connect_port = Some(p);
+            } else {
+                // Load persisted cache from disk (if any), then fall back to in-memory
+                let (cached_port, cached_ws) = match read_cached_connection().await {
+                    Some(v) => v,
+                    None => codex_browser::global::get_last_connection().await,
+                };
+                if let Some(ws) = cached_ws {
+                    tracing::info!("[cdp] using cached Chrome WS endpoint");
+                    config.connect_ws = Some(ws);
+                    config.connect_port = None;
+                } else if let Some(p) = cached_port {
+                    tracing::info!("[cdp] using cached Chrome debug port: {}", p);
+                    config.connect_ws = None;
+                    config.connect_port = Some(p);
+                } else {
+                    config.connect_ws = None;
+                    config.connect_port = Some(0); // auto-detect
+                }
+            }
         }
 
-        // Try to connect to existing Chrome (no fallback to internal browser)
-        match browser_manager.connect_to_chrome_only().await {
-            Ok(_) => {
-                tracing::info!("Connected to Chrome via CDP");
+        // Try to connect to existing Chrome (no fallback to internal browser) with timeout
+        tracing::info!("[cdp] calling BrowserManager::connect_to_chrome_only()…");
+        // Allow 15s for WS discovery + 5s for connect
+        let connect_deadline = tokio::time::Duration::from_secs(20);
+        let connect_result = tokio::time::timeout(connect_deadline, browser_manager.connect_to_chrome_only()).await;
+        match connect_result {
+            Err(_) => {
+                tracing::error!("[cdp] connect_to_chrome_only timed out after {:?}", connect_deadline);
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                        message: format!(
+                            "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                            connect_deadline.as_secs(), port.unwrap_or(0), port.unwrap_or(0)
+                        ),
+                    }),
+                }));
+                return;
+            }
+            Ok(result) => match result {
+                Ok(_) => {
+                    tracing::info!("[cdp] Connected to Chrome via CDP");
 
-                // Send success message
-                let success_msg = if let Some(p) = port {
-                    format!("✅ Connected to Chrome on port {}", p)
-                } else {
-                    "✅ Connected to Chrome (auto-detected port)".to_string()
-                };
+                    // Prepare success message
+                    let success_msg = if let Some(p) = port {
+                        format!("✅ Connected to Chrome on port {}", p)
+                    } else {
+                        "✅ Connected to Chrome (auto-detected port)".to_string()
+                    };
 
-                // Set up navigation callback
-                let latest_screenshot_callback = latest_screenshot.clone();
-                let app_event_tx_callback = app_event_tx.clone();
+                    // Immediately notify success (do not block on screenshots)
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                            message: success_msg.clone(),
+                        }),
+                    }));
 
-                browser_manager
-                    .set_navigation_callback(move |url| {
-                        tracing::info!("CDP Navigation callback triggered for URL: {}", url);
-                        let latest_screenshot_inner = latest_screenshot_callback.clone();
-                        let app_event_tx_inner = app_event_tx_callback.clone();
-                        let url_inner = url.clone();
+                    // Persist last connection cache to disk (best-effort)
+                    tokio::spawn(async move {
+                        let (p, ws) = codex_browser::global::get_last_connection().await;
+                        let _ = write_cached_connection(p, ws).await;
+                    });
 
-                        tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                            let browser_manager_inner = ChatWidget::get_browser_manager().await;
-                            match browser_manager_inner.capture_screenshot_with_url().await {
-                                Ok((paths, _)) => {
-                                    if let Some(first_path) = paths.first() {
-                                        tracing::info!(
-                                            "Auto-captured CDP screenshot: {}",
-                                            first_path.display()
-                                        );
+                    // Set up navigation callback
+                    let latest_screenshot_callback = latest_screenshot.clone();
+                    let app_event_tx_callback = app_event_tx.clone();
 
-                                        if let Ok(mut latest) = latest_screenshot_inner.lock() {
-                                            *latest = Some((first_path.clone(), url_inner.clone()));
-                                        }
+                    browser_manager
+                        .set_navigation_callback(move |url| {
+                            tracing::info!("CDP Navigation callback triggered for URL: {}", url);
+                            let latest_screenshot_inner = latest_screenshot_callback.clone();
+                            let app_event_tx_inner = app_event_tx_callback.clone();
+                            let url_inner = url.clone();
 
-                                        use codex_core::protocol::{
-                                            BrowserScreenshotUpdateEvent, Event, EventMsg,
-                                        };
-                                        let _ =
-                                            app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                            tokio::spawn(async move {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                                let mut attempt = 0;
+                                let max_attempts = 2;
+                                loop {
+                                    attempt += 1;
+                                    match browser_manager_inner.capture_screenshot_with_url().await {
+                                        Ok((paths, _)) => {
+                                            if let Some(first_path) = paths.first() {
+                                                tracing::info!("[cdp] auto-captured screenshot: {}", first_path.display());
+
+                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                *latest = Some((first_path.clone(), url_inner.clone()));
+                                            }
+
+                                            use codex_core::protocol::{
+                                                BrowserScreenshotUpdateEvent, Event, EventMsg,
+                                            };
+                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                 id: uuid::Uuid::new_v4().to_string(),
-                                                msg: EventMsg::BrowserScreenshotUpdate(
-                                                    BrowserScreenshotUpdateEvent {
-                                                        screenshot_path: first_path.clone(),
-                                                        url: url_inner,
-                                                    },
-                                                ),
+                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                    screenshot_path: first_path.clone(),
+                                                    url: url_inner,
+                                                }),
                                             }));
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("[cdp] auto-capture failed (attempt {}): {}", attempt, e);
+                                        if attempt >= max_attempts { break; }
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                        continue;
                                     }
                                 }
-                                Err(e) => {
-                                    tracing::error!("Failed to auto-capture CDP screenshot: {}", e);
+                                // end match
+                                }
+                                // end loop
+                            });
+                        })
+                        .await;
+
+                    // Set as global manager
+                    codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+
+                    // Capture initial screenshot in background (don't block connect feedback)
+                    {
+                        let latest_screenshot_bg = latest_screenshot.clone();
+                        let app_event_tx_bg = app_event_tx.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                            let browser_manager = ChatWidget::get_browser_manager().await;
+                            let mut attempt = 0;
+                            let max_attempts = 2;
+                            loop {
+                                attempt += 1;
+                                match browser_manager.capture_screenshot_with_url().await {
+                                    Ok((paths, url)) => {
+                                        if let Some(first_path) = paths.first() {
+                                            tracing::info!("Initial CDP screenshot captured: {}", first_path.display());
+                                            if let Ok(mut latest) = latest_screenshot_bg.lock() {
+                                                *latest = Some((
+                                                    first_path.clone(),
+                                                    url.clone().unwrap_or_else(|| "Chrome".to_string()),
+                                                ));
+                                            }
+                                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                            let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                    screenshot_path: first_path.clone(),
+                                                    url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                                }),
+                                            }));
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to capture initial CDP screenshot (attempt {}): {}", attempt, e);
+                                        if attempt >= max_attempts { break; }
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                    }
                                 }
                             }
                         });
-                    })
-                    .await;
-
-                // Set as global manager
-                codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
-
-                // Capture initial screenshot
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                match browser_manager.capture_screenshot_with_url().await {
-                    Ok((paths, url)) => {
-                        if let Some(first_path) = paths.first() {
-                            tracing::info!(
-                                "Initial CDP screenshot captured: {}",
-                                first_path.display()
-                            );
-
-                            if let Ok(mut latest) = latest_screenshot.lock() {
-                                *latest = Some((
-                                    first_path.clone(),
-                                    url.clone().unwrap_or_else(|| "Chrome".to_string()),
-                                ));
-                            }
-
-                            use codex_core::protocol::{
-                                BrowserScreenshotUpdateEvent, Event, EventMsg,
-                            };
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                msg: EventMsg::BrowserScreenshotUpdate(
-                                    BrowserScreenshotUpdateEvent {
-                                        screenshot_path: first_path.clone(),
-                                        url: url.unwrap_or_else(|| "Chrome".to_string()),
-                                    },
-                                ),
-                            }));
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to capture initial CDP screenshot: {}", e);
                     }
                 }
-
-                // Send success status to chat
-                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: success_msg,
-                    }),
-                }));
-            }
-            Err(e) => {
-                tracing::error!("Failed to connect to Chrome: {}", e);
-
-                // Send error message only - don't show dialog again since we're already
-                // in the post-launch connection attempt
-                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!("❌ Failed to connect to Chrome: {}", e),
-                    }),
-                }));
+                Err(e) => {
+                    tracing::error!("[cdp] connect_to_chrome_only failed immediately: {}", e);
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                            message: format!("❌ Failed to connect to Chrome: {}", e),
+                        }),
+                    }));
+                    return;
+                }
             }
         }
     }
@@ -2853,7 +2932,6 @@ impl ChatWidget<'_> {
                 .arg(format!("--user-data-dir={}", profile_dir.display()))
                 .arg("--no-first-run")
                 .arg("--no-default-browser-check")
-                .arg("--disable-blink-features=AutomationControlled")
                 .arg("--disable-component-extensions-with-background-pages")
                 .arg("--disable-background-networking")
                 .arg("--silent-debugger-extension-api")
@@ -2878,7 +2956,6 @@ impl ChatWidget<'_> {
                 .arg(format!("--user-data-dir={}", profile_dir.display()))
                 .arg("--no-first-run")
                 .arg("--no-default-browser-check")
-                .arg("--disable-blink-features=AutomationControlled")
                 .arg("--disable-component-extensions-with-background-pages")
                 .arg("--disable-background-networking")
                 .arg("--silent-debugger-extension-api")
@@ -2914,7 +2991,6 @@ impl ChatWidget<'_> {
                         .arg(format!("--user-data-dir={}", profile_dir.display()))
                         .arg("--no-first-run")
                         .arg("--no-default-browser-check")
-                        .arg("--disable-blink-features=AutomationControlled")
                         .arg("--disable-component-extensions-with-background-pages")
                         .arg("--disable-background-networking")
                         .arg("--silent-debugger-extension-api")
@@ -3344,11 +3420,26 @@ impl ChatWidget<'_> {
             // Enable internal browser
             browser_manager.set_enabled_sync(true);
 
-            // Notify about successful switch
+            // Explicitly (re)start the internal browser session now
+            if let Err(e) = browser_manager.start().await {
+                tracing::error!("Failed to start internal browser: {}", e);
+                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                        message: format!("❌ Failed to start internal browser: {}", e),
+                    }),
+                }));
+                return;
+            }
+
+            // Set as global manager so core/session share the same instance
+            codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+
+            // Notify about successful switch/reconnect
             let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                 id: uuid::Uuid::new_v4().to_string(),
                 msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                    message: "✅ Switched to internal browser mode".to_string(),
+                    message: "✅ Switched to internal browser mode (reconnected)".to_string(),
                 }),
             }));
 
@@ -3356,10 +3447,37 @@ impl ChatWidget<'_> {
             if let Ok(mut screenshot) = latest_screenshot.lock() {
                 *screenshot = None;
             }
+
+            // Capture an initial screenshot (about:blank) to populate HUD
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            match browser_manager.capture_screenshot_with_url().await {
+                Ok((paths, url)) => {
+                    if let Some(first_path) = paths.first() {
+                        if let Ok(mut latest) = latest_screenshot.lock() {
+                            *latest = Some((
+                                first_path.clone(),
+                                url.clone().unwrap_or_else(|| "Browser".to_string()),
+                            ));
+                        }
+                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                screenshot_path: first_path.clone(),
+                                url: url.unwrap_or_else(|| "Browser".to_string()),
+                            }),
+                        }));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to capture initial internal browser screenshot: {}", e);
+                }
+            }
         });
     }
 
     fn handle_chrome_connection(&mut self, port: Option<u16>) {
+        tracing::info!("[cdp] handle_chrome_connection begin, port={:?}", port);
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
@@ -3372,44 +3490,22 @@ impl ChatWidget<'_> {
         );
         self.add_to_history(history_cell::PlainHistoryCell { lines: vec![Line::from(status_msg)], kind: history_cell::HistoryCellType::BackgroundEvent });
 
-        // Connect in background - first try to connect, show dialog on failure
+        // Connect in background with a single, unified flow (no double-connect)
         tokio::spawn(async move {
-            // First attempt to connect to Chrome
-            let browser_manager = ChatWidget::get_browser_manager().await;
-            browser_manager.set_enabled_sync(true);
-
-            // Configure for CDP connection
-            {
-                let mut config = browser_manager.config.write().await;
-                config.connect_port = Some(port.unwrap_or(0)); // 0 means auto-detect
-                config.headless = false;
-                config.persist_profile = true;
-                config.enabled = true;
-            }
-
-            // Try to connect to existing Chrome first
-            match browser_manager.connect_to_chrome_only().await {
-                Ok(_) => {
-                    // Chrome is already running and we can connect - use the shared connection logic
-                    // but we need to reset the browser manager state first since we already connected
-                    browser_manager.set_enabled_sync(false);
-                    ChatWidget::connect_to_cdp_chrome(port, latest_screenshot, app_event_tx).await;
-                }
-                Err(_e) => {
-                    // Chrome not found or can't connect - show options dialog
-                    let show_dialog_tx = app_event_tx.clone();
-                    let _ = show_dialog_tx.send(AppEvent::ShowChromeOptions(Some(launch_port)));
-                }
-            }
+            tracing::info!("[cdp] connect task spawned, port={:?}", port);
+            // Unified connect flow; emits success/failure messages internally
+            ChatWidget::connect_to_cdp_chrome(port, latest_screenshot.clone(), app_event_tx.clone()).await;
         });
     }
 
     pub(crate) fn handle_chrome_command(&mut self, command_text: String) {
+        tracing::info!("[cdp] handle_chrome_command start: '{}'", command_text);
         // Parse the chrome command arguments
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
 
         // Handle empty command - just "/chrome"
         if parts.is_empty() || command_text.trim().is_empty() {
+            tracing::info!("[cdp] no args provided; starting connection (auto-detect)");
             // Switch to external Chrome mode with default port
             self.handle_chrome_connection(None);
             return;
@@ -3439,6 +3535,7 @@ impl ChatWidget<'_> {
 
         // Extract port if provided (number as first argument)
         let port = parts[0].parse::<u16>().ok();
+        tracing::info!("[cdp] parsed port: {:?}", port);
         self.handle_chrome_connection(port);
     }
 
@@ -4212,12 +4309,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let has_custom = cell.has_custom_render();
             let height = cell.desired_height(content_area.width);
             
-            if is_animating || has_custom {
-                tracing::info!(
-                    "Cell[{}]: animating={}, custom_render={}, height={}",
-                    idx, is_animating, has_custom, height
-                );
-            }
+            // suppress noisy per-cell animation logs
             // If this is the animated welcome cell, render it as an overlay instead
             let is_welcome = cell
                 .as_any()
@@ -4328,7 +4420,7 @@ impl WidgetRef for &ChatWidget<'_> {
             self.last_history_viewport_height.set(content_area.height);
         }
 
-        let (start_y, mut scroll_pos) = if total_height <= content_area.height {
+        let (start_y, scroll_pos) = if total_height <= content_area.height {
             // Content fits - always align to bottom so "Popular commands" stays at the bottom
             let start_y = content_area.y + content_area.height.saturating_sub(total_height);
             // Update last_max_scroll cache
@@ -4534,9 +4626,9 @@ impl WidgetRef for &ChatWidget<'_> {
                 height: history_area.height,
             };
 
-            // Clear and repaint the overlay area with theme background
+            // Clear and repaint the overlay area with theme border background
             Clear.render(area, buf);
-            let bg_style = Style::default().bg(crate::colors::background());
+            let bg_style = Style::default().bg(crate::colors::border());
             for y in area.y..area.y + area.height {
                 for x in area.x..area.x + area.width {
                     buf[(x, y)].set_style(bg_style);
@@ -4565,14 +4657,22 @@ impl WidgetRef for &ChatWidget<'_> {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(ratatui::text::Line::from(title_spans))
-                .style(Style::default().bg(crate::colors::background()))
+                .style(Style::default().bg(crate::colors::border()))
                 .border_style(
                     Style::default()
                         .fg(crate::colors::border())
-                        .bg(crate::colors::background()),
+                        .bg(crate::colors::border()),
                 );
             let inner = block.inner(area);
             block.render(area, buf);
+
+            // Paint inner content background as the normal theme background
+            let inner_bg = Style::default().bg(crate::colors::background());
+            for y in inner.y..inner.y + inner.height {
+                for x in inner.x..inner.x + inner.width {
+                    buf[(x, y)].set_style(inner_bg);
+                }
+            }
 
             // Split into header tabs and body/footer
             // Add one cell padding around the entire inside of the window
@@ -4580,7 +4680,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let [tabs_area, body_area] =
                 Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(padded_inner);
 
-            // Render tabs with a more tab-like look (individual bordered blocks)
+            // Render tabs with a more tab-like look (filled blocks, no borders)
             let labels: Vec<String> = overlay
                 .tabs
                 .iter()
@@ -4601,24 +4701,32 @@ impl WidgetRef for &ChatWidget<'_> {
                 let rect = chunks[i];
                 if rect.width == 0 { continue; }
                 let selected = i == overlay.selected;
-                let border_style = if selected {
-                    Style::default().fg(crate::colors::primary())
-                } else {
-                    Style::default().fg(crate::colors::border())
-                };
-                let mut b = Block::default()
-                    .border_style(border_style)
-                    .title(ratatui::text::Line::from(if selected {
-                        ratatui::text::Span::styled(labels[i].clone(), Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD))
-                    } else {
-                        ratatui::text::Span::styled(labels[i].clone(), Style::default().fg(crate::colors::text_dim()))
-                    }));
-                if selected {
-                    b = b.borders(Borders::TOP | Borders::LEFT | Borders::RIGHT);
-                } else {
-                    b = b.borders(Borders::ALL);
+
+                // Fill background for each tab: selected uses background to match inner window
+                let tab_bg = if selected { crate::colors::background() } else { crate::colors::border() };
+                let bg_style = Style::default().bg(tab_bg);
+                for y in rect.y..rect.y + rect.height {
+                    for x in rect.x..rect.x + rect.width {
+                        buf[(x, y)].set_style(bg_style);
+                    }
                 }
-                b.render(rect, buf);
+
+                // Render label centered vertically (line 2 of 3), with padding
+                let label_rect = Rect {
+                    x: rect.x + 1,
+                    y: rect.y + rect.height.saturating_sub(2),
+                    width: rect.width.saturating_sub(2),
+                    height: 1,
+                };
+                let label_style = if selected {
+                    Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(crate::colors::text_dim())
+                };
+                let line = ratatui::text::Line::from(ratatui::text::Span::styled(labels[i].clone(), label_style));
+                Paragraph::new(RtText::from(vec![line]))
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .render(label_rect, buf);
             }
 
             // Render selected tab with vertical scroll and highlight current diff block
@@ -4644,6 +4752,13 @@ impl WidgetRef for &ChatWidget<'_> {
                 // Collect visible slice
                 let end = (skip + visible_rows).min(all_lines.len());
                 let visible = if skip < all_lines.len() { &all_lines[skip..end] } else { &[] };
+                // Fill body background with normal theme background color
+                let body_bg = Style::default().bg(crate::colors::background());
+                for y in body_inner.y..body_inner.y + body_inner.height {
+                    for x in body_inner.x..body_inner.x + body_inner.width {
+                        buf[(x, y)].set_style(body_bg);
+                    }
+                }
                 let paragraph = Paragraph::new(RtText::from(visible.to_vec())).wrap(ratatui::widgets::Wrap { trim: false });
                 ratatui::widgets::Widget::render(paragraph, body_inner, buf);
 
@@ -4667,7 +4782,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         };
                         let border_block = Block::default()
                             .borders(Borders::ALL)
-                            .border_style(Style::default().fg(crate::colors::primary()));
+                            .border_style(Style::default().fg(crate::colors::border_focused()));
                         border_block.render(highlight, buf);
                     }
                 }

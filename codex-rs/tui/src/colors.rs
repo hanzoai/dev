@@ -36,6 +36,10 @@ pub(crate) fn border() -> Color {
     current_theme().border
 }
 
+pub(crate) fn border_focused() -> Color {
+    current_theme().border_focused
+}
+
 pub(crate) fn text() -> Color {
     current_theme().text
 }
@@ -59,6 +63,11 @@ pub(crate) fn dim() -> Color {
 
 pub(crate) fn background() -> Color {
     current_theme().background
+}
+
+#[allow(dead_code)]
+pub(crate) fn selection() -> Color {
+    current_theme().selection
 }
 
 // Syntax/special helpers
