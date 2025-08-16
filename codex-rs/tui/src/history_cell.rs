@@ -376,8 +376,6 @@ impl HistoryCell for AnimatedWelcomeCell {
     
     fn custom_render(&self, area: Rect, buf: &mut Buffer) {
         let elapsed = self.start_time.elapsed();
-        tracing::debug!("AnimatedWelcomeCell::custom_render called, area: {:?}, elapsed: {:?}, completed: {}", 
-                      area, elapsed, self.completed.get());
         
         // Center the animation within the provided area
         // The actual animation needs 21 rows
@@ -406,7 +404,6 @@ impl HistoryCell for AnimatedWelcomeCell {
                 let fade_progress = fade_elapsed.as_secs_f32() / fade_duration.as_secs_f32();
                 let alpha = 1.0 - fade_progress; // From 1.0 to 0.0
                 
-                tracing::debug!("Rendering fade-out animation, alpha: {}", alpha);
                 crate::glitch_animation::render_intro_animation_with_alpha(
                     positioned_area, buf, 1.0, // Full animation progress (static state)
                     alpha,
@@ -415,7 +412,7 @@ impl HistoryCell for AnimatedWelcomeCell {
                 // Fade-out complete - mark as faded out
                 self.faded_out.set(true);
                 // Don't render anything (invisible)
-                tracing::debug!("Fade-out complete, not rendering");
+                // not rendering
             }
         } else {
             // Normal animation phase
@@ -427,14 +424,12 @@ impl HistoryCell for AnimatedWelcomeCell {
                 let progress = elapsed.as_secs_f32() / animation_duration.as_secs_f32();
                 
                 // Render the animation
-                tracing::debug!("Rendering animation, progress: {}", progress);
                 crate::glitch_animation::render_intro_animation(positioned_area, buf, progress);
             } else {
                 // Animation complete - mark it and render final static state
                 self.completed.set(true);
                 
                 // Render the final static state
-                tracing::debug!("Animation complete, rendering static state");
                 crate::glitch_animation::render_intro_animation(
                     positioned_area, buf, 1.0, // Full progress = static final state
                 );
@@ -447,12 +442,8 @@ impl HistoryCell for AnimatedWelcomeCell {
         if !self.completed.get() {
             let elapsed = self.start_time.elapsed();
             let animation_duration = std::time::Duration::from_secs(2);
-            if elapsed < animation_duration {
-                tracing::debug!("AnimatedWelcomeCell is animating, elapsed: {:?}", elapsed);
-                return true;
-            }
+            if elapsed < animation_duration { return true; }
             // Mark as completed if animation time has passed
-            tracing::info!("AnimatedWelcomeCell animation complete after {:?}", elapsed);
             self.completed.set(true);
         }
         
@@ -475,7 +466,6 @@ impl HistoryCell for AnimatedWelcomeCell {
     fn trigger_fade(&self) {
         // Only trigger fade if not already fading or faded
         if self.fade_start.get().is_none() {
-            tracing::info!("Triggering fade-out animation for AnimatedWelcomeCell");
             self.fade_start.set(Some(Instant::now()));
         }
     }
@@ -1200,7 +1190,7 @@ fn new_parsed_command(
             } else {
                 Line::styled(
                     done,
-                    Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
+                    Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD),
                 )
             }
         }
@@ -1530,11 +1520,14 @@ fn browser_tool_title(tool_name: &str) -> &'static str {
         "browser_click" => "Browser Click",
         "browser_type" => "Browser Type",
         "browser_key" => "Browser Key",
-        "browser_javascript" => "Browser Run",
+        "browser_javascript" => "Browser JavaScript",
         "browser_scroll" => "Browser Scroll",
         "browser_open" => "Browser Open",
         "browser_close" => "Browser Close",
         "browser_status" => "Browser Status",
+        "browser_history" => "Browser History",
+        "browser_console" => "Browser Console",
+        "browser_move" => "Browser Move",
         _ => "Browser Tool",
     }
 }
@@ -1550,7 +1543,7 @@ fn format_browser_args_line(args: &serde_json::Value) -> Vec<Line<'static>> {
     fn short(v: &serde_json::Value, key: &str) -> String {
         match v {
             serde_json::Value::String(s) => {
-                let mut one = s.replace('\n', " ");
+                let one = s.replace('\n', " ");
                 let max = if key == "code" { 80 } else { 80 };
                 if one.chars().count() > max {
                     let truncated: String = one.chars().take(max).collect();
@@ -1641,15 +1634,34 @@ fn new_completed_browser_tool_call(
 }
 
 // Map `agent_*` tool names to friendly titles
-fn agent_tool_title(tool_name: &str) -> &'static str {
+fn agent_tool_title(tool_name: &str) -> String {
     match tool_name {
-        "agent_run" => "Agent Run",
-        "agent_check" => "Agent Check",
-        "agent_result" => "Agent Result",
-        "agent_cancel" => "Agent Cancel",
-        "agent_wait" => "Agent Wait",
-        "agent_list" => "Agent List",
-        _ => "Agent Tool",
+        "agent_run" => "Agent Run".to_string(),
+        "agent_check" => "Agent Check".to_string(),
+        "agent_result" => "Agent Result".to_string(),
+        "agent_cancel" => "Agent Cancel".to_string(),
+        "agent_wait" => "Agent Wait".to_string(),
+        "agent_list" => "Agent List".to_string(),
+        other => {
+            // Fallback: pretty-print unknown agent_* tools as "Agent <TitleCase>"
+            if let Some(rest) = other.strip_prefix("agent_") {
+                let title = rest
+                    .split('_')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| {
+                        let mut chars = s.chars();
+                        match chars.next() {
+                            Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("Agent {}", title)
+            } else {
+                "Agent Tool".to_string()
+            }
+        }
     }
 }
 

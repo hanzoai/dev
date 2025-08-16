@@ -16,12 +16,11 @@ pub fn render_intro_animation_with_alpha(area: Rect, buf: &mut Buffer, t: f32, a
 
 // Outline fill animation - inline, no borders
 pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
-    tracing::info!("render_intro_outline_fill: area={:?}, checking size...", area);
     if area.width < 40 || area.height < 10 {
         tracing::warn!("!!! Area too small for animation: {}x{} (need 40x10)", area.width, area.height);
         return;
     }
-    tracing::info!("Area size OK, proceeding with animation render");
+    // area is sufficient; proceed with render
 
     let t = t.clamp(0.0, 1.0);
     let outline_p = smoothstep(0.00, 0.60, t); // outline draws L->R
@@ -78,7 +77,7 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
         .alignment(Alignment::Left)
         .render(r, buf);
     
-    tracing::info!("✓ Animation rendered successfully at {:?}", r);
+    // animation render complete
 }
 
 // Outline fill animation with alpha blending - inline, no borders
@@ -144,7 +143,7 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
         .alignment(Alignment::Left)
         .render(r, buf);
     
-    tracing::info!("✓ Animation rendered successfully at {:?}", r);
+    // animation render complete
 }
 
 /* ---------------- outline fill renderer ---------------- */

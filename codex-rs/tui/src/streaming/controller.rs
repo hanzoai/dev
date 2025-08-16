@@ -206,6 +206,21 @@ impl StreamController {
                     line.style = line
                         .style
                         .patch(ratatui::style::Style::default().fg(color));
+                    if matches!(kind, StreamKind::Answer) {
+                        // Force bold spans in assistant output to use bright text
+                        let spans: Vec<ratatui::text::Span<'static>> = line
+                            .spans
+                            .into_iter()
+                            .map(|s| {
+                                if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
+                                    s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
+                                } else {
+                                    s
+                                }
+                            })
+                            .collect();
+                        line.spans = spans;
+                    }
                     styled.push(line);
                 }
                 state.enqueue(styled);
@@ -310,6 +325,20 @@ impl StreamController {
                         line.style = line
                             .style
                             .patch(ratatui::style::Style::default().fg(color));
+                        if matches!(kind, StreamKind::Answer) {
+                            let spans: Vec<ratatui::text::Span<'static>> = line
+                                .spans
+                                .into_iter()
+                                .map(|s| {
+                                    if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
+                                        s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
+                                    } else {
+                                        s
+                                    }
+                                })
+                                .collect();
+                            line.spans = spans;
+                        }
                         line
                     })
                     .collect();
@@ -380,6 +409,20 @@ impl StreamController {
                     line.style = line
                         .style
                         .patch(ratatui::style::Style::default().fg(color));
+                    if matches!(kind, StreamKind::Answer) {
+                        let spans: Vec<ratatui::text::Span<'static>> = line
+                            .spans
+                            .into_iter()
+                            .map(|s| {
+                                if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
+                                    s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
+                                } else {
+                                    s
+                                }
+                            })
+                            .collect();
+                        line.spans = spans;
+                    }
                     line
                 })
                 .collect();

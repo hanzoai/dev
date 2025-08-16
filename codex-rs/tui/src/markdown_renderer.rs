@@ -289,9 +289,9 @@ impl MarkdownRenderer {
                         // Found closing markers
                         // Assistant messages render with bright bold; others stay dim
                         let bold_color = if self.bold_first_sentence {
-                            crate::colors::text_dim()
-                        } else {
                             crate::colors::text_bright()
+                        } else {
+                            crate::colors::text_dim()
                         };
                         spans.push(Span::styled(
                             bold_content,
