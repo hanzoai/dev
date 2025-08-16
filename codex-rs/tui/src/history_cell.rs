@@ -1297,10 +1297,19 @@ fn new_parsed_command(
                 // Highlight searched terms in normal text color; keep connectors/path dim
                 "Search" => {
                     let remaining = line_text.to_string();
-                    // Split off optional path suffix " (in ...)"
-                    let (terms_part, path_part) = match remaining.rfind(" (in ") {
-                        Some(idx) => (remaining[..idx].to_string(), Some(remaining[idx..].to_string())),
-                        None => (remaining.clone(), None),
+                    // Split off optional path suffix. Support both " (in ...)" and " in <dir>/" forms.
+                    let (terms_part, path_part) = if let Some(idx) = remaining.rfind(" (in ") {
+                        (remaining[..idx].to_string(), Some(remaining[idx..].to_string()))
+                    } else if let Some(idx) = remaining.rfind(" in ") {
+                        let suffix = &remaining[idx + 1..]; // keep leading space for styling
+                        // Heuristic: treat as path if it ends with '/'
+                        if suffix.trim_end().ends_with('/') {
+                            (remaining[..idx].to_string(), Some(remaining[idx..].to_string()))
+                        } else {
+                            (remaining.clone(), None)
+                        }
+                    } else {
+                        (remaining.clone(), None)
                     };
                     // Tokenize terms by ", " and " and " while preserving separators
                     let tmp = terms_part.clone();
@@ -1325,6 +1334,7 @@ fn new_parsed_command(
                         }
                     }
                     if let Some(p) = path_part {
+                        // Dim the entire path portion including the " in " or " (in " prefix
                         spans.push(Span::styled(p, Style::default().fg(crate::colors::text_dim())));
                     }
                 }
