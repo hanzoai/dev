@@ -71,6 +71,7 @@ use crate::history_cell::PatchEventType;
 use crate::live_wrap::RowBuilder;
 use crate::user_approval_widget::ApprovalRequest;
 use crate::streaming::controller::AppEventHistorySink;
+use crate::height_manager::{HeightEvent, HeightManager, height_manager_enabled};
 use crate::streaming::StreamKind;
 use codex_browser::BrowserManager;
 use codex_file_search::FileMatch;
@@ -185,6 +186,12 @@ pub(crate) struct ChatWidget<'a> {
     last_history_viewport_height: std::cell::Cell<u16>,
     // Cached visible rows for the diff overlay body to clamp scrolling
     diff_body_visible_rows: std::cell::Cell<u16>,
+
+    // Optional centralized height manager (feature-gated at runtime)
+    height_manager: Option<RefCell<HeightManager>>,
+
+    // Track prior HUD visibility to emit toggle events to HeightManager
+    last_hud_present: std::cell::Cell<bool>,
 }
 
 struct DiffOverlay {
@@ -253,6 +260,9 @@ impl ChatWidget<'_> {
             self.scroll_offset = 0;
             // Restore spacer above input when at bottom
             self.bottom_pane.set_compact_compose(false);
+            if let Some(hm) = &self.height_manager {
+                hm.borrow_mut().record_event(HeightEvent::ComposerModeChange);
+            }
         }
     }
 
@@ -366,6 +376,9 @@ impl ChatWidget<'_> {
         self.active_exec_cell = Some(cell);
         // Exec cell content changed; clear height cache
         self.invalidate_height_cache();
+        if let Some(hm) = &self.height_manager {
+            hm.borrow_mut().record_event(HeightEvent::RunBegin);
+        }
         
         // Store in running commands
         self.running_commands.insert(ev.call_id.clone(), RunningCommand {
@@ -389,6 +402,9 @@ impl ChatWidget<'_> {
         self.active_exec_cell = None;
         // Exec cell content changed; clear height cache
         self.invalidate_height_cache();
+        if let Some(hm) = &self.height_manager {
+            hm.borrow_mut().record_event(HeightEvent::RunEnd);
+        }
         
         // Get command and parsed info
         let (command, parsed) = cmd
@@ -601,15 +617,29 @@ impl ChatWidget<'_> {
         }
     }
     fn layout_areas(&self, area: Rect) -> Vec<Rect> {
-        // Check if browser is active and has a screenshot
+        // Check HUD presence based on browser/agents.
         let has_browser_screenshot = self
             .latest_browser_screenshot
             .lock()
             .map(|lock| lock.is_some())
             .unwrap_or(false);
-
-        // Check if there are active agents or if agents are ready to start
         let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
+        let hud_present = has_browser_screenshot || has_active_agents;
+
+        if let Some(hm) = &self.height_manager {
+            // Centralized layout path.
+            // Ask bottom pane for its desired height at the current width.
+            let bottom_desired = self.bottom_pane.desired_height(area.width);
+            let font_cell = self.measured_font_size();
+            let mut mut_hm = hm.borrow_mut();
+            // Emit HUD toggle event if visibility changed.
+            let last = self.last_hud_present.get();
+            if last != hud_present {
+                mut_hm.record_event(HeightEvent::HudToggle(hud_present));
+                self.last_hud_present.set(hud_present);
+            }
+            return mut_hm.begin_frame(area, hud_present, bottom_desired, font_cell);
+        }
 
         // Ensure the bottom pane height can shrink by exactly one row when
         // compact compose mode is enabled (spacer removed). The minimum
@@ -624,7 +654,7 @@ impl ChatWidget<'_> {
             .max(self.bottom_pane.desired_height(area.width))
             .min(bottom_cap);
 
-        if has_browser_screenshot || has_active_agents {
+        if hud_present {
             // match HUD padding used in render_browser_hud()
             let horizontal_padding = 1u16;
             let padded_area = Rect {
@@ -669,10 +699,9 @@ impl ChatWidget<'_> {
             .areas::<4>(area)
             .to_vec();
         } else {
-            // Status bar, history, bottom pane (no HUD)
             Layout::vertical([
-                Constraint::Length(3), // Status bar with box border
-                Constraint::Fill(1),   // History takes all remaining space
+                Constraint::Length(3),
+                Constraint::Fill(1),
                 Constraint::Length(bottom_height),
             ])
             .areas::<3>(area)
@@ -687,6 +716,9 @@ impl ChatWidget<'_> {
             self.stream.finalize(StreamKind::Reasoning, true, &sink);
             self.current_stream_kind = Some(StreamKind::Answer);
             self.stream.finalize(StreamKind::Answer, true, &sink);
+            if let Some(hm) = &self.height_manager {
+                hm.borrow_mut().record_event(HeightEvent::HistoryFinalize);
+            }
         }
         // Clear active stream marker after finalization
         self.current_stream_kind = None;
@@ -804,6 +836,15 @@ impl ChatWidget<'_> {
             height_cache_last_width: std::cell::Cell::new(0),
             last_history_viewport_height: std::cell::Cell::new(0),
             diff_body_visible_rows: std::cell::Cell::new(0),
+            height_manager: if height_manager_enabled() {
+                tracing::info!("HeightManager enabled (CODEX_TUI_HEIGHT_MANAGER_V1)");
+                Some(RefCell::new(HeightManager::new(
+                    crate::height_manager::HeightManagerConfig::default(),
+                )))
+            } else {
+                None
+            },
+            last_hud_present: std::cell::Cell::new(false),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1016,6 +1057,9 @@ impl ChatWidget<'_> {
                     self.bottom_pane.set_compact_compose(true);
                 }
                 self.app_event_tx.send(AppEvent::RequestRedraw);
+                if let Some(hm) = &self.height_manager {
+                    hm.borrow_mut().record_event(HeightEvent::UserScroll);
+                }
             }
             InputResult::ScrollDown => {
                 // Scroll down in chat history (decrease offset, towards bottom)
@@ -1025,17 +1069,26 @@ impl ChatWidget<'_> {
                     // reclaimed line above the input.
                     self.bottom_pane.set_compact_compose(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
+                    if let Some(hm) = &self.height_manager {
+                        hm.borrow_mut().record_event(HeightEvent::UserScroll);
+                    }
                 } else if self.scroll_offset >= 3 {
                     // Move towards bottom but do NOT toggle spacer yet; wait until
                     // the user confirms by pressing Down again at bottom.
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
+                    if let Some(hm) = &self.height_manager {
+                        hm.borrow_mut().record_event(HeightEvent::UserScroll);
+                    }
                 } else if self.scroll_offset > 0 {
                     // Land exactly at bottom without toggling spacer yet; require
                     // a subsequent Down to re-enable the spacer so the input
                     // doesn't move when scrolling into the line above it.
                     self.scroll_offset = 0;
                     self.app_event_tx.send(AppEvent::RequestRedraw);
+                    if let Some(hm) = &self.height_manager {
+                        hm.borrow_mut().record_event(HeightEvent::UserScroll);
+                    }
                 }
             }
             InputResult::None => {}
@@ -1134,6 +1187,9 @@ impl ChatWidget<'_> {
         // for our terminal rendering and theming system.
         // Invalidate height cache since content has changed
         self.invalidate_height_cache();
+        if let Some(hm) = &self.height_manager {
+            hm.borrow_mut().record_event(HeightEvent::HistoryAppend);
+        }
         // Any new history item means reasoning is no longer at the bottom
         self.clear_reasoning_in_progress();
         let new_cell: Box<dyn HistoryCell> = Box::new(cell);
