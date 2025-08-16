@@ -78,6 +78,9 @@ pub(crate) struct ChatComposer {
     use_shift_enter_hint: bool,
     dismissed_file_popup_token: Option<String>,
     current_file_query: Option<String>,
+    // Tracks a one-off Tab-triggered file search. When set, we will only
+    // create/show a popup if the results are non-empty to avoid flicker.
+    pending_tab_file_query: Option<String>,
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
@@ -94,6 +97,7 @@ pub(crate) struct ChatComposer {
     // Footer hint visibility flags
     show_reasoning_hint: bool,
     show_diffs_hint: bool,
+    reasoning_shown: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -122,6 +126,7 @@ impl ChatComposer {
             use_shift_enter_hint,
             dismissed_file_popup_token: None,
             current_file_query: None,
+            pending_tab_file_query: None,
             pending_pastes: Vec::new(),
             token_usage_info: None,
             has_focus: has_input_focus,
@@ -134,6 +139,7 @@ impl ChatComposer {
             footer_notice: None,
             show_reasoning_hint: false,
             show_diffs_hint: false,
+            reasoning_shown: false,
         }
     }
 
@@ -188,6 +194,10 @@ impl ChatComposer {
         if self.show_diffs_hint != show {
             self.show_diffs_hint = show;
         }
+    }
+
+    pub fn set_reasoning_state(&mut self, shown: bool) {
+        self.reasoning_shown = shown;
     }
 
     // Map technical status messages to user-friendly ones
@@ -254,13 +264,15 @@ impl ChatComposer {
         };
 
         // Calculate actual content height of textarea
-        // Account for: 2 border + 2 horizontal padding (1 left + 1 right)
-        let content_width = width.saturating_sub(4); // 2 border + 2 horizontal padding
+        // Width adjustments must mirror render exactly:
+        // In render, we allocate the input block, then compute its inner area (borders = 2),
+        // then apply a horizontal Margin of 1 on each side (padding = 2). Total = 4 columns.
+        let content_width = width.saturating_sub(4);
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
         // Total input height: content + border (2) only, no vertical padding
         // Minimum of 3 ensures at least 1 visible line with border
-        let input_height = (content_lines + 2).max(3).min(15);
+        let input_height = (content_lines + 2).max(3);
 
         input_height + hint_height
     }
@@ -279,7 +291,7 @@ impl ChatComposer {
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
         let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
 
         // Use desired height but don't exceed available space
         let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
@@ -362,15 +374,34 @@ impl ChatComposer {
 
     /// Integrate results from an asynchronous file search.
     pub(crate) fn on_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
-        // Only apply if user is still editing a token starting with `query`.
-        let current_opt = Self::current_at_token(&self.textarea);
-        let Some(current_token) = current_opt else {
-            return;
-        };
+        // Handle one-off Tab-triggered case first: only open if matches exist.
+        if self.pending_tab_file_query.as_ref() == Some(&query) {
+            // Clear pending regardless of result to avoid repeats.
+            self.pending_tab_file_query = None;
 
-        if !current_token.starts_with(&query) {
+            if matches.is_empty() {
+                return; // do not open popup when no matches to avoid flicker
+            }
+
+            match &mut self.active_popup {
+                ActivePopup::File(popup) => popup.set_matches(&query, matches),
+                _ => {
+                    let mut popup = FileSearchPopup::new();
+                    popup.set_query(&query);
+                    popup.set_matches(&query, matches);
+                    self.active_popup = ActivePopup::File(popup);
+                }
+            }
+            self.current_file_query = Some(query);
+            self.dismissed_file_popup_token = None;
             return;
         }
+
+        // Otherwise, only apply if user is still editing a token matching the query
+        // and that token qualifies for auto-trigger (i.e., @ or ./).
+        let current_opt = Self::current_completion_token(&self.textarea);
+        let Some(current_token) = current_opt else { return; };
+        if !current_token.starts_with(&query) { return; }
 
         if let ActivePopup::File(popup) = &mut self.active_popup {
             popup.set_matches(&query, matches);
@@ -506,7 +537,7 @@ impl ChatComposer {
                 code: KeyCode::Esc, ..
             } => {
                 // Hide popup without modifying text, remember token to avoid immediate reopen.
-                if let Some(tok) = Self::current_at_token(&self.textarea) {
+                if let Some(tok) = Self::current_completion_token(&self.textarea) {
                     self.dismissed_file_popup_token = Some(tok.to_string());
                 }
                 self.active_popup = ActivePopup::None;
@@ -538,8 +569,8 @@ impl ChatComposer {
     /// The returned string **does not** include the leading `@`.
     ///
     /// Behavior:
-    /// - The cursor may be anywhere *inside* the token (including on the
-    ///   leading `@`). It does **not** need to be at the end of the line.
+    /// - The cursor may be anywhere inside the token (including on the
+    ///   leading `@`). It does not need to be at the end of the line.
     /// - A token is delimited by ASCII whitespace (space, tab, newline).
     /// - If the token under the cursor starts with `@`, that token is
     ///   returned without the leading `@`. This includes the case where the
@@ -635,6 +666,103 @@ impl ChatComposer {
         left_at.or(right_at)
     }
 
+    /// Extract the completion token under the cursor for auto file search.
+    ///
+    /// Auto-trigger only for:
+    /// - explicit @tokens (without the leading '@' in the return value)
+    /// - tokens starting with "./" (relative paths)
+    ///
+    /// Returns the token text (without a leading '@' if present). Any other
+    /// tokens should not auto-trigger completion; they may be handled on Tab.
+    fn current_completion_token(textarea: &TextArea) -> Option<String> {
+        // Prefer explicit @tokens when present.
+        if let Some(tok) = Self::current_at_token(textarea) {
+            return Some(tok);
+        }
+
+        // Otherwise, consider the generic token under the cursor, but only
+        // auto-trigger for tokens starting with "./".
+        let cursor_offset = textarea.cursor();
+        let text = textarea.text();
+
+        let mut safe_cursor = cursor_offset.min(text.len());
+        if safe_cursor < text.len() && !text.is_char_boundary(safe_cursor) {
+            safe_cursor = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= cursor_offset)
+                .last()
+                .unwrap_or(0);
+        }
+
+        let before_cursor = &text[..safe_cursor];
+        let after_cursor = &text[safe_cursor..];
+
+        let start_idx = before_cursor
+            .char_indices()
+            .rfind(|(_, c)| c.is_whitespace())
+            .map(|(idx, c)| idx + c.len_utf8())
+            .unwrap_or(0);
+        let end_rel_idx = after_cursor
+            .char_indices()
+            .find(|(_, c)| c.is_whitespace())
+            .map(|(idx, _)| idx)
+            .unwrap_or(after_cursor.len());
+        let end_idx = safe_cursor + end_rel_idx;
+
+        if start_idx >= end_idx {
+            return None;
+        }
+
+        let token = &text[start_idx..end_idx];
+
+        // Strip a leading '@' if the user typed it but we didn't catch it
+        // (paranoia; current_at_token should have handled this case).
+        let token_stripped = token.strip_prefix('@').unwrap_or(token);
+
+        if token_stripped.starts_with("./") {
+            return Some(token_stripped.to_string());
+        }
+
+        None
+    }
+
+    /// Extract the generic token under the cursor (no special rules).
+    /// Used for Tab-triggered one-off file searches.
+    fn current_generic_token(textarea: &TextArea) -> Option<String> {
+        let cursor_offset = textarea.cursor();
+        let text = textarea.text();
+
+        let mut safe_cursor = cursor_offset.min(text.len());
+        if safe_cursor < text.len() && !text.is_char_boundary(safe_cursor) {
+            safe_cursor = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= cursor_offset)
+                .last()
+                .unwrap_or(0);
+        }
+
+        let before_cursor = &text[..safe_cursor];
+        let after_cursor = &text[safe_cursor..];
+
+        let start_idx = before_cursor
+            .char_indices()
+            .rfind(|(_, c)| c.is_whitespace())
+            .map(|(idx, c)| idx + c.len_utf8())
+            .unwrap_or(0);
+        let end_rel_idx = after_cursor
+            .char_indices()
+            .find(|(_, c)| c.is_whitespace())
+            .map(|(idx, _)| idx)
+            .unwrap_or(after_cursor.len());
+        let end_idx = safe_cursor + end_rel_idx;
+
+        if start_idx >= end_idx { return None; }
+
+        Some(text[start_idx..end_idx].trim().to_string())
+    }
+
     /// Replace the active `@token` (the one under the cursor) with `path`.
     ///
     /// The algorithm mirrors `current_at_token` so replacement works no matter
@@ -677,6 +805,40 @@ impl ChatComposer {
     /// Handle key event when no popup is visible.
     fn handle_key_event_without_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         match key_event {
+            // -------------------------------------------------------------
+            // Tab-press file search when not using @ or ./ and not in slash cmd
+            // -------------------------------------------------------------
+            KeyEvent { code: KeyCode::Tab, .. } => {
+                // Do not trigger if composing a slash command
+                let first_line = self.textarea.text().lines().next().unwrap_or("");
+                let starts_with_slash_cmd = first_line.trim_start().starts_with('/');
+
+                if starts_with_slash_cmd {
+                    return (InputResult::None, false);
+                }
+
+                // If already showing a file popup, let the dedicated handler manage Tab.
+                if matches!(self.active_popup, ActivePopup::File(_)) {
+                    return (InputResult::None, false);
+                }
+
+                // If an @ token is present or token starts with ./, rely on auto-popup.
+                if Self::current_completion_token(&self.textarea).is_some() {
+                    return (InputResult::None, false);
+                }
+
+                // Use the generic token under cursor for a one-off search.
+                if let Some(tok) = Self::current_generic_token(&self.textarea) {
+                    if !tok.is_empty() {
+                        self.pending_tab_file_query = Some(tok.clone());
+                        self.app_event_tx.send(AppEvent::StartFileSearch(tok));
+                        // Do not show a popup yet; wait for results and only
+                        // show if there are matches to avoid flicker.
+                        return (InputResult::None, true);
+                    }
+                }
+                (InputResult::None, false)
+            }
             // -------------------------------------------------------------
             // Handle Esc key for double-press clearing
             // -------------------------------------------------------------
@@ -898,8 +1060,8 @@ impl ChatComposer {
     /// Synchronize `self.file_search_popup` with the current text in the textarea.
     /// Note this is only called when self.active_popup is NOT Command.
     fn sync_file_search_popup(&mut self) {
-        // Determine if there is an @token underneath the cursor.
-        let query = match Self::current_at_token(&self.textarea) {
+        // Determine if there is a token underneath the cursor worth completing.
+        let query = match Self::current_completion_token(&self.textarea) {
             Some(token) => token,
             None => {
                 self.active_popup = ActivePopup::None;
@@ -965,7 +1127,7 @@ impl WidgetRef for &ChatComposer {
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
         let content_lines = self.textarea.desired_height(content_width).max(1);
-        let desired_input_height = (content_lines + 2).max(3).min(15); // Dynamic with min/max
+        let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
 
         // Use desired height but don't exceed available space
         let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
@@ -1013,7 +1175,8 @@ impl WidgetRef for &ChatComposer {
                     if self.show_reasoning_hint {
                         if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }
                         right_spans.push(Span::from("Ctrl+R").style(key_hint_style));
-                        right_spans.push(Span::from(" toggle reasoning").style(label_style));
+                        let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
+                        right_spans.push(Span::from(label).style(label_style));
                     }
                     if self.show_diffs_hint {
                         if !first_right { right_spans.push(Span::from("  •  ").style(Style::default())); } else { first_right = false; }

@@ -72,8 +72,8 @@ if (existsSync(binaryPath)) {
 } else {
   console.error(`Binary not found: ${binaryPath}`);
   console.error(`Please try reinstalling the package:`);
-  console.error(`  npm uninstall -g @just-every/coder`);
-  console.error(`  npm install -g @just-every/coder`);
+  console.error(`  npm uninstall -g @just-every/code`);
+  console.error(`  npm install -g @just-every/code`);
   process.exit(1);
 }
 
@@ -94,7 +94,7 @@ child.on("error", (err) => {
   if (err.code === 'EACCES') {
     console.error(`Permission denied: ${binaryPath}`);
     console.error(`Try running: chmod +x "${binaryPath}"`);
-    console.error(`Or reinstall the package with: npm install -g @just-every/coder`);
+    console.error(`Or reinstall the package with: npm install -g @just-every/code`);
   } else {
     console.error(err);
   }

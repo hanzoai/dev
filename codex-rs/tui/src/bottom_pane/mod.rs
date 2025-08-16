@@ -399,6 +399,11 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn set_reasoning_state(&mut self, shown: bool) {
+        self.composer.set_reasoning_state(shown);
+        self.request_redraw();
+    }
+
     pub(crate) fn set_diffs_hint(&mut self, show: bool) {
         self.composer.set_show_diffs_hint(show);
         self.request_redraw();

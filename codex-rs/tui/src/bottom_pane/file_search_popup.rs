@@ -1,6 +1,7 @@
 use codex_file_search::FileMatch;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::layout::Margin;
 use ratatui::widgets::WidgetRef;
 
 use super::popup_consts::MAX_POPUP_ROWS;
@@ -114,6 +115,9 @@ impl FileSearchPopup {
 
 impl WidgetRef for &FileSearchPopup {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        // Match the slash-command popup: add two spaces of left padding so
+        // rows align with the text inside the composer (border + inner pad).
+        let indented_area = area.inner(Margin::new(2, 0));
         // Convert matches to GenericDisplayRow, translating indices to usize at the UI boundary.
         let rows_all: Vec<GenericDisplayRow> = if self.matches.is_empty() {
             Vec::new()
@@ -136,9 +140,9 @@ impl WidgetRef for &FileSearchPopup {
 
         if self.waiting && rows_all.is_empty() {
             // Render a minimal waiting stub using the shared renderer (no rows -> "no matches").
-            render_rows(area, buf, &[], &self.state, MAX_POPUP_ROWS);
+            render_rows(indented_area, buf, &[], &self.state, MAX_POPUP_ROWS);
         } else {
-            render_rows(area, buf, &rows_all, &self.state, MAX_POPUP_ROWS);
+            render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS);
         }
     }
 }

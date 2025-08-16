@@ -196,7 +196,7 @@ impl StreamController {
                 }
             }
             if !newly_completed.is_empty() {
-                // Color reasoning as text_dim and answers as text_bright, preserving span modifiers (e.g., bold)
+                // Color reasoning as text_dim and answers as text_bright, preserving span modifiers
                 let color = match kind {
                     StreamKind::Reasoning => crate::colors::text_dim(),
                     StreamKind::Answer => crate::colors::text_bright(),
