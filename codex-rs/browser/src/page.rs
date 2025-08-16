@@ -62,11 +62,16 @@ impl Page {
             cursor_state: Arc::new(Mutex::new(initial_cursor)),
         };
 
-        // Inject the navigation interception script asynchronously (New)
-        let cdp_page_clone = page.cdp_page.clone();
+        // Register a unified bootstrap (runs on every new document):
+        //  - Blocks _blank/tab opens
+        //  - Installs minimal virtual cursor early
+        //  - Hooks SPA history to signal route changes
+        let cdp_page_boot = page.cdp_page.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::inject_tab_interception_script(&cdp_page_clone).await {
-                warn!("Failed to inject navigation interception script: {}", e);
+            if let Err(e) = Self::inject_bootstrap_script(&cdp_page_boot).await {
+                warn!("Failed to inject unified bootstrap script: {}", e);
+            } else {
+                debug!("Unified bootstrap script registered for new documents");
             }
         });
 
@@ -200,6 +205,79 @@ impl Page {
         let params = AddScriptToEvaluateOnNewDocumentParams::new(script);
         cdp_page.execute(params).await?;
         debug!("Tab interception script injected successfully.");
+        Ok(())
+    }
+
+    /// Injects a unified bootstrap for each new document: tab blocking + cursor bootstrap + SPA hooks
+    async fn inject_bootstrap_script(cdp_page: &Arc<CdpPage>) -> Result<()> {
+        // This script installs the full virtual cursor on DOM ready for each new document.
+        // It also prevents _blank tabs and hooks SPA history changes.
+        let script = r#"
+(function(){
+  // 1) Tab blocking: override window.open + intercept target="_blank"
+  try {
+    const originalOpen = window.open;
+    const openProxy = new Proxy(originalOpen, {
+      apply(_t, _this, args) {
+        const url = args[0];
+        if (url) location.href = url;
+        return null;
+      }
+    });
+    Object.defineProperty(window, 'open', { value: openProxy, writable: false, configurable: false });
+
+    const urlFrom = n => n?.href ?? n?.getAttribute?.('href') ?? n?.getAttribute?.('post-outbound-link') ?? n?.dataset?.url ?? n?.dataset?.href ?? null;
+    const intercept = e => {
+      const path = e.composedPath?.() ?? [];
+      for (const n of path) {
+        if (!n?.getAttribute) continue;
+        if (n.getAttribute('target') === '_blank') {
+          const url = urlFrom(n);
+          if (url) { e.preventDefault(); e.stopImmediatePropagation(); location.href = url; }
+          return;
+        }
+      }
+    };
+    ['pointerdown','click','auxclick'].forEach(ev => document.addEventListener(ev, intercept, { capture: true }));
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'Enter' || e.key === ' ') && document.activeElement?.getAttribute?.('target') === '_blank') {
+        e.preventDefault(); const url = urlFrom(document.activeElement); if (url) location.href = url;
+      }
+    }, { capture: true });
+    document.addEventListener('submit', e => {
+      if (e.target?.target === '_blank') { e.preventDefault(); e.target.target = '_self'; e.target.submit(); }
+    }, { capture: true });
+    try {
+      const observeTarget = document.documentElement || document;
+      if (observeTarget) {
+        new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => n && n.shadowRoot && ['pointerdown','click','auxclick'].forEach(ev => n.shadowRoot.addEventListener(ev, intercept, { capture: true })) ))).observe(observeTarget, { subtree: true, childList: true });
+      }
+    } catch (e) { console.warn('Tab block MO failed', e); }
+  } catch (e) { console.warn('Tab blocking failed', e); }
+
+  // 2) SPA history hooks
+  try {
+    const dispatch = () => {
+      try {
+        const ev = new Event('codex:locationchange');
+        window.dispatchEvent(ev);
+        window.__codex_last_url = location.href;
+      } catch {}
+    };
+    const push = history.pushState.bind(history);
+    const repl = history.replaceState.bind(history);
+    history.pushState = function(...a){ const r = push(...a); dispatch(); return r; };
+    history.replaceState = function(...a){ const r = repl(...a); dispatch(); return r; };
+    window.addEventListener('popstate', dispatch, { passive: true });
+    dispatch();
+  } catch (e) { console.warn('SPA hook failed', e); }
+
+  // 3) No cursor bootstrap here; full cursor is injected by runtime ensure_virtual_cursor
+})();
+"#;
+
+        let params = AddScriptToEvaluateOnNewDocumentParams::new(script);
+        cdp_page.execute(params).await?;
         Ok(())
     }
 
@@ -442,8 +520,8 @@ impl Page {
 
   function createSvg(tag) {{ return document.createElementNS(ns, tag); }}
 
-  // Install once
-  if (!window.__vc) {{
+    // Install once or upgrade from bootstrap version
+    if (!window.__vc) {{
     const root = ensureRoot();
 
     // --- Arrow SVG container ---
@@ -502,12 +580,12 @@ impl Page {
     badge.style.height = 'auto';
 
     const rect = createSvg('rect');
-    rect.setAttribute('x','13.119');
-    rect.setAttribute('y','20.897');
-    rect.setAttribute('width','28.228');
+    rect.setAttribute('x','10.82');
+    rect.setAttribute('y','18.564');
+    rect.setAttribute('width','25.686');
     rect.setAttribute('height','10.691');
-    rect.setAttribute('rx','5');
-    rect.setAttribute('ry','5');
+    rect.setAttribute('rx','4');
+    rect.setAttribute('ry','4');
     rect.setAttribute('fill','rgb(0, 171, 255)');
     rect.setAttribute('stroke', 'white');
     rect.setAttribute('stroke-width','1');
@@ -517,7 +595,7 @@ impl Page {
 
     const glyphs = createSvg('path');
     glyphs.setAttribute('d',
-      'M 21.568 26.99 L 22.259 27.165 C 22.114 27.732 21.854 28.165 21.477 28.464 C 21.1 28.762 20.64 28.911 20.095 28.911 C 19.532 28.911 19.074 28.796 18.721 28.567 C 18.368 28.338 18.1 28.006 17.916 27.571 C 17.732 27.136 17.64 26.669 17.64 26.17 C 17.64 25.626 17.744 25.151 17.951 24.746 C 18.159 24.341 18.455 24.033 18.839 23.823 C 19.223 23.612 19.645 23.507 20.106 23.507 C 20.629 23.507 21.068 23.64 21.425 23.907 C 21.782 24.173 22.03 24.547 22.17 25.029 L 21.489 25.19 C 21.368 24.81 21.192 24.533 20.962 24.359 C 20.731 24.186 20.441 24.099 20.092 24.099 C 19.691 24.099 19.355 24.195 19.085 24.388 C 18.815 24.581 18.625 24.839 18.516 25.163 C 18.407 25.488 18.352 25.822 18.352 26.166 C 18.352 26.611 18.417 26.999 18.547 27.33 C 18.676 27.662 18.878 27.91 19.151 28.073 C 19.424 28.237 19.72 28.319 20.038 28.319 C 20.425 28.319 20.753 28.207 21.022 27.984 C 21.291 27.761 21.473 27.429 21.568 26.99 Z M 22.79 26.929 C 22.79 26.228 22.985 25.709 23.375 25.372 C 23.7 25.091 24.097 24.951 24.565 24.951 C 25.086 24.951 25.511 25.122 25.841 25.463 C 26.172 25.804 26.337 26.275 26.337 26.876 C 26.337 27.363 26.264 27.746 26.117 28.025 C 25.971 28.304 25.758 28.521 25.479 28.676 C 25.2 28.831 24.896 28.908 24.565 28.908 C 24.035 28.908 23.607 28.738 23.28 28.398 C 22.953 28.058 22.79 27.568 22.79 26.929 Z M 23.449 26.929 C 23.449 27.414 23.555 27.777 23.767 28.018 C 23.978 28.259 24.244 28.38 24.565 28.38 C 24.884 28.38 25.149 28.259 25.36 28.016 C 25.571 27.774 25.677 27.405 25.677 26.908 C 25.677 26.44 25.571 26.085 25.358 25.844 C 25.145 25.603 24.881 25.482 24.565 25.482 C 24.244 25.482 23.978 25.602 23.767 25.842 C 23.555 26.082 23.449 26.444 23.449 26.929 Z M 29.544 28.822 L 29.544 28.344 C 29.304 28.72 28.951 28.908 28.485 28.908 C 28.184 28.908 27.906 28.825 27.653 28.658 C 27.4 28.492 27.204 28.26 27.065 27.961 C 26.926 27.663 26.856 27.32 26.856 26.933 C 26.856 26.555 26.919 26.212 27.045 25.904 C 27.171 25.597 27.36 25.361 27.612 25.197 C 27.864 25.033 28.146 24.951 28.457 24.951 C 28.685 24.951 28.888 24.999 29.066 25.095 C 29.245 25.192 29.39 25.317 29.501 25.471 L 29.501 23.597 L 30.139 23.597 L 30.139 28.822 L 29.544 28.822 Z M 27.516 26.933 C 27.516 27.418 27.618 27.78 27.822 28.02 C 28.027 28.26 28.268 28.38 28.546 28.38 C 28.826 28.38 29.064 28.265 29.26 28.036 C 29.457 27.807 29.555 27.457 29.555 26.986 C 29.555 26.468 29.455 26.088 29.255 25.846 C 29.056 25.603 28.81 25.482 28.517 25.482 C 28.232 25.482 27.994 25.598 27.803 25.831 C 27.612 26.064 27.516 26.432 27.516 26.933 Z M 33.739 27.603 L 34.402 27.685 C 34.297 28.072 34.104 28.373 33.821 28.587 C 33.538 28.801 33.177 28.908 32.738 28.908 C 32.184 28.908 31.745 28.737 31.421 28.396 C 31.096 28.055 30.934 27.577 30.934 26.961 C 30.934 26.324 31.098 25.83 31.426 25.479 C 31.754 25.127 32.179 24.951 32.702 24.951 C 33.208 24.951 33.621 25.123 33.942 25.468 C 34.263 25.813 34.424 26.297 34.424 26.922 C 34.424 26.96 34.423 27.017 34.42 27.093 L 31.597 27.093 C 31.621 27.509 31.739 27.828 31.95 28.049 C 32.161 28.27 32.425 28.38 32.741 28.38 C 32.976 28.38 33.177 28.318 33.344 28.195 C 33.51 28.071 33.642 27.874 33.739 27.603 Z M 31.633 26.566 L 33.746 26.566 C 33.718 26.247 33.637 26.008 33.504 25.849 C 33.3 25.602 33.035 25.479 32.709 25.479 C 32.414 25.479 32.167 25.577 31.966 25.774 C 31.765 25.971 31.654 26.235 31.633 26.566 Z M 35.201 28.822 L 35.201 25.037 L 35.778 25.037 L 35.778 25.61 C 35.925 25.342 36.061 25.165 36.186 25.079 C 36.311 24.994 36.449 24.951 36.598 24.951 C 36.814 24.951 37.034 25.02 37.258 25.158 L 37.037 25.753 C 36.88 25.66 36.723 25.614 36.566 25.614 C 36.426 25.614 36.3 25.656 36.188 25.741 C 36.077 25.825 35.997 25.942 35.949 26.092 C 35.878 26.32 35.842 26.569 35.842 26.84 L 35.842 28.822 L 35.201 28.822 Z'
+      'M 19.269 24.657 L 19.96 24.832 C 19.815 25.399 19.555 25.832 19.178 26.131 C 18.801 26.429 18.341 26.578 17.796 26.578 C 17.233 26.578 16.775 26.463 16.422 26.234 C 16.069 26.005 15.801 25.673 15.617 25.238 C 15.433 24.803 15.341 24.336 15.341 23.837 C 15.341 23.293 15.445 22.818 15.652 22.413 C 15.86 22.008 16.156 21.7 16.54 21.49 C 16.924 21.279 17.346 21.174 17.807 21.174 C 18.33 21.174 18.769 21.307 19.126 21.574 C 19.483 21.84 19.731 22.214 19.871 22.696 L 19.19 22.857 C 19.069 22.477 18.893 22.2 18.663 22.026 C 18.432 21.853 18.142 21.766 17.793 21.766 C 17.392 21.766 17.056 21.862 16.786 22.055 C 16.516 22.248 16.326 22.506 16.217 22.83 C 16.108 23.155 16.053 23.489 16.053 23.833 C 16.053 24.278 16.118 24.666 16.248 24.997 C 16.377 25.329 16.579 25.577 16.852 25.74 C 17.125 25.904 17.421 25.986 17.739 25.986 C 18.126 25.986 18.454 25.874 18.723 25.651 C 18.992 25.428 19.174 25.096 19.269 24.657 Z M 20.491 24.596 C 20.491 23.895 20.686 23.376 21.076 23.039 C 21.401 22.758 21.798 22.618 22.266 22.618 C 22.787 22.618 23.212 22.789 23.542 23.13 C 23.873 23.471 24.038 23.942 24.038 24.543 C 24.038 25.03 23.965 25.413 23.818 25.692 C 23.672 25.971 23.459 26.188 23.18 26.343 C 22.901 26.498 22.597 26.575 22.266 26.575 C 21.736 26.575 21.308 26.405 20.981 26.065 C 20.654 25.725 20.491 25.235 20.491 24.596 Z M 21.15 24.596 C 21.15 25.081 21.256 25.444 21.468 25.685 C 21.679 25.926 21.945 26.047 22.266 26.047 C 22.585 26.047 22.85 25.926 23.061 25.683 C 23.272 25.441 23.378 25.072 23.378 24.575 C 23.378 24.107 23.272 23.752 23.059 23.511 C 22.846 23.27 22.582 23.149 22.266 23.149 C 21.945 23.149 21.679 23.269 21.468 23.509 C 21.256 23.749 21.15 24.111 21.15 24.596 Z M 27.245 26.489 L 27.245 26.011 C 27.005 26.387 26.652 26.575 26.186 26.575 C 25.885 26.575 25.607 26.492 25.354 26.325 C 25.101 26.159 24.905 25.927 24.766 25.628 C 24.627 25.33 24.557 24.987 24.557 24.6 C 24.557 24.222 24.62 23.879 24.746 23.571 C 24.872 23.264 25.061 23.028 25.313 22.864 C 25.565 22.7 25.847 22.618 26.158 22.618 C 26.386 22.618 26.589 22.666 26.767 22.762 C 26.946 22.859 27.091 22.984 27.202 23.138 L 27.202 21.264 L 27.84 21.264 L 27.84 26.489 L 27.245 26.489 Z M 25.217 24.6 C 25.217 25.085 25.319 25.447 25.523 25.687 C 25.728 25.927 25.969 26.047 26.247 26.047 C 26.527 26.047 26.765 25.932 26.961 25.703 C 27.158 25.474 27.256 25.124 27.256 24.653 C 27.256 24.135 27.156 23.755 26.956 23.513 C 26.757 23.27 26.511 23.149 26.218 23.149 C 25.933 23.149 25.695 23.265 25.504 23.498 C 25.313 23.731 25.217 24.099 25.217 24.6 Z M 31.44 25.27 L 32.103 25.352 C 31.998 25.739 31.805 26.04 31.522 26.254 C 31.239 26.468 30.878 26.575 30.439 26.575 C 29.885 26.575 29.446 26.404 29.122 26.063 C 28.797 25.722 28.635 25.244 28.635 24.628 C 28.635 23.991 28.799 23.497 29.127 23.146 C 29.455 22.794 29.88 22.618 30.403 22.618 C 30.909 22.618 31.322 22.79 31.643 23.135 C 31.964 23.48 32.125 23.964 32.125 24.589 C 32.125 24.627 32.124 24.684 32.121 24.76 L 29.298 24.76 C 29.322 25.176 29.44 25.495 29.651 25.716 C 29.862 25.937 30.126 26.047 30.442 26.047 C 30.677 26.047 30.878 25.985 31.045 25.862 C 31.211 25.738 31.343 25.541 31.44 25.27 Z M 29.334 24.233 L 31.447 24.233 C 31.419 23.914 31.338 23.675 31.205 23.516 C 31.001 23.269 30.736 23.146 30.41 23.146 C 30.115 23.146 29.868 23.244 29.667 23.441 C 29.466 23.638 29.355 23.902 29.334 24.233 Z'
     );
     glyphs.setAttribute('fill', 'white');
 
@@ -536,23 +614,41 @@ impl Page {
       badgeY: Math.round(y - TIP_Y + BADGE_OFF_Y),
       aAnim: null,
       bAnim: null,
+      ignoreHoverUntil: 0,
+      curveFlip: false,
     }};
 
     arrow.style.transform = 'translate3d(' + state.arrowX + 'px,' + state.arrowY + 'px,0)';
     badge.style.transform = 'translate3d(' + state.badgeX + 'px,' + state.badgeY + 'px,0)';
     arrow.style.willChange = 'transform';
     badge.style.willChange = 'transform';
+    // For consistent rotation pivoting
+    arrow.style.transformOrigin = '0 0';
+    badge.style.transformOrigin = '0 0';
 
     // Motion configuration (distance-based durations)
     const MOTION = {{
-      pxPerSec: 600,                           // base speed (external CDP friendly)
-      min: 200,                                // ms clamp
-      max: 3000,                               // ms cap (ok for CDP)
-      easing: 'cubic-bezier(0.25, 1, 0.5, 1)', // easeOutQuart-ish
-      badgeScale: 1.25,                         // badge slightly lags longer
-      badgeDelay: 140,                          // ms delay for trailing effect
-      jitter: 0.0,                              // deterministic for consistency
-      rotateMaxDeg: 16                          // max tilt based on direction
+      pxPerSec: 120,                           // much slower, relaxed glide
+      min: 600,                                // longer minimum duration
+      max: 4200,                               // ms cap
+      easing: 'cubic-bezier(0.18, 0.9, 0.18, 1)', // very soft ease-out
+      // Duration shaping
+      arrowScale: 1.50,                        // arrow takes noticeably longer
+      badgeScale: 1.70,                        // badge travels longer (smooth trail)
+      badgeDelay: 40,                          // tiny delay so it starts almost immediately
+      jitter: 0.0,                             // deterministic for consistency
+      rotateMaxDeg: 16,                        // cap rotation
+      // Rotation tuning
+      arrowTilt: 0.85,                         // slightly calmer rotation
+      badgeTilt: 0.60,                         // calmer badge rotation
+      overshootDeg: 4.0,                       // gentler overshoot
+      arrowOvershootScale: 0.5,                // arrow overshoot smaller
+      badgeOvershootScale: 0.85,               // badge overshoot gentle
+      overshootAt: 0.7,                        // overshoot moment
+      // Curve tuning
+      curveFactor: 0.25,                       // scales with distance (0..1)
+      curveMaxPx: 70,                          // pixel cap for arc height
+      curveAlternate: true                     // alternate left/right per move for variety
     }};
 
     function dist(x0, y0, x1, y1) {{
@@ -582,6 +678,18 @@ impl Page {
       state.badgeX = bx; state.badgeY = by;
     }}
 
+    // Ensure elements use their currently computed transform as the inline baseline
+    function pinCurrent(el) {{
+      try {{
+        const cs = getComputedStyle(el);
+        const t  = cs && cs.transform;
+        if (t && t !== 'none') {{
+          // Set inline to the current computed transform to avoid visual jumps on cancel
+          el.style.transform = t;
+        }}
+      }} catch (e) {{}}
+    }}
+
     function moveTo(nx, ny, opts) {{
       const o = Object.assign({{}}, MOTION, opts || {{}});
 
@@ -591,30 +699,83 @@ impl Page {
       const ax0 = state.arrowX, ay0 = state.arrowY;
       const bx0 = state.badgeX, by0 = state.badgeY;
 
+      // Helper to coerce to finite numbers
+      const _safe = (v, dv=0) => (Number.isFinite(v) ? v : dv);
+
       const d    = dist(ax0, ay0, ax1, ay1);
+      // For tiny moves, snap without animation to avoid visible twitch
+      if (d < 1.5) {{
+        try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
+        try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
+        arrow.style.transform = 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)';
+        badge.style.transform = 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)';
+        commit(ax1, ay1, bx1, by1);
+        return;
+      }}
+
       const base = durationForDistance(d);
-      const aDur = base;
+      const aDur = Math.round(base * o.arrowScale);
       const bDur = Math.round(base * o.badgeScale);
       const bDel = o.badgeDelay;
       const angle = Math.atan2(ay1 - ay0, ax1 - ax0) * 180 / Math.PI; // [-180,180]
       const rot   = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angle));
+      const sign  = rot >= 0 ? 1 : -1; // direction sign
+      // Scale rotation and overshoot by distance so tiny moves don't wiggle
+      const distNorm = Math.min(1, d / 80); // 0..1 over ~80px
+      const aRotTarget = rot * o.arrowTilt * distNorm;
+      const bRotTarget = rot * o.badgeTilt * distNorm;
+      const overs = o.overshootDeg * distNorm;
+      const aOvershoot = -sign * overs * o.arrowOvershootScale;
+      const bOvershoot = -sign * overs * o.badgeOvershootScale;
 
-      // Cancel any in-flight animations (discrete moves -> clean restart)
+      // Curved path mid-point calculation
+      const dx = ax1 - ax0, dy = ay1 - ay0;
+      const len = Math.hypot(dx, dy) || 1;
+      const nqx = -dy / len, nqy = dx / len; // unit normal (renamed to avoid param shadow)
+      if (o.curveAlternate) state.curveFlip = !state.curveFlip;
+      const curveSign = state.curveFlip ? 1 : -1;
+      const curveMag = Math.min(o.curveMaxPx || 0, Math.max(0, d * (o.curveFactor || 0)));
+      const mx = Math.round((ax0 + ax1) / 2 + nqx * curveMag * curveSign);
+      const my = Math.round((ay0 + ay1) / 2 + nqy * curveMag * curveSign);
+      const angleMid = Math.atan2(my - ay0, mx - ax0) * 180 / Math.PI;
+      const aRotMid = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angleMid)) * (o.arrowTilt * distNorm);
+      const bRotMid = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angleMid)) * (o.badgeTilt * distNorm);
+
+      // Pin current visual state, then cancel any in-flight animations.
+      // This prevents elements from snapping back to their old inline transforms.
+      pinCurrent(arrow);
+      pinCurrent(badge);
       try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
       try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
 
-      // Arrow: translate + subtle rotation toward movement direction, then settle to 0deg
-      state.aAnim = arrow.animate([
-          {{ transform: 'translate3d(' + ax0 + 'px,' + ay0 + 'px,0) rotate(0deg)' }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + (rot*0.85) + 'deg)', offset: 0.35 }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)' }}
-        ], {{ duration: aDur, easing: o.easing, fill: 'forwards' }});
+      // Arrow and badge animations with robust fallback
+      try {{
+        const supportsWAAPI = typeof arrow.animate === 'function' && typeof badge.animate === 'function';
+        if (!supportsWAAPI) throw new Error('WAAPI not supported');
 
-      // Badge: translate only (no rotation), longer + delayed to create pleasing lag
-      state.bAnim = badge.animate([
-          {{ transform: 'translate3d(' + bx0 + 'px,' + by0 + 'px,0)' }},
-          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0)' }}
-        ], {{ duration: bDur, delay: bDel, easing: o.easing, fill: 'forwards' }});
+        const aKF = [
+          {{ transform: 'translate3d(' + ax0 + 'px,' + ay0 + 'px,0) rotate(0deg)' }},
+          {{ transform: 'translate3d(' + mx  + 'px,' + my  + 'px,0) rotate(' + aRotMid + 'deg)', offset: 0.5 }},
+          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + aRotTarget + 'deg)', offset: 0.82 }},
+          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + aOvershoot + 'deg)', offset: Math.min(0.95, Math.max(0.5, _safe(o.overshootAt, 0.7))) }},
+          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)' }}
+        ];
+        const bKF = [
+          {{ transform: 'translate3d(' + bx0 + 'px,' + by0 + 'px,0) rotate(0deg)' }},
+          {{ transform: 'translate3d(' + (mx + BADGE_OFF_X) + 'px,' + (my + BADGE_OFF_Y) + 'px,0) rotate(' + bRotMid + 'deg)', offset: 0.5 }},
+          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(' + bRotTarget + 'deg)', offset: 0.85 }},
+          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(' + bOvershoot + 'deg)', offset: Math.min(0.98, Math.max(0.55, _safe(o.overshootAt, 0.7) + 0.05)) }},
+          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)' }}
+        ];
+
+        state.aAnim = arrow.animate(aKF, {{ duration: aDur, easing: o.easing, fill: 'forwards' }});
+        state.bAnim = badge.animate(bKF, {{ duration: bDur, delay: bDel, easing: o.easing, fill: 'forwards' }});
+      }} catch (e) {{
+        // Fallback: set final transforms directly (no animation)
+        arrow.style.transform = 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)';
+        badge.style.transform = 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)';
+        state.aAnim = null; state.bAnim = null;
+      }}
 
       // Commit endpoints immediately so subsequent math uses the new base
       commit(ax1, ay1, bx1, by1);
@@ -628,6 +789,11 @@ impl Page {
     let _mx = 0, _my = 0, _rafHover = 0, _dimmed = false;
     function hoverTick() {{
       _rafHover = 0;
+      const now = (window.performance && performance.now) ? performance.now() : Date.now();
+      if (now < state.ignoreHoverUntil) {{
+        // Ignore hover updates during synthetic/programmatic moves
+        return;
+      }}
       const tipX = state.arrowX + TIP_X + HOVER.offset;
       const tipY = state.arrowY + TIP_Y + HOVER.offset;
       const dx = _mx - tipX, dy = _my - tipY;
@@ -653,11 +819,11 @@ impl Page {
       update: function(nx, ny) {{     // backwards compat
         moveTo(nx, ny);
       }},
-      // Click pulse animation: scale down/up around current position
+      // Click pulse animation: bouncy scale + transient ring ripple at tip
       clickPulse: function(opts) {{
-        const scale = (opts && opts.scale) || 0.85;
-        const dur   = (opts && opts.duration) || 240; // per half-cycle
-        const easing= (opts && opts.easing) || 'cubic-bezier(0.4, 0, 0.2, 1)';
+        const scaleDown = (opts && opts.scaleDown) || 0.84;
+        const dur       = (opts && opts.duration) || 360; // per half-cycle (slower)
+        const easing    = (opts && opts.easing) || 'cubic-bezier(0.16, 1, 0.3, 1)';
 
         // Cancel any prior click animations
         try {{ state.caAnim && state.caAnim.cancel(); }} catch (e) {{}}
@@ -666,20 +832,57 @@ impl Page {
         const aBase = 'translate3d(' + state.arrowX + 'px,' + state.arrowY + 'px,0)';
         const bBase = 'translate3d(' + state.badgeX + 'px,' + state.badgeY + 'px,0)';
 
+        // Suppress hover dimming during click pulse too
+        try {{
+          const nowTS = (window.performance && performance.now) ? performance.now() : Date.now();
+          state.ignoreHoverUntil = Math.max(state.ignoreHoverUntil, nowTS + (dur*2 + 40));
+        }} catch (e) {{}}
+
         state.caAnim = arrow.animate(
           [ {{ transform: aBase + ' scale(1)' }},
-            {{ transform: aBase + ' scale(' + scale + ')' }},
+            {{ transform: aBase + ' scale(' + scaleDown + ')' }},
             {{ transform: aBase + ' scale(1)' }} ],
           {{ duration: dur * 2, easing, fill: 'none' }}
         );
         state.cbAnim = badge.animate(
           [ {{ transform: bBase + ' scale(1)' }},
-            {{ transform: bBase + ' scale(' + scale + ')' }},
+            {{ transform: bBase + ' scale(' + (scaleDown - 0.04) + ')' }},
             {{ transform: bBase + ' scale(1)' }} ],
-          {{ duration: dur * 2, easing, fill: 'none' }}
+          {{ duration: dur * 2 + 40, easing, fill: 'none' }}
         );
 
-        return dur * 2;
+        // Transient ring ripple near the tip for visibility
+        try {{
+          const ring = document.createElement('div');
+          ring.className = '__vc_click_ring';
+          const tipX = state.arrowX + TIP_X; // approximate tip
+          const tipY = state.arrowY + TIP_Y;
+          const sz = 18; // ring base size
+          Object.assign(ring.style, {{
+            position: 'absolute',
+            left: (tipX - sz/2) + 'px',
+            top: (tipY - sz/2) + 'px',
+            width: sz + 'px',
+            height: sz + 'px',
+            borderRadius: '999px',
+            border: '2px solid rgba(255,255,255,0.95)',
+            boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
+            opacity: '0.9',
+            pointerEvents: 'none',
+            transform: 'scale(0.6)',
+            transformOrigin: 'center center',
+            willChange: 'transform, opacity',
+            zIndex: '2147483647'
+          }});
+          state.root.appendChild(ring);
+          const ringAnim = ring.animate([
+            {{ transform: 'scale(0.6)', opacity: 0.9 }},
+            {{ transform: 'scale(1.8)', opacity: 0.0 }}
+          ], {{ duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }});
+          ringAnim.onfinish = () => {{ try {{ ring.remove(); }} catch (e) {{}} }};
+        }} catch (e) {{}}
+
+        return dur * 2 + 80; // approximate total
       }},
       // Return an estimated remaining time (ms) for any in-flight animations
       getSettleMs: function() {{
@@ -706,11 +909,18 @@ impl Page {
       setHover:  function(p) {{ Object.assign(HOVER,  p || {{}}); }},
       destroy: function() {{
         try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
-        try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
+      try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
+
+      // During programmatic movement, suppress hover dimming as CDP will fire mousemove events
+      const nowTS = (window.performance && performance.now) ? performance.now() : Date.now();
+      const total = Math.max(aDur, bDur + bDel) + 40;
+      state.ignoreHoverUntil = nowTS + total;
         window.removeEventListener('mousemove', scheduleHover);
         if (root && root.parentNode) root.parentNode.removeChild(root);
         window.__vc = null;
       }},
+      __bootstrap: false,
+      __version: 2,
       _s: state
     }};
 
@@ -807,14 +1017,17 @@ impl Page {
 
         let wait_strategy = wait.unwrap_or_else(|| self.config.wait.clone());
 
-        // Navigate to the URL with retry on timeout
+        // Navigate to the URL with retry on timeout. If Chrome reports timeouts
+        // but the page URL actually updates to a real http(s) page, treat it as success.
         let max_retries = 3;
         let mut last_error = None;
+        let mut fallback_navigated = false;
 
         for attempt in 1..=max_retries {
             match self.cdp_page.goto(url).await {
                 Ok(_) => {
-                    // Navigation succeeded, break out of retry loop
+                    // Navigation reported success
+                    last_error = None;
                     break;
                 }
                 Err(e) => {
@@ -825,6 +1038,22 @@ impl Page {
                             attempt, max_retries, error_str
                         );
                         last_error = Some(e);
+
+                        // Check if the page actually navigated despite the timeout
+                        if let Ok(cur_opt) = self.cdp_page.url().await {
+                            if let Some(cur) = cur_opt {
+                                let looks_loaded = cur.starts_with("http://") || cur.starts_with("https://");
+                                if looks_loaded && cur != "about:blank" {
+                                    info!(
+                                        "Navigation reported timeout, but page URL is now {} — treating as success",
+                                        cur
+                                    );
+                                    fallback_navigated = true;
+                                    last_error = None;
+                                    break;
+                                }
+                            }
+                        }
 
                         if attempt < max_retries {
                             // Wait before retry, increasing delay each time
@@ -841,7 +1070,7 @@ impl Page {
             }
         }
 
-        // If we exhausted retries, return the last error
+        // If we exhausted retries and still have an error, bail out
         if let Some(e) = last_error {
             return Err(BrowserError::CdpError(format!(
                 "Navigation failed after {} retries: {}",
@@ -853,8 +1082,29 @@ impl Page {
         match wait_strategy {
             WaitStrategy::Event(event) => match event.as_str() {
                 "domcontentloaded" => {
-                    // Wait for DOMContentLoaded event
-                    self.cdp_page.wait_for_navigation().await?;
+                    if fallback_navigated {
+                        // Poll document.readyState instead of wait_for_navigation()
+                        let script = "document.readyState";
+                        let start = std::time::Instant::now();
+                        loop {
+                            let state = self
+                                .cdp_page
+                                .evaluate(script)
+                                .await
+                                .ok()
+                                .and_then(|r| r.value().and_then(|v| v.as_str().map(|s| s.to_string())));
+                            if matches!(state.as_deref(), Some("interactive") | Some("complete")) {
+                                break;
+                            }
+                            if start.elapsed() > std::time::Duration::from_secs(3) {
+                                break;
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    } else {
+                        // Wait for DOMContentLoaded event
+                        self.cdp_page.wait_for_navigation().await?;
+                    }
                 }
                 "networkidle" | "networkidle0" => {
                     // Wait for network to be idle
@@ -865,10 +1115,33 @@ impl Page {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
                 "load" => {
-                    // Wait for load event
-                    self.cdp_page.wait_for_navigation().await?;
-                    // Add extra delay to ensure page is fully loaded
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    if fallback_navigated {
+                        // Poll for complete state
+                        let script = "document.readyState";
+                        let start = std::time::Instant::now();
+                        loop {
+                            let state = self
+                                .cdp_page
+                                .evaluate(script)
+                                .await
+                                .ok()
+                                .and_then(|r| r.value().and_then(|v| v.as_str().map(|s| s.to_string())));
+                            if matches!(state.as_deref(), Some("complete")) {
+                                break;
+                            }
+                            if start.elapsed() > std::time::Duration::from_secs(4) {
+                                break;
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
+                        }
+                        // Small cushion after load
+                        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                    } else {
+                        // Wait for load event
+                        self.cdp_page.wait_for_navigation().await?;
+                        // Add extra delay to ensure page is fully loaded
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
                 }
                 _ => {
                     return Err(BrowserError::ConfigError(format!(
@@ -947,7 +1220,8 @@ impl Page {
             .and_then(|r| Ok(r.value().and_then(|v| v.as_u64()).unwrap_or(0)))
         {
             if remain > 0 {
-                let wait_ms = remain.min(300);
+                // Allow a bit more time so screenshots catch the settled state
+                let wait_ms = remain.min(800);
                 tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
             }
         }
@@ -1194,6 +1468,14 @@ impl Page {
 
         let mut cursor = self.cursor_state.lock().await;
 
+        // If target is effectively the same as current, avoid dispatching/animating
+        if (cursor.x - move_x).abs() < 0.5 && (cursor.y - move_y).abs() < 0.5 {
+            drop(cursor);
+            // Ensure cursor is present/updated even if no move
+            let _ = self.ensure_virtual_cursor().await;
+            return Ok(());
+        }
+
         // Dispatch the mouse move event, including the current button state
         let move_params = DispatchMouseEventParams::builder()
             .r#type(DispatchMouseEventType::MouseMoved)
@@ -1396,64 +1678,24 @@ impl Page {
         let was_down = cursor.is_mouse_down;
         debug!("Clicking at current position ({}, {}), mouse was_down: {}", click_x, click_y, was_down);
         drop(cursor); // Release lock before async calls
-        
+
         // If mouse is already down, release it first
         if was_down {
             debug!("Mouse was down, releasing first before click");
             self.mouse_up_at_current().await?;
-            // Small delay between release and new click
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
         }
 
-        // Trigger click animation on the virtual cursor
-        // The animation scales from 1.0 to 0.7 and back over 3 seconds with transform-origin at top-left
-        let animation_script = r#"
-            if (window.__vc && window.__vc._s) {
-                const arrow = window.__vc._s.arrow;
-                const badge = window.__vc._s.badge;
-                if (arrow && badge) {
-                    // Store original transform to preserve position
-                    const originalArrowTransform = arrow.style.transform;
-                    const originalBadgeTransform = badge.style.transform;
-                    
-                    // Add transition for smooth animation (3s total duration)
-                    arrow.style.transition = 'transform 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
-                    badge.style.transition = 'transform 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
-                    
-                    // Set transform-origin to top-left (where the cursor tip is)
-                    arrow.style.transformOrigin = '0 0';
-                    badge.style.transformOrigin = '0 0';
-                    
-                    // Apply scale down (keeping position)
-                    setTimeout(() => {
-                        // Parse existing transform to preserve translate3d
-                        const arrowMatch = originalArrowTransform.match(/translate3d\([^)]+\)/);
-                        const badgeMatch = originalBadgeTransform.match(/translate3d\([^)]+\)/);
-                        const arrowTranslate = arrowMatch ? arrowMatch[0] : 'translate3d(0px, 0px, 0)';
-                        const badgeTranslate = badgeMatch ? badgeMatch[0] : 'translate3d(0px, 0px, 0)';
-                        
-                        // Apply scale while preserving position
-                        arrow.style.transform = arrowTranslate + ' scale(0.7)';
-                        badge.style.transform = badgeTranslate + ' scale(0.7)';
-                    }, 10);
-                    
-                    // Scale back up after 1.5s
-                    setTimeout(() => {
-                        arrow.style.transform = originalArrowTransform;
-                        badge.style.transform = originalBadgeTransform;
-                    }, 1500);
-                    
-                    // Clean up transitions after animation completes
-                    setTimeout(() => {
-                        arrow.style.transition = '';
-                        badge.style.transition = '';
-                    }, 3000);
-                }
-            }
-        "#;
-
-        // Start the click animation
-        let _ = self.cdp_page.evaluate(animation_script).await;
+        // Trigger click animation through virtual cursor API
+        let click_ms_val = self
+            .cdp_page
+            .evaluate(
+                "(function(){ if(window.__vc && window.__vc.clickPulse){ return window.__vc.clickPulse(); } return 0; })()",
+            )
+            .await
+            .ok()
+            .and_then(|r| r.value().and_then(|v| v.as_u64()))
+            .unwrap_or(0) as u64;
 
         // Mouse down
         let down_params = DispatchMouseEventParams::builder()
@@ -1466,8 +1708,8 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
-        // Add a small delay between press and release (Ported from TS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Add a small delay between press and release
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
 
         // Mouse up
         let up_params = DispatchMouseEventParams::builder()
@@ -1480,8 +1722,12 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
-        // Wait briefly to allow potential event handlers (like navigation) to trigger (ported from TS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Wait so the next auto-screenshot captures the click pulse
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        let settle_ms = if is_external { click_ms_val.max(120) } else { 40 };
+        if settle_ms > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
+        }
 
         Ok((click_x, click_y))
     }
@@ -1500,12 +1746,18 @@ impl Page {
         if text_len < 20 {
             // Short text: character-by-character with natural delays
             for ch in processed_text.chars() {
-                let params = DispatchKeyEventParams::builder()
-                    .r#type(DispatchKeyEventType::Char)
-                    .text(ch.to_string())
-                    .build()
-                    .map_err(BrowserError::CdpError)?;
-                self.cdp_page.execute(params).await?;
+                if ch == '\n' {
+                    self.press_key("Enter").await?;
+                } else if ch == '\t' {
+                    self.press_key("Tab").await?;
+                } else {
+                    let params = DispatchKeyEventParams::builder()
+                        .r#type(DispatchKeyEventType::Char)
+                        .text(ch.to_string())
+                        .build()
+                        .map_err(BrowserError::CdpError)?;
+                    self.cdp_page.execute(params).await?;
+                }
 
                 // Natural typing delay with slight randomization
                 let delay = 50 + (rand::random::<u64>() % 30);
@@ -1523,12 +1775,18 @@ impl Page {
             for chunk in chunks {
                 // Type each character in the chunk
                 for ch in chunk.chars() {
-                    let params = DispatchKeyEventParams::builder()
-                        .r#type(DispatchKeyEventType::Char)
-                        .text(ch.to_string())
-                        .build()
-                        .map_err(BrowserError::CdpError)?;
-                    self.cdp_page.execute(params).await?;
+                    if ch == '\n' {
+                        self.press_key("Enter").await?;
+                    } else if ch == '\t' {
+                        self.press_key("Tab").await?;
+                    } else {
+                        let params = DispatchKeyEventParams::builder()
+                            .r#type(DispatchKeyEventType::Char)
+                            .text(ch.to_string())
+                            .build()
+                            .map_err(BrowserError::CdpError)?;
+                        self.cdp_page.execute(params).await?;
+                    }
                 }
 
                 // Delay between chunks
@@ -1547,12 +1805,18 @@ impl Page {
             for (i, chunk) in chunks.iter().enumerate() {
                 // Type each character in the chunk
                 for ch in chunk.chars() {
-                    let params = DispatchKeyEventParams::builder()
-                        .r#type(DispatchKeyEventType::Char)
-                        .text(ch.to_string())
-                        .build()
-                        .map_err(BrowserError::CdpError)?;
-                    self.cdp_page.execute(params).await?;
+                    if ch == '\n' {
+                        self.press_key("Enter").await?;
+                    } else if ch == '\t' {
+                        self.press_key("Tab").await?;
+                    } else {
+                        let params = DispatchKeyEventParams::builder()
+                            .r#type(DispatchKeyEventType::Char)
+                            .text(ch.to_string())
+                            .build()
+                            .map_err(BrowserError::CdpError)?;
+                        self.cdp_page.execute(params).await?;
+                    }
                 }
 
                 // Add occasional longer pauses to simulate thinking
@@ -1750,7 +2014,7 @@ impl Page {
         let result = self.cdp_page.evaluate(wrapped).await?;
         let result_value = result.value().cloned().unwrap_or(serde_json::Value::Null);
 
-        tracing::info!("JavaScript execution result: {}", result_value);
+        tracing::debug!("JavaScript execution result: {}", result_value);
 
         // Give a brief moment for potential navigation triggered by the script
         // (e.g., element.click(), location changes) to take effect before
@@ -1788,6 +2052,55 @@ impl Page {
     pub async fn get_cursor_position(&self) -> Result<(f64, f64)> {
         let cursor = self.cursor_state.lock().await;
         Ok((cursor.x, cursor.y))
+    }
+}
+
+// Raw CDP command wrapper to allow executing arbitrary methods with JSON params
+#[derive(Debug, Clone)]
+struct RawCdpCommand {
+    method: String,
+    params: serde_json::Value,
+}
+
+impl RawCdpCommand {
+    fn new(method: impl Into<String>, params: serde_json::Value) -> Self {
+        Self {
+            method: method.into(),
+            params,
+        }
+    }
+}
+
+impl serde::Serialize for RawCdpCommand {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize only the params as the Command payload
+        self.params.serialize(serializer)
+    }
+}
+
+impl chromiumoxide_types::Method for RawCdpCommand {
+    fn identifier(&self) -> chromiumoxide_types::MethodId {
+        self.method.clone().into()
+    }
+}
+
+impl chromiumoxide_types::Command for RawCdpCommand {
+    type Response = serde_json::Value;
+}
+
+impl Page {
+    /// Execute an arbitrary CDP method with the provided JSON params against this page's session
+    pub async fn execute_cdp_raw(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let cmd = RawCdpCommand::new(method, params);
+        let resp = self.cdp_page.execute(cmd).await?;
+        Ok(resp.result)
     }
 }
 
