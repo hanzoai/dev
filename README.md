@@ -27,20 +27,20 @@
 ### Install Code
 
 ```bash
-npm install -g @just-every/coder
-coder
+npm install -g @just-every/code
+code
 ```
 
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
-  - Run `coder` and pick "Sign in with ChatGPT"
+  - Run `code` and pick "Sign in with ChatGPT"
   - Stores creds locally at `~/.coder/auth.json` (also reads legacy `~/.codex/auth.json`)
 - **API key** (usage-based)
-  - Set `export OPENAI_API_KEY=xyz` and run `coder`
+  - Set `export OPENAI_API_KEY=xyz` and run `code`
 
 ### Install Claude & Gemini (optional)
 
-Code supports orchestrating other AI CLI tools. Install these and config to use alongside coder.
+Code supports orchestrating other AI CLI tools. Install these and config to use alongside Code.
 
 ```bash
 
@@ -52,7 +52,7 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 
 ### Browser
 ```bash
-# Connect coder to external Chrome browser (running CDP)
+# Connect code to external Chrome browser (running CDP)
 /chrome        # Connect with auto-detect port
 /chrome 9222   # Connect to specific port
 
@@ -91,7 +91,7 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 ## CLI reference
 
 ```shell
-coder [options] [prompt]
+code [options] [prompt]
 
 Options:
   --model <name>        Override the model (gpt-5, claude-opus, etc.)
@@ -134,13 +134,13 @@ For automation and CI/CD:
 
 ```shell
 # Run a specific task
-coder --no-approval "run tests and fix any failures"
+code --no-approval "run tests and fix any failures"
 
 # Generate reports
-coder --read-only "analyze code quality and generate report"
+code --read-only "analyze code quality and generate report"
 
 # Batch processing
-coder --config output_format=json "list all TODO comments"
+code --config output_format=json "list all TODO comments"
 ```
 
 &ensp;
