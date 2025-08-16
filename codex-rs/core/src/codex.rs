@@ -422,6 +422,10 @@ struct State {
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
     history: ConversationHistory,
+    /// Tracks which completed agents (by id) have already been returned to the
+    /// model for a given batch when using `agent_wait` without `return_all`.
+    /// This enables sequential waiting behavior across multiple calls.
+    seen_completed_agents_by_batch: HashMap<String, HashSet<String>>,
 }
 
 /// Context for an initialized model agent
@@ -2325,6 +2329,8 @@ async fn handle_function_call(
         "browser_scroll" => handle_browser_scroll(sess, arguments, sub_id, call_id).await,
         "browser_history" => handle_browser_history(sess, arguments, sub_id, call_id).await,
         "browser_console" => handle_browser_console(sess, arguments, sub_id, call_id).await,
+        "browser_inspect" => handle_browser_inspect(sess, arguments, sub_id, call_id).await,
+        "browser_cdp" => handle_browser_cdp(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -2792,8 +2798,10 @@ async fn handle_wait_for_agent(
                     }
                 } else if let Some(batch_id) = &params.batch_id {
                     let agents = manager.list_agents(None, Some(batch_id.clone()), false);
-                    let completed_agents: Vec<_> = agents
-                        .into_iter()
+
+                    // Separate terminal vs non-terminal agents
+                    let mut completed_agents: Vec<_> = agents
+                        .iter()
                         .filter(|t| {
                             matches!(
                                 t.status,
@@ -2802,29 +2810,80 @@ async fn handle_wait_for_agent(
                                     | AgentStatus::Cancelled
                             )
                         })
+                        .cloned()
                         .collect();
+                    let any_in_progress = agents.iter().any(|a| {
+                        matches!(a.status, AgentStatus::Pending | AgentStatus::Running)
+                    });
 
-                    if !completed_agents.is_empty() {
-                        let response = if params.return_all.unwrap_or(false) {
-                            serde_json::json!({
+                    if params.return_all.unwrap_or(false) {
+                        if !completed_agents.is_empty() {
+                            let response = serde_json::json!({
                                 "batch_id": batch_id,
                                 "completed_agents": completed_agents.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
                                 "wait_time_seconds": start.elapsed().as_secs(),
-                            })
-                        } else {
-                            serde_json::json!({
-                                "agent_id": completed_agents[0].id,
-                                "status": completed_agents[0].status,
+                            });
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: response.to_string(),
+                                    success: Some(true),
+                                },
+                            };
+                        }
+                    } else {
+                        // Sequential behavior: return the next unseen completed agent if available
+                        let mut state = sess.state.lock().unwrap();
+                        let seen = state
+                            .seen_completed_agents_by_batch
+                            .entry(batch_id.clone())
+                            .or_default();
+
+                        // Find the first completed agent that we haven't returned yet
+                        if let Some(unseen) = completed_agents
+                            .iter()
+                            .find(|a| !seen.contains(&a.id))
+                            .cloned()
+                        {
+                            // Record as seen and return immediately
+                            seen.insert(unseen.id.clone());
+                            drop(state);
+
+                            let response = serde_json::json!({
+                                "agent_id": unseen.id,
+                                "status": unseen.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
-                            })
-                        };
-                        return ResponseInputItem::FunctionCallOutput {
-                            call_id: call_id_clone,
-                            output: FunctionCallOutputPayload {
-                                content: response.to_string(),
-                                success: Some(true),
-                            },
-                        };
+                            });
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: response.to_string(),
+                                    success: Some(true),
+                                },
+                            };
+                        }
+
+                        // If all agents in the batch are terminal and all have been seen, return immediately
+                        if !any_in_progress && !completed_agents.is_empty() {
+                            // Mark all as seen to keep state consistent
+                            for a in &completed_agents {
+                                seen.insert(a.id.clone());
+                            }
+                            drop(state);
+
+                            let response = serde_json::json!({
+                                "batch_id": batch_id,
+                                "status": "no_agents_remaining",
+                                "wait_time_seconds": start.elapsed().as_secs(),
+                            });
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: response.to_string(),
+                                    success: Some(true),
+                                },
+                            };
+                        }
                     }
                 }
 
@@ -3895,25 +3954,62 @@ async fn handle_browser_click(
                     .unwrap_or("click")
                     .to_lowercase();
 
+                // Optional absolute coordinates
+                let (mut target_x, mut target_y) = (None, None);
+                if let Some(p) = params.as_ref() {
+                    if let Some(vx) = p.get("x").and_then(|v| v.as_f64()) {
+                        target_x = Some(vx);
+                    }
+                    if let Some(vy) = p.get("y").and_then(|v| v.as_f64()) {
+                        target_y = Some(vy);
+                    }
+                }
+
+                // If x or y provided, resolve missing coord from current position, move, then short sleep
+                if target_x.is_some() || target_y.is_some() {
+                    // get current cursor for missing values
+                    match browser_manager.get_cursor_position().await {
+                        Ok((cx, cy)) => {
+                            let x = target_x.unwrap_or(cx);
+                            let y = target_y.unwrap_or(cy);
+                            if let Err(e) = browser_manager.move_mouse(x, y).await {
+                                return ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone.clone(),
+                                    output: FunctionCallOutputPayload {
+                                        content: format!("Failed to move before click: {}", e),
+                                        success: Some(false),
+                                    },
+                                };
+                            }
+                            // Allow small UI animation/hover effects to settle
+                            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                        }
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone.clone(),
+                                output: FunctionCallOutputPayload {
+                                    content: format!("Failed to get current cursor position: {}", e),
+                                    success: Some(false),
+                                },
+                            };
+                        }
+                    }
+                }
+
+                // Perform the action at current (possibly moved) position
                 let action_result = match click_type.as_str() {
-                    "mousedown" => {
-                        match browser_manager.mouse_down_at_current().await {
-                            Ok((x, y)) => Ok((x, y, "Mouse down".to_string())),
-                            Err(e) => Err(e),
-                        }
-                    }
-                    "mouseup" => {
-                        match browser_manager.mouse_up_at_current().await {
-                            Ok((x, y)) => Ok((x, y, "Mouse up".to_string())),
-                            Err(e) => Err(e),
-                        }
-                    }
-                    "click" | _ => {
-                        match browser_manager.click_at_current().await {
-                            Ok((x, y)) => Ok((x, y, "Clicked".to_string())),
-                            Err(e) => Err(e),
-                        }
-                    }
+                    "mousedown" => match browser_manager.mouse_down_at_current().await {
+                        Ok((x, y)) => Ok((x, y, "Mouse down".to_string())),
+                        Err(e) => Err(e),
+                    },
+                    "mouseup" => match browser_manager.mouse_up_at_current().await {
+                        Ok((x, y)) => Ok((x, y, "Mouse up".to_string())),
+                        Err(e) => Err(e),
+                    },
+                    "click" | _ => match browser_manager.click_at_current().await {
+                        Ok((x, y)) => Ok((x, y, "Clicked".to_string())),
+                        Err(e) => Err(e),
+                    },
                 };
 
                 match action_result {
@@ -3926,7 +4022,7 @@ async fn handle_browser_click(
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("{} at current mouse position ({}, {}) [updated status shown in screenshot]", label, x, y),
+                                content: format!("{} at ({}, {}) [updated status shown in screenshot]", label, x, y),
                                 success: Some(true),
                             },
                         }
@@ -4480,6 +4576,328 @@ async fn handle_browser_console(
                     call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: "Browser is not enabled. Use browser_open to enable it first.".to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
+        },
+    )
+    .await
+}
+
+async fn handle_browser_cdp(
+    sess: &Session,
+    arguments: String,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_cdp".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        let method = json
+                            .get("method")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let params = json.get("params").cloned().unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+                        let target = json
+                            .get("target")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("page");
+
+                        if method.is_empty() {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: "Missing required field: method".to_string(),
+                                    success: Some(false),
+                                },
+                            };
+                        }
+
+                        let exec_res = if target == "browser" {
+                            browser_manager.execute_cdp_browser(&method, params).await
+                        } else {
+                            browser_manager.execute_cdp(&method, params).await
+                        };
+
+                        match exec_res {
+                            Ok(result) => {
+                                let pretty = serde_json::to_string_pretty(&result)
+                                    .unwrap_or_else(|_| "<non-serializable result>".to_string());
+                                ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone,
+                                    output: FunctionCallOutputPayload {
+                                        content: pretty,
+                                        success: Some(true),
+                                    },
+                                }
+                            }
+                            Err(e) => ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload {
+                                    content: format!("Failed to execute CDP command: {}", e),
+                                    success: Some(false),
+                                },
+                            },
+                        }
+                    }
+                    Err(e) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to parse browser_cdp arguments: {}", e),
+                            success: Some(false),
+                        },
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
+                        success: Some(false),
+                    },
+                }
+            }
+        },
+    )
+    .await
+}
+
+async fn handle_browser_inspect(
+    sess: &Session,
+    arguments: String,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    use serde_json::json;
+    let params = serde_json::from_str(&arguments).ok();
+    let sess_clone = sess;
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_inspect".to_string(),
+        params,
+        || async move {
+            let browser_manager = get_browser_manager_for_session(sess_clone).await;
+            if let Some(browser_manager) = browser_manager {
+                let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
+                match args {
+                    Ok(json) => {
+                        // Determine target element: by id, by coords, or by cursor
+                        let id_attr = json.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let mut x = json.get("x").and_then(|v| v.as_f64());
+                        let mut y = json.get("y").and_then(|v| v.as_f64());
+
+                        if (x.is_none() || y.is_none()) && id_attr.is_none() {
+                            // No coords provided; use current cursor
+                            if let Ok((cx, cy)) = browser_manager.get_cursor_position().await {
+                                x = Some(cx);
+                                y = Some(cy);
+                            }
+                        }
+
+                        // Resolve nodeId
+                        let node_id_value = if let Some(id_attr) = id_attr.clone() {
+                            // Use DOM.getDocument -> DOM.querySelector with selector `#id`
+                            let doc = browser_manager
+                                .execute_cdp("DOM.getDocument", json!({}))
+                                .await
+                                .map_err(|e| e);
+                            let root_id = match doc {
+                                Ok(v) => v.get("root").and_then(|r| r.get("nodeId")).and_then(|n| n.as_u64()),
+                                Err(_) => None,
+                            };
+                            if let Some(root_node_id) = root_id {
+                                let sel = format!("#{}", id_attr);
+                                let q = browser_manager
+                                    .execute_cdp(
+                                        "DOM.querySelector",
+                                        json!({"nodeId": root_node_id, "selector": sel}),
+                                    )
+                                    .await;
+                                match q {
+                                    Ok(v) => v.get("nodeId").cloned(),
+                                    Err(_) => None,
+                                }
+                            } else {
+                                None
+                            }
+                        } else if let (Some(x), Some(y)) = (x, y) {
+                            // Use DOM.getNodeForLocation
+                            let res = browser_manager
+                                .execute_cdp(
+                                    "DOM.getNodeForLocation",
+                                    json!({
+                                        "x": x,
+                                        "y": y,
+                                        "includeUserAgentShadowDOM": true
+                                    }),
+                                )
+                                .await;
+                            match res {
+                                Ok(v) => {
+                                    // Prefer nodeId; if absent, push backendNodeId
+                                    if let Some(n) = v.get("nodeId").cloned() {
+                                        Some(n)
+                                    } else if let Some(backend) = v.get("backendNodeId").and_then(|b| b.as_u64()) {
+                                        let pushed = browser_manager
+                                            .execute_cdp(
+                                                "DOM.pushNodesByBackendIdsToFrontend",
+                                                json!({ "backendNodeIds": [backend] }),
+                                            )
+                                            .await
+                                            .ok();
+                                        pushed
+                                            .and_then(|pv| pv.get("nodeIds").and_then(|arr| arr.as_array().cloned()))
+                                            .and_then(|arr| arr.first().cloned())
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Err(_) => None,
+                            }
+                        } else {
+                            None
+                        };
+
+                        let node_id = match node_id_value.and_then(|v| v.as_u64()) {
+                            Some(id) => id,
+                            None => {
+                                return ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone,
+                                    output: FunctionCallOutputPayload {
+                                        content: "Failed to resolve target node for inspection".to_string(),
+                                        success: Some(false),
+                                    },
+                                };
+                            }
+                        };
+
+                        // Enable CSS domain to get matched rules
+                        let _ = browser_manager.execute_cdp("CSS.enable", json!({})).await;
+
+                        // Gather details
+                        let attrs = browser_manager
+                            .execute_cdp("DOM.getAttributes", json!({"nodeId": node_id}))
+                            .await
+                            .unwrap_or_else(|_| json!({}));
+                        let outer = browser_manager
+                            .execute_cdp("DOM.getOuterHTML", json!({"nodeId": node_id}))
+                            .await
+                            .unwrap_or_else(|_| json!({}));
+                        let box_model = browser_manager
+                            .execute_cdp("DOM.getBoxModel", json!({"nodeId": node_id}))
+                            .await
+                            .unwrap_or_else(|_| json!({}));
+                        let styles = browser_manager
+                            .execute_cdp("CSS.getMatchedStylesForNode", json!({"nodeId": node_id}))
+                            .await
+                            .unwrap_or_else(|_| json!({}));
+
+                        // Highlight node (best-effort)
+                        let _ = browser_manager
+                            .execute_cdp(
+                                "Overlay.highlightNode",
+                                json!({
+                                    "nodeId": node_id,
+                                    "highlightConfig": {
+                                        "showInfo": true,
+                                        "showStyles": false,
+                                        "contentColor": {"r": 111, "g": 168, "b": 220, "a": 0.2},
+                                        "borderColor": {"r": 17, "g": 17, "b": 17, "a": 0.8},
+                                        "marginColor": {"r": 246, "g": 178, "b": 107, "a": 0.4},
+                                        "paddingColor": {"r": 147, "g": 196, "b": 125, "a": 0.4}
+                                    }
+                                }),
+                            )
+                            .await;
+
+                        // Capture screenshot with highlight
+                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await {
+                            add_pending_screenshot(sess_clone, screenshot_path, url);
+                        }
+
+                        // Hide highlight
+                        let _ = browser_manager.execute_cdp("Overlay.hideHighlight", json!({})).await;
+
+                        // Format output
+                        let mut out = String::new();
+                        if let (Some(ix), Some(iy)) = (x, y) {
+                            out.push_str(&format!("Target: coordinates ({}, {})\n", ix, iy));
+                        }
+                        if let Some(id_attr) = id_attr {
+                            out.push_str(&format!("Target: id '#{}'\n", id_attr));
+                        }
+                        out.push_str(&format!("NodeId: {}\n", node_id));
+
+                        // Attributes
+                        if let Some(arr) = attrs.get("attributes").and_then(|v| v.as_array()) {
+                            out.push_str("Attributes:\n");
+                            let mut it = arr.iter();
+                            while let (Some(k), Some(v)) = (it.next(), it.next()) {
+                                out.push_str(&format!("  {}=\"{}\"\n", k.as_str().unwrap_or(""), v.as_str().unwrap_or("")));
+                            }
+                        }
+
+                        // Outer HTML
+                        if let Some(html) = outer.get("outerHTML").and_then(|v| v.as_str()) {
+                            let one = html.replace('\n', " ");
+                            let snippet: String = one.chars().take(800).collect();
+                            out.push_str("\nOuterHTML (truncated):\n");
+                            out.push_str(&snippet);
+                            if one.len() > snippet.len() { out.push_str("…"); }
+                            out.push('\n');
+                        }
+
+                        // Box Model summary
+                        if box_model.get("model").is_some() {
+                            out.push_str("\nBoxModel: available (content/padding/border/margin)\n");
+                        }
+
+                        // Matched styles summary
+                        if let Some(rules) = styles.get("matchedCSSRules").and_then(|v| v.as_array()) {
+                            out.push_str(&format!("Matched CSS rules: {}\n", rules.len()));
+                        }
+
+                        out.push_str("\nNode highlighted in attached screenshot.\n");
+
+                        ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload { content: out, success: Some(true) },
+                        }
+                    }
+                    Err(e) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to parse browser_inspect arguments: {}", e),
+                            success: Some(false),
+                        },
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: "Browser is not initialized. Use browser_open to start the browser.".to_string(),
                         success: Some(false),
                     },
                 }
