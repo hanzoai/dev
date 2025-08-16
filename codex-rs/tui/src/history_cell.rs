@@ -558,6 +558,7 @@ pub(crate) struct ToolCallCell {
 
 impl HistoryCell for ToolCallCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any { self }
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Tool {
             status: match self.state {
@@ -568,12 +569,8 @@ impl HistoryCell for ToolCallCell {
         }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        // Hide header line if gutter is present
-        if self.lines.len() > 1 {
-            self.lines[1..].to_vec()
-        } else {
-            Vec::new()
-        }
+        // Show all lines; header visibility aligns with exec-style sections
+        self.lines.clone()
     }
 }
 
@@ -745,6 +742,11 @@ impl HistoryCell for CollapsibleReasoningCell {
         self
     }
     fn kind(&self) -> HistoryCellType { HistoryCellType::Reasoning }
+    
+    // Ensure collapsed reasoning always gets standard spacing after it.
+    // Treating it as a title-only cell suppresses the inter-cell spacer,
+    // which causes the missing blank line effect users observed.
+    fn is_title_only(&self) -> bool { false }
     
     fn display_lines(&self) -> Vec<Line<'static>> {
         if self.lines.is_empty() {
@@ -938,7 +940,7 @@ pub(crate) fn new_session_info(
             Line::from("notice".dim()),
             Line::styled(
                 "Popular commands:",
-                Style::default().fg(crate::colors::primary()),
+                Style::default().fg(crate::colors::text_bright()),
             ),
             Line::from(vec![
                 Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
@@ -1396,7 +1398,7 @@ fn new_exec_command_generic(
         }
         Some(o) if o.exit_code == 0 => Line::styled(
             "Ran",
-            Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD),
+            Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD),
         ),
         Some(o) => Line::styled(
             format!("Error (exit {})", o.exit_code),
@@ -1471,6 +1473,14 @@ pub(crate) fn new_completed_custom_tool_call(
     success: bool,
     result: String,
 ) -> ToolCallCell {
+    // Special rendering for browser_* tools
+    if tool_name.starts_with("browser_") {
+        return new_completed_browser_tool_call(tool_name, args, duration, success, result);
+    }
+    // Special rendering for agent_* tools
+    if tool_name.starts_with("agent_") {
+        return new_completed_agent_tool_call(tool_name, args, duration, success, result);
+    }
     let duration = format_duration(duration);
     let status_str = if success { "Complete" } else { "Error" };
     let title_line = if success {
@@ -1511,6 +1521,188 @@ pub(crate) fn new_completed_custom_tool_call(
     }
 
     lines.push(Line::from(""));
+    ToolCallCell { lines, state: if success { ToolState::Success } else { ToolState::Failed } }
+}
+
+// Map `browser_*` tool names to friendly titles
+fn browser_tool_title(tool_name: &str) -> &'static str {
+    match tool_name {
+        "browser_click" => "Browser Click",
+        "browser_type" => "Browser Type",
+        "browser_key" => "Browser Key",
+        "browser_javascript" => "Browser Run",
+        "browser_scroll" => "Browser Scroll",
+        "browser_open" => "Browser Open",
+        "browser_close" => "Browser Close",
+        "browser_status" => "Browser Status",
+        _ => "Browser Tool",
+    }
+}
+
+fn format_browser_args_line(args: &serde_json::Value) -> Vec<Line<'static>> {
+    use serde_json::Value;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    let dim = |s: &str| Span::styled(s.to_string(), Style::default().fg(crate::colors::text_dim()));
+    let text = |s: String| Span::styled(s, Style::default().fg(crate::colors::text()));
+
+    // Helper to one-line, truncated representation for values
+    fn short(v: &serde_json::Value, key: &str) -> String {
+        match v {
+            serde_json::Value::String(s) => {
+                let mut one = s.replace('\n', " ");
+                let max = if key == "code" { 80 } else { 80 };
+                if one.chars().count() > max {
+                    let truncated: String = one.chars().take(max).collect();
+                    format!("{}…", truncated)
+                } else {
+                    one
+                }
+            }
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            serde_json::Value::Array(a) => format!("[{} items]", a.len()),
+            serde_json::Value::Object(o) => format!("{{{} keys}}", o.len()),
+            serde_json::Value::Null => "null".to_string(),
+        }
+    }
+
+    match args {
+        Value::Object(map) => {
+            // Preserve insertion order (serde_json in this crate preserves order via feature)
+            for (k, v) in map {
+                let val = short(v, k);
+                lines.push(Line::from(vec![
+                    dim("└ "),
+                    dim(&format!("{}: ", k)),
+                    text(val),
+                ]));
+            }
+        }
+        Value::Null => {}
+        other => {
+            lines.push(Line::from(vec![dim("└ args: "), text(other.to_string())]));
+        }
+    }
+    lines
+}
+
+fn new_completed_browser_tool_call(
+    tool_name: String,
+    args: Option<String>,
+    duration: Duration,
+    success: bool,
+    result: String,
+) -> ToolCallCell {
+    let title = browser_tool_title(&tool_name);
+    let duration = format_duration(duration);
+
+    // Title styled by status with duration dimmed
+    let title_line = if success {
+        Line::from(vec![
+            Span::styled(title, Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD)),
+            format!(", duration: {duration}").dim(),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(title, Style::default().fg(crate::colors::error()).add_modifier(Modifier::BOLD)),
+            format!(", duration: {duration}").dim(),
+        ])
+    };
+
+    // Parse args JSON (if provided)
+    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(args_str) = args {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
+            arg_lines.extend(format_browser_args_line(&json));
+        }
+    }
+
+    // Result line (truncated)
+    let mut result_lines: Vec<Line<'static>> = Vec::new();
+    if !result.is_empty() {
+        let truncated = format_and_truncate_tool_result(&result, TOOL_CALL_MAX_LINES, 80);
+        result_lines.push(Line::from(vec![
+            Span::styled("Result: ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD)),
+            Span::styled(truncated, Style::default().fg(crate::colors::text())),
+        ]));
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(title_line);
+    lines.extend(arg_lines);
+    if !result_lines.is_empty() {
+        lines.push(Line::from(""));
+        lines.extend(result_lines);
+    }
+    lines.push(Line::from(""));
+
+    ToolCallCell { lines, state: if success { ToolState::Success } else { ToolState::Failed } }
+}
+
+// Map `agent_*` tool names to friendly titles
+fn agent_tool_title(tool_name: &str) -> &'static str {
+    match tool_name {
+        "agent_run" => "Agent Run",
+        "agent_check" => "Agent Check",
+        "agent_result" => "Agent Result",
+        "agent_cancel" => "Agent Cancel",
+        "agent_wait" => "Agent Wait",
+        "agent_list" => "Agent List",
+        _ => "Agent Tool",
+    }
+}
+
+fn new_completed_agent_tool_call(
+    tool_name: String,
+    args: Option<String>,
+    duration: Duration,
+    success: bool,
+    result: String,
+) -> ToolCallCell {
+    let title = agent_tool_title(&tool_name);
+    let duration = format_duration(duration);
+
+    // Title styled by status with duration dimmed
+    let title_line = if success {
+        Line::from(vec![
+            Span::styled(title, Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD)),
+            format!(", duration: {duration}").dim(),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(title, Style::default().fg(crate::colors::error()).add_modifier(Modifier::BOLD)),
+            format!(", duration: {duration}").dim(),
+        ])
+    };
+
+    // Parse args JSON (if provided)
+    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(args_str) = args {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
+            arg_lines.extend(format_browser_args_line(&json));
+        }
+    }
+
+    // Result line (truncated)
+    let mut result_lines: Vec<Line<'static>> = Vec::new();
+    if !result.is_empty() {
+        let truncated = format_and_truncate_tool_result(&result, TOOL_CALL_MAX_LINES, 80);
+        result_lines.push(Line::from(vec![
+            Span::styled("Result: ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD)),
+            Span::styled(truncated, Style::default().fg(crate::colors::text())),
+        ]));
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(title_line);
+    lines.extend(arg_lines);
+    if !result_lines.is_empty() {
+        lines.push(Line::from(""));
+        lines.extend(result_lines);
+    }
+    lines.push(Line::from(""));
+
     ToolCallCell { lines, state: if success { ToolState::Success } else { ToolState::Failed } }
 }
 

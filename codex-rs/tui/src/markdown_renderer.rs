@@ -224,6 +224,11 @@ impl MarkdownRenderer {
     fn process_inline_text(&mut self, text: &str) {
         let spans = self.process_inline_spans(text);
         self.current_line.extend(spans);
+        // If bold-first is enabled, restrict bolding to the first rendered line.
+        // Even when no sentence terminator is present, only the first line should be bold.
+        if self.bold_first_sentence && !self.first_sentence_done {
+            self.first_sentence_done = true;
+        }
         self.flush_current_line();
     }
     
@@ -282,10 +287,16 @@ impl MarkdownRenderer {
                 while j + 1 < chars.len() {
                     if chars[j] == marker && chars[j + 1] == marker {
                         // Found closing markers
+                        // Assistant messages render with bright bold; others stay dim
+                        let bold_color = if self.bold_first_sentence {
+                            crate::colors::text_dim()
+                        } else {
+                            crate::colors::text_bright()
+                        };
                         spans.push(Span::styled(
                             bold_content,
                             Style::default()
-                                .fg(crate::colors::text_dim())
+                                .fg(bold_color)
                                 .add_modifier(Modifier::BOLD),
                         ));
                         i = j + 2;
@@ -358,7 +369,7 @@ impl MarkdownRenderer {
                     spans.push(Span::styled(
                         first_sentence.to_string(),
                         Style::default()
-                            .fg(crate::colors::text_dim())
+                            .fg(crate::colors::text_bright())
                             .add_modifier(Modifier::BOLD),
                     ));
                     self.first_sentence_done = true;
@@ -372,7 +383,7 @@ impl MarkdownRenderer {
                     spans.push(Span::styled(
                         current_text,
                         Style::default()
-                            .fg(crate::colors::text_dim())
+                            .fg(crate::colors::text_bright())
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
