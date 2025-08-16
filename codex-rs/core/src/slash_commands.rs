@@ -45,14 +45,14 @@ pub fn format_plan_command(
     format!(
         r#"Create a comprehensive plan by leveraging multiple state-of-the-art LLMs working in parallel.
 
-Use the agent tool to start a batch of agents using run_agent with:
+Use the agent tool to start a batch of agents using agent_run with:
 - models: an array containing [{}]
 - read_only: true (planning mode - no file modifications)
 Provide a comprehensive description of the task and context. You should research the code base first and provide a general directory structure to give the models a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves.
 
 This will start all agents at once and return a batch_id.
 
-IMPORTANT: Use wait_for_agent with the batch_id and return_all: true to wait for ALL agents to complete. This ensures you get all perspectives before formulating the final plan. If an agent fails or times out, you can ignore it and continue with the other results.
+IMPORTANT: Use agent_wait with the batch_id and return_all: true to wait for ALL agents to complete. This ensures you get all perspectives before formulating the final plan. If an agent fails or times out, you can ignore it and continue with the other results.
 
 Once all models have completed:
 1. Analyze all the different plans and recommendations
@@ -94,7 +94,7 @@ pub fn format_solve_command(
     format!(
         r#"Solve a complicated problem by starting multiple agents with state of the art LLMs.
 
-Use the agent tool to start a batch of agents using a SINGLE run_agent with:
+Use the agent tool to start a batch of agents using a SINGLE agent_run with:
 - models: an array containing [{}]
 - read_only: true (so agents don't edit files but can read them)
 Provide an extremely comprehensive description of the task and context. You should research the background information thoroughly and include any relevant details that could help the models understand the problem better. Include ALL relevant files you find.
@@ -102,8 +102,8 @@ Provide an extremely comprehensive description of the task and context. You shou
 This will start all agents at once and return a batch_id.
 
 To monitor progress, you have two options:
-1. Use wait_for_agent with the batch_id to block until the next agent completes (efficient, ignores already-completed agents)
-2. Use list_agents with the batch_id to poll and check status manually
+1. Use agent_wait with the batch_id to block until the next agent completes (efficient, ignores already-completed agents)
+2. Use agent_list with the batch_id to poll and check status manually
 
 As soon as one completes you can try implementing the solution it proposes. IMPORTANT: You must thoroughly test and verify that the solution works correctly before considering the problem solved. This includes:
 - Running any relevant tests
@@ -125,7 +125,7 @@ If the solution does not work or only partially works, start a new agent with th
 - The problem is only partially solved
 - You haven't verified the solution works
 
-If you're unsure whether the problem is fully solved, keep the agents running and continue working on the solution. It's better to have agents running in the background than to cancel them prematurely.
+Once you complete implement the solution from the first agent, check that no other agents have also completed before returning to the user. You may get a second opinion with a better result which is what the multi agent process is all about! Don't be too confident in any solution you implement.
 
 Problem to solve:
 {}
@@ -162,7 +162,7 @@ pub fn format_code_command(
     format!(
         r#"Perform a coding task with multiple LLMs and compare the results.
 
-Use the agent tool to start a batch of agents using run_agent with:
+Use the agent tool to start a batch of agents using agent_run with:
 - models: an array containing [{}]
 - read_only: false (allow file modifications and code execution)
 Provide a comprehensive description of the task and context. You should research the code base first to give the model a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves.
@@ -179,7 +179,7 @@ IMPORTANT: When agents complete, the response will include the worktree_path and
 - worktree_path: The full path to the git worktree where the model made its changes
 - branch_name: The git branch name created for that model's work
 
-Monitor the agent progress using check_agent_status and wait for completion with wait_for_agent.
+Monitor the agent progress using agent_check and wait for completion with agent_wait.
 
 Once the agents are complete:
 1. Check the worktree paths returned for each model

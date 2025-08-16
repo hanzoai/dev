@@ -259,8 +259,8 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             warning: Color::Rgb(154, 103, 0),       // #9A6700
             error: Color::Rgb(207, 34, 46),         // #CF222E
             info: Color::Rgb(9, 105, 218),          // #0969DA
-            text: Color::Rgb(68, 78, 91),           // #444e5bff
-            text_dim: Color::Rgb(158, 168, 188),    // #9ea8bcff
+            text: Color::Rgb(79, 91, 106),          // #4f5b6a
+            text_dim: Color::Rgb(171, 180, 199),    // #abb4c7
             text_bright: Color::Black,              // #000000
             keyword: Color::Rgb(110, 89, 203),      // #6E59CB
             string: Color::Rgb(11, 125, 105),       // #0B7D69

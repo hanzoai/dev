@@ -20,7 +20,7 @@ impl WidgetRef for &WelcomeWidget {
         let line = Line::from(vec![
             Span::raw(">_ "),
             Span::styled(
-                "Welcome to Codex, OpenAI's command-line coding agent",
+                "Welcome to Code",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
         ]);

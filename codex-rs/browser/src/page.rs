@@ -73,6 +73,39 @@ impl Page {
         page
     }
 
+    /// Ensure the virtual cursor is present; inject if missing, then update to current position.
+    async fn ensure_virtual_cursor(&self) -> Result<bool> {
+        // Quick existence check
+        let exists = self
+            .cdp_page
+            .evaluate("typeof window.__vc !== 'undefined'")
+            .await
+            .ok()
+            .and_then(|r| r.value().and_then(|v| v.as_bool()))
+            .unwrap_or(false);
+
+        if !exists {
+            // Inject if missing
+            if let Err(e) = self.inject_virtual_cursor().await {
+                warn!("Failed to inject virtual cursor: {}", e);
+                return Err(e);
+            }
+            return Ok(true);
+        } else {
+            // Update position to current cursor
+            let cursor = self.cursor_state.lock().await.clone();
+            let _ = self
+                .cdp_page
+                .evaluate(format!(
+                    "window.__vc && window.__vc.update({:.0}, {:.0});",
+                    cursor.x, cursor.y
+                ))
+                .await;
+        }
+
+        Ok(false)
+    }
+
     /// (NEW) Injects the script to prevent new tabs from opening and redirect them to the current tab.
     async fn inject_tab_interception_script(cdp_page: &Arc<CdpPage>) -> Result<()> {
         // The comprehensive script ported from browser_session.ts
@@ -512,13 +545,14 @@ impl Page {
 
     // Motion configuration (distance-based durations)
     const MOTION = {{
-      pxPerSec: 800,                          // base speed
-      min: 600,                                // ms clamp
-      max: 3000,                                // ms clamp
+      pxPerSec: 600,                           // base speed (external CDP friendly)
+      min: 200,                                // ms clamp
+      max: 3000,                               // ms cap (ok for CDP)
       easing: 'cubic-bezier(0.25, 1, 0.5, 1)', // easeOutQuart-ish
-      badgeScale: 1.25,                         // badge longer than arrow
-      badgeDelay: 100,                          // ms
-      jitter: 0.08,                             // ±8% random variation
+      badgeScale: 1.25,                         // badge slightly lags longer
+      badgeDelay: 140,                          // ms delay for trailing effect
+      jitter: 0.0,                              // deterministic for consistency
+      rotateMaxDeg: 16                          // max tilt based on direction
     }};
 
     function dist(x0, y0, x1, y1) {{
@@ -562,22 +596,25 @@ impl Page {
       const aDur = base;
       const bDur = Math.round(base * o.badgeScale);
       const bDel = o.badgeDelay;
+      const angle = Math.atan2(ay1 - ay0, ax1 - ax0) * 180 / Math.PI; // [-180,180]
+      const rot   = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angle));
 
       // Cancel any in-flight animations (discrete moves -> clean restart)
       try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
       try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
 
-      state.aAnim = arrow.animate(
-        [ {{ transform: 'translate3d(' + ax0 + 'px,' + ay0 + 'px,0)' }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0)' }} ],
-        {{ duration: aDur, easing: o.easing, fill: 'forwards' }}
-      );
+      // Arrow: translate + subtle rotation toward movement direction, then settle to 0deg
+      state.aAnim = arrow.animate([
+          {{ transform: 'translate3d(' + ax0 + 'px,' + ay0 + 'px,0) rotate(0deg)' }},
+          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + (rot*0.85) + 'deg)', offset: 0.35 }},
+          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)' }}
+        ], {{ duration: aDur, easing: o.easing, fill: 'forwards' }});
 
-      state.bAnim = badge.animate(
-        [ {{ transform: 'translate3d(' + bx0 + 'px,' + by0 + 'px,0)' }},
-          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0)' }} ],
-        {{ duration: bDur, delay: bDel, easing: o.easing, fill: 'forwards' }}
-      );
+      // Badge: translate only (no rotation), longer + delayed to create pleasing lag
+      state.bAnim = badge.animate([
+          {{ transform: 'translate3d(' + bx0 + 'px,' + by0 + 'px,0)' }},
+          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0)' }}
+        ], {{ duration: bDur, delay: bDel, easing: o.easing, fill: 'forwards' }});
 
       // Commit endpoints immediately so subsequent math uses the new base
       commit(ax1, ay1, bx1, by1);
@@ -615,6 +652,51 @@ impl Page {
       moveTo: moveTo,                 // preferred
       update: function(nx, ny) {{     // backwards compat
         moveTo(nx, ny);
+      }},
+      // Click pulse animation: scale down/up around current position
+      clickPulse: function(opts) {{
+        const scale = (opts && opts.scale) || 0.85;
+        const dur   = (opts && opts.duration) || 240; // per half-cycle
+        const easing= (opts && opts.easing) || 'cubic-bezier(0.4, 0, 0.2, 1)';
+
+        // Cancel any prior click animations
+        try {{ state.caAnim && state.caAnim.cancel(); }} catch (e) {{}}
+        try {{ state.cbAnim && state.cbAnim.cancel(); }} catch (e) {{}}
+
+        const aBase = 'translate3d(' + state.arrowX + 'px,' + state.arrowY + 'px,0)';
+        const bBase = 'translate3d(' + state.badgeX + 'px,' + state.badgeY + 'px,0)';
+
+        state.caAnim = arrow.animate(
+          [ {{ transform: aBase + ' scale(1)' }},
+            {{ transform: aBase + ' scale(' + scale + ')' }},
+            {{ transform: aBase + ' scale(1)' }} ],
+          {{ duration: dur * 2, easing, fill: 'none' }}
+        );
+        state.cbAnim = badge.animate(
+          [ {{ transform: bBase + ' scale(1)' }},
+            {{ transform: bBase + ' scale(' + scale + ')' }},
+            {{ transform: bBase + ' scale(1)' }} ],
+          {{ duration: dur * 2, easing, fill: 'none' }}
+        );
+
+        return dur * 2;
+      }},
+      // Return an estimated remaining time (ms) for any in-flight animations
+      getSettleMs: function() {{
+        function rem(anim) {{
+          if (!anim) return 0;
+          try {{
+            const t = anim.currentTime || 0;
+            const eff = anim.effect && anim.effect.getTiming ? anim.effect.getTiming() : null;
+            let d = 0;
+            if (eff) {{
+              if (typeof eff.duration === 'number') d = eff.duration || 0;
+            }}
+            const left = Math.max(0, d - t);
+            return isFinite(left) ? Math.ceil(left) : 0;
+          }} catch (e) {{ return 0; }}
+        }}
+        return Math.max(rem(state.aAnim), rem(state.bAnim), rem(state.caAnim), rem(state.cbAnim));
       }},
       setSize: function(arrowPx, badgePx) {{
         if (arrowPx) arrow.style.width = arrowPx + 'px';
@@ -819,9 +901,9 @@ impl Page {
         *current_url = Some(final_url.clone());
         drop(current_url); // Release lock before injecting cursor
 
-        // Inject the virtual cursor after navigation
-        debug!("Injecting virtual cursor after navigation");
-        if let Err(e) = self.inject_virtual_cursor().await {
+        // Ensure the virtual cursor after navigation
+        debug!("Ensuring virtual cursor after navigation");
+        if let Err(e) = self.ensure_virtual_cursor().await {
             warn!("Failed to inject virtual cursor after navigation: {}", e);
             // Continue even if cursor injection fails
         }
@@ -834,27 +916,41 @@ impl Page {
 
     // (UPDATED) Inject cursor before taking screenshot
     pub async fn screenshot(&self, mode: ScreenshotMode) -> Result<Vec<Screenshot>> {
-        // Check if this is an external Chrome connection
-        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        // Always verify and correct viewport before capturing
+        if let Err(e) = self.check_and_fix_scaling().await {
+            warn!(
+                "Failed to check/fix viewport scaling: {}, continuing anyway",
+                e
+            );
+        }
 
-        // First, check and fix viewport scaling if needed (skip for external Chrome)
-        if !is_external {
-            if let Err(e) = self.check_and_fix_scaling().await {
-                warn!(
-                    "Failed to check/fix viewport scaling: {}, continuing anyway",
-                    e
-                );
+        // Fast path: ensure the virtual cursor exists before capturing
+        let injected = match self.ensure_virtual_cursor().await {
+            Ok(injected) => injected,
+            Err(e) => {
+                warn!("Failed to inject virtual cursor: {}", e);
+                // Continue with screenshot even if cursor injection fails
+                false
+            }
+        };
+
+        // Allow a brief moment for the cursor SVG to render only if we injected it now
+        if injected {
+            tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+        }
+
+        // Wait for any in-flight cursor animation to settle before capture
+        if let Ok(remain) = self
+            .cdp_page
+            .evaluate("(function(){ return (window.__vc && window.__vc.getSettleMs) ? window.__vc.getSettleMs() : 0; })()")
+            .await
+            .and_then(|r| Ok(r.value().and_then(|v| v.as_u64()).unwrap_or(0)))
+        {
+            if remain > 0 {
+                let wait_ms = remain.min(300);
+                tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
             }
         }
-
-        // Inject the virtual cursor before capturing
-        if let Err(e) = self.inject_virtual_cursor().await {
-            warn!("Failed to inject virtual cursor: {}", e);
-            // Continue with screenshot even if cursor injection fails
-        }
-
-        // Allow a brief moment for the cursor SVG to render and scaling to apply
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         match mode {
             ScreenshotMode::Viewport => self.screenshot_viewport().await,
@@ -1130,7 +1226,7 @@ impl Page {
             }
         }
 
-        // Update cursor position
+        // Update cursor position with animation
         let _ = self
             .cdp_page
             .evaluate(format!(
@@ -1139,8 +1235,27 @@ impl Page {
             ))
             .await;
 
-        // Small delay (ported from TS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+        // Optionally wait a tiny amount to reduce flicker in immediate snapshots
+        // (movement duration is dynamic; we defer full waiting to screenshot path)
+
+        // If using external CDP, wait for animation to settle so the next screenshot captures final state
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        if is_external {
+            let remain = self
+                .cdp_page
+                .evaluate("(function(){ return (window.__vc && window.__vc.getSettleMs) ? window.__vc.getSettleMs() : 0; })()")
+                .await
+                .ok()
+                .and_then(|r| r.value().and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+            if remain > 0 {
+                let wait_ms = remain.min(3000);
+                tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
+            }
+        } else {
+            // Tiny delay for internal to keep interactions smooth
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        }
 
         Ok(())
     }
@@ -1158,55 +1273,16 @@ impl Page {
         let click_y = cursor.y;
         drop(cursor); // Release lock before async calls
 
-        // Trigger click animation on the virtual cursor
-        // The animation scales from 1.0 to 0.7 and back over 3 seconds with transform-origin at top-left
-        let animation_script = r#"
-            if (window.__vc && window.__vc._s) {
-                const arrow = window.__vc._s.arrow;
-                const badge = window.__vc._s.badge;
-                if (arrow && badge) {
-                    // Store original transform to preserve position
-                    const originalArrowTransform = arrow.style.transform;
-                    const originalBadgeTransform = badge.style.transform;
-                    
-                    // Add transition for smooth animation (3s total duration)
-                    arrow.style.transition = 'transform 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
-                    badge.style.transition = 'transform 1.5s cubic-bezier(0.4, 0, 0.2, 1)';
-                    
-                    // Set transform-origin to top-left (where the cursor tip is)
-                    arrow.style.transformOrigin = '0 0';
-                    badge.style.transformOrigin = '0 0';
-                    
-                    // Apply scale down (keeping position)
-                    setTimeout(() => {
-                        // Parse existing transform to preserve translate3d
-                        const arrowMatch = originalArrowTransform.match(/translate3d\([^)]+\)/);
-                        const badgeMatch = originalBadgeTransform.match(/translate3d\([^)]+\)/);
-                        const arrowTranslate = arrowMatch ? arrowMatch[0] : 'translate3d(0px, 0px, 0)';
-                        const badgeTranslate = badgeMatch ? badgeMatch[0] : 'translate3d(0px, 0px, 0)';
-                        
-                        // Apply scale while preserving position
-                        arrow.style.transform = arrowTranslate + ' scale(0.7)';
-                        badge.style.transform = badgeTranslate + ' scale(0.7)';
-                    }, 10);
-                    
-                    // Scale back up after 1.5s
-                    setTimeout(() => {
-                        arrow.style.transform = originalArrowTransform;
-                        badge.style.transform = originalBadgeTransform;
-                    }, 1500);
-                    
-                    // Clean up transitions after animation completes
-                    setTimeout(() => {
-                        arrow.style.transition = '';
-                        badge.style.transition = '';
-                    }, 3000);
-                }
-            }
-        "#;
-
-        // Start the click animation
-        let _ = self.cdp_page.evaluate(animation_script).await;
+        // Trigger click pulse animation via virtual cursor API and wait briefly
+        let click_ms_val = self
+            .cdp_page
+            .evaluate(
+                "(function(){ if(window.__vc && window.__vc.clickPulse){ return window.__vc.clickPulse(); } return 0; })()",
+            )
+            .await
+            .ok()
+            .and_then(|r| r.value().and_then(|v| v.as_u64()))
+            .unwrap_or(0) as u64;
 
         // Mouse down
         let down_params = DispatchMouseEventParams::builder()
@@ -1219,8 +1295,8 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
-        // Add a small delay between press and release (Ported from TS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // Add a small delay between press and release
+        tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
 
         // Mouse up
         let up_params = DispatchMouseEventParams::builder()
@@ -1233,8 +1309,12 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
-        // Wait briefly to allow potential event handlers (like navigation) to trigger (ported from TS)
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Wait for click animation to settle before returning (helps next auto-screenshot)
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        let settle_ms = if is_external { click_ms_val.max(120) } else { 40 };
+        if settle_ms > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
+        }
 
         Ok(())
     }
@@ -1264,9 +1344,10 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
         
-        // Update mouse state
+        // Update mouse state (track button for drag moves)
         let mut cursor = self.cursor_state.lock().await;
         cursor.is_mouse_down = true;
+        cursor.button = MouseButton::Left;
         drop(cursor);
         
         Ok((x, y))
@@ -1300,6 +1381,7 @@ impl Page {
         // Update mouse state
         let mut cursor = self.cursor_state.lock().await;
         cursor.is_mouse_down = false;
+        cursor.button = MouseButton::None;
         drop(cursor);
         
         Ok((x, y))
