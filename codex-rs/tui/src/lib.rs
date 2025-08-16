@@ -231,7 +231,7 @@ pub async fn run_main(
         );
 
         if managed_by_npm {
-            let npm_cmd = "npm install -g @just-every/coder@latest";
+            let npm_cmd = "npm install -g @just-every/code@latest";
             eprintln!("Run {} to update.", npm_cmd.cyan().on_black());
         } else if cfg!(target_os = "macos")
             && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))

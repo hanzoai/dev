@@ -145,6 +145,7 @@ pub(crate) struct ChatWidget<'a> {
     // Accumulated patch change sets for this session (latest last)
     session_patch_sets: Vec<HashMap<PathBuf, codex_core::protocol::FileChange>>,
     diff_overlay: Option<DiffOverlay>,
+    diff_confirm: Option<DiffConfirm>,
 
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
@@ -152,19 +153,30 @@ pub(crate) struct ChatWidget<'a> {
     height_cache_last_width: std::cell::Cell<u16>,
     // Track last viewport height of the history content area to stabilize scrolling
     last_history_viewport_height: std::cell::Cell<u16>,
+    // Cached visible rows for the diff overlay body to clamp scrolling
+    diff_body_visible_rows: std::cell::Cell<u16>,
 }
 
 struct DiffOverlay {
-    tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)>,
+    tabs: Vec<(String, Vec<DiffBlock>)>,
     selected: usize,
     scroll_offsets: Vec<u16>,
 }
 
 impl DiffOverlay {
-    fn new(tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)>) -> Self {
+    fn new(tabs: Vec<(String, Vec<DiffBlock>)>) -> Self {
         let n = tabs.len();
         Self { tabs, selected: 0, scroll_offsets: vec![0; n] }
     }
+}
+
+#[derive(Clone)]
+struct DiffBlock {
+    lines: Vec<ratatui::text::Line<'static>>,
+}
+
+struct DiffConfirm {
+    text_to_submit: String,
 }
 
 struct UserMessage {
@@ -575,9 +587,12 @@ impl ChatWidget<'_> {
         // Using 5 here keeps the input pinned in place when scrolling up,
         // allowing history to extend into the reclaimed spacer row without
         // shifting the input area upward.
+        // Cap bottom pane to 30% of the screen height (at least 5 rows)
+        let percent_cap: u16 = ((area.height as u32).saturating_mul(30) / 100) as u16;
+        let bottom_cap = percent_cap.max(5);
         let bottom_height = 5u16
             .max(self.bottom_pane.desired_height(area.width))
-            .min(15);
+            .min(bottom_cap);
 
         if has_browser_screenshot || has_active_agents {
             // match HUD padding used in render_browser_hud()
@@ -757,9 +772,11 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             session_patch_sets: Vec::new(),
             diff_overlay: None,
+            diff_confirm: None,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             last_history_viewport_height: std::cell::Cell::new(0),
+            diff_body_visible_rows: std::cell::Cell::new(0),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -809,48 +826,141 @@ impl ChatWidget<'_> {
         // Intercept keys for diff overlay when active
         if let Some(ref mut overlay) = self.diff_overlay {
             use crossterm::event::KeyCode;
+            // Handle confirmation dialog if active
+            if let Some(confirm) = self.diff_confirm.take() {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        self.submit_user_message(confirm.text_to_submit.into());
+                        self.diff_overlay = None;
+                        self.request_redraw();
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        // Cancel confirmation
+                        self.diff_confirm = None;
+                        self.request_redraw();
+                        return;
+                    }
+                    _ => {
+                        // Put it back for other keys
+                        self.diff_confirm = Some(confirm);
+                    }
+                }
+            }
             match key_event.code {
                 KeyCode::Left => {
                     if overlay.selected > 0 { overlay.selected -= 1; }
+                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) { *off = 0; }
                     self.request_redraw();
                     return;
                 }
                 KeyCode::Right => {
                     if overlay.selected + 1 < overlay.tabs.len() { overlay.selected += 1; }
+                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) { *off = 0; }
                     self.request_redraw();
                     return;
                 }
                 KeyCode::Up => {
                     if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) {
-                        *off = off.saturating_sub(1);
+                        // Clamp to current max offset
+                        let visible_rows = self.diff_body_visible_rows.get() as usize;
+                        let total_lines: usize = overlay
+                            .tabs
+                            .get(overlay.selected)
+                            .map(|(_, blocks)| blocks.iter().map(|b| b.lines.len()).sum())
+                            .unwrap_or(0);
+                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
+                        // Ensure we don't keep overscrolled values
+                        let cur = (*off).min(max_off as u16);
+                        *off = cur.saturating_sub(1);
                     }
                     self.request_redraw();
                     return;
                 }
                 KeyCode::Down => {
                     if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) {
-                        *off = off.saturating_add(1);
+                        let visible_rows = self.diff_body_visible_rows.get() as usize;
+                        let total_lines: usize = overlay
+                            .tabs
+                            .get(overlay.selected)
+                            .map(|(_, blocks)| blocks.iter().map(|b| b.lines.len()).sum())
+                            .unwrap_or(0);
+                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
+                        let next = (*off as usize).saturating_add(1).min(max_off);
+                        *off = next as u16;
                     }
                     self.request_redraw();
                     return;
                 }
                 KeyCode::Char('u') => {
-                    if let Some((_, lines)) = overlay.tabs.get(overlay.selected) {
-                        let mut text = String::from("Please undo this:\n");
-                        for l in lines {
-                            let s: String = l.spans.iter().map(|sp| sp.content.clone()).collect();
-                            text.push_str(&s);
-                            text.push('\n');
+                    if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
+                        // Determine selected block from scroll position
+                        let visible_rows = self.diff_body_visible_rows.get() as usize;
+                        let total_lines: usize = blocks.iter().map(|b| b.lines.len()).sum();
+                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
+                        let skip_raw = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
+                        let skip = skip_raw.min(max_off);
+                        let mut start = 0usize;
+                        let mut chosen: Option<&DiffBlock> = None;
+                        for b in blocks {
+                            let len = b.lines.len();
+                            if start <= skip && skip < start + len {
+                                chosen = Some(b);
+                            }
+                            start += len;
                         }
-                        self.bottom_pane.insert_str(&text);
-                        self.bottom_pane.flash_footer_notice("Press Enter to confirm undo".to_string());
+                        if let Some(block) = chosen {
+                            let mut diff_text = String::new();
+                            for l in &block.lines {
+                                let s: String = l.spans.iter().map(|sp| sp.content.clone()).collect();
+                                diff_text.push_str(&s);
+                                diff_text.push('\n');
+                            }
+                            // Keep only the final command for submission, show simple confirm UI in render
+                            let submit_text = format!("Please undo this:\n{}", diff_text);
+                            self.diff_confirm = Some(DiffConfirm { text_to_submit: submit_text });
+                            self.request_redraw();
+                        }
                     }
-                    self.diff_overlay = None;
-                    self.request_redraw();
+                    return;
+                }
+                KeyCode::Char('e') => {
+                    if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
+                        let visible_rows = self.diff_body_visible_rows.get() as usize;
+                        let total_lines: usize = blocks.iter().map(|b| b.lines.len()).sum();
+                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
+                        let skip_raw = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
+                        let skip = skip_raw.min(max_off);
+                        let mut start = 0usize;
+                        let mut chosen: Option<&DiffBlock> = None;
+                        for b in blocks {
+                            let len = b.lines.len();
+                            if start <= skip && skip < start + len {
+                                chosen = Some(b);
+                            }
+                            start += len;
+                        }
+                        if let Some(block) = chosen {
+                            let mut diff_text = String::new();
+                            for l in &block.lines {
+                                let s: String = l.spans.iter().map(|sp| sp.content.clone()).collect();
+                                diff_text.push_str(&s);
+                                diff_text.push('\n');
+                            }
+                            let prompt = format!(
+                                "Can you please explain what this diff does and the reason behind it?\n\n{}",
+                                diff_text
+                            );
+                            self.submit_user_message(prompt.into());
+                            self.diff_overlay = None;
+                            self.request_redraw();
+                        }
+                    }
                     return;
                 }
                 KeyCode::Esc => {
                     self.diff_overlay = None;
+                    self.diff_confirm = None;
                     self.request_redraw();
                     return;
                 }
@@ -1053,12 +1163,76 @@ impl ChatWidget<'_> {
                         }
                     }
                     combined.extend(body);
+                    // Coalesce adjacent Read entries of the same file with contiguous ranges
+                    coalesce_read_ranges_in_lines(&mut combined);
                     *last_box = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
                     self.autoscroll_if_near_bottom();
                     self.bottom_pane.set_has_chat_history(true);
                     self.process_animation_cleanup();
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     return;
+                }
+            } else {
+                // Also allow merging into an already-merged PlainHistoryCell produced above
+                if let Some(new_exec) = (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>() {
+                    // Compute the label for the incoming exec
+                    let exec_label = |e: &history_cell::ExecCell| -> &'static str {
+                        let action = history_cell::action_from_parsed(&e.parsed);
+                        match (&e.output, action) {
+                            (None, "read") => "Reading...",
+                            (None, "search") => "Searching...",
+                            (None, "list") => "Listing...",
+                            (None, _) => "Running...",
+                            (Some(o), "read") if o.exit_code == 0 => "Read",
+                            (Some(o), "search") if o.exit_code == 0 => "Searched",
+                            (Some(o), "list") if o.exit_code == 0 => "Listed",
+                            (Some(o), _) if o.exit_code == 0 => "Ran",
+                            _ => "",
+                        }
+                    };
+                    let new_label = exec_label(new_exec);
+                    let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
+
+                    if let Some(last_plain) = last_box.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
+                        // Extract the header label from the first line (best-effort)
+                        let last_lines_snapshot = last_plain.lines.clone();
+                        let last_header = last_lines_snapshot.first().and_then(|l| l.spans.get(0)).map(|s| s.content.clone().to_string()).unwrap_or_default();
+                        if !new_label.is_empty() && is_joinable_label(new_label) && last_header == new_label {
+                            // Merge by appending the new body's content lines
+                            let new_lines = new_cell.display_lines();
+                            let mut combined = last_plain.lines.clone();
+                            while combined
+                                .last()
+                                .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+                                .unwrap_or(false)
+                            {
+                                combined.pop();
+                            }
+                            let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+                            while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                body.remove(0);
+                            }
+                            while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                body.pop();
+                            }
+                            if let Some(first_line) = body.first_mut() {
+                                if let Some(first_span) = first_line.spans.get_mut(0) {
+                                    if first_span.content == "  └ " || first_span.content == "└ " {
+                                        first_span.content = "  ".into();
+                                    }
+                                }
+                            }
+                            combined.extend(body);
+                            // Coalesce adjacent Read entries of the same file with contiguous ranges
+                            coalesce_read_ranges_in_lines(&mut combined);
+                            last_plain.lines = combined;
+                            self.autoscroll_if_near_bottom();
+                            self.bottom_pane.set_has_chat_history(true);
+                            self.process_animation_cleanup();
+                            self.app_event_tx.send(AppEvent::RequestRedraw);
+                            return;
+                        }
+                    }
                 }
             }
         }
@@ -1614,10 +1788,13 @@ impl ChatWidget<'_> {
                 self.finalize_active_stream();
                 // Flush any queued interrupts when streaming ends
                 self.flush_interrupt_queue();
-                let params_string = parameters.map(|p| p.to_string());
-                self.add_to_history(history_cell::new_active_custom_tool_call(
-                    tool_name, params_string,
-                ));
+                // For browser_* and agent_* tools, suppress the separate begin entry to show a single combined section
+                if !(tool_name.starts_with("browser_") || tool_name.starts_with("agent_")) {
+                    let params_string = parameters.map(|p| p.to_string());
+                    self.add_to_history(history_cell::new_active_custom_tool_call(
+                        tool_name, params_string,
+                    ));
+                }
             }
             EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
                 call_id: _,
@@ -1790,19 +1967,19 @@ impl ChatWidget<'_> {
             }
         }
         // Build tabs: for each file, concatenate diffs from all change sets in chronological order
-        let mut tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)> = Vec::new();
+        let mut tabs: Vec<(String, Vec<DiffBlock>)> = Vec::new();
         for path in order {
-            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+            let mut blocks: Vec<DiffBlock> = Vec::new();
             for changes in &self.session_patch_sets {
                 if let Some(change) = changes.get(&path) {
                     let mut single = HashMap::new();
                     single.insert(path.clone(), change.clone());
-                    let mut detail = create_diff_summary("patch", &single, history_cell::PatchEventType::ApprovalRequest);
-                    lines.append(&mut detail);
+                    let detail = create_diff_summary("patch", &single, history_cell::PatchEventType::ApprovalRequest);
+                    blocks.push(DiffBlock { lines: detail });
                 }
             }
             let title = path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()).unwrap_or_else(|| path.display().to_string());
-            tabs.push((title, lines));
+            tabs.push((title, blocks));
         }
         if tabs.is_empty() {
             // Nothing to show — surface a small notice so Ctrl+D feels responsive
@@ -1810,6 +1987,7 @@ impl ChatWidget<'_> {
             return;
         }
         self.diff_overlay = Some(DiffOverlay::new(tabs));
+        self.diff_confirm = None;
         self.request_redraw();
     }
 
@@ -2203,6 +2381,8 @@ impl ChatWidget<'_> {
                 self.clear_reasoning_in_progress();
                 // Ensure footer shows Ctrl+R hint when reasoning content is present
                 self.bottom_pane.set_reasoning_hint(true);
+                // Update footer label to reflect current visibility state
+                self.bottom_pane.set_reasoning_state(self.is_reasoning_shown());
                 // Append to last reasoning cell if present; else create a new one
                 if let Some(last) = self.history_cells.last_mut() {
                     if let Some(reasoning_cell) = last
@@ -2317,6 +2497,8 @@ impl ChatWidget<'_> {
             // Brief status to confirm the toggle to the user
             let status = if self.config.tui.show_reasoning { "Reasoning shown" } else { "Reasoning hidden" };
             self.bottom_pane.update_status_text(status.to_string());
+            // Update footer label to reflect current state
+            self.bottom_pane.set_reasoning_state(self.config.tui.show_reasoning);
         } else {
             // No reasoning cells exist; inform the user
             self.bottom_pane.update_status_text("No reasoning to toggle".to_string());
@@ -3419,7 +3601,7 @@ impl ChatWidget<'_> {
             Span::styled("Model: ", Style::default().dim()),
             Span::styled(
                 self.format_model_name(&self.config.model),
-                Style::default().fg(crate::colors::secondary()),
+                Style::default().fg(crate::colors::info()),
             ),
             Span::raw("  •  "),
             Span::styled("Reasoning: ", Style::default().dim()),
@@ -4247,7 +4429,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         if let Some(exec) = item.as_any().downcast_ref::<crate::history_cell::ExecCell>() {
                             match &exec.output {
                                 None => crate::colors::primary(),          // Running...
-                                Some(o) if o.exit_code == 0 => crate::colors::primary(), // Ran
+                                Some(o) if o.exit_code == 0 => crate::colors::text_bright(), // Ran
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
@@ -4262,12 +4444,12 @@ impl WidgetRef for &ChatWidget<'_> {
                     } else {
                         match symbol {
                             "›" => crate::colors::text(),        // user
-                            "⋮" => crate::colors::text_dim(),     // thinking
+                            "⋮" => crate::colors::primary(),     // thinking
                             "•" => crate::colors::text_bright(),  // codex/agent
                             "⚙" => crate::colors::primary(),      // tool working
                             "✔" => crate::colors::success(),      // tool complete
                             "✖" => crate::colors::error(),        // error
-                            "★" => crate::colors::primary(),      // notice/popular
+                            "★" => crate::colors::text_bright(),  // notice/popular
                             _ => crate::colors::text_dim(),
                         }
                     };
@@ -4396,29 +4578,122 @@ impl WidgetRef for &ChatWidget<'_> {
             // Add one cell padding around the entire inside of the window
             let padded_inner = inner.inner(ratatui::layout::Margin::new(1, 1));
             let [tabs_area, body_area] =
-                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(padded_inner);
+                Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(padded_inner);
 
-            // Render tabs
-            let titles = overlay.tabs.iter().map(|(t, _)| ratatui::text::Line::from(format!(" {t} "))).collect::<Vec<_>>();
-            let tabs = ratatui::widgets::Tabs::new(titles)
-                .select(overlay.selected)
-                .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-                .divider(" ");
-            ratatui::widgets::Widget::render(tabs, tabs_area, buf);
+            // Render tabs with a more tab-like look (individual bordered blocks)
+            let labels: Vec<String> = overlay
+                .tabs
+                .iter()
+                .map(|(t, _)| format!("  {}  ", t))
+                .collect();
+            let mut constraints: Vec<Constraint> = Vec::new();
+            let mut total: u16 = 0;
+            for label in &labels {
+                let w = (label.chars().count() as u16).min(tabs_area.width.saturating_sub(total));
+                constraints.push(Constraint::Length(w));
+                total = total.saturating_add(w);
+                if total >= tabs_area.width.saturating_sub(4) { break; }
+            }
+            constraints.push(Constraint::Fill(1));
+            let chunks = Layout::horizontal(constraints).split(tabs_area);
+            for i in 0..labels.len() { // last chunk is filler; guard below
+                if i >= chunks.len().saturating_sub(1) { break; }
+                let rect = chunks[i];
+                if rect.width == 0 { continue; }
+                let selected = i == overlay.selected;
+                let border_style = if selected {
+                    Style::default().fg(crate::colors::primary())
+                } else {
+                    Style::default().fg(crate::colors::border())
+                };
+                let mut b = Block::default()
+                    .border_style(border_style)
+                    .title(ratatui::text::Line::from(if selected {
+                        ratatui::text::Span::styled(labels[i].clone(), Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD))
+                    } else {
+                        ratatui::text::Span::styled(labels[i].clone(), Style::default().fg(crate::colors::text_dim()))
+                    }));
+                if selected {
+                    b = b.borders(Borders::TOP | Borders::LEFT | Borders::RIGHT);
+                } else {
+                    b = b.borders(Borders::ALL);
+                }
+                b.render(rect, buf);
+            }
 
-            // Render selected tab with vertical scroll
-            if let Some((_, lines)) = overlay.tabs.get(overlay.selected) {
-                let mut visible_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                let skip = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
+            // Render selected tab with vertical scroll and highlight current diff block
+            if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
+                // Flatten blocks into lines and record block start indices
+                let mut all_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                let mut block_starts: Vec<(usize, usize)> = Vec::new(); // (start_index, len)
+                for b in blocks {
+                    let start = all_lines.len();
+                    block_starts.push((start, b.lines.len()));
+                    all_lines.extend(b.lines.clone());
+                }
 
-                // Use full body area for content
+                let raw_skip = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
+                let visible_rows = body_area.height as usize;
+                // Cache visible rows so key handler can clamp
+                self.diff_body_visible_rows.set(body_area.height);
+                let max_off = all_lines.len().saturating_sub(visible_rows.max(1));
+                let skip = raw_skip.min(max_off);
                 let body_inner = body_area;
                 let visible_rows = body_inner.height as usize;
-                for l in lines.iter().skip(skip).take(visible_rows) {
-                    visible_lines.push(l.clone());
-                }
-                let paragraph = Paragraph::new(RtText::from(visible_lines)).wrap(ratatui::widgets::Wrap { trim: false });
+
+                // Collect visible slice
+                let end = (skip + visible_rows).min(all_lines.len());
+                let visible = if skip < all_lines.len() { &all_lines[skip..end] } else { &[] };
+                let paragraph = Paragraph::new(RtText::from(visible.to_vec())).wrap(ratatui::widgets::Wrap { trim: false });
                 ratatui::widgets::Widget::render(paragraph, body_inner, buf);
+
+                // Determine selected block based on scroll position
+                let mut selected_block: Option<(usize, usize)> = None; // (start, len)
+                for (start, len) in &block_starts {
+                    if *start <= skip && skip < *start + *len {
+                        selected_block = Some((*start, *len));
+                    }
+                }
+                if let Some((start, len)) = selected_block {
+                    let top_in_view = start.saturating_sub(skip);
+                    if top_in_view < visible_rows {
+                        let height = len.min(visible_rows - top_in_view);
+                        // Draw a subtle border around the current block
+                        let highlight = Rect {
+                            x: body_inner.x,
+                            y: body_inner.y + top_in_view as u16,
+                            width: body_inner.width,
+                            height: height as u16,
+                        };
+                        let border_block = Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(crate::colors::primary()));
+                        border_block.render(highlight, buf);
+                    }
+                }
+
+                // Render confirmation dialog if active
+                if self.diff_confirm.is_some() {
+                    // Centered small box
+                    let w = (body_inner.width as i16 - 10).max(20) as u16;
+                    let h = 5u16;
+                    let x = body_inner.x + (body_inner.width.saturating_sub(w)) / 2;
+                    let y = body_inner.y + (body_inner.height.saturating_sub(h)) / 2;
+                    let dialog = Rect { x, y, width: w, height: h };
+                    Clear.render(dialog, buf);
+                    let dlg_block = Block::default()
+                        .borders(Borders::ALL)
+                        .title("Confirm Undo")
+                        .border_style(Style::default().fg(crate::colors::primary()));
+                    let dlg_inner = dlg_block.inner(dialog);
+                    dlg_block.render(dialog, buf);
+                    let lines = vec![
+                        ratatui::text::Line::from("Are you sure you want to undo this diff?"),
+                        ratatui::text::Line::from("Press Enter to confirm • Esc to cancel".to_string().dim()),
+                    ];
+                    let para = Paragraph::new(RtText::from(lines)).wrap(ratatui::widgets::Wrap { trim: true });
+                    ratatui::widgets::Widget::render(para, dlg_inner, buf);
+                }
             }
         }
     }
@@ -4449,5 +4724,76 @@ fn add_token_usage(current_usage: &TokenUsage, new_usage: &TokenUsage) -> TokenU
         output_tokens: current_usage.output_tokens + new_usage.output_tokens,
         reasoning_output_tokens,
         total_tokens: current_usage.total_tokens + new_usage.total_tokens,
+    }
+}
+
+// Coalesce adjacent Read entries of the same file with contiguous ranges in a rendered lines vector.
+// Expects the vector to contain a header line at index 0 (e.g., "Read"). Modifies in place.
+fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+
+    if lines.len() <= 2 {
+        return;
+    }
+
+    // Helper to parse a content line into (filename, start, end, prefix)
+    fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32, String)> {
+        if line.spans.is_empty() {
+            return None;
+        }
+        // First span should be prefix (dim): "└ " or "  "
+        let prefix = line.spans[0].content.to_string();
+        // Only consider the two standard prefixes this renderer emits
+        if !(prefix == "└ " || prefix == "  ") {
+            return None;
+        }
+        // Concatenate the rest of spans as one string for parsing
+        let rest: String = line
+            .spans
+            .iter()
+            .skip(1)
+            .map(|s| s.content.as_ref())
+            .collect();
+        // Expect format: "<fname> (lines X to Y)"
+        if let Some(idx) = rest.rfind(" (lines ") {
+            let fname = rest[..idx].to_string();
+            let tail = &rest[idx + 1..]; // starts with "(lines ..."
+            if tail.starts_with("(lines ") && tail.ends_with(")") {
+                let inner = &tail[7..tail.len() - 1]; // remove "(lines " and trailing ")"
+                if let Some((s1, s2)) = inner.split_once(" to ") {
+                    if let (Ok(start), Ok(end)) = (s1.trim().parse::<u32>(), s2.trim().parse::<u32>()) {
+                        return Some((fname, start, end, prefix));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    let mut i: usize = 1; // start after header
+    while i + 1 < lines.len() {
+        let left = parse_read_line(&lines[i]);
+        let right = parse_read_line(&lines[i + 1]);
+        if let (Some((fname_a, mut a1, mut a2, prefix_a)), Some((fname_b, b1, b2, _prefix_b))) = (left, right) {
+            if fname_a == fname_b {
+                // Consider contiguous if next start equals prev end, or prev end + 1
+                if b1 == a2 || b1 == a2 + 1 {
+                    a1 = a1.min(b1);
+                    a2 = a2.max(b2);
+                    // Rebuild line i with new range, preserving styling conventions
+                    let new_spans: Vec<Span<'static>> = vec![
+                        Span::styled(prefix_a, Style::default().add_modifier(Modifier::DIM)),
+                        Span::styled(fname_a, Style::default().fg(crate::colors::text())),
+                        Span::styled(format!(" (lines {} to {})", a1, a2), Style::default().fg(crate::colors::text_dim())),
+                    ];
+                    lines[i] = Line::from(new_spans);
+                    // Remove merged line and continue without advancing i to check further merges
+                    lines.remove(i + 1);
+                    continue;
+                }
+            }
+        }
+        i += 1;
     }
 }

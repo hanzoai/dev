@@ -2306,6 +2306,14 @@ async fn handle_function_call(
                 .await
         }
         "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id).await,
+        // New agent_* names
+        "agent_run" => handle_run_agent(sess, arguments, sub_id, call_id).await,
+        "agent_check" => handle_check_agent_status(sess, arguments, sub_id, call_id).await,
+        "agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id).await,
+        "agent_cancel" => handle_cancel_agent(sess, arguments, sub_id, call_id).await,
+        "agent_wait" => handle_wait_for_agent(sess, arguments, sub_id, call_id).await,
+        "agent_list" => handle_list_agents(sess, arguments, sub_id, call_id).await,
+        // Back-compat for older tool names
         "run_agent" => handle_run_agent(sess, arguments, sub_id, call_id).await,
         "check_agent_status" => handle_check_agent_status(sess, arguments, sub_id, call_id).await,
         "get_agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id).await,
@@ -2404,10 +2412,20 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
 async fn handle_run_agent(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<RunAgentParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_run".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
         Ok(params) => {
             let mut manager = AGENT_MANAGER.write().await;
 
@@ -2495,7 +2513,7 @@ async fn handle_run_agent(
             };
 
             ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
                     content: response.to_string(),
                     success: Some(true),
@@ -2503,22 +2521,34 @@ async fn handle_run_agent(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid run_agent arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_check_agent_status(
-    _sess: &Session,
+    sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<CheckAgentStatusParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_check".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<CheckAgentStatusParams>(&arguments_clone) {
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
@@ -2537,7 +2567,7 @@ async fn handle_check_agent_status(
                 });
 
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: response.to_string(),
                         success: Some(true),
@@ -2545,7 +2575,7 @@ async fn handle_check_agent_status(
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: format!("Agent not found: {}", params.agent_id),
                         success: Some(false),
@@ -2554,29 +2584,41 @@ async fn handle_check_agent_status(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid check_agent_status arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_get_agent_result(
-    _sess: &Session,
+    sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<GetAgentResultParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_result".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<GetAgentResultParams>(&arguments_clone) {
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
             if let Some(agent) = manager.get_agent(&params.agent_id) {
                 if agent.status == AgentStatus::Completed {
                     ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: agent
                                 .result
@@ -2586,7 +2628,7 @@ async fn handle_get_agent_result(
                     }
                 } else if agent.status == AgentStatus::Failed {
                     ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: format!(
                                 "Agent failed: {}",
@@ -2597,7 +2639,7 @@ async fn handle_get_agent_result(
                     }
                 } else {
                     ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: format!(
                                 "Agent is still {}: cannot get result yet",
@@ -2610,7 +2652,7 @@ async fn handle_get_agent_result(
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: format!("Agent not found: {}", params.agent_id),
                         success: Some(false),
@@ -2619,29 +2661,41 @@ async fn handle_get_agent_result(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid get_agent_result arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_cancel_agent(
-    _sess: &Session,
+    sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<CancelAgentParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_cancel".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<CancelAgentParams>(&arguments_clone) {
         Ok(params) => {
             let mut manager = AGENT_MANAGER.write().await;
 
             if let Some(agent_id) = params.agent_id {
                 if manager.cancel_agent(&agent_id).await {
                     ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: format!("Agent {} cancelled", agent_id),
                             success: Some(true),
@@ -2649,7 +2703,7 @@ async fn handle_cancel_agent(
                     }
                 } else {
                     ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: format!("Failed to cancel agent {}", agent_id),
                             success: Some(false),
@@ -2659,7 +2713,7 @@ async fn handle_cancel_agent(
             } else if let Some(batch_id) = params.batch_id {
                 let count = manager.cancel_batch(&batch_id).await;
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: format!("Cancelled {} agents in batch {}", count, batch_id),
                         success: Some(true),
@@ -2667,7 +2721,7 @@ async fn handle_cancel_agent(
                 }
             } else {
                 ResponseInputItem::FunctionCallOutput {
-                    call_id,
+                    call_id: call_id_clone,
                     output: FunctionCallOutputPayload {
                         content: "Either agent_id or batch_id must be provided".to_string(),
                         success: Some(false),
@@ -2676,22 +2730,34 @@ async fn handle_cancel_agent(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid cancel_agent arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_wait_for_agent(
-    _sess: &Session,
+    sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<WaitForAgentParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_wait".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
         Ok(params) => {
             let timeout =
                 std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300).min(600));
@@ -2700,7 +2766,7 @@ async fn handle_wait_for_agent(
             loop {
                 if start.elapsed() > timeout {
                     return ResponseInputItem::FunctionCallOutput {
-                        call_id,
+                        call_id: call_id_clone,
                         output: FunctionCallOutputPayload {
                             content: "Timeout waiting for agent completion".to_string(),
                             success: Some(false),
@@ -2722,7 +2788,7 @@ async fn handle_wait_for_agent(
                                 "wait_time_seconds": start.elapsed().as_secs(),
                             });
                             return ResponseInputItem::FunctionCallOutput {
-                                call_id,
+                                call_id: call_id_clone,
                                 output: FunctionCallOutputPayload {
                                     content: response.to_string(),
                                     success: Some(true),
@@ -2759,7 +2825,7 @@ async fn handle_wait_for_agent(
                             })
                         };
                         return ResponseInputItem::FunctionCallOutput {
-                            call_id,
+                            call_id: call_id_clone,
                             output: FunctionCallOutputPayload {
                                 content: response.to_string(),
                                 success: Some(true),
@@ -2773,22 +2839,34 @@ async fn handle_wait_for_agent(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid wait_for_agent arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_list_agents(
     sess: &Session,
     arguments: String,
-    _sub_id: String,
+    sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    match serde_json::from_str::<ListAgentsParams>(&arguments) {
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "agent_list".to_string(),
+        params_for_event,
+        || async move {
+    match serde_json::from_str::<ListAgentsParams>(&arguments_clone) {
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
@@ -2875,7 +2953,7 @@ async fn handle_list_agents(
             });
 
             ResponseInputItem::FunctionCallOutput {
-                call_id,
+                call_id: call_id_clone,
                 output: FunctionCallOutputPayload {
                     content: summary.to_string(),
                     success: Some(true),
@@ -2883,13 +2961,15 @@ async fn handle_list_agents(
             }
         }
         Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id,
+            call_id: call_id_clone,
             output: FunctionCallOutputPayload {
                 content: format!("Invalid list_agents arguments: {}", e),
                 success: None,
             },
         },
     }
+        },
+    ).await
 }
 
 async fn handle_container_exec_with_params(

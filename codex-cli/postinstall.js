@@ -72,7 +72,7 @@ async function main() {
   // Binary names to download (Rust artifacts remain named 'coder*')
   const binaries = ['coder', 'coder-tui', 'coder-exec'];
   
-  console.log(`Installing @just-every/coder v${version} for ${targetTriple}...`);
+  console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
   
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;

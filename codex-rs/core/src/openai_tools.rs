@@ -546,7 +546,7 @@ mod tests {
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["local_shell", "update_plan", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents"]);
+        assert_eq_tool_names(&tools, &["local_shell", "update_plan", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list"]);
     }
 
     #[test]
@@ -560,7 +560,7 @@ mod tests {
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["shell", "update_plan", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents"]);
+        assert_eq_tool_names(&tools, &["shell", "update_plan", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list"]);
     }
 
     #[test]
@@ -611,7 +611,7 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "test_server/do_something_cool"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "test_server/do_something_cool"]);
 
         assert_eq!(
             tools[1],
@@ -691,7 +691,7 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/search"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/search"]);
 
         assert_eq!(
             tools[1],
@@ -745,7 +745,7 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/paginate"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/paginate"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {
@@ -796,7 +796,7 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/tags"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/tags"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {
@@ -850,7 +850,7 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "run_agent", "check_agent_status", "get_agent_result", "cancel_agent", "wait_for_agent", "list_agents", "dash/value"]);
+        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/value"]);
         assert_eq!(
             tools[1],
             OpenAiTool::Function(ResponsesApiTool {

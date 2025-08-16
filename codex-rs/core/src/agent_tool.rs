@@ -679,7 +679,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "run_agent".to_string(),
+        name: "agent_run".to_string(),
         description: "Start a complex AI task asynchronously. Returns a agent ID immediately to check status and retrieve results.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
@@ -701,7 +701,7 @@ pub fn create_check_agent_status_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "check_agent_status".to_string(),
+        name: "agent_check".to_string(),
         description: "Check the status of a running agent. Returns current status, progress, and partial results if available.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
@@ -723,7 +723,7 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "get_agent_result".to_string(),
+        name: "agent_result".to_string(),
         description: "Get the final result of a completed agent.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
@@ -757,7 +757,7 @@ pub fn create_cancel_agent_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "cancel_agent".to_string(),
+        name: "agent_cancel".to_string(),
         description: "Cancel a pending or running agent, or all agents in a batch.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
@@ -808,7 +808,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "wait_for_agent".to_string(),
+        name: "agent_wait".to_string(),
         description: "Wait for a agent or any agent in a batch to complete, fail, or be cancelled."
             .to_string(),
         strict: false,
@@ -847,7 +847,7 @@ pub fn create_list_agents_tool() -> OpenAiTool {
     );
 
     OpenAiTool::Function(ResponsesApiTool {
-        name: "list_agents".to_string(),
+        name: "agent_list".to_string(),
         description: "List all agents with their current status.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {

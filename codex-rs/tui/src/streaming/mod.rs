@@ -157,10 +157,10 @@ impl HeaderEmitter {
 
 fn render_header_line(kind: StreamKind) -> ratatui::text::Line<'static> {
     match kind {
-        // Reasoning header in dim text
+        // Reasoning header uses theme primary color
         StreamKind::Reasoning => ratatui::text::Line::styled(
             "thinking",
-            ratatui::style::Style::default().fg(crate::colors::text_dim()),
+            ratatui::style::Style::default().fg(crate::colors::primary()),
         ),
         // Agent/Codex header in bright text
         StreamKind::Answer => ratatui::text::Line::styled(
