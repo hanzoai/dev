@@ -1,14 +1,10 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Constraint;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::Block;
-use ratatui::widgets::BorderType;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Cell;
 use ratatui::widgets::Row;
 use ratatui::widgets::Table;
@@ -22,6 +18,8 @@ pub(crate) struct GenericDisplayRow {
     pub match_indices: Option<Vec<usize>>, // indices to bold (char positions)
     pub is_current: bool,
     pub description: Option<String>, // optional grey text after the name
+    /// Optional explicit color for the `name` span. When `None`, default text color is used.
+    pub name_color: Option<ratatui::style::Color>,
 }
 
 impl GenericDisplayRow {}
@@ -71,6 +69,7 @@ pub(crate) fn render_rows(
                 match_indices,
                 is_current,
                 description,
+                name_color,
             } = row;
 
             // Highlight fuzzy indices when present.
@@ -79,6 +78,9 @@ pub(crate) fn render_rows(
                 let mut idx_iter = idxs.iter().peekable();
                 for (char_idx, ch) in name.chars().enumerate() {
                     let mut style = Style::default();
+                    if let Some(color) = *name_color {
+                        style = style.fg(color);
+                    }
                     if idx_iter.peek().is_some_and(|next| **next == char_idx) {
                         idx_iter.next();
                         style = style.add_modifier(Modifier::BOLD);
@@ -86,7 +88,11 @@ pub(crate) fn render_rows(
                     spans.push(Span::styled(ch.to_string(), style));
                 }
             } else {
-                spans.push(Span::raw(name.clone()));
+                let mut style = Style::default();
+                if let Some(color) = *name_color {
+                    style = style.fg(color);
+                }
+                spans.push(Span::styled(name.clone(), style));
             }
 
             if let Some(desc) = description.as_ref() {
@@ -99,11 +105,7 @@ pub(crate) fn render_rows(
 
             let mut cell = Cell::from(Line::from(spans));
             if Some(i) == state.selected_idx {
-                cell = cell.style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                );
+                cell = cell.style(Style::default().fg(crate::colors::primary()));
             } else if *is_current {
                 cell = cell.style(Style::default().fg(crate::colors::light_blue()));
             }
@@ -112,12 +114,6 @@ pub(crate) fn render_rows(
     }
 
     let table = Table::new(rows, vec![Constraint::Percentage(100)])
-        .block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_type(BorderType::QuadrantOutside)
-                .border_style(Style::default().fg(crate::colors::dim())),
-        )
         .widths([Constraint::Percentage(100)]);
 
     table.render(area, buf);

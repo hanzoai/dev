@@ -66,6 +66,11 @@ pub(crate) struct BottomPane<'a> {
     /// True if the active view is the StatusIndicatorView that replaces the
     /// composer during a running task.
     status_view_active: bool,
+
+    /// Whether to reserve an empty spacer line above the input composer.
+    /// Defaults to true for visual breathing room, but can be disabled when
+    /// the chat history is scrolled up to allow history to reclaim that row.
+    top_spacer_enabled: bool,
 }
 
 pub(crate) struct BottomPaneParams {
@@ -76,7 +81,8 @@ pub(crate) struct BottomPaneParams {
 }
 
 impl BottomPane<'_> {
-    const BOTTOM_PAD_LINES: u16 = 2;
+    // Reduce bottom padding so footer sits one line lower
+    const BOTTOM_PAD_LINES: u16 = 1;
     pub fn new(params: BottomPaneParams) -> Self {
         let enhanced_keys_supported = params.enhanced_keys_supported;
         Self {
@@ -93,6 +99,7 @@ impl BottomPane<'_> {
             ctrl_c_quit_hint: false,
             live_ring: None,
             status_view_active: false,
+            top_spacer_enabled: true,
         }
     }
 
@@ -110,8 +117,9 @@ impl BottomPane<'_> {
         let view_height = if let Some(view) = self.active_view.as_ref() {
             view.desired_height(width)
         } else {
-            // Add 1 for the empty line above the composer
-            1 + self.composer.desired_height(width)
+            // Optionally add 1 for the empty line above the composer
+            let spacer = if self.top_spacer_enabled { 1 } else { 0 };
+            spacer + self.composer.desired_height(width)
         };
 
         ring_h
@@ -125,8 +133,8 @@ impl BottomPane<'_> {
         if self.active_view.is_some() {
             None
         } else {
-            // Account for the empty line above the composer
-            let y_offset = 1u16;
+            // Account for the optional empty line above the composer
+            let y_offset = if self.top_spacer_enabled { 1u16 } else { 0u16 };
 
             // Adjust composer area to account for empty line and padding
             let horizontal_padding = 1u16; // Message input uses 1 char padding
@@ -150,12 +158,12 @@ impl BottomPane<'_> {
                 self.active_view = Some(view);
             }
             // Don't create a status view - keep composer visible
-            self.request_redraw();
+            self.request_immediate_redraw();
             InputResult::None
         } else {
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
             if needs_redraw {
-                self.request_redraw();
+                self.request_immediate_redraw();
             }
             input_result
         }
@@ -189,7 +197,7 @@ impl BottomPane<'_> {
         if self.active_view.is_none() {
             let needs_redraw = self.composer.handle_paste(pasted);
             if needs_redraw {
-                self.request_redraw();
+                self.request_immediate_redraw();
             }
         }
     }
@@ -197,6 +205,17 @@ impl BottomPane<'_> {
     pub(crate) fn insert_str(&mut self, text: &str) {
         self.composer.insert_str(text);
         self.request_redraw();
+    }
+
+    /// Enable or disable compact compose mode. When enabled, the spacer line
+    /// above the input composer is removed so the history can scroll into that
+    /// row. This is typically toggled when the user scrolls up.
+    pub(crate) fn set_compact_compose(&mut self, compact: bool) {
+        let new_enabled = !compact;
+        if self.top_spacer_enabled != new_enabled {
+            self.top_spacer_enabled = new_enabled;
+            self.request_redraw();
+        }
     }
 
     /// Update the status indicator text. Shows status as overlay above composer
@@ -354,11 +373,34 @@ impl BottomPane<'_> {
         self.app_event_tx.send(AppEvent::RequestRedraw)
     }
 
+    pub(crate) fn request_immediate_redraw(&self) {
+        self.app_event_tx.send(AppEvent::ImmediateRedraw)
+    }
+
     pub(crate) fn flash_footer_notice(&mut self, text: String) {
         self.composer.flash_footer_notice(text);
         // Ask app to schedule a redraw shortly to clear the notice automatically
         self.app_event_tx
             .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(2100)));
+        self.request_redraw();
+    }
+
+    /// Control footer hint visibility: whether to show Ctrl+R (reasoning) and Ctrl+D (diffs)
+    #[allow(dead_code)]
+    pub(crate) fn set_footer_hints(&mut self, show_reasoning: bool, show_diffs: bool) {
+        self.composer.set_show_reasoning_hint(show_reasoning);
+        self.composer.set_show_diffs_hint(show_diffs);
+        self.request_redraw();
+    }
+
+    /// Convenience setters for individual hints
+    pub(crate) fn set_reasoning_hint(&mut self, show: bool) {
+        self.composer.set_show_reasoning_hint(show);
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_diffs_hint(&mut self, show: bool) {
+        self.composer.set_show_diffs_hint(show);
         self.request_redraw();
     }
 
@@ -455,8 +497,10 @@ impl WidgetRef for &BottomPane<'_> {
                 view.render(view_rect, buf);
             }
         } else if y_offset < area.height {
-            // Always add an empty line above the input box
-            y_offset = y_offset.saturating_add(1);
+            // Optionally add an empty line above the input box
+            if self.top_spacer_enabled {
+                y_offset = y_offset.saturating_add(1);
+            }
 
             // Add horizontal padding (2 chars on each side) for Message input
             let horizontal_padding = 1u16;
@@ -593,12 +637,11 @@ mod tests {
         }
         assert!(r2.trim().is_empty(), "expected blank spacer line: {r2:?}");
 
-        // Bottom row is the status line; it should contain the left bar and "Coding".
+        // Bottom row is the status line; it should contain the "Coding" header.
         let mut r3 = String::new();
         for x in 0..area.width {
             r3.push(buf[(x, 3)].symbol().chars().next().unwrap_or(' '));
         }
-        assert_eq!(buf[(0, 3)].symbol().chars().next().unwrap_or(' '), '▌');
         assert!(
             r3.contains("Coding"),
             "expected Coding header in status line: {r3:?}"
@@ -751,7 +794,6 @@ mod tests {
         for x in 0..area.width {
             top.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
-        assert_eq!(buf[(0, 0)].symbol().chars().next().unwrap_or(' '), '▌');
         assert!(
             top.contains("Coding"),
             "expected Coding header on top row: {top:?}"

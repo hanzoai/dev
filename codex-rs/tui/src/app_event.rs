@@ -6,6 +6,7 @@ use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
 use ratatui::text::Line;
+use crate::streaming::StreamKind;
 use std::time::Duration;
 
 use crate::app::ChatWidgetArgs;
@@ -19,6 +20,10 @@ pub(crate) enum AppEvent {
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
+
+    /// Request an immediate redraw with no debounce. Intended for latency-sensitive
+    /// interactions like input editing and cursor movement.
+    ImmediateRedraw,
 
     /// Actually draw the next frame.
     Redraw,
@@ -74,6 +79,7 @@ pub(crate) enum AppEvent {
     },
 
     InsertHistory(Vec<Line<'static>>),
+    InsertHistoryWithKind { kind: StreamKind, lines: Vec<Line<'static>> },
 
     #[allow(dead_code)]
     StartCommitAnimation,
