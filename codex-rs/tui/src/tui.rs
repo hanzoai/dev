@@ -83,7 +83,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         )),
         Clear(ClearType::All),
         MoveTo(0, 0),
-        crossterm::terminal::SetTitle("Coder"),
+        crossterm::terminal::SetTitle("Code"),
         crossterm::terminal::EnableLineWrap
     )?;
 
