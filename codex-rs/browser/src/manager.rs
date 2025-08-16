@@ -10,6 +10,7 @@ use chromiumoxide::cdp::browser_protocol::network;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
@@ -790,17 +791,17 @@ impl BrowserManager {
                 let mut active_page = None;
 
                 for page in &pages {
-                    // Check if this page is visible by evaluating document.visibilityState
-                    // and document.hasFocus()
+                    // Evaluate visibility/focus of the tab. We avoid focus listeners since they won't fire when attaching.
                     let eval = page.evaluate(
-                            "(() => { 
-                            return {
-                                visible: document.visibilityState === 'visible',
-                                focused: document.hasFocus(),
-                                url: window.location.href
-                            };
-                        })()",
-                        );
+                        "(() => {\n"
+                        .to_string()
+                        + "  return {\n"
+                        + "    visible: document.visibilityState === 'visible',\n"
+                        + "    focused: (document.hasFocus && document.hasFocus()) || false,\n"
+                        + "    url: String(window.location.href || '')\n"
+                        + "  };\n"
+                        + "})()",
+                    );
                     // Guard against hung targets by timing out quickly
                     let is_visible = tokio::time::timeout(Duration::from_millis(300), eval).await;
 
@@ -821,7 +822,10 @@ impl BrowserManager {
                                 url, visible, focused
                             );
 
-                            // Prefer focused tab, then visible tab
+                            // Selection heuristic:
+                            // 1) Focused tab wins immediately
+                            // 2) Otherwise, prefer first visible tab encountered
+                            // 3) Otherwise, fallback to last available tab
                             if focused {
                                 info!("Found focused tab: {}", url);
                                 active_page = Some(page.clone());
@@ -1466,7 +1470,65 @@ impl BrowserManager {
             }})()"#
         );
 
-        page.execute_javascript(&script).await
+        // Use raw JS injection so our console hooks persist beyond the
+        // temporary wrapper used by execute_javascript(). This ensures
+        // console.* overrides remain active and logs accumulate across
+        // page interactions until explicitly cleared.
+        page.inject_js(&script).await
+    }
+
+    /// Execute an arbitrary CDP command against the active page session
+    pub async fn execute_cdp(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        let page = self.get_or_create_page().await?;
+        page.execute_cdp_raw(method, params).await
+    }
+
+    /// Execute an arbitrary CDP command at the browser (no session) scope
+    pub async fn execute_cdp_browser(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        // Ensure a browser is connected
+        self.ensure_browser().await?;
+        let browser_guard = self.browser.lock().await;
+        let browser = browser_guard
+            .as_ref()
+            .ok_or_else(|| BrowserError::CdpError("Browser not available".to_string()))?;
+
+        // Local raw command type (serialize only params)
+        #[derive(Debug, Clone)]
+        struct RawCdpCommandBrowser {
+            method: String,
+            params: Value,
+        }
+        impl serde::Serialize for RawCdpCommandBrowser {
+            fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                self.params.serialize(serializer)
+            }
+        }
+        impl chromiumoxide_types::Method for RawCdpCommandBrowser {
+            fn identifier(&self) -> chromiumoxide_types::MethodId {
+                self.method.clone().into()
+            }
+        }
+        impl chromiumoxide_types::Command for RawCdpCommandBrowser {
+            type Response = Value;
+        }
+
+        let cmd = RawCdpCommandBrowser {
+            method: method.to_string(),
+            params,
+        };
+        let resp = browser.execute(cmd).await?;
+        Ok(resp.result)
     }
 
     /// Get the current cursor position
@@ -1498,9 +1560,12 @@ impl BrowserManager {
         let navigation_callback = Arc::clone(&self.navigation_callback);
         let page_weak = Arc::downgrade(&page);
 
+        let assets_arc = Arc::clone(&self.assets);
+        let config_arc = Arc::clone(&self.config);
         let handle = tokio::spawn(async move {
             let mut last_url = String::new();
-            let mut check_count = 0;
+            let mut last_seq: u64 = 0;
+            let mut _check_count = 0; // reserved for future periodic checks
 
             loop {
                 // Check if page is still alive
@@ -1549,85 +1614,76 @@ impl BrowserManager {
                     }
                 }
 
-                // Also inject JavaScript to detect client-side navigation
-                if check_count % 10 == 0 {
-                    // Every 10 checks, reinject the navigation detection script
-                    let script = r#"
-                        (function() {
-                            if (!window.__coder_nav_monitor) {
-                                window.__coder_nav_monitor = true;
-                                let lastUrl = window.location.href;
-                                
-                                // Monitor for pushState/replaceState
-                                const originalPushState = history.pushState;
-                                const originalReplaceState = history.replaceState;
-                                
-                                history.pushState = function() {
-                                    originalPushState.apply(history, arguments);
-                                    window.__coder_url_changed = true;
-                                };
-                                
-                                history.replaceState = function() {
-                                    originalReplaceState.apply(history, arguments);
-                                    window.__coder_url_changed = true;
-                                };
-                                
-                                // Monitor popstate event
-                                window.addEventListener('popstate', function() {
-                                    window.__coder_url_changed = true;
-                                });
-                                
-                                // Monitor for hash changes
-                                window.addEventListener('hashchange', function() {
-                                    window.__coder_url_changed = true;
-                                });
+                // Listen for SPA changes via codex:locationchange (only when attached to external Chrome)
+                let cfg_now = config_arc.read().await.clone();
+                if cfg_now.connect_port.is_some() || cfg_now.connect_ws.is_some() {
+                    // Install listener once and poll sequence counter
+                    let listener_script = r#"
+                        (function(){
+                          try {
+                            if (!window.__codex_nav_listening) {
+                              window.__codex_nav_listening = true;
+                              window.__codex_nav_seq = 0;
+                              window.__codex_nav_url = String(location.href || '');
+                              window.addEventListener('codex:locationchange', function(){
+                                window.__codex_nav_seq += 1;
+                                window.__codex_nav_url = String(location.href || '');
+                              }, { capture: true });
                             }
-                            
-                            // Check if URL changed
-                            const changed = window.__coder_url_changed || false;
-                            window.__coder_url_changed = false;
-                            return {
-                                url: window.location.href,
-                                changed: changed
-                            };
+                            return { seq: Number(window.__codex_nav_seq||0), url: String(window.__codex_nav_url||location.href) };
+                          } catch (e) { return { seq: 0, url: String(location.href||'') }; }
                         })()
                     "#;
 
-                    if let Ok(result) = page.execute_javascript(script).await {
-                        if let Some(changed) = result.get("changed").and_then(|v| v.as_bool()) {
-                            if changed {
-                                if let Some(url) = result.get("url").and_then(|v| v.as_str()) {
-                                    info!("Client-side navigation detected: {}", url);
-                                    if let Some(ref callback) = *navigation_callback.read().await {
-                                        callback(url.to_string());
-                                    }
+                    if let Ok(result) = page.execute_javascript(listener_script).await {
+                        let seq = result.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let url = result
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
 
-                                    // Schedule a delayed callback for fully loaded page
-                                    let navigation_callback_delayed =
-                                        Arc::clone(&navigation_callback);
-                                    let url_delayed = url.to_string();
-                                    tokio::spawn(async move {
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                                            2000,
-                                        ))
-                                        .await;
-                                        if let Some(ref callback) =
-                                            *navigation_callback_delayed.read().await
-                                        {
-                                            info!(
-                                                "Page fully loaded callback for client-side nav: {}",
-                                                url_delayed
-                                            );
-                                            callback(url_delayed);
-                                        }
-                                    });
-                                }
+                        if seq > last_seq {
+                            info!("SPA locationchange detected: {} (seq {} -> {})", url, last_seq, seq);
+                            last_seq = seq;
+
+                            // Fire callback
+                            if let Some(ref callback) = *navigation_callback.read().await {
+                                callback(url.clone());
                             }
+
+                            // Capture a screenshot asynchronously
+                            let assets_arc2 = Arc::clone(&assets_arc);
+                            let config_arc2 = Arc::clone(&config_arc);
+                            let page_for_shot = Arc::clone(&page);
+                            tokio::spawn(async move {
+                                // Initialize assets manager if needed
+                                if assets_arc2.lock().await.is_none() {
+                                    if let Ok(am) = crate::assets::AssetManager::new().await {
+                                        *assets_arc2.lock().await = Some(Arc::new(am));
+                                    }
+                                }
+                                let assets_opt = assets_arc2.lock().await.clone();
+                                drop(assets_arc2);
+                                if let Some(assets) = assets_opt {
+                                    let cfg = config_arc2.read().await.clone();
+                                    let mode = if cfg.fullpage {
+                                        crate::page::ScreenshotMode::FullPage { segments_max: Some(cfg.segments_max) }
+                                    } else { crate::page::ScreenshotMode::Viewport };
+                                    // small delay to allow SPA content to render
+                                    tokio::time::sleep(Duration::from_millis(400)).await;
+                                    if let Ok(shots) = page_for_shot.screenshot(mode).await {
+                                        for s in shots {
+                                            let _ = assets.store_screenshot(&s.data, s.format, s.width, s.height, 300000).await;
+                                        }
+                                    }
+                                }
+                            });
                         }
                     }
                 }
 
-                check_count += 1;
+                // periodic counter disabled; listener-based SPA detection in place
 
                 // Check every 500ms
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;

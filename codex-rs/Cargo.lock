@@ -736,6 +736,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chromiumoxide",
+ "chromiumoxide_types",
  "chrono",
  "futures",
  "image 0.25.6",
