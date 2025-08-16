@@ -4,6 +4,7 @@ use crate::citation_regex::CITATION_REGEX;
 use crate::markdown_renderer::MarkdownRenderer;
 use codex_core::config::Config;
 use codex_core::config_types::UriBasedFileOpener;
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use std::borrow::Cow;
@@ -69,7 +70,10 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                     } else {
                         line
                     };
-                    let owned_line: Line<'static> = Line::from(Span::raw(line.to_string()));
+                    // Style code blocks using the theme's function color for visibility.
+                    let code_style = Style::default().fg(crate::colors::function());
+                    let owned_line: Line<'static> =
+                        Line::from(Span::styled(line.to_string(), code_style));
                     lines.push(owned_line);
                 }
             }

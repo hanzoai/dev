@@ -1,4 +1,4 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// Custom markdown renderer with full control over spacing and styling
@@ -64,10 +64,8 @@ impl MarkdownRenderer {
             // Handle headings
             if let Some(heading) = self.parse_heading(line) {
                 self.flush_current_line();
-                // Only add spacing before heading if we have content before it
-                if !self.lines.is_empty() && !self.is_last_line_blank() {
-                    self.lines.push(Line::from(""));
-                }
+                // Do not auto-insert spacing before headings; preserve exactly what the
+                // assistant returned. Only explicit blank lines in the source should render.
                 self.lines.push(heading);
                 i += 1;
                 continue;
@@ -120,7 +118,7 @@ impl MarkdownRenderer {
     
     fn add_code_line(&mut self, line: &str) {
         // Preserve exact indentation in code blocks
-        let code_style = Style::default().fg(Color::Cyan);
+        let code_style = Style::default().fg(crate::colors::function());
         self.lines.push(Line::from(Span::styled(
             line.to_string(),
             code_style,
@@ -153,12 +151,16 @@ impl MarkdownRenderer {
         
         // Style based on heading level
         let style = match level {
-            1 => Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-            2 => Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-            3 => Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-            4 => Style::default().fg(Color::Blue),
-            5 => Style::default().fg(Color::Cyan),
-            _ => Style::default().fg(Color::Cyan),
+            1 => Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD),
+            2 => Style::default().fg(crate::colors::primary()),
+            3 => Style::default()
+                .fg(crate::colors::text_bright())
+                .add_modifier(Modifier::BOLD),
+            4 => Style::default().fg(crate::colors::text_bright()),
+            5 => Style::default().fg(crate::colors::text_dim()),
+            _ => Style::default().fg(crate::colors::text_dim()),
         };
         
         // Include the # symbols in the output for clarity
@@ -177,14 +179,18 @@ impl MarkdownRenderer {
             // Determine nesting level from indent (2 spaces per level approximation)
             let level = (indent / 2) + 1;
             let bullet = match level {
-                1 => "•",
-                2 => "◦",
-                3 => "·",
-                4 => "∘",
+                1 => "◦",
+                2 => "·",
+                3 => "∘",
                 _ => "⋅",
             };
 
-            let mut spans = vec![Span::raw(" ".repeat(indent)), Span::raw(bullet), Span::raw(" ")];
+            let mut spans = vec![
+                Span::raw(" ".repeat(indent)),
+                // Render bullet using standard text color for consistency
+                Span::styled(bullet, Style::default().fg(crate::colors::text())),
+                Span::raw(" "),
+            ];
             spans.extend(styled_content);
             
             return Some(Line::from(spans));
@@ -200,7 +206,10 @@ impl MarkdownRenderer {
                 
                 let mut spans = vec![
                     Span::raw(" ".repeat(indent)),
-                    Span::styled(format!("{}.", number_part), Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("{}.", number_part),
+                        Style::default().fg(crate::colors::primary()),
+                    ),
                     Span::raw(" "),
                 ];
                 spans.extend(styled_content);
@@ -245,7 +254,7 @@ impl MarkdownRenderer {
                     // Found closing backtick — render code without surrounding backticks
                     spans.push(Span::styled(
                         code_content,
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(crate::colors::function()),
                     ));
                     i = j + 1;
                 } else {
@@ -275,7 +284,9 @@ impl MarkdownRenderer {
                         // Found closing markers
                         spans.push(Span::styled(
                             bold_content,
-                            Style::default().add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(crate::colors::text_dim())
+                                .add_modifier(Modifier::BOLD),
                         ));
                         i = j + 2;
                         break;
@@ -346,7 +357,9 @@ impl MarkdownRenderer {
                     let first_sentence = &current_text[..end_with_punct];
                     spans.push(Span::styled(
                         first_sentence.to_string(),
-                        Style::default().add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::BOLD),
                     ));
                     self.first_sentence_done = true;
                     
@@ -358,7 +371,9 @@ impl MarkdownRenderer {
                     // No sentence end found, bold the entire text
                     spans.push(Span::styled(
                         current_text,
-                        Style::default().add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::BOLD),
                     ));
                 }
             } else {
