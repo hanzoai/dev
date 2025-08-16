@@ -1032,10 +1032,11 @@ impl WidgetRef for &ChatComposer {
 
                     let token_usage = &token_usage_info.total_token_usage;
                     let used_str = format_with_thousands(token_usage.blended_total());
-                    right_spans.push(Span::from(used_str).style(Style::default().add_modifier(Modifier::BOLD)));
-                    right_spans.push(Span::from(" tokens used").style(Style::default()));
+                    // Numbers bold, color to match footer labels (toggle reasoning/diff viewer)
+                    right_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
+                    right_spans.push(Span::from(" tokens ").style(label_style));
 
-                    // Context remaining, if known
+                    // Context remaining, if known, rendered in parentheses
                     let last_token_usage = &token_usage_info.last_token_usage;
                     if let Some(context_window) = token_usage_info.model_context_window {
                         let percent_remaining: u8 = if context_window > 0 {
@@ -1047,11 +1048,11 @@ impl WidgetRef for &ChatComposer {
                         } else {
                             100
                         };
-                        right_spans.push(Span::from("  •  ").style(Style::default()));
+                        right_spans.push(Span::from("(").style(label_style));
                         right_spans.push(
-                            Span::from(percent_remaining.to_string()).style(Style::default().add_modifier(Modifier::BOLD)),
+                            Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)),
                         );
-                        right_spans.push(Span::from("% context left").style(Style::default()));
+                        right_spans.push(Span::from("% left)").style(label_style));
                     }
                 }
 
