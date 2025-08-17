@@ -15,6 +15,7 @@ members = [
     "mcp-client",
     "mcp-server",
     "mcp-types",
+    "protocol",
     "ollama",
     "tui",
 ]
