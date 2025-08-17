@@ -12,7 +12,7 @@ use codex_core::protocol::FileChange;
 use crate::history_cell::PatchEventType;
 
 #[allow(dead_code)]
-const SPACES_AFTER_LINE_NUMBER: usize = 4;
+const SPACES_AFTER_LINE_NUMBER: usize = 6;
 
 // Internal representation for diff line rendering
 #[allow(dead_code)]
@@ -290,15 +290,14 @@ fn push_wrapped_diff_line(
     let mut remaining_text: &str = text;
 
     // Reserve a fixed number of spaces after the line number so that content starts
-    // at a consistent column. The sign ("+"/"-") is rendered as part of the content
-    // and colored with the same foreground as the edited text, not as a separate
-    // dimmed column.
+    // at a consistent column. Always include a 1‑char diff sign ("+"/"-" or space)
+    // at the start of the content so gutters align across wrapped lines.
     let gap_after_ln = SPACES_AFTER_LINE_NUMBER.saturating_sub(ln_str.len());
     let first_prefix_cols = indent.len() + ln_str.len() + gap_after_ln;
     let cont_prefix_cols = indent.len() + ln_str.len() + gap_after_ln;
 
     let mut first = true;
-    let (sign_opt, line_style) = match kind { 
+    let (sign_opt, line_style) = match kind {
         DiffLineType::Insert => (Some('+'), Some(style_add())),
         DiffLineType::Delete => (Some('-'), Some(style_del())),
         DiffLineType::Context => (None, None),
@@ -328,12 +327,9 @@ fn push_wrapped_diff_line(
             spans.push(RtSpan::styled(ln_str.clone(), style_dim()));
             spans.push(RtSpan::raw(" ".repeat(gap_after_ln)));
 
-            // Prefix the content with the sign if it is an insertion or deletion, and color
-            // the sign and content with the same foreground as the edited text.
-            let display_chunk = match sign_opt {
-                Some(sign_char) => format!("{sign_char}{chunk}"),
-                None => chunk.to_string(),
-            };
+            // Always prefix the content with a sign char for consistent gutters
+            let sign_char = sign_opt.unwrap_or(' ');
+            let display_chunk = format!("{sign_char}{chunk}");
 
             let content_span = match line_style {
                 Some(style) => RtSpan::styled(display_chunk, style),
@@ -344,7 +340,7 @@ fn push_wrapped_diff_line(
             if let Some(style) = line_style {
                 line.style = line.style.patch(style);
             }
-            // Apply a very light background tint for added/removed lines for readability
+            // Apply themed tinted background for added/removed lines
             if matches!(kind, DiffLineType::Insert | DiffLineType::Delete) {
                 let tint = match kind {
                     DiffLineType::Insert => success_tint(),
@@ -356,8 +352,9 @@ fn push_wrapped_diff_line(
             lines.push(line);
             first = false;
         } else {
+            // Continuation lines keep a space for the sign column so content aligns
             let hang_prefix = format!(
-                "{indent}{}{}",
+                "{indent}{}{} ",
                 " ".repeat(ln_str.len()),
                 " ".repeat(gap_after_ln)
             );

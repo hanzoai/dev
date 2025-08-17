@@ -87,6 +87,9 @@ impl CodexMessageProcessor {
             ClientRequest::RemoveConversationListener { request_id, params } => {
                 self.remove_conversation_listener(request_id, params).await;
             }
+            ClientRequest::SendUserTurn { request_id, params } => {
+                self.send_user_turn_compat(request_id, params).await;
+            }
         }
     }
 
@@ -297,6 +300,63 @@ impl CodexMessageProcessor {
     }
 }
 
+impl CodexMessageProcessor {
+    // Minimal compatibility layer: translate SendUserTurn into our current
+    // flow by submitting only the user items. We intentionally do not attempt
+    // per‑turn reconfiguration here (model, cwd, approval, sandbox) to avoid
+    // destabilizing the session. This preserves behavior and acks the request
+    // so clients using the new method continue to function.
+    async fn send_user_turn_compat(
+        &self,
+        request_id: RequestId,
+        params: crate::wire_format::SendUserTurnParams,
+    ) {
+        use crate::wire_format::SendUserTurnResponse;
+
+        let crate::wire_format::SendUserTurnParams {
+            conversation_id,
+            items,
+            ..
+        } = params;
+
+        let Ok(conversation) = self
+            .conversation_manager
+            .get_conversation(conversation_id.0)
+            .await
+        else {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("conversation not found: {conversation_id}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        };
+
+        // Map wire input items into core protocol items.
+        let mapped_items: Vec<CoreInputItem> = items
+            .into_iter()
+            .map(|item| match item {
+                WireInputItem::Text { text } => CoreInputItem::Text { text },
+                WireInputItem::Image { image_url } => CoreInputItem::Image { image_url },
+                WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
+            })
+            .collect();
+
+        // Submit user input to the conversation.
+        let _ = conversation
+            .submit(Op::UserInput {
+                items: mapped_items,
+            })
+            .await;
+
+        // Acknowledge.
+        self.outgoing
+            .send_response(request_id, SendUserTurnResponse {})
+            .await;
+    }
+}
+
 async fn apply_bespoke_event_handling(
     event: Event,
     conversation_id: ConversationId,
@@ -367,6 +427,7 @@ fn derive_config_from_params(
         config: cli_overrides,
         base_instructions,
         include_plan_tool,
+        ..
     } = params;
     let overrides = ConfigOverrides {
         model,

@@ -94,8 +94,8 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Binary names to download (Rust artifacts remain named 'coder*')
-  const binaries = ['coder', 'coder-tui', 'coder-exec'];
+  // Binary names to download (new naming is 'code*')
+  const binaries = ['code', 'code-tui', 'code-exec'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
   
@@ -139,17 +139,17 @@ async function main() {
   }
   
   // Create platform-specific symlink/copy for main binary
-  const mainBinary = `coder-${targetTriple}${binaryExt}`;
+  const mainBinary = `code-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
   
   if (existsSync(mainBinaryPath)) {
-    console.log('Setting up main coder binary...');
+    console.log('Setting up main code binary...');
     
     // On Windows, we can't use symlinks easily, so update the JS wrapper
     // On Unix, the JS wrapper will find the correct binary
     console.log('✓ Installation complete!');
   } else {
-    console.warn('⚠ Main coder binary not found. You may need to build from source.');
+    console.warn('⚠ Main code binary not found. You may need to build from source.');
   }
 
   // With bin name = 'code', handle collisions with existing 'code' (e.g., VS Code)

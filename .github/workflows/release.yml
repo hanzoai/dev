@@ -73,27 +73,27 @@ jobs:
           # Linux builds
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            artifact: coder-x86_64-unknown-linux-musl
+            artifact: code-x86_64-unknown-linux-musl
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            artifact: coder-x86_64-unknown-linux-gnu
+            artifact: code-x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            artifact: coder-aarch64-unknown-linux-musl
+            artifact: code-aarch64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            artifact: coder-aarch64-unknown-linux-gnu
+            artifact: code-aarch64-unknown-linux-gnu
           # macOS builds
           - os: macos-14  # ARM Mac for both targets
             target: x86_64-apple-darwin
-            artifact: coder-x86_64-apple-darwin
+            artifact: code-x86_64-apple-darwin
           - os: macos-14
             target: aarch64-apple-darwin
-            artifact: coder-aarch64-apple-darwin
+            artifact: code-aarch64-apple-darwin
           # Windows build
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: coder-x86_64-pc-windows-msvc.exe
+            artifact: code-x86_64-pc-windows-msvc.exe
     
     steps:
     - name: Checkout code
@@ -163,19 +163,19 @@ jobs:
         fi
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         # Use --locked to ensure reproducible builds
-        cargo build --release --locked --target ${{ matrix.target }} --bin coder --bin coder-tui --bin coder-exec
+        cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
         
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp codex-rs/target/${{ matrix.target }}/release/coder.exe artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/coder-tui.exe artifacts/coder-tui-${{ matrix.target }}.exe
-          cp codex-rs/target/${{ matrix.target }}/release/coder-exec.exe artifacts/coder-exec-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
+          cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
         else
-          cp codex-rs/target/${{ matrix.target }}/release/coder artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/coder-tui artifacts/coder-tui-${{ matrix.target }}
-          cp codex-rs/target/${{ matrix.target }}/release/coder-exec artifacts/coder-exec-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
+          cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
+          cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
         fi
       shell: bash
       
