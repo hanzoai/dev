@@ -2296,7 +2296,7 @@ async fn handle_response_item(
 
 // Helper utilities for agent output/progress management
 fn ensure_agent_dir(cwd: &Path, agent_id: &str) -> Result<PathBuf, String> {
-    let dir = cwd.join(".coder").join("agents").join(agent_id);
+    let dir = cwd.join(".code").join("agents").join(agent_id);
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create agent dir {}: {}", dir.display(), e))?;
     Ok(dir)

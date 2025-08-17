@@ -238,7 +238,7 @@ pub async fn run_main(
         } else if cfg!(target_os = "macos")
             && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
         {
-            let brew_cmd = "brew upgrade coder";
+            let brew_cmd = "brew upgrade code";
             eprintln!("Run {} to update.", brew_cmd.cyan().on_black());
         } else {
             eprintln!(
