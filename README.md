@@ -14,12 +14,21 @@
 ## Why Code
 
   - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
+  - 📝 **Diff Viewer** - Side-by-side diffs with syntax highlighting
   - 🤖 **Multi-Agent Commands** - /plan, /solve, /code with agent panels
   - 🎨 **Theme System** - /themes with live preview and accessibility
   - 🧠 **Reasoning Control** - /reasoning for dynamic effort adjustment
   - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
   - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
   - 🔁 **Backwards compatible** – Supports `~/.codex/*` or default `~/.coder/*`
+
+&ensp;
+| <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
+|:--:|:--:|
+
+| <br><img src="docs/screenshots/browser.png" alt="Browser control" width="100%"><br>Browser control | <br><img src="docs/screenshots/agents.png" alt="Assist with Claude & Gemini" width="100%"><br>Assist with Claude & Gemini |
+|:--:|:--:|
+
 
 &ensp;
 ## Quickstart

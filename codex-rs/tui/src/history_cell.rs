@@ -2298,6 +2298,17 @@ pub(crate) fn retint_lines_in_place(
     }
 
     for line in lines.iter_mut() {
+        // First retint the line-level style so lines that rely on a global
+        // foreground/background (with span-level colors unset) still update.
+        {
+            let mut st = line.style;
+            if let Some(fg) = st.fg { st.fg = Some(map_color(fg, old, new)); }
+            if let Some(bg) = st.bg { st.bg = Some(map_color(bg, old, new)); }
+            if let Some(uc) = st.underline_color { st.underline_color = Some(map_color(uc, old, new)); }
+            line.style = st;
+        }
+
+        // Then retint any explicit span-level colors.
         let mut new_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
         for s in line.spans.drain(..) {
             let mut st = s.style;

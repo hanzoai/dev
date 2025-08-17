@@ -335,9 +335,15 @@ impl ChatWidget<'_> {
 
     /// Mark that the widget needs to be redrawn
     fn mark_needs_redraw(&mut self) {
-        // Clean up fully faded cells before redraw
+        // Clean up fully faded cells before redraw. If any are removed,
+        // invalidate the height cache since indices shift and our cache is
+        // keyed by (idx,width).
+        let before_len = self.history_cells.len();
         self.history_cells.retain(|cell| !cell.should_remove());
-        
+        if self.history_cells.len() != before_len {
+            self.invalidate_height_cache();
+        }
+
         // Send a redraw event to trigger UI update
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
@@ -1192,25 +1198,6 @@ impl ChatWidget<'_> {
 
     fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
         // Debug: trace cell being added
-        {
-            let kind = cell.kind();
-            let lines_dbg = cell.display_lines();
-            let first_dbg: String = lines_dbg
-                .first()
-                .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
-                .unwrap_or_default();
-            let last_dbg: String = lines_dbg
-                .last()
-                .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
-                .unwrap_or_default();
-            tracing::debug!(
-                "add_to_history: kind={:?} lines={} first={:?} last={:?}",
-                kind,
-                lines_dbg.len(),
-                first_dbg,
-                last_dbg
-            );
-        }
         // Note: We diverge from upstream here - upstream takes &dyn HistoryCell
         // and sends display_lines() through events. We store the actual cells
         // for our terminal rendering and theming system.
@@ -1351,7 +1338,7 @@ impl ChatWidget<'_> {
 
         // Store in memory for local rendering
         self.history_cells.push(new_cell);
-        tracing::debug!("add_to_history: history_cells now {} items", self.history_cells.len());
+        
         
         // Log animation cells
         // suppress noisy animation logging
@@ -2501,32 +2488,26 @@ impl ChatWidget<'_> {
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
+    /// Public-facing hook for preview mode to retint existing history lines
+    /// without persisting the theme or adding history events.
+    pub(crate) fn retint_history_for_preview(&mut self) {
+        self.restyle_history_after_theme_change();
+    }
+
     fn save_theme_to_config(&self, new_theme: codex_core::config_types::ThemeName) {
-        // For now, just log the theme change - config saving could be implemented
-        // using the core config system in a future update
-        let theme_str = match new_theme {
-            // Light themes
-            codex_core::config_types::ThemeName::LightPhoton => "light-photon",
-            codex_core::config_types::ThemeName::LightPrismRainbow => "light-prism-rainbow",
-            codex_core::config_types::ThemeName::LightVividTriad => "light-vivid-triad",
-            codex_core::config_types::ThemeName::LightPorcelain => "light-porcelain",
-            codex_core::config_types::ThemeName::LightSandbar => "light-sandbar",
-            codex_core::config_types::ThemeName::LightGlacier => "light-glacier",
-            // Dark themes
-            codex_core::config_types::ThemeName::DarkCarbonNight => "dark-carbon-night",
-            codex_core::config_types::ThemeName::DarkShinobiDusk => "dark-shinobi-dusk",
-            codex_core::config_types::ThemeName::DarkOledBlackPro => "dark-oled-black-pro",
-            codex_core::config_types::ThemeName::DarkAmberTerminal => "dark-amber-terminal",
-            codex_core::config_types::ThemeName::DarkAuroraFlux => "dark-aurora-flux",
-            codex_core::config_types::ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
-            codex_core::config_types::ThemeName::DarkZenGarden => "dark-zen-garden",
-            codex_core::config_types::ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
-            codex_core::config_types::ThemeName::Custom => "custom",
-        };
-        tracing::info!("Theme changed to: {}", theme_str);
-        // Note: To persist the theme, add the following to your config.toml:
-        // [tui.theme]
-        // name = "{}"
+        // Persist the theme selection to CODE_HOME/CODEX_HOME config.toml
+        match codex_core::config::find_codex_home() {
+            Ok(home) => {
+                if let Err(e) = codex_core::config::set_tui_theme_name(&home, new_theme) {
+                    tracing::warn!("Failed to persist theme to config.toml: {}", e);
+                } else {
+                    tracing::info!("Persisted TUI theme selection to config.toml");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Could not locate Codex home to persist theme: {}", e);
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -2572,11 +2553,6 @@ impl ChatWidget<'_> {
 
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
         let kind = self.current_stream_kind.unwrap_or(StreamKind::Answer);
-        tracing::debug!(
-            "insert_history_lines(default kind={:?}) {} lines",
-            kind,
-            lines.len()
-        );
         self.insert_history_lines_with_kind(kind, lines);
     }
 
@@ -2586,15 +2562,9 @@ impl ChatWidget<'_> {
         mut lines: Vec<ratatui::text::Line<'static>>,
     ) {
         // Insert all lines as a single streaming content cell to preserve spacing
-        if lines.is_empty() {
-            tracing::debug!(
-                "insert_history_lines_with_kind({:?}): empty lines (ignored)",
-                kind
-            );
-            return;
-        }
+        if lines.is_empty() { return; }
 
-        tracing::debug!("insert_history_lines(k={:?}): {} lines", kind, lines.len());
+        
         if let Some(first_line) = lines.first() {
             let first_line_text: String = first_line
                 .spans
@@ -2648,7 +2618,7 @@ impl ChatWidget<'_> {
                         .as_any_mut()
                         .downcast_mut::<history_cell::StreamingContentCell>()
                     {
-                        tracing::debug!("Appending {} lines to StreamingContentCell (Answer)", lines.len());
+                        
                         // Guard against stray header sneaking into a later chunk
                         if lines.first().map(|l| {
                             l.spans
@@ -2672,7 +2642,7 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
-                tracing::debug!("Creating regular StreamingContentCell");
+                
                 // Ensure a hidden 'codex' header is present
                 let has_header = lines.first().map(|l| {
                     l.spans
@@ -2689,9 +2659,7 @@ impl ChatWidget<'_> {
                     with_header.extend(lines);
                     lines = with_header;
                 }
-                self.history_cells
-                    .push(Box::new(history_cell::new_streaming_content(lines)));
-                tracing::debug!("StreamingContentCell appended; history_cells={}", self.history_cells.len());
+                self.history_cells.push(Box::new(history_cell::new_streaming_content(lines)));
             }
         }
 
@@ -3213,10 +3181,13 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.add_to_history(history_cell::new_background_event(format!(
-            "✅ Chrome launched with temporary profile at {}",
-            profile_dir.display()
-        )));
+        self.add_to_history(history_cell::PlainHistoryCell {
+            lines: vec![Line::from(format!(
+                "✅ Chrome launched with temporary profile at {}",
+                profile_dir.display()
+            ))],
+            kind: history_cell::HistoryCellType::BackgroundEvent,
+        });
     }
 
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
@@ -3328,7 +3299,10 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.add_to_history(history_cell::new_background_event(status_msg));
+                self.add_to_history(history_cell::PlainHistoryCell {
+                    lines: vec![Line::from(status_msg)],
+                    kind: history_cell::HistoryCellType::BackgroundEvent,
+                });
                 // Also reflect browsing activity in the input border
                 self.bottom_pane.update_status_text("using browser".to_string());
 
@@ -3654,8 +3628,12 @@ impl ChatWidget<'_> {
             "Browser commands:\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser".to_string()
         };
 
-        // Add the response to the UI as a background event (with a proper header)
-        self.add_to_history(history_cell::new_background_event(response));
+        // Add the response to the UI as a background event
+        let lines = response
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect();
+        self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
     }
 
     fn switch_to_internal_browser(&mut self) {
@@ -3748,7 +3726,7 @@ impl ChatWidget<'_> {
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
 
-        // Add status message to chat
+        // Add status message to chat (use BackgroundEvent with header so it renders reliably)
         let status_msg = format!(
             "🔗 Connecting to Chrome DevTools Protocol (port: {})...",
             port_display
@@ -4930,16 +4908,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     );
                 }
                 
-                // Debug: trace render of each item
-                tracing::debug!(
-                    "render item idx={} kind={:?} item_h={} vis_h={} skip_top={} area={:?}",
-                    idx,
-                    item.kind(),
-                    item_height,
-                    visible_height,
-                    skip_top,
-                    item_area
-                );
                 item.render_with_skip(item_area, buf, skip_rows);
                 screen_y += visible_height;
             }
@@ -4947,9 +4915,8 @@ impl WidgetRef for &ChatWidget<'_> {
             // Add spacing only if something was actually rendered for this item.
             // Prevents a stray blank row when a zero-height cell is present
             // (e.g., a streaming cell that currently only has a hidden header).
-            if idx < all_content.len() - 1 && !item.is_title_only() && visible_height > 0 {
+            if idx < all_content.len() - 1 && !item.is_title_only() {
                 if screen_y < content_area.y + content_area.height {
-                    tracing::debug!("render spacing after idx={}", idx);
                     screen_y += spacing.min((content_area.y + content_area.height).saturating_sub(screen_y));
                 }
             }
