@@ -626,6 +626,11 @@ impl App<'_> {
                         crossterm::terminal::EnableLineWrap
                     );
 
+                    // Retint pre-rendered history cells so the preview reflects immediately
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.retint_history_for_preview();
+                    }
+
                     // Don't update config or add to history for previews
                     // Request a redraw to apply the new theme
                     self.schedule_redraw();

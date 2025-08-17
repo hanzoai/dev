@@ -22,6 +22,13 @@ echo "Building coder binary (${PROFILE} mode)..."
 
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
+
+# In fast dev profile, suppress compiler warnings for a clean output while
+# still surfacing errors. This does not affect other profiles.
+if [ "$PROFILE" = "dev-fast" ]; then
+    export RUSTFLAGS="${RUSTFLAGS:-} -Awarnings"
+fi
+
 cargo build --profile "${PROFILE}" --bin coder
 
 # Check if build succeeded
