@@ -6,11 +6,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
+#[derive(Debug)]
 struct StreamInfo {
     response_file: PathBuf,
     events: Vec<Value>,
 }
 
+#[derive(Debug)]
 pub struct DebugLogger {
     enabled: bool,
     log_dir: PathBuf,
