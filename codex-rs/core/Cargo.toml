@@ -20,6 +20,7 @@ codex-apply-patch = { path = "../apply-patch" }
 codex-browser = { path = "../browser" }
 codex-login = { path = "../login" }
 codex-mcp-client = { path = "../mcp-client" }
+codex-protocol = { path = "../protocol" }
 dirs = "6"
 env-flags = "0.1.1"
 eventsource-stream = "0.2.3"
