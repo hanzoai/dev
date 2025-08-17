@@ -1024,13 +1024,21 @@ impl Page {
         let mut fallback_navigated = false;
 
         for attempt in 1..=max_retries {
-            match self.cdp_page.goto(url).await {
-                Ok(_) => {
+            // Wrap CDP navigation with a short timeout so we don't block ~30s
+            // for sites that load but don't signal expected events.
+            let nav_attempt = tokio::time::timeout(
+                tokio::time::Duration::from_secs(5),
+                self.cdp_page.goto(url),
+            )
+            .await;
+
+            match nav_attempt {
+                Ok(Ok(_)) => {
                     // Navigation reported success
                     last_error = None;
                     break;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let error_str = e.to_string();
                     if error_str.contains("Request timed out") || error_str.contains("timeout") {
                         warn!(
@@ -1066,6 +1074,37 @@ impl Page {
                         // Non-timeout error, fail immediately
                         return Err(e.into());
                     }
+                }
+                Err(_) => {
+                    // Our outer timeout fired; fallback to URL check, same as above.
+                    warn!(
+                        "Navigation attempt {}/{} exceeded 5s timeout; checking current URL...",
+                        attempt, max_retries
+                    );
+                    // Check if the page actually navigated despite the timeout
+                    if let Ok(cur_opt) = self.cdp_page.url().await {
+                        if let Some(cur) = cur_opt {
+                            let looks_loaded = cur.starts_with("http://") || cur.starts_with("https://");
+                            if looks_loaded && cur != "about:blank" {
+                                info!(
+                                    "Navigation exceeded timeout, but page URL is now {} — treating as success",
+                                    cur
+                                );
+                                fallback_navigated = true;
+                                last_error = None;
+                                break;
+                            }
+                        }
+                    }
+
+                    if attempt < max_retries {
+                        let delay_ms = 1000 * attempt as u64;
+                        info!("Retrying navigation after {}ms...", delay_ms);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                        continue;
+                    }
+                    // If this was the last attempt, return a synthetic timeout error
+                    return Err(BrowserError::CdpError("Navigation timed out".to_string()));
                 }
             }
         }
