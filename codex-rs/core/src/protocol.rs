@@ -211,6 +211,20 @@ pub struct WritableRoot {
     pub read_only_subpaths: Vec<PathBuf>,
 }
 
+impl WritableRoot {
+    pub fn is_path_writable(&self, path: &Path) -> bool {
+        if !path.starts_with(&self.root) {
+            return false;
+        }
+        for sub in &self.read_only_subpaths {
+            if path.starts_with(sub) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl FromStr for SandboxPolicy {
     type Err = serde_json::Error;
 

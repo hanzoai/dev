@@ -487,6 +487,10 @@ impl Session {
         &self.cwd
     }
 
+    pub(crate) fn get_sandbox_policy(&self) -> &SandboxPolicy {
+        &self.sandbox_policy
+    }
+
     fn resolve_path(&self, path: Option<String>) -> PathBuf {
         path.as_ref()
             .map(PathBuf::from)
