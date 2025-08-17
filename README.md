@@ -40,6 +40,8 @@ npm install -g @just-every/code
 code
 ```
 
+Note: If another tool already provides a `code` command (e.g., VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts. Check which command runs with `which -a code` (or `type -a code`). You can also run our CLI explicitly via `npx -y @just-every/code` or `$(npm bin -g)/code`.
+
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
   - Run `code` and pick "Sign in with ChatGPT"
