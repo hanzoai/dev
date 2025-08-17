@@ -45,12 +45,10 @@ pub(crate) async fn apply_patch(
     call_id: &str,
     action: ApplyPatchAction,
 ) -> InternalApplyPatchInvocation {
-    let writable_roots_snapshot = sess.get_writable_roots().to_vec();
-
     match assess_patch_safety(
         &action,
         sess.get_approval_policy(),
-        &writable_roots_snapshot,
+        sess.get_sandbox_policy(),
         sess.get_cwd(),
     ) {
         SafetyCheck::AutoApprove { .. } => {
