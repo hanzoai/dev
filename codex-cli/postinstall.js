@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Non-functional change to trigger release workflow
 
 import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
