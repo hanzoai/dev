@@ -1,5 +1,5 @@
 use crossterm::terminal;
-use ratatui::style::Color;
+// Color type is already in scope at the top of this module
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line as RtLine;
@@ -12,7 +12,7 @@ use codex_core::protocol::FileChange;
 use crate::history_cell::PatchEventType;
 
 #[allow(dead_code)]
-const SPACES_AFTER_LINE_NUMBER: usize = 6;
+const SPACES_AFTER_LINE_NUMBER: usize = 4;
 
 // Internal representation for diff line rendering
 #[allow(dead_code)]
@@ -268,6 +268,15 @@ fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'s
     out
 }
 
+/// Produce only the detailed diff lines without any file-level headers/summaries.
+/// Used by the Diff Viewer overlay where surrounding chrome already conveys context.
+#[allow(dead_code)]
+pub(super) fn create_diff_details_only(
+    changes: &HashMap<PathBuf, FileChange>,
+) -> Vec<RtLine<'static>> {
+    render_patch_details(changes)
+}
+
 #[allow(dead_code)]
 fn push_wrapped_diff_line(
     line_number: usize,
@@ -275,7 +284,8 @@ fn push_wrapped_diff_line(
     text: &str,
     term_cols: usize,
 ) -> Vec<RtLine<'static>> {
-    let indent = "    ";
+    // Slightly smaller left padding so line numbers sit a couple of spaces left
+    let indent = "  ";
     let ln_str = line_number.to_string();
     let mut remaining_text: &str = text;
 
@@ -288,7 +298,7 @@ fn push_wrapped_diff_line(
     let cont_prefix_cols = indent.len() + ln_str.len() + gap_after_ln;
 
     let mut first = true;
-    let (sign_opt, line_style) = match kind {
+    let (sign_opt, line_style) = match kind { 
         DiffLineType::Insert => (Some('+'), Some(style_add())),
         DiffLineType::Delete => (Some('-'), Some(style_del())),
         DiffLineType::Context => (None, None),
@@ -334,6 +344,15 @@ fn push_wrapped_diff_line(
             if let Some(style) = line_style {
                 line.style = line.style.patch(style);
             }
+            // Apply a very light background tint for added/removed lines for readability
+            if matches!(kind, DiffLineType::Insert | DiffLineType::Delete) {
+                let tint = match kind {
+                    DiffLineType::Insert => success_tint(),
+                    DiffLineType::Delete => error_tint(),
+                    DiffLineType::Context => crate::colors::background(),
+                };
+                line.style = line.style.bg(tint);
+            }
             lines.push(line);
             first = false;
         } else {
@@ -350,6 +369,14 @@ fn push_wrapped_diff_line(
             if let Some(style) = line_style {
                 line.style = line.style.patch(style);
             }
+            if matches!(kind, DiffLineType::Insert | DiffLineType::Delete) {
+                let tint = match kind {
+                    DiffLineType::Insert => success_tint(),
+                    DiffLineType::Delete => error_tint(),
+                    DiffLineType::Context => crate::colors::background(),
+                };
+                line.style = line.style.bg(tint);
+            }
             lines.push(line);
         }
     }
@@ -363,13 +390,69 @@ fn style_dim() -> Style {
 
 #[allow(dead_code)]
 fn style_add() -> Style {
-    Style::default().fg(Color::Green)
+    // Use theme success color for additions so it adapts to light/dark themes
+    Style::default().fg(crate::colors::success())
 }
 
 #[allow(dead_code)]
 fn style_del() -> Style {
-    Style::default().fg(Color::Red)
+    // Use theme error color for deletions so it adapts to light/dark themes
+    Style::default().fg(crate::colors::error())
 }
+
+// --- Very light tinted backgrounds for insert/delete lines ------------------
+use ratatui::style::Color;
+
+fn color_to_rgb(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::White => (255, 255, 255),
+        Color::Gray => (192, 192, 192),
+        Color::DarkGray => (128, 128, 128),
+        Color::Red => (205, 49, 49),
+        Color::Green => (13, 188, 121),
+        Color::Yellow => (229, 229, 16),
+        Color::Blue => (36, 114, 200),
+        Color::Magenta => (188, 63, 188),
+        Color::Cyan => (17, 168, 205),
+        Color::LightRed => (255, 102, 102),
+        Color::LightGreen => (102, 255, 178),
+        Color::LightYellow => (255, 255, 102),
+        Color::LightBlue => (102, 153, 255),
+        Color::LightMagenta => (255, 102, 255),
+        Color::LightCyan => (102, 255, 255),
+        Color::Indexed(i) => (i, i, i),
+        Color::Reset => color_to_rgb(crate::colors::background()),
+    }
+}
+
+fn blend(bg: (u8, u8, u8), fg: (u8, u8, u8), alpha: f32) -> (u8, u8, u8) {
+    let inv = 1.0 - alpha;
+    let r = (bg.0 as f32 * inv + fg.0 as f32 * alpha).round() as u8;
+    let g = (bg.1 as f32 * inv + fg.1 as f32 * alpha).round() as u8;
+    let b = (bg.2 as f32 * inv + fg.2 as f32 * alpha).round() as u8;
+    (r, g, b)
+}
+
+fn is_dark(rgb: (u8, u8, u8)) -> bool {
+    let l = (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0;
+    l < 0.55
+}
+
+fn tinted_bg_toward(accent: Color) -> Color {
+    let bg = color_to_rgb(crate::colors::background());
+    let fg = color_to_rgb(accent);
+    // Slightly stronger tint on dark themes, lighter on light themes
+    let alpha = if is_dark(bg) { 0.20 } else { 0.10 };
+    let (r, g, b) = blend(bg, fg, alpha);
+    Color::Rgb(r, g, b)
+}
+
+fn success_tint() -> Color { tinted_bg_toward(crate::colors::success()) }
+fn error_tint() -> Color { tinted_bg_toward(crate::colors::error()) }
+
+// Removed per-line tinted backgrounds per design feedback
 
 #[allow(clippy::expect_used)]
 #[cfg(test)]

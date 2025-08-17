@@ -741,7 +741,10 @@ impl BrowserManager {
     }
 
     pub async fn get_or_create_page(&self) -> Result<Arc<Page>> {
+        let overall_start = Instant::now();
+        info!("[bm] get_or_create_page: begin");
         self.ensure_browser().await?;
+        info!("[bm] get_or_create_page: ensure_browser in {:?}", overall_start.elapsed());
         self.update_activity().await;
 
         let mut page_guard = self.page.lock().await;
@@ -753,6 +756,10 @@ impl BrowserManager {
             match check_result {
                 Ok(Ok(_)) => {
                     // Page is responsive
+                    info!(
+                        "[bm] get_or_create_page: reused responsive page in {:?}",
+                        overall_start.elapsed()
+                    );
                     return Ok(Arc::clone(page));
                 }
                 Ok(Err(e)) => {
@@ -774,6 +781,7 @@ impl BrowserManager {
         // If we're connected to an existing Chrome (via connect_port or connect_ws),
         // try to use the current active tab instead of creating a new one
         let cdp_page = if config.connect_port.is_some() || config.connect_ws.is_some() {
+            info!("[bm] get_or_create_page: selecting an existing tab");
             // Try to get existing pages
             let mut pages = browser.pages().await?;
             if pages.is_empty() {
@@ -867,11 +875,14 @@ impl BrowserManager {
             }
         } else {
             // We launched Chrome ourselves, create a new page
+            info!("[bm] get_or_create_page: creating new about:blank tab");
             browser.new_page("about:blank").await?
         };
 
         // Apply page overrides (UA, locale, timezone, viewport, etc.)
+        let overrides_start = Instant::now();
         self.apply_page_overrides(&cdp_page).await?;
+        info!("[bm] get_or_create_page: overrides in {:?}", overrides_start.elapsed());
 
         let page = Arc::new(Page::new(cdp_page, config.clone()));
         *page_guard = Some(Arc::clone(&page));
@@ -885,6 +896,10 @@ impl BrowserManager {
 
         // Start navigation monitoring for this page
         self.start_navigation_monitor(Arc::clone(&page)).await;
+        info!(
+            "[bm] get_or_create_page: complete in {:?}",
+            overall_start.elapsed()
+        );
 
         Ok(page)
     }
@@ -1217,10 +1232,15 @@ impl BrowserManager {
         // Get or create page
         let page = self.get_or_create_page().await?;
 
+        let nav_start = std::time::Instant::now();
         info!("Navigating to URL: {}", url);
         let config = self.config.read().await;
         let result = page.goto(url, Some(config.wait.clone())).await?;
-        info!("Navigation complete to: {}", result.url);
+        info!(
+            "Navigation complete to: {} in {:?}",
+            result.url,
+            nav_start.elapsed()
+        );
 
         // Manually trigger navigation callback for immediate response
         if let Some(ref callback) = *self.navigation_callback.read().await {

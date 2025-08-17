@@ -3933,18 +3933,23 @@ async fn handle_browser_open(
                     };
 
                     if let Some(browser_manager) = browser_manager {
-                        // Navigate to the URL
+                        // Navigate to the URL with detailed timing logs
+                        let step_start = std::time::Instant::now();
+                        tracing::info!("[browser_open] begin goto: {}", url);
                         match browser_manager.goto(url).await {
                             Ok(_) => {
                                 tracing::info!(
-                                    "Browser navigation to {} completed successfully",
-                                    url
+                                    "[browser_open] goto success: {} in {:?}",
+                                    url,
+                                    step_start.elapsed()
                                 );
-                                // Capture screenshot after navigation
+                                let ss_start = std::time::Instant::now();
+                                // Capture screenshot after navigation (synchronous)
                                 match capture_browser_screenshot(sess_clone).await {
                                     Ok((screenshot_path, updated_url)) => {
                                         tracing::info!(
-                                            "Screenshot captured after navigation: {} at URL: {}",
+                                            "[browser_open] screenshot captured in {:?}: {} at URL: {}",
+                                            ss_start.elapsed(),
                                             screenshot_path.display(),
                                             updated_url
                                         );
@@ -3956,8 +3961,8 @@ async fn handle_browser_open(
                                     }
                                     Err(e) => {
                                         tracing::warn!(
-                                            "Screenshot capture failed after navigation: {}",
-                                            e
+                                            "[browser_open] screenshot failed after {:?}: {}",
+                                            ss_start.elapsed(), e
                                         );
                                     }
                                 }
