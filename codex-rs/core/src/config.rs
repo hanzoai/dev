@@ -2,6 +2,7 @@ use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
 use crate::config_types::BrowserConfig;
 use crate::config_types::History;
+use crate::config_types::ThemeName;
 use crate::config_types::McpServerConfig;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
@@ -267,6 +268,52 @@ pub fn set_project_trusted(codex_home: &Path, project_path: &Path) -> anyhow::Re
     // missing properties
     let project_key = project_path.to_string_lossy().to_string();
     doc["projects"][project_key.as_str()]["trust_level"] = toml_edit::value("trusted");
+
+    // ensure codex_home exists
+    std::fs::create_dir_all(codex_home)?;
+
+    // create a tmp_file
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+
+    // atomically move the tmp file into config.toml
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist the selected TUI theme into `CODEX_HOME/config.toml` at `[tui.theme].name`.
+pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+
+    // Parse existing config if present; otherwise start a new document.
+    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Map enum to kebab-case string used in config
+    let theme_str = match theme {
+        ThemeName::LightPhoton => "light-photon",
+        ThemeName::LightPrismRainbow => "light-prism-rainbow",
+        ThemeName::LightVividTriad => "light-vivid-triad",
+        ThemeName::LightPorcelain => "light-porcelain",
+        ThemeName::LightSandbar => "light-sandbar",
+        ThemeName::LightGlacier => "light-glacier",
+        ThemeName::DarkCarbonNight => "dark-carbon-night",
+        ThemeName::DarkShinobiDusk => "dark-shinobi-dusk",
+        ThemeName::DarkOledBlackPro => "dark-oled-black-pro",
+        ThemeName::DarkAmberTerminal => "dark-amber-terminal",
+        ThemeName::DarkAuroraFlux => "dark-aurora-flux",
+        ThemeName::DarkCharcoalRainbow => "dark-charcoal-rainbow",
+        ThemeName::DarkZenGarden => "dark-zen-garden",
+        ThemeName::DarkPaperLightPro => "dark-paper-light-pro",
+        ThemeName::Custom => "custom",
+    };
+
+    // Write `[tui.theme].name = "…"`
+    doc["tui"]["theme"]["name"] = toml_edit::value(theme_str);
 
     // ensure codex_home exists
     std::fs::create_dir_all(codex_home)?;

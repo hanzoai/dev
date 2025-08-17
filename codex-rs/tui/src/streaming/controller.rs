@@ -153,7 +153,11 @@ impl StreamController {
             }
             // Emit header immediately for reasoning; for answers, defer to first commit.
             if matches!(kind, StreamKind::Reasoning) {
-                tracing::debug!("Reasoning stream began (no immediate header emission)");
+                let mut header_lines = Vec::new();
+                if self.emit_header_if_needed(kind, &mut header_lines) {
+                    sink.insert_history(header_lines);
+                    self.thinking_placeholder_shown = true;
+                }
             }
         }
     }
@@ -166,11 +170,6 @@ impl StreamController {
         };
         tracing::debug!("push_and_maybe_commit for {:?}, delta={:?}", kind, delta);
         let cfg = self.config.clone();
-        // Capture prior committed count to detect first-commit case
-        let was_committed_before = {
-            let state = self.state(kind);
-            state.collector.committed_count()
-        };
 
         // Check header flag before borrowing state (used only to avoid double headers)
         let _just_emitted_header = self.header.consume_header_flag();
@@ -183,17 +182,17 @@ impl StreamController {
         state.collector.push_delta(delta);
         if delta.contains('\n') {
             let mut newly_completed = state.collector.commit_complete_lines(&cfg);
-            // Drop all leading blanks on the first commit; thereafter, allow at most one.
+            // Reduce leading blanks to at most one across commits
             if !newly_completed.is_empty() {
                 let mut skip_count = 0;
                 while skip_count < newly_completed.len()
                     && crate::render::line_utils::is_blank_line_trim(&newly_completed[skip_count]) {
                     skip_count += 1;
                 }
-                if was_committed_before == 0 {
-                    if skip_count > 0 { newly_completed.drain(0..skip_count); }
-                } else if skip_count > 1 {
-                    newly_completed.drain(0..skip_count - 1);
+                if skip_count > 1 {
+                    for _ in 0..(skip_count - 1) {
+                        newly_completed.remove(0);
+                    }
                 }
             }
             if !newly_completed.is_empty() {
@@ -236,11 +235,6 @@ impl StreamController {
             self.begin(StreamKind::Reasoning, sink);
         }
         let cfg = self.config.clone();
-        // Capture prior committed count to detect first-commit case
-        let was_committed_before = {
-            let s = self.state(StreamKind::Reasoning);
-            s.collector.committed_count()
-        };
         let state = self.state_mut(StreamKind::Reasoning);
         // Insert an explicit section break so upcoming section titles are
         // rendered on a fresh line. Without this, bold titles that arrive
@@ -248,17 +242,17 @@ impl StreamController {
         // recognized as titles in collapsed view.
         state.collector.insert_section_break();
         let mut newly_completed = state.collector.commit_complete_lines(&cfg);
-        // First emit: drop all leading blanks; afterwards keep at most one.
+        // Reduce leading blanks to at most one after section breaks
         if !newly_completed.is_empty() {
             let mut skip_count = 0;
             while skip_count < newly_completed.len()
                 && crate::render::line_utils::is_blank_line_trim(&newly_completed[skip_count]) {
                 skip_count += 1;
             }
-            if was_committed_before == 0 {
-                if skip_count > 0 { newly_completed.drain(0..skip_count); }
-            } else if skip_count > 1 {
-                newly_completed.drain(0..skip_count - 1);
+            if skip_count > 1 {
+                for _ in 0..(skip_count - 1) {
+                    newly_completed.remove(0);
+                }
             }
         }
         if !newly_completed.is_empty() {
@@ -290,11 +284,6 @@ impl StreamController {
             return false;
         }
         let cfg = self.config.clone();
-        // Capture prior committed count to detect first-commit case
-        let was_committed_before = {
-            let state = self.state(kind);
-            state.collector.committed_count()
-        };
         // Finalize collector first.
         let remaining = {
             let state = self.state_mut(kind);
@@ -320,10 +309,10 @@ impl StreamController {
                     && crate::render::line_utils::is_blank_line_trim(&out_lines[skip_count]) {
                     skip_count += 1;
                 }
-                if was_committed_before == 0 {
-                    if skip_count > 0 { out_lines.drain(0..skip_count); }
-                } else if skip_count > 1 {
-                    out_lines.drain(0..skip_count - 1);
+                if skip_count > 1 {
+                    for _ in 0..(skip_count - 1) {
+                        out_lines.remove(0);
+                    }
                 }
                 // Apply stream-specific color to body lines
                 let color = match kind {
