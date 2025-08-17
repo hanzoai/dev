@@ -239,7 +239,7 @@ impl MessageProcessor {
             instructions: None,
             protocol_version: params.protocol_version.clone(),
             server_info: mcp_types::Implementation {
-                name: "coder-mcp-server".to_string(),
+                name: "code-mcp-server".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 title: Some("Code".to_string()),
             },

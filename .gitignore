@@ -92,3 +92,4 @@ branches/
 
 # coder directories
 .coder/
+.code/

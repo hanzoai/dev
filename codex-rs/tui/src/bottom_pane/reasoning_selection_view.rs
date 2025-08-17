@@ -152,7 +152,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
                 Span::styled(
                     format!("{}", self.current_effort),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(crate::colors::warning())
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -166,10 +166,10 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
 
             let mut style = Style::default();
             if is_selected {
-                style = style.bg(Color::DarkGray).add_modifier(Modifier::BOLD);
+                style = style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
             }
             if is_current {
-                style = style.fg(Color::Yellow);
+                style = style.fg(crate::colors::warning());
             }
 
             let prefix = if is_selected { "▶ " } else { "  " };
@@ -186,9 +186,9 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
         lines.push(Line::from(vec![
             Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
             Span::raw(" Navigate  "),
-            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled("Enter", Style::default().fg(crate::colors::success())),
             Span::raw(" Select  "),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled("Esc", Style::default().fg(crate::colors::error())),
             Span::raw(" Cancel"),
         ]));
 

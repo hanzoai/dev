@@ -495,7 +495,7 @@ impl HistoryCell for LoadingCell {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("⟳ ", Style::default().fg(Color::Cyan)),
+                Span::styled("⟳ ", Style::default().fg(crate::colors::info())),
                 Span::from("Loading..."),
             ]),
             Line::from(""),
@@ -852,7 +852,7 @@ fn output_lines(
                         "> ",
                         Style::default()
                             .add_modifier(Modifier::DIM)
-                            .fg(Color::Gray),
+                            .fg(crate::colors::text_dim()),
                     ),
                 ];
                 let escaped_line = ansi_escape_line(line);

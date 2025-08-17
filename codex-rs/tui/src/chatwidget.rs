@@ -2778,7 +2778,7 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "macos")]
         {
-            let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}/code-chrome.log", std::env::temp_dir().display());
             let mut cmd = std::process::Command::new(
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             );
@@ -2803,7 +2803,7 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "linux")]
         {
-            let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}/code-chrome.log", std::env::temp_dir().display());
             let mut cmd = std::process::Command::new("google-chrome");
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg("--no-first-run")
@@ -2826,7 +2826,7 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "windows")]
         {
-            let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}\\code-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".to_string(),
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe".to_string(),
@@ -3090,11 +3090,11 @@ impl ChatWidget<'_> {
         use std::process::Stdio;
 
         let temp_dir = std::env::temp_dir();
-        let profile_dir = temp_dir.join(format!("coder-chrome-temp-{}", port));
+        let profile_dir = temp_dir.join(format!("code-chrome-temp-{}", port));
 
         #[cfg(target_os = "macos")]
         {
-            let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}/code-chrome.log", std::env::temp_dir().display());
             let mut cmd = std::process::Command::new(
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             );
@@ -3120,7 +3120,7 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "linux")]
         {
-            let log_path = format!("{}/coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}/code-chrome.log", std::env::temp_dir().display());
             let mut cmd = std::process::Command::new("google-chrome");
             cmd.arg(format!("--remote-debugging-port={}", port))
                 .arg(format!("--user-data-dir={}", profile_dir.display()))
@@ -3144,7 +3144,7 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "windows")]
         {
-            let log_path = format!("{}\\coder-chrome.log", std::env::temp_dir().display());
+            let log_path = format!("{}\\code-chrome.log", std::env::temp_dir().display());
             let chrome_paths = vec![
                 "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".to_string(),
                 "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe".to_string(),

@@ -385,18 +385,18 @@ fn generate_branch_id(model: &str, agent: &str) -> String {
         words.join("-").to_lowercase()
     };
 
-    format!("coder-{}-{}", model, agent_suffix)
+    format!("code-{}-{}", model, agent_suffix)
 }
 
 async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, String> {
-    // Create .coder/branches directory if it doesn't exist
-    let coder_dir = git_root.join(".coder").join("branches");
-    tokio::fs::create_dir_all(&coder_dir)
+    // Create .code/branches directory if it doesn't exist
+    let code_dir = git_root.join(".code").join("branches");
+    tokio::fs::create_dir_all(&code_dir)
         .await
-        .map_err(|e| format!("Failed to create .coder/branches directory: {}", e))?;
+        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
 
     // Path for this model's worktree
-    let worktree_path = coder_dir.join(branch_id);
+    let worktree_path = code_dir.join(branch_id);
 
     // Remove existing worktree if it exists (cleanup from previous runs)
     if worktree_path.exists() {
