@@ -382,6 +382,7 @@ impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
+    Minimal,
     Low,
     #[default]
     Medium,
@@ -415,4 +416,26 @@ pub enum TextVerbosity {
     #[default]
     Medium,
     High,
+}
+
+impl From<codex_protocol::config_types::ReasoningEffort> for ReasoningEffort {
+    fn from(v: codex_protocol::config_types::ReasoningEffort) -> Self {
+        match v {
+            codex_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
+            codex_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
+            codex_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
+            codex_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
+        }
+    }
+}
+
+impl From<codex_protocol::config_types::ReasoningSummary> for ReasoningSummary {
+    fn from(v: codex_protocol::config_types::ReasoningSummary) -> Self {
+        match v {
+            codex_protocol::config_types::ReasoningSummary::Auto => ReasoningSummary::Auto,
+            codex_protocol::config_types::ReasoningSummary::Concise => ReasoningSummary::Concise,
+            codex_protocol::config_types::ReasoningSummary::Detailed => ReasoningSummary::Detailed,
+            codex_protocol::config_types::ReasoningSummary::None => ReasoningSummary::None,
+        }
+    }
 }

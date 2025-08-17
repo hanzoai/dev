@@ -80,6 +80,9 @@ pub(crate) enum AppEvent {
         matches: Vec<FileMatch>,
     },
 
+    /// Result of computing a `/diff` command.
+    DiffResult(String),
+
     InsertHistory(Vec<Line<'static>>),
     InsertHistoryWithKind { kind: StreamKind, lines: Vec<Line<'static>> },
 
