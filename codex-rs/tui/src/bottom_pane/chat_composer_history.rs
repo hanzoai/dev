@@ -61,12 +61,21 @@ impl ChatComposerHistory {
     /// Record a message submitted by the user in the current session so it can
     /// be recalled later.
     pub fn record_local_submission(&mut self, text: &str) {
-        if !text.is_empty() {
-            self.local_history.push(text.to_string());
-            self.history_cursor = None;
-            self.last_history_text = None;
-            self.original_text = None;
+        if text.is_empty() {
+            return;
         }
+        // Avoid inserting a duplicate if identical to the previous entry.
+        if self
+            .local_history
+            .last()
+            .is_some_and(|prev| prev == text)
+        {
+            return;
+        }
+        self.local_history.push(text.to_string());
+        self.history_cursor = None;
+        self.last_history_text = None;
+        self.original_text = None;
     }
 
     /// Reset navigation state (used when clearing input with double-Esc or when text is edited)

@@ -239,7 +239,7 @@ npm install
 ./build-fast.sh
 
 # Run locally
-./codex-rs/target/dev-fast/coder
+./codex-rs/target/dev-fast/code
 ```
 
 ### Opening a pull request

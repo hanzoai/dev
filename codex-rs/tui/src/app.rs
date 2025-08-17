@@ -447,7 +447,7 @@ impl App<'_> {
                             break;
                         }
                         SlashCommand::Diff => {
-                            let (is_git_repo, diff_text) = match get_git_diff() {
+                            let (is_git_repo, diff_text) = match tokio::runtime::Handle::current().block_on(get_git_diff()) {
                                 Ok(v) => v,
                                 Err(e) => {
                                     let msg = format!("Failed to compute diff: {e}");
@@ -578,6 +578,11 @@ impl App<'_> {
                 AppEvent::UpdateTextVerbosity(new_verbosity) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_text_verbosity(new_verbosity);
+                    }
+                }
+                AppEvent::DiffResult(text) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.add_diff_output(text);
                     }
                 }
                 AppEvent::UpdateTheme(new_theme) => {

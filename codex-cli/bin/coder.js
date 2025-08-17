@@ -56,7 +56,11 @@ if (!targetTriple) {
   throw new Error(`Unsupported platform: ${platform} (${arch})`);
 }
 
-const binaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
+// Prefer new 'code-*' binary names; fall back to legacy 'coder-*' if missing.
+let binaryPath = path.join(__dirname, "..", "bin", `code-${targetTriple}`);
+if (!existsSync(binaryPath)) {
+  binaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
+}
 
 // Check if binary exists and try to fix permissions if needed
 import { existsSync, chmodSync } from "fs";

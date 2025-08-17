@@ -619,7 +619,7 @@ impl BrowserManager {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            let temp_path = format!("/tmp/coder-browser-{}-{}", std::process::id(), timestamp);
+            let temp_path = format!("/tmp/code-browser-{}-{}", std::process::id(), timestamp);
             if tokio::fs::metadata(&temp_path).await.is_ok() {
                 let _ = tokio::fs::remove_dir_all(&temp_path).await;
             }
@@ -652,7 +652,7 @@ impl BrowserManager {
             .arg("--enable-logging")
             .arg("--log-level=1") // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
             .arg(format!(
-                "--log-file={}/coder-chrome.log",
+                "--log-file={}/code-chrome.log",
                 std::env::temp_dir().display()
             ))
             // Suppress console output
