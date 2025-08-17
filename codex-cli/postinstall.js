@@ -56,6 +56,30 @@ async function downloadBinary(url, dest) {
 }
 
 async function main() {
+  // Detect potential PATH conflict with an existing `code` command (e.g., VS Code)
+  try {
+    const whichCmd = process.platform === 'win32' ? 'where code' : 'command -v code || which code || true';
+    const resolved = execSync(whichCmd, { stdio: ['ignore', 'pipe', 'ignore'], shell: process.platform !== 'win32' }).toString().split(/\r?\n/).filter(Boolean)[0];
+    if (resolved) {
+      let contents = '';
+      try {
+        contents = readFileSync(resolved, 'utf8');
+      } catch {
+        contents = '';
+      }
+      const looksLikeOurs = contents.includes('@just-every/code') || contents.includes('bin/coder.js');
+      if (!looksLikeOurs) {
+        console.warn('[notice] Found an existing `code` on PATH at:');
+        console.warn(`         ${resolved}`);
+        console.warn('[notice] We will still install our CLI, also available as `coder`.');
+        console.warn('         If `code` runs another tool, prefer using: coder');
+        console.warn('         Or run our CLI explicitly via: npx -y @just-every/code');
+      }
+    }
+  } catch {
+    // Ignore detection failures; proceed with install.
+  }
+
   const targetTriple = getTargetTriple();
   const isWindows = platform() === 'win32';
   const binaryExt = isWindows ? '.exe' : '';
