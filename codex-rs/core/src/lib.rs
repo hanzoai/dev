@@ -50,7 +50,6 @@ mod openai_model_info;
 mod openai_tools;
 pub mod plan_tool;
 mod project_doc;
-pub mod protocol;
 mod rollout;
 pub(crate) mod safety;
 pub mod seatbelt;
@@ -62,3 +61,7 @@ mod user_notification;
 pub mod util;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use safety::get_platform_sandbox;
+// Use our local protocol definitions to preserve custom events and input items.
+pub mod protocol;
+// Optionally expose upstream protocol config enums for callers that need them.
+pub use codex_protocol::config_types as protocol_config_types;

@@ -19,9 +19,7 @@ use uuid::Uuid;
 
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::message_history::HistoryEntry;
-use crate::model_provider_info::ModelProviderInfo;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
 
@@ -40,53 +38,6 @@ pub struct Submission {
 #[allow(clippy::large_enum_variant)]
 #[non_exhaustive]
 pub enum Op {
-    /// Configure the model session.
-    ConfigureSession {
-        /// Provider identifier ("openai", "openrouter", ...).
-        provider: ModelProviderInfo,
-
-        /// If not specified, server will use its default model.
-        model: String,
-
-        model_reasoning_effort: ReasoningEffortConfig,
-        model_reasoning_summary: ReasoningSummaryConfig,
-        model_text_verbosity: TextVerbosityConfig,
-
-        /// Model instructions that are appended to the base instructions.
-        user_instructions: Option<String>,
-
-        /// Base instructions override.
-        base_instructions: Option<String>,
-
-        /// When to escalate for approval for execution
-        approval_policy: AskForApproval,
-        /// How to sandbox commands executed in the system
-        sandbox_policy: SandboxPolicy,
-        /// Disable server-side response storage (send full context each request)
-        #[serde(default)]
-        disable_response_storage: bool,
-
-        /// Optional external notifier command tokens. Present only when the
-        /// client wants the agent to spawn a program after each completed
-        /// turn.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[serde(default)]
-        notify: Option<Vec<String>>,
-
-        /// Working directory that should be treated as the *root* of the
-        /// session. All relative paths supplied by the model as well as the
-        /// execution sandbox are resolved against this directory **instead**
-        /// of the process-wide current working directory. CLI front-ends are
-        /// expected to expand this to an absolute path before sending the
-        /// `ConfigureSession` operation so that the business-logic layer can
-        /// operate deterministically.
-        cwd: std::path::PathBuf,
-
-        /// Path to a rollout file to resume from.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        resume_path: Option<std::path::PathBuf>,
-    },
-
     /// Abort current task.
     /// This server sends no corresponding Event
     Interrupt,
@@ -95,6 +46,33 @@ pub enum Op {
     UserInput {
         /// User input items, see `InputItem`
         items: Vec<InputItem>,
+    },
+
+    /// Similar to [`Op::UserInput`], but contains additional context required
+    /// for a turn of a [`crate::codex_conversation::CodexConversation`].
+    UserTurn {
+        /// User input items, see `InputItem`
+        items: Vec<InputItem>,
+
+        /// `cwd` to use with the [`SandboxPolicy`] and potentially tool calls
+        /// such as `local_shell`.
+        cwd: PathBuf,
+
+        /// Policy to use for command approval.
+        approval_policy: AskForApproval,
+
+        /// Policy to use for tool calls such as `local_shell`.
+        sandbox_policy: SandboxPolicy,
+
+        /// Must be a valid model slug for the [`crate::client::ModelClient`]
+        /// associated with this conversation.
+        model: String,
+
+        /// Will only be honored if the model is configured to use reasoning.
+        effort: ReasoningEffortConfig,
+
+        /// Will only be honored if the model is configured to use reasoning.
+        summary: ReasoningSummaryConfig,
     },
 
     /// Approve a command execution
@@ -207,20 +185,27 @@ pub enum SandboxPolicy {
 /// not modified by the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WritableRoot {
+    /// Absolute path, by construction.
     pub root: PathBuf,
+
+    /// Also absolute paths, by construction.
     pub read_only_subpaths: Vec<PathBuf>,
 }
 
 impl WritableRoot {
     pub fn is_path_writable(&self, path: &Path) -> bool {
+        // Check if the path is under the root.
         if !path.starts_with(&self.root) {
             return false;
         }
-        for sub in &self.read_only_subpaths {
-            if path.starts_with(sub) {
+
+        // Check if the path is under any of the read-only subpaths.
+        for subpath in &self.read_only_subpaths {
+            if path.starts_with(subpath) {
                 return false;
             }
         }
+
         true
     }
 }
@@ -354,14 +339,6 @@ pub enum InputItem {
     LocalImage {
         path: std::path::PathBuf,
     },
-
-    /// Ephemeral image (like browser screenshots) that should not be persisted in history.
-    /// This will be converted to an `Image` variant but marked as ephemeral.
-    EphemeralImage {
-        path: std::path::PathBuf,
-        /// Optional metadata to help identify the image (e.g., "screenshot:1234567890:https://example.com")
-        metadata: Option<String>,
-    },
 }
 
 /// Event Queue Entry - events from agent
@@ -418,10 +395,6 @@ pub enum EventMsg {
 
     McpToolCallEnd(McpToolCallEndEvent),
 
-    /// Custom tool call events for non-MCP tools (browser, agent, etc)
-    CustomToolCallBegin(CustomToolCallBeginEvent),
-    CustomToolCallEnd(CustomToolCallEndEvent),
-
     /// Notification that the server is about to execute a command.
     ExecCommandBegin(ExecCommandBeginEvent),
 
@@ -449,12 +422,6 @@ pub enum EventMsg {
     GetHistoryEntryResponse(GetHistoryEntryResponseEvent),
 
     PlanUpdate(UpdatePlanArgs),
-
-    /// Browser screenshot has been captured and is ready for display
-    BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent),
-
-    /// Agent status has been updated
-    AgentStatusUpdate(AgentStatusUpdateEvent),
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
@@ -612,30 +579,6 @@ impl McpToolCallEndEvent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CustomToolCallBeginEvent {
-    /// Identifier so this can be paired with the CustomToolCallEnd event.
-    pub call_id: String,
-    /// Name of the tool (e.g., "browser_navigate", "agent_run")
-    pub tool_name: String,
-    /// Parameters passed to the tool as JSON
-    pub parameters: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CustomToolCallEndEvent {
-    /// Identifier for the corresponding CustomToolCallBegin that finished.
-    pub call_id: String,
-    /// Name of the tool
-    pub tool_name: String,
-    /// Parameters passed to the tool as JSON
-    pub parameters: Option<serde_json::Value>,
-    /// Duration of the tool call
-    pub duration: Duration,
-    /// Result of the tool call (success message or error)
-    pub result: Result<String, String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecCommandBeginEvent {
     /// Identifier so this can be paired with the ExecCommandEnd event.
     pub call_id: String,
@@ -760,36 +703,6 @@ pub struct SessionConfiguredEvent {
     pub history_entry_count: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BrowserScreenshotUpdateEvent {
-    /// Path to the screenshot file
-    pub screenshot_path: PathBuf,
-    /// Current URL of the browser
-    pub url: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AgentStatusUpdateEvent {
-    /// List of currently active agents
-    pub agents: Vec<AgentInfo>,
-    /// Shared context for all agents (if available)
-    pub context: Option<String>,
-    /// Shared task/output goal for all agents (if available)  
-    pub task: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AgentInfo {
-    /// Unique identifier for the agent
-    pub id: String,
-    /// Display name for the agent
-    pub name: String,
-    /// Current status of the agent
-    pub status: String,
-    /// Optional model being used
-    pub model: Option<String>,
-}
-
 /// User's decision in response to an ExecApprovalRequest.
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -835,7 +748,6 @@ pub struct Chunk {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
     use super::*;
 
     /// Serialize Event to verify that its JSON representation has the expected
