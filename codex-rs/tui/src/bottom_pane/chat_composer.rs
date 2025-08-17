@@ -223,6 +223,24 @@ impl ChatComposer {
         {
             "Using tools".to_string()
         }
+        // Browser activity
+        else if lower.contains("browser")
+            || lower.contains("chrome")
+            || lower.contains("cdp")
+            || lower.contains("navigate")
+            || lower.contains("url")
+            || lower.contains("screenshot")
+        {
+            "Browsing".to_string()
+        }
+        // Multi-agent orchestration
+        else if lower.contains("agent")
+            || lower.contains("agents")
+            || lower.contains("orchestrating")
+            || lower.contains("coordinating")
+        {
+            "Agents".to_string()
+        }
         // Response generation patterns
         else if lower.contains("generating")
             || lower.contains("responding")
@@ -1052,6 +1070,8 @@ impl ChatComposer {
                     let mut command_popup = CommandPopup::new_with_filter(self.using_chatgpt_auth);
                     command_popup.on_composer_text_change(first_line.to_string());
                     self.active_popup = ActivePopup::Command(command_popup);
+                    // Notify app: composer expanded due to slash popup
+                    self.app_event_tx.send(AppEvent::ComposerExpanded);
                 }
             }
         }
@@ -1167,67 +1187,100 @@ impl WidgetRef for &ChatComposer {
                 }
 
                 // Right side: command key hints (Ctrl+R/D/C) followed by token usage if available
+                // We will elide hints when space is tight in this order: hide reasoning, diff viewer.
                 let mut right_spans: Vec<Span> = Vec::new();
 
-                // Only show command hints on the right when not in the special Ctrl+C confirmation state
-                if !self.ctrl_c_quit_hint {
-                    if self.show_reasoning_hint {
-                        if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
-                        right_spans.push(Span::from("Ctrl+R").style(key_hint_style));
-                        let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
-                        right_spans.push(Span::from(label).style(label_style));
-                    }
-                    if self.show_diffs_hint {
-                        if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
-                        right_spans.push(Span::from("Ctrl+D").style(key_hint_style));
-                        right_spans.push(Span::from(" diff viewer").style(label_style));
-                    }
-                    // Always show quit at the end of the command hints
-                    if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
-                    right_spans.push(Span::from("Ctrl+C").style(key_hint_style));
-                    right_spans.push(Span::from(" quit").style(label_style));
-                }
-
-                // Token usage (always shown to the far right when available)
+                // Prepare token usage spans (always shown when available)
+                let mut token_spans: Vec<Span> = Vec::new();
                 if let Some(token_usage_info) = &self.token_usage_info {
-                    if !right_spans.is_empty() { right_spans.push(Span::from("  •  ").style(Style::default())); }
-
                     let token_usage = &token_usage_info.total_token_usage;
                     let used_str = format_with_thousands(token_usage.blended_total());
-                    // Numbers bold, color to match footer labels (toggle reasoning/diff viewer)
-                    right_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
-                    right_spans.push(Span::from(" tokens ").style(label_style));
-
-                    // Context remaining, if known, rendered in parentheses
-                    let last_token_usage = &token_usage_info.last_token_usage;
+                    token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
+                    token_spans.push(Span::from(" tokens ").style(label_style));
                     if let Some(context_window) = token_usage_info.model_context_window {
+                        let last_token_usage = &token_usage_info.last_token_usage;
                         let percent_remaining: u8 = if context_window > 0 {
                             let percent = 100.0
                                 - (last_token_usage.tokens_in_context_window() as f32
                                     / context_window as f32
                                     * 100.0);
                             percent.clamp(0.0, 100.0) as u8
-                        } else {
-                            100
-                        };
-                        right_spans.push(Span::from("(").style(label_style));
-                        right_spans.push(
-                            Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)),
-                        );
-                        right_spans.push(Span::from("% left)").style(label_style));
+                        } else { 100 };
+                        token_spans.push(Span::from("(").style(label_style));
+                        token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                        token_spans.push(Span::from("% left)").style(label_style));
                     }
                 }
 
+                // Helper to build hint spans based on inclusion flags
+                let build_hints = |include_reasoning: bool, include_diff: bool| -> Vec<Span> {
+                    let mut spans: Vec<Span> = Vec::new();
+                    if !self.ctrl_c_quit_hint {
+                        if self.show_reasoning_hint && include_reasoning {
+                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                            spans.push(Span::from("Ctrl+R").style(key_hint_style));
+                            let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
+                            spans.push(Span::from(label).style(label_style));
+                        }
+                        if self.show_diffs_hint && include_diff {
+                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                            spans.push(Span::from("Ctrl+D").style(key_hint_style));
+                            spans.push(Span::from(" diff viewer").style(label_style));
+                        }
+                        // Always show quit at the end of the command hints
+                        if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                        spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                        spans.push(Span::from(" quit").style(label_style));
+                    }
+                    spans
+                };
+
+                // Start with all hints included
+                let mut include_reasoning = true;
+                let mut include_diff = true;
+                let mut hint_spans = build_hints(include_reasoning, include_diff);
+
+                // Measure function for spans length
+                let measure = |spans: &Vec<Span>| -> usize {
+                    spans.iter().map(|s| s.content.chars().count()).sum()
+                };
+
                 // Compute spacer between left and right to make right content right-aligned
                 let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
                 let total_width = bottom_line_rect.width as usize;
                 let trailing_pad = 1usize; // one space on the right edge
+
+                // We'll add separators between hints and tokens when both are present
+                let combined_len = |h: &Vec<Span>, t: &Vec<Span>| -> usize {
+                    let mut len = measure(h) + measure(t);
+                    if !h.is_empty() && !t.is_empty() { len += "  •  ".chars().count(); }
+                    len
+                };
+
+                // Elide hints in order until content fits
+                while left_len + combined_len(&hint_spans, &token_spans) + trailing_pad > total_width {
+                    if include_reasoning {
+                        include_reasoning = false;
+                    } else if include_diff {
+                        include_diff = false;
+                    } else {
+                        break;
+                    }
+                    hint_spans = build_hints(include_reasoning, include_diff);
+                }
+
+                // Compose final right spans: hints, optional separator, then tokens
+                if !hint_spans.is_empty() { right_spans.extend(hint_spans); }
+                if !right_spans.is_empty() && !token_spans.is_empty() {
+                    right_spans.push(Span::from("  •  ").style(Style::default()));
+                }
+                right_spans.extend(token_spans);
+
+                // Recompute spacer after elision
+                let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
                 let spacer = if total_width > left_len + right_len + trailing_pad {
                     " ".repeat(total_width - left_len - right_len - trailing_pad)
-                } else {
-                    String::from(" ")
-                };
+                } else { String::from(" ") };
 
                 let mut line_spans = left_spans;
                 line_spans.push(Span::from(spacer));

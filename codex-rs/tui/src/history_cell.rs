@@ -350,6 +350,10 @@ pub(crate) struct AnimatedWelcomeCell {
     pub(crate) completed: std::cell::Cell<bool>,
     pub(crate) fade_start: std::cell::Cell<Option<Instant>>,
     pub(crate) faded_out: std::cell::Cell<bool>,
+    // Lock the measured height on first layout so it doesn't resize later
+    pub(crate) locked_height: std::cell::Cell<Option<u16>>,
+    // When true, render nothing but keep reserved height (for stable layout)
+    pub(crate) hidden: std::cell::Cell<bool>,
 }
 
 impl HistoryCell for AnimatedWelcomeCell {
@@ -365,9 +369,19 @@ impl HistoryCell for AnimatedWelcomeCell {
         ]
     }
     
-    fn desired_height(&self, _width: u16) -> u16 {
-        // With scale of 3, we need 7 * 3 = 21 rows
-        21
+    fn desired_height(&self, width: u16) -> u16 {
+        // On first use, choose a height based on width; then lock it to avoid
+        // resizing as the user scrolls or resizes slightly.
+        if let Some(h) = self.locked_height.get() { return h; }
+
+        // Word "CODE" uses 4 letters of 5 cols each with 3 gaps: 4*5 + 3 = 23 cols.
+        let cols: u16 = 23;
+        let base_rows: u16 = 7;
+        let max_scale: u16 = 3;
+        let scale = if width >= cols { (width / cols).min(max_scale).max(1) } else { 1 };
+        let h = base_rows.saturating_mul(scale);
+        self.locked_height.set(Some(h));
+        h
     }
     
     fn has_custom_render(&self) -> bool {
@@ -375,24 +389,16 @@ impl HistoryCell for AnimatedWelcomeCell {
     }
     
     fn custom_render(&self, area: Rect, buf: &mut Buffer) {
+        // If hidden, draw nothing (area will retain background) to preserve layout height.
+        if self.hidden.get() {
+            return;
+        }
         let _elapsed = self.start_time.elapsed();
-        
-        // Center the animation within the provided area
-        // The actual animation needs 21 rows
-        let animation_height = 21u16;
-        let height = animation_height.min(area.height);
-        let vertical_offset = if area.height > height {
-            (area.height - height) / 2
-        } else {
-            0
-        };
-        // Use full width so the renderer can horizontally center
-        let positioned_area = Rect {
-            x: area.x,
-            y: area.y.saturating_add(vertical_offset),
-            width: area.width,
-            height: height,
-        };
+        // Top-align within the provided area so scrolling simply crops the top.
+        // Limit to our locked height if present to avoid growth/shrink.
+        let locked_h = self.locked_height.get().unwrap_or(21);
+        let height = locked_h.min(area.height);
+        let positioned_area = Rect { x: area.x, y: area.y, width: area.width, height };
         
         let fade_duration = std::time::Duration::from_millis(800);
         
@@ -430,9 +436,7 @@ impl HistoryCell for AnimatedWelcomeCell {
                 self.completed.set(true);
                 
                 // Render the final static state
-                crate::glitch_animation::render_intro_animation(
-                    positioned_area, buf, 1.0, // Full progress = static final state
-                );
+                crate::glitch_animation::render_intro_animation(positioned_area, buf, 1.0);
             }
         }
     }
@@ -561,6 +565,12 @@ impl HistoryCell for ToolCallCell {
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Show all lines; header visibility aligns with exec-style sections
         self.lines.clone()
+    }
+}
+
+impl ToolCallCell {
+    pub(crate) fn retint(&mut self, old: &crate::theme::Theme, new: &crate::theme::Theme) {
+        retint_lines_in_place(&mut self.lines, old, new);
     }
 }
 
@@ -1001,6 +1011,8 @@ pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
         completed: std::cell::Cell::new(false),
         fade_start: std::cell::Cell::new(None),
         faded_out: std::cell::Cell::new(false),
+        locked_height: std::cell::Cell::new(None),
+        hidden: std::cell::Cell::new(false),
     }
 }
 
@@ -1194,10 +1206,32 @@ fn new_parsed_command(
                 )
             }
         }
-        Some(o) => Line::styled(
-            format!("Error (exit {})", o.exit_code),
-            Style::default().fg(crate::colors::error()).add_modifier(Modifier::BOLD),
-        ),
+        Some(_o) => {
+            // Preserve the action header (e.g., "Searched") on error so users
+            // can still see what operation was attempted. Error details are
+            // rendered below via `output_lines`.
+            let done = match action {
+                "read" => "Read".to_string(),
+                "search" => "Searched".to_string(),
+                "list" => "List Files".to_string(),
+                _ => match &ctx_path {
+                    Some(p) => format!("Ran in {p}"),
+                    None => "Ran".to_string(),
+                },
+            };
+            // Use the same styling as success to keep headers stable/recognizable.
+            if matches!(action, "read" | "search" | "list") {
+                Line::styled(
+                    done,
+                    Style::default().fg(crate::colors::text()),
+                )
+            } else {
+                Line::styled(
+                    done,
+                    Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD),
+                )
+            }
+        }
     }];
 
     // Collect any paths referenced by search commands to suppress redundant directory lines
@@ -1235,15 +1269,30 @@ fn new_parsed_command(
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query: split on '|' and join with commas + 'and' for readability
+                // Also pretty-print common shell-escaped characters for display purposes.
+                let prettify_term = |s: &str| -> String {
+                    let mut out = s
+                        .replace("\\(", "(")
+                        .replace("\\)", ")")
+                        .replace("\\.", ".");
+                    // Balance a single unmatched opening paren common in function-name searches
+                    let opens = out.matches('(').count();
+                    let closes = out.matches(')').count();
+                    if opens > closes {
+                        out.push(')');
+                    }
+                    out
+                };
                 let fmt_query = |q: &str| -> String {
-                    let parts: Vec<String> = q
+                    let mut parts: Vec<String> = q
                         .split('|')
-                        .map(|s| s.trim().to_string())
+                        .map(|s| s.trim())
                         .filter(|s| !s.is_empty())
+                        .map(prettify_term)
                         .collect();
                     match parts.len() {
                         0 => String::new(),
-                        1 => parts[0].clone(),
+                        1 => parts.remove(0),
                         2 => format!("{} and {}", parts[0], parts[1]),
                         _ => {
                             let last = parts.last().cloned().unwrap_or_default();
@@ -1390,10 +1439,14 @@ fn new_exec_command_generic(
             "Ran",
             Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD),
         ),
-        Some(o) => Line::styled(
-            format!("Error (exit {})", o.exit_code),
-            Style::default().fg(crate::colors::error()).add_modifier(Modifier::BOLD),
-        ),
+        Some(_o) => {
+            // Preserve the header as "Ran" even on error; detailed error output
+            // (including exit code and stderr) will be shown below by `output_lines`.
+            Line::styled(
+                "Ran",
+                Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD),
+            )
+        },
     };
 
     if let Some(first) = cmd_lines.next() {
@@ -1882,8 +1935,7 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
     let lines = vec![
         Line::from(""),
         Line::from("Reasoning Effort".magenta().bold()),
-        Line::from(format!("Current: {}", reasoning_effort)),
-        Line::from(""),
+        Line::from(format!("Value: {}", reasoning_effort)),
     ];
     PlainHistoryCell { lines, kind: HistoryCellType::Notice }
 }
@@ -2159,8 +2211,13 @@ fn is_title_line(line: &Line) -> bool {
 
 /// Check if a line is empty (no content or just whitespace)
 fn is_empty_line(line: &Line) -> bool {
-    line.spans.is_empty() || 
-    (line.spans.len() == 1 && line.spans[0].content.trim().is_empty())
+    if line.spans.is_empty() {
+        return true;
+    }
+    // Consider a line empty when all spans have only whitespace
+    line.spans
+        .iter()
+        .all(|s| s.content.as_ref().trim().is_empty())
 }
 
 /// Trim empty lines from the beginning and end of a Vec<Line>.
@@ -2199,4 +2256,56 @@ pub(crate) fn trim_empty_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'stati
     }
     
     result
+}
+
+/// Retint a set of pre-rendered lines by mapping colors from the previous
+/// theme palette to the new one. This pragmatically applies a theme change
+/// to already materialized `Line` structures without rebuilding them from
+/// semantic sources.
+pub(crate) fn retint_lines_in_place(
+    lines: &mut Vec<Line<'static>>,
+    old: &crate::theme::Theme,
+    new: &crate::theme::Theme,
+){
+    use ratatui::style::Color;
+    fn map_color(c: Color, old: &crate::theme::Theme, new: &crate::theme::Theme) -> Color {
+        // Map prior theme-resolved colors to new theme.
+        if c == old.text { return new.text; }
+        if c == old.text_dim { return new.text_dim; }
+        if c == old.text_bright { return new.text_bright; }
+        if c == old.primary { return new.primary; }
+        if c == old.success { return new.success; }
+        if c == old.error { return new.error; }
+        if c == old.info { return new.info; }
+        if c == old.border { return new.border; }
+        if c == old.foreground { return new.foreground; }
+        if c == old.background { return new.background; }
+
+        // Map named ANSI colors to semantic theme colors for dynamic theme switches
+        match c {
+            Color::White => return new.text_bright,
+            Color::Gray | Color::DarkGray => return new.text_dim,
+            Color::Black => return new.text, // ensure visible on dark backgrounds
+            Color::Red | Color::LightRed => return new.error,
+            Color::Green | Color::LightGreen => return new.success,
+            Color::Yellow | Color::LightYellow => return new.warning,
+            Color::Blue | Color::LightBlue | Color::Cyan | Color::LightCyan => return new.info,
+            Color::Magenta | Color::LightMagenta => return new.primary,
+            _ => {}
+        }
+
+        c
+    }
+
+    for line in lines.iter_mut() {
+        let mut new_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+        for s in line.spans.drain(..) {
+            let mut st = s.style;
+            if let Some(fg) = st.fg { st.fg = Some(map_color(fg, old, new)); }
+            if let Some(bg) = st.bg { st.bg = Some(map_color(bg, old, new)); }
+            if let Some(uc) = st.underline_color { st.underline_color = Some(map_color(uc, old, new)); }
+            new_spans.push(Span::styled(s.content, st));
+        }
+        line.spans = new_spans;
+    }
 }

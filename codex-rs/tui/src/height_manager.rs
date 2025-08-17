@@ -26,6 +26,8 @@ pub(crate) struct HeightManagerConfig {
     pub hud_quantum: u16,
     /// Frames that a quantized HUD change must persist before applying.
     pub hud_confirm_frames: u8,
+    /// Max bottom pane height as percent of total terminal height.
+    pub bottom_percent_cap: u8,
 }
 
 impl Default for HeightManagerConfig {
@@ -34,6 +36,8 @@ impl Default for HeightManagerConfig {
             hysteresis_n: 2,
             hud_quantum: 2,
             hud_confirm_frames: 2,
+            // Slightly generous default to make compose more comfortable
+            bottom_percent_cap: 35,
         }
     }
 }
@@ -53,6 +57,8 @@ pub(crate) struct HeightManager {
     last_hud: Option<u16>,
     /// Tracks frames where a small (+/-1) change was ignored.
     small_change_count: u8,
+    /// Tracks frames to confirm a 1-row bottom pane decrease before applying.
+    bottom_small_change_count: u8,
     /// Pending HUD value with confirmation counter.
     hud_pending: Option<(u16, u8)>,
     /// When set by an explicit event, bypass hysteresis once.
@@ -69,6 +75,7 @@ impl HeightManager {
             last_bottom: None,
             last_hud: None,
             small_change_count: 0,
+            bottom_small_change_count: 0,
             hud_pending: None,
             bypass_once: false,
             #[cfg(debug_assertions)]
@@ -123,14 +130,46 @@ impl HeightManager {
         // Status bar height is fixed at 3.
         let status_h = 3u16;
 
-        // Cap the bottom pane to 30% of screen height, with a minimum of 5 rows.
-        let percent_cap: u16 = ((area.height as u32).saturating_mul(30) / 100) as u16;
+        // Cap the bottom pane to a percentage of screen height, with a minimum of 5 rows.
+        let percent_cap: u16 = ((area.height as u32).saturating_mul(self.cfg.bottom_percent_cap as u32) / 100) as u16;
         let bottom_cap = percent_cap.max(5);
-        let mut bottom_h = bottom_desired_height.max(5).min(bottom_cap);
+        let desired = bottom_desired_height.max(5).min(bottom_cap);
 
-        // Apply small-change hysteresis to the bottom pane unless bypassed by event.
-        bottom_h = self.apply_hysteresis(self.last_bottom, bottom_h);
+        // Bottom pane policy: Grow immediately, confirm small decreases over a few frames
+        let mut bottom_h = match (self.last_bottom, self.bypass_once) {
+            (Some(prev), true) => desired,
+            (Some(prev), false) => {
+                if desired > prev {
+                    // grow immediately, reset counter
+                    self.bottom_small_change_count = 0;
+                    desired
+                } else if desired < prev {
+                    let diff = prev - desired;
+                    if diff == 1 {
+                        // Require N consecutive frames before accepting a 1-row shrink
+                        if self.bottom_small_change_count + 1 >= self.cfg.hysteresis_n {
+                            self.bottom_small_change_count = 0;
+                            desired
+                        } else {
+                            self.bottom_small_change_count = self.bottom_small_change_count.saturating_add(1);
+                            prev
+                        }
+                    } else {
+                        // Larger decreases apply immediately
+                        self.bottom_small_change_count = 0;
+                        desired
+                    }
+                } else {
+                    // unchanged
+                    self.bottom_small_change_count = 0;
+                    prev
+                }
+            }
+            (None, _) => desired,
+        };
         self.last_bottom = Some(bottom_h);
+        // Clear bypass after use
+        if self.bypass_once { self.bypass_once = false; }
 
         // Determine HUD height if present.
         let mut hud_h: u16 = 0;
@@ -203,38 +242,6 @@ impl HeightManager {
         }
     }
 
-    fn apply_hysteresis(&mut self, last: Option<u16>, new_val: u16) -> u16 {
-        if self.bypass_once {
-            self.bypass_once = false;
-            self.small_change_count = 0;
-            return new_val;
-        }
-
-        if let Some(prev) = last {
-            let diff = prev.abs_diff(new_val);
-            if diff == 1 {
-                // Suppress small +/-1 oscillation up to hysteresis_n frames.
-                if self.small_change_count < self.cfg.hysteresis_n {
-                    self.small_change_count += 1;
-                    #[cfg(debug_assertions)]
-                    {
-                        self.counters.hysteresis_applied += 1;
-                    }
-                    return prev;
-                } else {
-                    // After N frames, accept the change and reset.
-                    self.small_change_count = 0;
-                    return new_val;
-                }
-            } else {
-                // Larger changes apply immediately.
-                self.small_change_count = 0;
-                return new_val;
-            }
-        }
-        new_val
-    }
-
     fn apply_hud_confirmation(&mut self, quantized: u16) -> u16 {
         if self.bypass_once {
             self.bypass_once = false;
@@ -283,11 +290,4 @@ impl HeightManager {
     }
 }
 
-/// Returns true when the centralized HeightManager should be used.
-pub(crate) fn height_manager_enabled() -> bool {
-    match std::env::var("CODEX_TUI_HEIGHT_MANAGER_V1") {
-        Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "ON"),
-        Err(_) => false,
-    }
-}
-
+// Centralized HeightManager is always enabled.

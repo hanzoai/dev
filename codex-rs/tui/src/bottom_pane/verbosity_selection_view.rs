@@ -147,7 +147,7 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
         // Build the content
         let mut lines = vec![
             Line::from(vec![
-                Span::raw("Current: "),
+                Span::raw("Value: "),
                 Span::styled(
                     format!("{}", self.current_verbosity),
                     Style::default()
@@ -155,7 +155,6 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
-            Line::from(""),
         ];
 
         // Add options

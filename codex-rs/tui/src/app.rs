@@ -630,6 +630,12 @@ impl App<'_> {
                     // Request a redraw to apply the new theme
                     self.schedule_redraw();
                 }
+                AppEvent::ComposerExpanded => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.on_composer_expanded();
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
                         screen.on_auth_complete(result);

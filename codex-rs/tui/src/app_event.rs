@@ -64,6 +64,8 @@ pub(crate) enum AppEvent {
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),
+    /// Bottom composer expanded (e.g., slash command popup opened)
+    ComposerExpanded,
 
     /// Kick off an asynchronous file search for the given query (text after
     /// the `@`). Previous searches may be cancelled by the app layer so there

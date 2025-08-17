@@ -10,7 +10,7 @@ lazy_static! {
 }
 
 /// Represents a complete theme with all colors resolved
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     // Primary colors
     pub primary: Color,
@@ -227,7 +227,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(11, 13, 16),       // #0B0D10
             foreground: Color::Rgb(230, 237, 243),    // #E6EDF3
             border: Color::Rgb(83, 85, 88),           // #535558  (↑ contrast)
-            border_focused: Color::Rgb(37, 194, 255), // #25C2FF
+            border_focused: Color::Rgb(106, 109, 114), // toned contrast vs border
             selection: Color::Rgb(23, 32, 42),        // #17202A
             cursor: Color::Rgb(230, 237, 243),        // #E6EDF3
             success: Color::Rgb(63, 185, 80),         // #3FB950
@@ -252,7 +252,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(250, 250, 250),  // #FAFAFA
             foreground: Color::Rgb(31, 35, 40),     // #1F2328
             border: Color::Rgb(206, 206, 206),      // #CECECE  (↑ contrast)
-            border_focused: Color::Rgb(0, 95, 204), // #005FCC
+            border_focused: Color::Rgb(160, 160, 160), // toned contrast vs border
             selection: Color::Rgb(234, 242, 255),   // #EAF2FF
             cursor: Color::Rgb(31, 35, 40),         // #1F2328
             success: Color::Rgb(26, 127, 55),       // #1A7F37
@@ -277,7 +277,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(251, 251, 253),    // #FBFBFD
             foreground: Color::Rgb(31, 35, 48),       // #1F2330
             border: Color::Rgb(157, 157, 159),        // #9D9D9F  (↑ contrast)
-            border_focused: Color::Rgb(58, 134, 255), // #3A86FF
+            border_focused: Color::Rgb(122, 122, 125), // toned contrast vs border
             selection: Color::Rgb(238, 243, 255),     // #EEF3FF
             cursor: Color::Rgb(31, 35, 48),           // #1F2330
             success: Color::Rgb(46, 196, 182),        // #2EC4B6
@@ -302,7 +302,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(250, 250, 250),   // #FAFAFA
             foreground: Color::Rgb(30, 34, 39),      // #1E2227
             border: Color::Rgb(156, 156, 156),       // #9C9C9C  (↑ contrast)
-            border_focused: Color::Rgb(0, 224, 255), // #00E0FF
+            border_focused: Color::Rgb(127, 127, 127), // toned contrast vs border
             selection: Color::Rgb(230, 251, 255),    // #E6FBFF
             cursor: Color::Rgb(30, 34, 39),          // #1E2227
             success: Color::Rgb(0, 179, 107),        // #00B36B
@@ -327,7 +327,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(245, 247, 250),    // #F5F7FA
             foreground: Color::Rgb(27, 31, 35),       // #1B1F23
             border: Color::Rgb(152, 154, 157),        // #989A9D  (↑ contrast)
-            border_focused: Color::Rgb(39, 110, 241), // #276EF1
+            border_focused: Color::Rgb(122, 124, 127), // toned contrast vs border
             selection: Color::Rgb(231, 240, 255),     // #E7F0FF
             cursor: Color::Rgb(27, 31, 35),           // #1B1F23
             success: Color::Rgb(43, 168, 74),         // #2BA84A
@@ -352,7 +352,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(251, 248, 243),   // #FBF8F3
             foreground: Color::Rgb(45, 42, 36),      // #2D2A24
             border: Color::Rgb(158, 155, 150),       // #9E9B96  (↑ contrast)
-            border_focused: Color::Rgb(201, 122, 0), // #C97A00
+            border_focused: Color::Rgb(127, 123, 117), // toned contrast vs border
             selection: Color::Rgb(243, 232, 209),    // #F3E8D1
             cursor: Color::Rgb(45, 42, 36),          // #2D2A24
             success: Color::Rgb(46, 125, 50),        // #2E7D32
@@ -377,7 +377,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(244, 248, 251),    // #F4F8FB
             foreground: Color::Rgb(24, 34, 48),       // #182230
             border: Color::Rgb(151, 155, 158),        // #979B9E  (↑ contrast)
-            border_focused: Color::Rgb(14, 165, 233), // #0EA5E9
+            border_focused: Color::Rgb(118, 122, 125), // toned contrast vs border
             selection: Color::Rgb(230, 243, 255),     // #E6F3FF
             cursor: Color::Rgb(24, 34, 48),           // #182230
             success: Color::Rgb(22, 163, 74),         // #16A34A
@@ -402,7 +402,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(15, 20, 25),        // #0F1419
             foreground: Color::Rgb(192, 202, 245),     // #C0CAF5
             border: Color::Rgb(84, 89, 94),            // #54595E  (↑ contrast)
-            border_focused: Color::Rgb(122, 162, 247), // #7AA2F7
+            border_focused: Color::Rgb(108, 113, 118), // toned contrast vs border
             selection: Color::Rgb(26, 33, 48),         // #1A2130
             cursor: Color::Rgb(192, 202, 245),         // #C0CAF5
             success: Color::Rgb(158, 206, 106),        // #9ECE6A
@@ -427,7 +427,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Black,                // #000000
             foreground: Color::Rgb(218, 218, 218),   // #DADADA
             border: Color::Rgb(80, 80, 80),          // #505050  (↑ contrast)
-            border_focused: Color::Rgb(0, 209, 255), // #00D1FF
+            border_focused: Color::Rgb(112, 112, 112), // toned contrast vs border
             selection: Color::Rgb(13, 13, 13),       // #0D0D0D
             cursor: Color::Rgb(218, 218, 218),       // #DADADA
             success: Color::Rgb(33, 243, 114),       // #21F372
@@ -452,7 +452,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(12, 12, 8),       // #0C0C08
             foreground: Color::Rgb(255, 209, 138),   // #FFD18A
             border: Color::Rgb(85, 85, 81),          // #555551  (↑ contrast)
-            border_focused: Color::Rgb(255, 176, 0), // #FFB000
+            border_focused: Color::Rgb(116, 116, 110), // toned contrast vs border
             selection: Color::Rgb(26, 20, 8),        // #1A1408
             cursor: Color::Rgb(255, 209, 138),       // #FFD18A
             success: Color::Rgb(255, 207, 51),       // #FFCF33
@@ -477,7 +477,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(11, 16, 32),        // #0B1020
             foreground: Color::Rgb(230, 241, 255),     // #E6F1FF
             border: Color::Rgb(82, 87, 103),           // #525767  (↑ contrast)
-            border_focused: Color::Rgb(142, 202, 255), // #8ECAFF
+            border_focused: Color::Rgb(106, 111, 127), // toned contrast vs border
             selection: Color::Rgb(19, 26, 44),         // #131A2C
             cursor: Color::Rgb(230, 241, 255),         // #E6F1FF
             success: Color::Rgb(158, 228, 147),        // #9EE493
@@ -502,7 +502,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(18, 18, 18),       // #121212
             foreground: Color::Rgb(232, 232, 232),    // #E8E8E8
             border: Color::Rgb(88, 88, 88),           // #585858  (↑ contrast)
-            border_focused: Color::Rgb(26, 209, 255), // #1AD1FF
+            border_focused: Color::Rgb(120, 120, 120), // toned contrast vs border
             selection: Color::Rgb(26, 26, 26),        // #1A1A1A
             cursor: Color::Rgb(232, 232, 232),        // #E8E8E8
             success: Color::Rgb(0, 194, 168),         // #00C2A8
@@ -527,7 +527,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(16, 20, 23),        // #101417
             foreground: Color::Rgb(220, 227, 234),     // #DCE3EA
             border: Color::Rgb(85, 89, 92),            // #55595C  (↑ contrast)
-            border_focused: Color::Rgb(148, 226, 213), // #94E2D5
+            border_focused: Color::Rgb(117, 122, 125), // toned contrast vs border
             selection: Color::Rgb(23, 32, 38),         // #172026
             cursor: Color::Rgb(220, 227, 234),         // #DCE3EA
             success: Color::Rgb(166, 227, 161),        // #A6E3A1
@@ -552,7 +552,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             background: Color::Rgb(247, 247, 245),  // #F7F7F5
             foreground: Color::Rgb(27, 31, 35),     // #1B1F23
             border: Color::Rgb(154, 154, 152),      // #9A9A98  (↑ contrast)
-            border_focused: Color::Rgb(0, 95, 204), // #005FCC
+            border_focused: Color::Rgb(122, 122, 120), // toned contrast vs border
             selection: Color::Rgb(231, 237, 243),   // #E7EDF3
             cursor: Color::Rgb(27, 31, 35),         // #1B1F23
             success: Color::Rgb(26, 127, 55),       // #1A7F37
