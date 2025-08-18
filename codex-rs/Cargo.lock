@@ -786,6 +786,7 @@ dependencies = [
  "codex-login",
  "codex-mcp-server",
  "codex-protocol",
+ "codex-protocol-ts",
  "codex-tui",
  "serde_json",
  "tokio",
@@ -1030,7 +1031,18 @@ dependencies = [
  "serde_json",
  "strum 0.27.2",
  "strum_macros 0.27.2",
+ "ts-rs",
  "uuid",
+]
+
+[[package]]
+name = "codex-protocol-ts"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codex-protocol",
+ "ts-rs",
 ]
 
 [[package]]
@@ -5574,6 +5586,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "ts-rs-macros",
+ "uuid",
 ]
 
 [[package]]
