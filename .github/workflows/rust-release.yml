@@ -124,7 +124,8 @@ jobs:
           fi
           echo "Building with $CARGO_BUILD_JOBS parallel jobs"
           # Use --locked to ensure reproducible builds
-          cargo build --target ${{ matrix.target }} --release --locked --bin coder
+          # Build the renamed binaries (code, code-tui, code-exec)
+          cargo build --target ${{ matrix.target }} --release --locked --bin code --bin code-tui --bin code-exec
 
       - name: Stage artifacts
         shell: bash
@@ -133,9 +134,13 @@ jobs:
           mkdir -p "$dest"
 
           if [[ "${{ matrix.runner }}" == windows* ]]; then
-            cp target/${{ matrix.target }}/release/coder.exe "$dest/coder-${{ matrix.target }}.exe"
+            cp target/${{ matrix.target }}/release/code.exe "$dest/code-${{ matrix.target }}.exe"
+            cp target/${{ matrix.target }}/release/code-tui.exe "$dest/code-tui-${{ matrix.target }}.exe"
+            cp target/${{ matrix.target }}/release/code-exec.exe "$dest/code-exec-${{ matrix.target }}.exe"
           else
-            cp target/${{ matrix.target }}/release/coder "$dest/coder-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/code "$dest/code-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/code-tui "$dest/code-tui-${{ matrix.target }}"
+            cp target/${{ matrix.target }}/release/code-exec "$dest/code-exec-${{ matrix.target }}"
           fi
 
       - name: Compress artifacts
@@ -148,8 +153,8 @@ jobs:
           # For compatibility with environments that lack the `zstd` tool we
           # additionally create a `.tar.gz` alongside every single binary that
           # we publish. The end result is:
-          #   coder-<target>.zst          (existing)
-          #   coder-<target>.tar.gz       (new)
+          #   code-<target>.zst           (zstd compressed)
+          #   code-<target>.tar.gz        (fallback for envs without zstd)
 
           # 1. Produce a .tar.gz for every file in the directory *before* we
           #    run `zstd --rm`, because that flag deletes the original files.

@@ -20,7 +20,7 @@ CODEX_CLI_ROOT=""
 # Until we start publishing stable GitHub releases, we have to grab the binaries
 # from the GitHub Action that created them. Update the URL below to point to the
 # appropriate workflow run:
-WORKFLOW_URL="https://github.com/openai/codex/actions/runs/16840150768" # rust-v0.20.0-alpha.2
+WORKFLOW_URL="" # Optional override; if empty, caller must pass --workflow-url
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,22 +70,22 @@ ARTIFACTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$ARTIFACTS_DIR"' EXIT
 
 # NB: The GitHub CLI `gh` must be installed and authenticated.
-gh run download --dir "$ARTIFACTS_DIR" --repo openai/codex "$WORKFLOW_ID"
+gh run download --dir "$ARTIFACTS_DIR" --repo just-every/code "$WORKFLOW_ID"
 
 # x64 Linux
-zstd -d "$ARTIFACTS_DIR/x86_64-unknown-linux-musl/codex-x86_64-unknown-linux-musl.zst" \
-    -o "$BIN_DIR/codex-x86_64-unknown-linux-musl"
+zstd -d "$ARTIFACTS_DIR/x86_64-unknown-linux-musl/code-x86_64-unknown-linux-musl.zst" \
+    -o "$BIN_DIR/code-x86_64-unknown-linux-musl"
 # ARM64 Linux
-zstd -d "$ARTIFACTS_DIR/aarch64-unknown-linux-musl/codex-aarch64-unknown-linux-musl.zst" \
-    -o "$BIN_DIR/codex-aarch64-unknown-linux-musl"
+zstd -d "$ARTIFACTS_DIR/aarch64-unknown-linux-musl/code-aarch64-unknown-linux-musl.zst" \
+    -o "$BIN_DIR/code-aarch64-unknown-linux-musl"
 # x64 macOS
-zstd -d "$ARTIFACTS_DIR/x86_64-apple-darwin/codex-x86_64-apple-darwin.zst" \
-    -o "$BIN_DIR/codex-x86_64-apple-darwin"
+zstd -d "$ARTIFACTS_DIR/x86_64-apple-darwin/code-x86_64-apple-darwin.zst" \
+    -o "$BIN_DIR/code-x86_64-apple-darwin"
 # ARM64 macOS
-zstd -d "$ARTIFACTS_DIR/aarch64-apple-darwin/codex-aarch64-apple-darwin.zst" \
-    -o "$BIN_DIR/codex-aarch64-apple-darwin"
+zstd -d "$ARTIFACTS_DIR/aarch64-apple-darwin/code-aarch64-apple-darwin.zst" \
+    -o "$BIN_DIR/code-aarch64-apple-darwin"
 # x64 Windows
-zstd -d "$ARTIFACTS_DIR/x86_64-pc-windows-msvc/codex-x86_64-pc-windows-msvc.exe.zst" \
-    -o "$BIN_DIR/codex-x86_64-pc-windows-msvc.exe"
+zstd -d "$ARTIFACTS_DIR/x86_64-pc-windows-msvc/code-x86_64-pc-windows-msvc.exe.zst" \
+    -o "$BIN_DIR/code-x86_64-pc-windows-msvc.exe"
 
 echo "Installed native dependencies into $BIN_DIR"

@@ -15,19 +15,14 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
 
-    if match &info {
-        None => true,
-        Some(info) => info.last_checked_at < Utc::now() - Duration::hours(20),
-    } {
-        // Refresh the cached latest version in the background so TUI startup
-        // isn’t blocked by a network call. The UI reads the previously cached
-        // value (if any) for this run; the next run shows the banner if needed.
-        tokio::spawn(async move {
-            check_for_update(&version_file)
-                .await
-                .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
-        });
-    }
+    // Always refresh the cached latest version in the background so TUI startup
+    // isn’t blocked by a network call. The UI reads the previously cached
+    // value (if any) for this run; the next run shows the banner if needed.
+    tokio::spawn(async move {
+        check_for_update(&version_file)
+            .await
+            .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
+    });
 
     info.and_then(|info| {
         let current_version = env!("CARGO_PKG_VERSION");
@@ -75,11 +70,27 @@ async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
         .json::<ReleaseInfo>()
         .await?;
 
+    // Support both tagging schemes:
+    // - "rust-vX.Y.Z" (legacy Rust-release workflow)
+    // - "vX.Y.Z" (general release workflow)
+    let latest_version = if let Some(v) = latest_tag_name.strip_prefix("rust-v") {
+        v.to_string()
+    } else if let Some(v) = latest_tag_name.strip_prefix('v') {
+        v.to_string()
+    } else {
+        // As a last resort, accept the raw tag if it looks like semver
+        // so we can recover from unexpected tag formats.
+        match parse_version(&latest_tag_name) {
+            Some(_) => latest_tag_name.clone(),
+            None => anyhow::bail!(
+                "Failed to parse latest tag name '{}': expected 'rust-vX.Y.Z' or 'vX.Y.Z'",
+                latest_tag_name
+            ),
+        }
+    };
+
     let info = VersionInfo {
-        latest_version: latest_tag_name
-            .strip_prefix("rust-v")
-            .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))?
-            .into(),
+        latest_version,
         last_checked_at: Utc::now(),
     };
 
