@@ -382,12 +382,15 @@ impl From<ShellEnvironmentPolicyToml> for ShellEnvironmentPolicy {
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// Minimal reasoning. Accepts legacy value "none" for backwards compatibility.
+    #[serde(alias = "none")]
     Minimal,
     Low,
     #[default]
     Medium,
     High,
-    /// Option to disable reasoning.
+    /// Deprecated: previously disabled reasoning. Kept for internal use only.
+    #[serde(skip)]
     None,
 }
 
@@ -421,10 +424,10 @@ pub enum TextVerbosity {
 impl From<codex_protocol::config_types::ReasoningEffort> for ReasoningEffort {
     fn from(v: codex_protocol::config_types::ReasoningEffort) -> Self {
         match v {
+            codex_protocol::config_types::ReasoningEffort::Minimal => ReasoningEffort::Minimal,
             codex_protocol::config_types::ReasoningEffort::Low => ReasoningEffort::Low,
             codex_protocol::config_types::ReasoningEffort::Medium => ReasoningEffort::Medium,
             codex_protocol::config_types::ReasoningEffort::High => ReasoningEffort::High,
-            codex_protocol::config_types::ReasoningEffort::None => ReasoningEffort::None,
         }
     }
 }

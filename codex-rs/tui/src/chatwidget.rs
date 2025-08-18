@@ -202,6 +202,8 @@ pub(crate) struct ChatWidget<'a> {
 
     // Stateful vertical scrollbar for history view
     vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
+    // Auto-hide scrollbar timer; when Some(t), keep visible until t
+    scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
 
     // Most recent theme snapshot used to retint pre-rendered lines
     last_theme: crate::theme::Theme,
@@ -385,10 +387,24 @@ impl ChatWidget<'_> {
         self.session_patch_sets.push(changes_clone);
         // For any new paths, capture an original baseline snapshot the first time we see them
         if let Some(last) = self.session_patch_sets.last() {
-            for (path, _chg) in last.iter() {
-                if !self.baseline_file_contents.contains_key(path) {
-                    let baseline = std::fs::read_to_string(path).unwrap_or_default();
-                    self.baseline_file_contents.insert(path.clone(), baseline);
+            for (src_path, chg) in last.iter() {
+                match chg {
+                    codex_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
+                        if let Some(baseline) = self.baseline_file_contents.get(src_path).cloned() {
+                            // Mirror baseline under destination so tabs use the new path
+                            self.baseline_file_contents.entry(dest_path.clone()).or_insert(baseline);
+                        } else if !self.baseline_file_contents.contains_key(dest_path) {
+                            // Snapshot from source (pre-apply)
+                            let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                            self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                        }
+                    }
+                    _ => {
+                        if !self.baseline_file_contents.contains_key(src_path) {
+                            let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                            self.baseline_file_contents.insert(src_path.clone(), baseline);
+                        }
+                    }
                 }
             }
         }
@@ -846,6 +862,7 @@ impl ChatWidget<'_> {
             last_hud_present: std::cell::Cell::new(false),
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+            scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
         };
         
@@ -1054,6 +1071,7 @@ impl ChatWidget<'_> {
                     .saturating_add(3)
                     .min(self.last_max_scroll.get());
                 self.scroll_offset = new_offset;
+                self.flash_scrollbar();
                 // Enable compact mode so history can use the spacer line
                 if self.scroll_offset > 0 {
                     self.bottom_pane.set_compact_compose(true);
@@ -1070,8 +1088,6 @@ impl ChatWidget<'_> {
                 // Scroll down in chat history (decrease offset, towards bottom)
                 if self.scroll_offset == 0 {
                     // Already at bottom: ensure spacer above input is enabled.
-                    // This avoids the input shifting while "landing" on the
-                    // reclaimed line above the input.
                     self.bottom_pane.set_compact_compose(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     self.height_manager
@@ -1098,6 +1114,7 @@ impl ChatWidget<'_> {
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
                 }
+                self.flash_scrollbar();
             }
             InputResult::None => {
                 // Trigger redraw so input wrapping/height reflects immediately
@@ -1194,6 +1211,19 @@ impl ChatWidget<'_> {
         self.bottom_pane.handle_paste(text);
         // Force immediate redraw so compose height matches new content
         self.request_redraw();
+    }
+
+    /// Briefly show the vertical scrollbar and schedule a redraw to hide it.
+    fn flash_scrollbar(&self) {
+        use std::time::{Duration, Instant};
+        let until = Instant::now() + Duration::from_millis(1200);
+        self.scrollbar_visible_until.set(Some(until));
+        // Schedule a redraw after it expires to clear the bar without further input
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1300)).await;
+            tx.send(crate::app_event::AppEvent::RequestRedraw);
+        });
     }
 
     fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
@@ -1645,6 +1675,11 @@ impl ChatWidget<'_> {
                     .saturating_add(3)
                     .min(self.last_max_scroll.get());
                 self.scroll_offset = new_offset;
+                self.flash_scrollbar();
+                // Use compact mode when scrolled up
+                if self.scroll_offset > 0 {
+                    self.bottom_pane.set_compact_compose(true);
+                }
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             MouseEventKind::ScrollDown => {
@@ -1655,6 +1690,11 @@ impl ChatWidget<'_> {
                 } else if self.scroll_offset > 0 {
                     self.scroll_offset = 0;
                     self.app_event_tx.send(AppEvent::RequestRedraw);
+                }
+                self.flash_scrollbar();
+                // If we reached the bottom, re-enable the spacer row
+                if self.scroll_offset == 0 {
+                    self.bottom_pane.set_compact_compose(false);
                 }
             }
             _ => {
@@ -1837,6 +1877,29 @@ impl ChatWidget<'_> {
             }) => {
                 // Store for session diff popup (clone before moving into history)
                 self.session_patch_sets.push(changes.clone());
+                // Capture/adjust baselines, including rename moves
+                if let Some(last) = self.session_patch_sets.last() {
+                    for (src_path, chg) in last.iter() {
+                        match chg {
+                            codex_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
+                                // Prefer to carry forward existing baseline from src to dest.
+                                if let Some(baseline) = self.baseline_file_contents.remove(src_path) {
+                                    self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                                } else if !self.baseline_file_contents.contains_key(dest_path) {
+                                    // Fallback: snapshot current contents of src (pre-apply) under dest key.
+                                    let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                                    self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                                }
+                            }
+                            _ => {
+                                if !self.baseline_file_contents.contains_key(src_path) {
+                                    let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
+                                    self.baseline_file_contents.insert(src_path.clone(), baseline);
+                                }
+                            }
+                        }
+                    }
+                }
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
                 self.add_to_history(history_cell::new_patch_event(
@@ -2082,9 +2145,14 @@ impl ChatWidget<'_> {
         let mut order: Vec<PathBuf> = Vec::new();
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         for changes in self.session_patch_sets.iter().rev() {
-            for path in changes.keys() {
-                if seen.insert(path.clone()) {
-                    order.push(path.clone());
+            for (path, change) in changes.iter() {
+                // If this change represents a move/rename, show the destination path in the tabs
+                let display_path: PathBuf = match change {
+                    codex_core::protocol::FileChange::Update { move_path: Some(dest), .. } => dest.clone(),
+                    _ => path.clone(),
+                };
+                if seen.insert(display_path.clone()) {
+                    order.push(display_path);
                 }
             }
         }
@@ -2188,14 +2256,16 @@ impl ChatWidget<'_> {
         if !trimmed.is_empty() {
             // User specified a level: e.g., "high"
             let new_effort = match trimmed.to_lowercase().as_str() {
+                "minimal" | "min" => ReasoningEffort::Minimal,
                 "low" => ReasoningEffort::Low,
                 "medium" | "med" => ReasoningEffort::Medium,
                 "high" => ReasoningEffort::High,
-                "none" | "off" => ReasoningEffort::None,
+                // Backwards compatibility: map legacy values to minimal.
+                "none" | "off" => ReasoningEffort::Minimal,
                 _ => {
                     // Invalid parameter, show error and return
                     let message = format!(
-                        "Invalid reasoning level: '{}'. Use: low, medium, high, or none",
+                        "Invalid reasoning level: '{}'. Use: minimal, low, medium, or high",
                         trimmed
                     );
                     self.add_to_history(history_cell::new_error_event(message));
@@ -4922,9 +4992,16 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
 
-        // Render vertical scrollbar when content is scrollable
-        // Only show scrollbar when content overflows the viewport
-        if total_height > content_area.height {
+        // Render vertical scrollbar when content is scrollable and currently visible
+        // Auto-hide after a short delay to avoid copying it along with text.
+        let now = std::time::Instant::now();
+        let show_scrollbar = total_height > content_area.height
+            && self
+                .scrollbar_visible_until
+                .get()
+                .map(|t| now < t)
+                .unwrap_or(false);
+        if show_scrollbar {
             let mut sb_state = self.vertical_scrollbar_state.borrow_mut();
             // Scrollbar expects number of scroll positions, not total rows.
             // For a viewport of H rows and content of N rows, there are
@@ -4944,7 +5021,15 @@ impl WidgetRef for &ChatWidget<'_> {
                 .track_style(Style::default().fg(crate::colors::border()))
                 .thumb_symbol("█")
                 .thumb_style(Style::default().fg(theme.border_focused));
-            StatefulWidget::render(sb, history_area, buf, &mut sb_state);
+            // To avoid a small jump at the bottom due to spacer toggling,
+            // render the scrollbar in a slightly shorter area (reserve 1 row).
+            let sb_area = Rect {
+                x: history_area.x,
+                y: history_area.y,
+                width: history_area.width,
+                height: history_area.height.saturating_sub(1),
+            };
+            StatefulWidget::render(sb, sb_area, buf, &mut sb_state);
         }
 
         // Render the bottom pane directly without a border for now

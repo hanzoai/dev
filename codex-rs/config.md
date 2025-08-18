@@ -219,15 +219,12 @@ Users can specify config values at multiple levels. Order of precedence is as fo
 
 If the model name starts with `"o"` (as in `"o3"` or `"o4-mini"`) or `"codex"`, reasoning is enabled by default when using the Responses API. As explained in the [OpenAI Platform documentation](https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning), this can be set to:
 
+- `"minimal"` (fastest)
 - `"low"`
 - `"medium"` (default)
 - `"high"`
 
-To disable reasoning, set `model_reasoning_effort` to `"none"` in your config:
-
-```toml
-model_reasoning_effort = "none"  # disable reasoning
-```
+Note: Older configs that use `"none"` are still accepted and now map to `"minimal"` for backwards compatibility.
 
 ## model_reasoning_summary
 

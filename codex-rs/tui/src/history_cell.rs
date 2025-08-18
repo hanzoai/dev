@@ -119,24 +119,20 @@ pub(crate) trait HistoryCell {
             // Custom renders (like animations) need to render fully - they can't be skipped
             // The area is already adjusted for the visible portion
             self.custom_render(area, buf);
-        } else {
-            // Default: render using display_lines_trimmed for consistent spacing
-            let lines = self.display_lines_trimmed();
-            
-            // Skip the specified number of rows
-            let visible_lines: Vec<Line<'static>> = lines
-                .into_iter()
-                .skip(skip_rows as usize)
-                .take(area.height as usize)
-                .collect();
-            
-            if !visible_lines.is_empty() {
-                let text = Text::from(visible_lines);
-                Paragraph::new(text)
-                    .wrap(Wrap { trim: false })
-                    .render(area, buf);
-            }
+            return;
         }
+
+        // Default path: render the full text and use Paragraph.scroll to skip
+        // vertical rows AFTER wrapping. Slicing lines before wrapping causes
+        // incorrect blank space when lines wrap across multiple rows.
+        let lines = self.display_lines_trimmed();
+        let text = Text::from(lines);
+
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((skip_rows, 0))
+            .style(Style::default().bg(crate::colors::background()))
+            .render(area, buf);
     }
     
     /// Returns true if this cell has custom rendering (e.g., animations)
@@ -339,6 +335,7 @@ impl WidgetRef for &ExecCell {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(Text::from(self.display_lines_trimmed()))
             .wrap(Wrap { trim: false })
+            .style(Style::default().bg(crate::colors::background()))
             .render(area, buf);
     }
 }
@@ -372,7 +369,7 @@ impl HistoryCell for AnimatedWelcomeCell {
     fn desired_height(&self, width: u16) -> u16 {
         // On first use, choose a height based on width; then lock it to avoid
         // resizing as the user scrolls or resizes slightly.
-        if let Some(h) = self.locked_height.get() { return h; }
+        if let Some(h) = self.locked_height.get() { return h.saturating_add(3); }
 
         // Word "CODE" uses 4 letters of 5 cols each with 3 gaps: 4*5 + 3 = 23 cols.
         let cols: u16 = 23;
@@ -381,7 +378,8 @@ impl HistoryCell for AnimatedWelcomeCell {
         let scale = if width >= cols { (width / cols).min(max_scale).max(1) } else { 1 };
         let h = base_rows.saturating_mul(scale);
         self.locked_height.set(Some(h));
-        h
+        // Add a little padding below to give extra spacing
+        h.saturating_add(3)
     }
     
     fn has_custom_render(&self) -> bool {
@@ -990,7 +988,13 @@ pub(crate) fn new_session_info(
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("user"));
-    lines.extend(message.lines().map(|l| Line::from(l.to_string())));
+    // Build content lines, then trim trailing/leading empties and normalize spacing
+    let content: Vec<Line<'static>> = message
+        .lines()
+        .map(|l| Line::from(l.to_string()))
+        .collect();
+    let content = trim_empty_lines(content);
+    lines.extend(content);
     // No empty line at end - trimming and spacing handled by renderer
     PlainHistoryCell { lines, kind: HistoryCellType::User }
 }

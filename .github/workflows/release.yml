@@ -114,6 +114,12 @@ jobs:
         cache-on-failure: true
         # Working directory for the cache
         workspaces: "codex-rs -> target"
+
+    - name: Install sccache + mold (Linux)
+      if: contains(matrix.os, 'ubuntu')
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sccache mold || true
         
     - name: Install musl tools (Linux)
       if: contains(matrix.target, 'musl')
@@ -151,6 +157,12 @@ jobs:
         
     - name: Build binaries
       shell: bash
+      env:
+        # Speed up compile by caching object files across runs
+        RUSTC_WRAPPER: sccache
+        SCCACHE_GHA_ENABLED: 'true'
+        # Use mold linker on Linux when available for faster linking
+        RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-C link-arg=-fuse-ld=mold' || '' }}
       run: |
         cd codex-rs
         # Use all available cores
@@ -164,6 +176,9 @@ jobs:
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         # Use --locked to ensure reproducible builds
         cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+
+        # Show sccache stats if available (non-fatal)
+        command -v sccache >/dev/null 2>&1 && sccache --show-stats || true
         
     - name: Prepare artifacts
       run: |

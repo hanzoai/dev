@@ -54,7 +54,7 @@ pub enum CodexErr {
     #[error("session configured event was not the first event in the stream")]
     SessionConfiguredNotFirstEvent,
 
-    /// Returned by run_command_stream when the spawned child process timed out (10s).
+    /// Returned by run_command_stream when the spawned child process timed out (default 120s).
     #[error("timeout waiting for child process to exit")]
     Timeout,
 
