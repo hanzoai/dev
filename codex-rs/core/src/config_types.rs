@@ -5,11 +5,9 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use strum_macros::Display;
 use wildmatch::WildMatchPattern;
 
 use serde::Deserialize;
-use serde::Serialize;
 
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
