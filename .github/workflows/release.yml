@@ -160,6 +160,8 @@ jobs:
       env:
         # Use mold linker on Linux when available for faster linking
         RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-C link-arg=-fuse-ld=mold' || '' }}
+        # Skip macOS codesigning in CI to allow cross-arch builds
+        SKIP_SIGNING: '1'
       run: |
         cd codex-rs
         # Enable sccache only if installed on this runner
