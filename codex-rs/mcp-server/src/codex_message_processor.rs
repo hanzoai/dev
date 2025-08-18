@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use codex_core::CodexConversation;
 use codex_core::ConversationManager;
@@ -14,6 +15,7 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ReviewDecision;
 use mcp_types::JSONRPCErrorError;
 use mcp_types::RequestId;
+use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tracing::error;
 use uuid::Uuid;
@@ -44,6 +46,48 @@ use crate::wire_format::SendUserMessageParams;
 use crate::wire_format::SendUserMessageResponse;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
+use codex_login::CLIENT_ID;
+use codex_login::ServerOptions as LoginServerOptions;
+use codex_login::ShutdownHandle;
+use codex_login::run_login_server;
+use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::ApplyPatchApprovalParams;
+use codex_protocol::mcp_protocol::ApplyPatchApprovalResponse;
+use codex_protocol::mcp_protocol::ClientRequest;
+use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
+use codex_protocol::mcp_protocol::ExecCommandApprovalParams;
+use codex_protocol::mcp_protocol::ExecCommandApprovalResponse;
+use codex_protocol::mcp_protocol::InputItem as WireInputItem;
+use codex_protocol::mcp_protocol::InterruptConversationParams;
+use codex_protocol::mcp_protocol::InterruptConversationResponse;
+use codex_protocol::mcp_protocol::LOGIN_CHATGPT_COMPLETE_EVENT;
+use codex_protocol::mcp_protocol::LoginChatGptCompleteNotification;
+use codex_protocol::mcp_protocol::LoginChatGptResponse;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::NewConversationResponse;
+use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
+use codex_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserMessageResponse;
+use codex_protocol::mcp_protocol::SendUserTurnParams;
+use codex_protocol::mcp_protocol::SendUserTurnResponse;
+
+// Duration before a ChatGPT login attempt is abandoned.
+const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+struct ActiveLogin {
+    shutdown_handle: ShutdownHandle,
+    login_id: Uuid,
+}
+
+impl ActiveLogin {
+    fn drop(&self) {
+        self.shutdown_handle.cancel();
+    }
+}
 
 /// Handles JSON-RPC messages for Codex conversations.
 pub(crate) struct CodexMessageProcessor {
@@ -51,6 +95,9 @@ pub(crate) struct CodexMessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     codex_linux_sandbox_exe: Option<PathBuf>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
+    active_login: Arc<Mutex<Option<ActiveLogin>>>,
+    // Queue of pending interrupt requests per conversation. We reply when TurnAborted arrives.
+    pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 }
 
 impl CodexMessageProcessor {
@@ -64,6 +111,8 @@ impl CodexMessageProcessor {
             outgoing,
             codex_linux_sandbox_exe,
             conversation_listeners: HashMap::new(),
+            active_login: Arc::new(Mutex::new(None)),
+            pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -192,13 +241,14 @@ impl CodexMessageProcessor {
             return;
         };
 
-        let _ = conversation.submit(Op::Interrupt).await;
+        // Record the pending interrupt so we can reply when TurnAborted arrives.
+        {
+            let mut map = self.pending_interrupts.lock().await;
+            map.entry(conversation_id.0).or_default().push(request_id);
+        }
 
-        // Apparently CodexConversation does not send an ack for Op::Interrupt,
-        // so we can reply to the request right away.
-        self.outgoing
-            .send_response(request_id, InterruptConversationResponse {})
-            .await;
+        // Submit the interrupt; we'll respond upon TurnAborted.
+        let _ = conversation.submit(Op::Interrupt).await;
     }
 
     async fn add_conversation_listener(
@@ -226,6 +276,7 @@ impl CodexMessageProcessor {
         self.conversation_listeners
             .insert(subscription_id, cancel_tx);
         let outgoing_for_task = self.outgoing.clone();
+        let pending_interrupts = self.pending_interrupts.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -266,7 +317,7 @@ impl CodexMessageProcessor {
                         })
                         .await;
 
-                        apply_bespoke_event_handling(event, conversation_id, conversation.clone(), outgoing_for_task.clone()).await;
+                        apply_bespoke_event_handling(event.clone(), conversation_id, conversation.clone(), outgoing_for_task.clone(), pending_interrupts.clone()).await;
                     }
                 }
             }
@@ -362,6 +413,7 @@ async fn apply_bespoke_event_handling(
     conversation_id: ConversationId,
     conversation: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
+    pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 ) {
     let Event { id: event_id, msg } = event;
     match msg {
@@ -410,6 +462,22 @@ async fn apply_bespoke_event_handling(
                 on_exec_approval_response(event_id, rx, conversation).await;
             });
         }
+        // If this is a TurnAborted, reply to any pending interrupt requests.
+        EventMsg::TurnAborted(turn_aborted_event) => {
+            let pending = {
+                let mut map = pending_interrupts.lock().await;
+                map.remove(&conversation_id.0).unwrap_or_default()
+            };
+            if !pending.is_empty() {
+                let response = InterruptConversationResponse {
+                    abort_reason: turn_aborted_event.reason,
+                };
+                for rid in pending {
+                    outgoing.send_response(rid, response.clone()).await;
+                }
+            }
+        }
+
         _ => {}
     }
 }
@@ -423,7 +491,7 @@ fn derive_config_from_params(
         profile,
         cwd,
         approval_policy,
-        sandbox,
+        sandbox: sandbox_mode,
         config: cli_overrides,
         base_instructions,
         include_plan_tool,
@@ -433,8 +501,8 @@ fn derive_config_from_params(
         model,
         config_profile: profile,
         cwd: cwd.map(PathBuf::from),
-        approval_policy: approval_policy.map(Into::into),
-        sandbox_mode: sandbox.map(Into::into),
+        approval_policy,
+        sandbox_mode,
         model_provider: None,
         codex_linux_sandbox_exe,
         base_instructions,
