@@ -37,6 +37,7 @@ use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::model_family::ModelFamily;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::models::ResponseItem;
@@ -384,6 +385,22 @@ impl ModelClient {
 
     pub fn get_provider(&self) -> ModelProviderInfo {
         self.provider.clone()
+    }
+
+    /// Returns the currently configured model slug.
+    pub fn get_model(&self) -> String {
+        self.config.model.clone()
+    }
+
+    /// Returns the currently configured model family.
+    pub fn get_model_family(&self) -> ModelFamily {
+        self.config.model_family.clone()
+    }
+
+    // duplicate of earlier helpers removed during merge cleanup
+
+    pub fn get_auth(&self) -> Option<CodexAuth> {
+        self.auth.clone()
     }
 }
 

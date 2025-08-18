@@ -5,11 +5,11 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use strum_macros::Display;
 use wildmatch::WildMatchPattern;
 
 use serde::Deserialize;
 use serde::Serialize;
+use strum_macros::Display;
 
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -252,21 +252,6 @@ pub enum BrowserWaitStrategy {
 pub enum BrowserImageFormat {
     Png,
     Webp,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Default, Serialize, Display)]
-#[serde(rename_all = "kebab-case")]
-#[strum(serialize_all = "kebab-case")]
-pub enum SandboxMode {
-    #[serde(rename = "read-only")]
-    #[default]
-    ReadOnly,
-
-    #[serde(rename = "workspace-write")]
-    WorkspaceWrite,
-
-    #[serde(rename = "danger-full-access")]
-    DangerFullAccess,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]

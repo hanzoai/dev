@@ -118,6 +118,8 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(Line::from(format!("  {error}")).fg(crate::colors::error()));
             lines.push(Line::from(""));
         }
+        // AE: Following styles.md, this should probably be Cyan because it's a user input tip.
+        //     But leaving this for a future cleanup.
         lines.push(Line::from("  Press Enter to continue").add_modifier(Modifier::DIM));
 
         Paragraph::new(lines)

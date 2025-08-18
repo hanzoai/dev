@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
@@ -173,6 +174,8 @@ impl AuthModeWidget {
         ));
         lines.push(Line::from(""));
         lines.push(
+            // AE: Following styles.md, this should probably be Cyan because it's a user input tip.
+            //     But leaving this for a future cleanup.
             Line::from("  Press Enter to continue")
                 .style(Style::default().add_modifier(Modifier::DIM)),
         );
