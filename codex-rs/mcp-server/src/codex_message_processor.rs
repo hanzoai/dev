@@ -12,7 +12,7 @@ use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecApprovalRequestEvent;
-use codex_core::protocol::ReviewDecision;
+use codex_protocol::protocol::ReviewDecision;
 use mcp_types::JSONRPCErrorError;
 use mcp_types::RequestId;
 use tokio::sync::Mutex;
@@ -25,27 +25,10 @@ use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::json_to_toml::json_to_toml;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
-use crate::wire_format::APPLY_PATCH_APPROVAL_METHOD;
-use crate::wire_format::AddConversationListenerParams;
-use crate::wire_format::AddConversationSubscriptionResponse;
-use crate::wire_format::ApplyPatchApprovalParams;
-use crate::wire_format::ApplyPatchApprovalResponse;
-use crate::wire_format::ClientRequest;
-use crate::wire_format::ConversationId;
-use crate::wire_format::EXEC_COMMAND_APPROVAL_METHOD;
-use crate::wire_format::ExecCommandApprovalParams;
-use crate::wire_format::ExecCommandApprovalResponse;
-use crate::wire_format::InputItem as WireInputItem;
-use crate::wire_format::InterruptConversationParams;
-use crate::wire_format::InterruptConversationResponse;
-use crate::wire_format::NewConversationParams;
-use crate::wire_format::NewConversationResponse;
-use crate::wire_format::RemoveConversationListenerParams;
-use crate::wire_format::RemoveConversationSubscriptionResponse;
-use crate::wire_format::SendUserMessageParams;
-use crate::wire_format::SendUserMessageResponse;
+use codex_protocol::protocol::TurnAbortReason;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
+use codex_core::protocol as core_protocol;
 use codex_login::CLIENT_ID;
 use codex_login::ServerOptions as LoginServerOptions;
 use codex_login::ShutdownHandle;
@@ -138,6 +121,22 @@ impl CodexMessageProcessor {
             }
             ClientRequest::SendUserTurn { request_id, params } => {
                 self.send_user_turn_compat(request_id, params).await;
+            }
+            ClientRequest::LoginChatGpt { request_id } => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "login is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+            ClientRequest::CancelLoginChatGpt { request_id, .. } => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "cancel login is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
             }
         }
     }
@@ -241,14 +240,10 @@ impl CodexMessageProcessor {
             return;
         };
 
-        // Record the pending interrupt so we can reply when TurnAborted arrives.
-        {
-            let mut map = self.pending_interrupts.lock().await;
-            map.entry(conversation_id.0).or_default().push(request_id);
-        }
-
-        // Submit the interrupt; we'll respond upon TurnAborted.
+        // Submit the interrupt and respond immediately (core does not emit a dedicated event).
         let _ = conversation.submit(Op::Interrupt).await;
+        let response = InterruptConversationResponse { abort_reason: TurnAbortReason::Interrupted };
+        self.outgoing.send_response(request_id, response).await;
     }
 
     async fn add_conversation_listener(
@@ -360,11 +355,9 @@ impl CodexMessageProcessor {
     async fn send_user_turn_compat(
         &self,
         request_id: RequestId,
-        params: crate::wire_format::SendUserTurnParams,
+        params: SendUserTurnParams,
     ) {
-        use crate::wire_format::SendUserTurnResponse;
-
-        let crate::wire_format::SendUserTurnParams {
+        let SendUserTurnParams {
             conversation_id,
             items,
             ..
@@ -402,9 +395,7 @@ impl CodexMessageProcessor {
             .await;
 
         // Acknowledge.
-        self.outgoing
-            .send_response(request_id, SendUserTurnResponse {})
-            .await;
+        self.outgoing.send_response(request_id, SendUserTurnResponse {}).await;
     }
 }
 
@@ -423,10 +414,29 @@ async fn apply_bespoke_event_handling(
             reason,
             grant_root,
         }) => {
+            // Map core FileChange to wire FileChange
+            let file_changes: HashMap<PathBuf, codex_protocol::protocol::FileChange> = changes
+                .into_iter()
+                .map(|(p, c)| {
+                    let mapped = match c {
+                        codex_core::protocol::FileChange::Add { content } => {
+                            codex_protocol::protocol::FileChange::Add { content }
+                        }
+                        codex_core::protocol::FileChange::Delete => {
+                            codex_protocol::protocol::FileChange::Delete
+                        }
+                        codex_core::protocol::FileChange::Update { unified_diff, move_path } => {
+                            codex_protocol::protocol::FileChange::Update { unified_diff, move_path }
+                        }
+                    };
+                    (p, mapped)
+                })
+                .collect();
+
             let params = ApplyPatchApprovalParams {
                 conversation_id,
                 call_id,
-                file_changes: changes,
+                file_changes,
                 reason,
                 grant_root,
             };
@@ -462,21 +472,7 @@ async fn apply_bespoke_event_handling(
                 on_exec_approval_response(event_id, rx, conversation).await;
             });
         }
-        // If this is a TurnAborted, reply to any pending interrupt requests.
-        EventMsg::TurnAborted(turn_aborted_event) => {
-            let pending = {
-                let mut map = pending_interrupts.lock().await;
-                map.remove(&conversation_id.0).unwrap_or_default()
-            };
-            if !pending.is_empty() {
-                let response = InterruptConversationResponse {
-                    abort_reason: turn_aborted_event.reason,
-                };
-                for rid in pending {
-                    outgoing.send_response(rid, response.clone()).await;
-                }
-            }
-        }
+        // No special handling needed for interrupts; responses are sent immediately.
 
         _ => {}
     }
@@ -501,7 +497,7 @@ fn derive_config_from_params(
         model,
         config_profile: profile,
         cwd: cwd.map(PathBuf::from),
-        approval_policy,
+        approval_policy: approval_policy.map(map_ask_for_approval_from_wire),
         sandbox_mode,
         model_provider: None,
         codex_linux_sandbox_exe,
@@ -534,7 +530,7 @@ async fn on_patch_approval_response(
             if let Err(submit_err) = codex
                 .submit(Op::PatchApproval {
                     id: event_id.clone(),
-                    decision: ReviewDecision::Denied,
+                    decision: core_protocol::ReviewDecision::Denied,
                 })
                 .await
             {
@@ -555,7 +551,7 @@ async fn on_patch_approval_response(
     if let Err(err) = codex
         .submit(Op::PatchApproval {
             id: event_id,
-            decision: response.decision,
+            decision: map_review_decision_from_wire(response.decision),
         })
         .await
     {
@@ -591,10 +587,28 @@ async fn on_exec_approval_response(
     if let Err(err) = conversation
         .submit(Op::ExecApproval {
             id: event_id,
-            decision: response.decision,
+            decision: map_review_decision_from_wire(response.decision),
         })
         .await
     {
         error!("failed to submit ExecApproval: {err}");
+    }
+}
+
+fn map_review_decision_from_wire(d: codex_protocol::protocol::ReviewDecision) -> core_protocol::ReviewDecision {
+    match d {
+        codex_protocol::protocol::ReviewDecision::Approved => core_protocol::ReviewDecision::Approved,
+        codex_protocol::protocol::ReviewDecision::ApprovedForSession => core_protocol::ReviewDecision::ApprovedForSession,
+        codex_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
+        codex_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
+    }
+}
+
+fn map_ask_for_approval_from_wire(a: codex_protocol::protocol::AskForApproval) -> core_protocol::AskForApproval {
+    match a {
+        codex_protocol::protocol::AskForApproval::UnlessTrusted => core_protocol::AskForApproval::UnlessTrusted,
+        codex_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
+        codex_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
+        codex_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
     }
 }
