@@ -251,6 +251,11 @@ jobs:
         
         # List assets for verification
         ls -la release-assets/
+
+    - name: Sync README for npm
+      run: |
+        # Ensure npm package uses the repository root README
+        cp README.md codex-cli/README.md
         
     - name: Update package.json version
       id: version
