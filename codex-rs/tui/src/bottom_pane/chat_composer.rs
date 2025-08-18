@@ -33,7 +33,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-const BASE_PLACEHOLDER_TEXT: &str = "What are we coding today?";
+const BASE_PLACEHOLDER_TEXT: &str = "Welcome to Code — What are we coding today? Type / to see commands";
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;

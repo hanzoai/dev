@@ -18,6 +18,8 @@ use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
 use codex_login::CodexAuth;
+use codex_protocol::protocol::TurnAbortReason;
+use codex_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
@@ -502,7 +504,7 @@ impl Session {
     pub fn set_agent(&self, agent: AgentAgent) {
         let mut state = self.state.lock().unwrap();
         if let Some(current_agent) = state.current_agent.take() {
-            current_agent.abort();
+            current_agent.abort(TurnAbortReason::Replaced);
         }
         state.current_agent = Some(agent);
     }
@@ -1058,7 +1060,7 @@ impl Session {
         state.pending_approvals.clear();
         state.pending_input.clear();
         if let Some(agent) = state.current_agent.take() {
-            agent.abort();
+            agent.abort(TurnAbortReason::Interrupted);
         }
     }
 
@@ -1094,6 +1096,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // Interrupt any running turn when the session is dropped.
         self.abort();
     }
 }
@@ -1161,7 +1164,8 @@ impl AgentAgent {
         }
     }
 
-    fn abort(self) {
+    fn abort(self, reason: TurnAbortReason) {
+        // TOCTOU?
         if !self.handle.is_finished() {
             self.handle.abort();
             let event = Event {
