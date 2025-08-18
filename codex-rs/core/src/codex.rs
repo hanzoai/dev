@@ -18,6 +18,8 @@ use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
 use codex_login::CodexAuth;
+use codex_protocol::protocol::TurnAbortReason;
+use codex_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
@@ -1094,7 +1096,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.abort();
+        self.interrupt_task();
     }
 }
 
@@ -1161,7 +1163,8 @@ impl AgentAgent {
         }
     }
 
-    fn abort(self) {
+    fn abort(self, reason: TurnAbortReason) {
+        // TOCTOU?
         if !self.handle.is_finished() {
             self.handle.abort();
             let event = Event {
