@@ -158,13 +158,18 @@ jobs:
     - name: Build binaries
       shell: bash
       env:
-        # Speed up compile by caching object files across runs
-        RUSTC_WRAPPER: sccache
-        SCCACHE_GHA_ENABLED: 'true'
         # Use mold linker on Linux when available for faster linking
         RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-C link-arg=-fuse-ld=mold' || '' }}
       run: |
         cd codex-rs
+        # Enable sccache only if installed on this runner
+        if command -v sccache >/dev/null 2>&1; then
+          export RUSTC_WRAPPER=sccache
+          export SCCACHE_GHA_ENABLED=true
+          echo "Using sccache for compilation caching"
+        else
+          echo "sccache not available; proceeding without it"
+        fi
         # Use all available cores
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
           # Windows: Use NUMBER_OF_PROCESSORS env var
