@@ -45,8 +45,6 @@ use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::protocol::TokenUsage;
 use crate::user_agent::get_codex_user_agent;
 use crate::util::backoff;
-use codex_protocol::config_types::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -399,15 +397,7 @@ impl ModelClient {
         self.config.model_family.clone()
     }
 
-    /// Returns the current reasoning effort setting.
-    pub fn get_reasoning_effort(&self) -> ReasoningEffortConfig {
-        self.effort
-    }
-
-    /// Returns the current reasoning summary setting.
-    pub fn get_reasoning_summary(&self) -> ReasoningSummaryConfig {
-        self.summary
-    }
+    // duplicate of earlier helpers removed during merge cleanup
 
     pub fn get_auth(&self) -> Option<CodexAuth> {
         self.auth.clone()
