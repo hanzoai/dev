@@ -17,14 +17,29 @@ pub(crate) struct WelcomeWidget {
 
 impl WidgetRef for &WelcomeWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        let line = Line::from(vec![
+        let line1 = Line::from(vec![
             Span::raw(">_ "),
             Span::styled(
                 "Welcome to Code",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
         ]);
-        line.render(area, buf);
+        line1.render(area, buf);
+        
+        // Render second line below the first
+        if area.height > 1 {
+            let line2 = Line::from(vec![
+                Span::raw("   "), // Indent to align with text after ">_ "
+                Span::raw("What can I code for you today?"),
+            ]);
+            let line2_area = Rect {
+                x: area.x,
+                y: area.y + 1,
+                width: area.width,
+                height: 1,
+            };
+            line2.render(line2_area, buf);
+        }
     }
 }
 
