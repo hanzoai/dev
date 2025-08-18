@@ -26,6 +26,9 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+// Externalized virtual cursor script (editable JS)
+const VIRTUAL_CURSOR_JS: &str = include_str!("js/virtual_cursor.js");
+
 // Define CursorState struct (New)
 #[derive(Debug, Clone)]
 pub struct CursorState {
@@ -80,32 +83,38 @@ impl Page {
 
     /// Ensure the virtual cursor is present; inject if missing, then update to current position.
     async fn ensure_virtual_cursor(&self) -> Result<bool> {
+        // Desired runtime version of the virtual cursor script
+        let desired_version: i32 = 11;
         // Quick existence check
-        let exists = self
+        // Check existence and version
+        let status = self
             .cdp_page
-            .evaluate("typeof window.__vc !== 'undefined'")
+            .evaluate(format!(
+                r#"(function(v) {{
+                      if (typeof window.__vc === 'undefined') return 'missing';
+                      try {{
+                        var cur = window.__vc.__version|0;
+                        if (!cur || cur !== v) {{
+                          if (window.__vc && typeof window.__vc.destroy === 'function') try {{ window.__vc.destroy(); }} catch (e) {{}}
+                          return 'reinstall';
+                        }}
+                        return 'ok';
+                      }} catch (e) {{ return 'reinstall'; }}
+                }})({})"#,
+                desired_version
+            ))
             .await
             .ok()
-            .and_then(|r| r.value().and_then(|v| v.as_bool()))
-            .unwrap_or(false);
+            .and_then(|r| r.value().and_then(|v| v.as_str().map(|s| s.to_string())))
+            .unwrap_or_else(|| "missing".to_string());
 
-        if !exists {
+        if status != "ok" {
             // Inject if missing
             if let Err(e) = self.inject_virtual_cursor().await {
                 warn!("Failed to inject virtual cursor: {}", e);
                 return Err(e);
             }
             return Ok(true);
-        } else {
-            // Update position to current cursor
-            let cursor = self.cursor_state.lock().await.clone();
-            let _ = self
-                .cdp_page
-                .evaluate(format!(
-                    "window.__vc && window.__vc.update({:.0}, {:.0});",
-                    cursor.x, cursor.y
-                ))
-                .await;
         }
 
         Ok(false)
@@ -478,537 +487,139 @@ impl Page {
         let cursor_x = cursor.x;
         let cursor_y = cursor.y;
 
-        // Creates (once) and updates a two-part virtual cursor:
-        // - Arrow (instant follow)
-        // - Badge (slight lag / offset for a nicer feel)
-        //
-        // Tunables inside script:
-        //   ARROW_SIZE_PX        => overall design width (scales arrow)
-        //   BADGE_SIZE_PX        => overall design width (scales badge)
-        //   TIP_X/TIP_Y    => pixel nudge so the arrow tip lands exactly on (x,y)
-        //   BADGE_OFF_*    => relative offset of the trailing badge
-        //   LAG            => how much the badge trails; lower = looser, higher = tighter
-        //
-        // To remove later: evaluate `window.__vc?.destroy()`
-        let script = format!(
-            r#"
-(function(x, y) {{
-  const ns = 'http://www.w3.org/2000/svg';
-  const VIEW_W = 40, VIEW_H = 30;       // original viewBox of your assets
-  const ARROW_SIZE_PX = 53;             // arrow visual width (px)
-  const BADGE_SIZE_PX = 70;             // badge visual width (px)
-  const TIP_X = 3, TIP_Y = 3;           // tip calibration (px) — adjust if needed
-  const BADGE_OFF_X = -4, BADGE_OFF_Y = -8;
-
-  function ensureRoot() {{
-    let root = document.getElementById('__virtualCursorRoot');
-    if (!root) {{
-      root = document.createElement('div');
-      root.id = '__virtualCursorRoot';
-      Object.assign(root.style, {{
-        position: 'fixed',
-        inset: '0',                 // cover viewport -> non-zero paint area
-        pointerEvents: 'none',
-        zIndex: '2147483647',
-        contain: 'layout style',    // avoid 'paint' or you'll clip to root box
-        overflow: 'visible',
-      }});
-      (document.body || document.documentElement).appendChild(root);
-    }}
-    return root;
-  }}
-
-  function createSvg(tag) {{ return document.createElementNS(ns, tag); }}
-
-    // Install once or upgrade from bootstrap version
-    if (!window.__vc) {{
-    const root = ensureRoot();
-
-    // --- Arrow SVG container ---
-    const arrow = createSvg('svg');
-    arrow.setAttribute('viewBox', '0 0 44 34');
-    arrow.setAttribute('aria-hidden', 'true');
-    arrow.style.position = 'absolute';
-    arrow.style.transformOrigin = '0 0';
-    arrow.style.width = ARROW_SIZE_PX + 'px';
-    arrow.style.height = 'auto';
-
-    // defs + drop-shadow filter (your values)
-    const defs = createSvg('defs');
-    const filt = createSvg('filter');
-    filt.setAttribute('id', 'vc-drop-shadow');
-    filt.setAttribute('color-interpolation-filters', 'sRGB');
-    filt.setAttribute('x', '-50%');
-    filt.setAttribute('y', '-50%');
-    filt.setAttribute('width', '200%');
-    filt.setAttribute('height', '200%');
-
-    const blur = createSvg('feGaussianBlur'); blur.setAttribute('in', 'SourceAlpha'); blur.setAttribute('stdDeviation', '1.5');
-    const off  = createSvg('feOffset');       off.setAttribute('dx', '0'); off.setAttribute('dy', '0');
-    const ct   = createSvg('feComponentTransfer'); ct.setAttribute('result', 'offsetblur');
-    const fa   = createSvg('feFuncA'); fa.setAttribute('type', 'linear'); fa.setAttribute('slope', '0.35'); ct.appendChild(fa);
-    const flood = createSvg('feFlood'); flood.setAttribute('flood-color', '#000'); flood.setAttribute('flood-opacity', '0.35');
-    const comp  = createSvg('feComposite'); comp.setAttribute('in2', 'offsetblur'); comp.setAttribute('operator', 'in');
-    const merge = createSvg('feMerge');
-    const m1 = createSvg('feMergeNode');
-    const m2 = createSvg('feMergeNode'); m2.setAttribute('in', 'SourceGraphic');
-
-    merge.appendChild(m1); merge.appendChild(m2);
-    filt.appendChild(blur); filt.appendChild(off); filt.appendChild(ct); filt.appendChild(flood); filt.appendChild(comp); filt.appendChild(merge);
-    defs.appendChild(filt);
-    arrow.appendChild(defs);
-
-    const arrowPath = createSvg('path');
-    arrowPath.setAttribute('d',
-      'M 16.63 12.239 C 16.63 12.239 3.029 2.981 3 3 L 3.841 18.948 C 3.841 19.648 4.641 20.148 5.241 19.748 L 9.518 15.207 L 16.13 13.939 C 16.93 13.839 17.253 12.798 16.63 12.239 Z'
-    );
-    arrowPath.setAttribute('stroke', 'white');
-    arrowPath.setAttribute('stroke-width','1');
-    arrowPath.setAttribute('vector-effect','non-scaling-stroke');
-    arrowPath.setAttribute('fill', 'rgb(0, 171, 255)');
-    arrowPath.style.strokeLinejoin = 'round';
-    arrowPath.setAttribute('filter', 'url(#vc-drop-shadow)');
-    arrow.appendChild(arrowPath);
-
-    // --- Badge SVG container ---
-    const badge = createSvg('svg');
-    badge.setAttribute('viewBox', '0 0 44 34');
-    badge.setAttribute('aria-hidden', 'true');
-    badge.style.position = 'absolute';
-    badge.style.transformOrigin = '0 0';
-    badge.style.width = BADGE_SIZE_PX + 'px';
-    badge.style.height = 'auto';
-
-    const rect = createSvg('rect');
-    rect.setAttribute('x','10.82');
-    rect.setAttribute('y','18.564');
-    rect.setAttribute('width','25.686');
-    rect.setAttribute('height','10.691');
-    rect.setAttribute('rx','4');
-    rect.setAttribute('ry','4');
-    rect.setAttribute('fill','rgb(0, 171, 255)');
-    rect.setAttribute('stroke', 'white');
-    rect.setAttribute('stroke-width','1');
-    rect.setAttribute('vector-effect','non-scaling-stroke');
-    rect.setAttribute('filter', 'url(#vc-drop-shadow)');
-    badge.appendChild(defs.cloneNode(true));
-
-    const glyphs = createSvg('path');
-    glyphs.setAttribute('d',
-      'M 19.269 24.657 L 19.96 24.832 C 19.815 25.399 19.555 25.832 19.178 26.131 C 18.801 26.429 18.341 26.578 17.796 26.578 C 17.233 26.578 16.775 26.463 16.422 26.234 C 16.069 26.005 15.801 25.673 15.617 25.238 C 15.433 24.803 15.341 24.336 15.341 23.837 C 15.341 23.293 15.445 22.818 15.652 22.413 C 15.86 22.008 16.156 21.7 16.54 21.49 C 16.924 21.279 17.346 21.174 17.807 21.174 C 18.33 21.174 18.769 21.307 19.126 21.574 C 19.483 21.84 19.731 22.214 19.871 22.696 L 19.19 22.857 C 19.069 22.477 18.893 22.2 18.663 22.026 C 18.432 21.853 18.142 21.766 17.793 21.766 C 17.392 21.766 17.056 21.862 16.786 22.055 C 16.516 22.248 16.326 22.506 16.217 22.83 C 16.108 23.155 16.053 23.489 16.053 23.833 C 16.053 24.278 16.118 24.666 16.248 24.997 C 16.377 25.329 16.579 25.577 16.852 25.74 C 17.125 25.904 17.421 25.986 17.739 25.986 C 18.126 25.986 18.454 25.874 18.723 25.651 C 18.992 25.428 19.174 25.096 19.269 24.657 Z M 20.491 24.596 C 20.491 23.895 20.686 23.376 21.076 23.039 C 21.401 22.758 21.798 22.618 22.266 22.618 C 22.787 22.618 23.212 22.789 23.542 23.13 C 23.873 23.471 24.038 23.942 24.038 24.543 C 24.038 25.03 23.965 25.413 23.818 25.692 C 23.672 25.971 23.459 26.188 23.18 26.343 C 22.901 26.498 22.597 26.575 22.266 26.575 C 21.736 26.575 21.308 26.405 20.981 26.065 C 20.654 25.725 20.491 25.235 20.491 24.596 Z M 21.15 24.596 C 21.15 25.081 21.256 25.444 21.468 25.685 C 21.679 25.926 21.945 26.047 22.266 26.047 C 22.585 26.047 22.85 25.926 23.061 25.683 C 23.272 25.441 23.378 25.072 23.378 24.575 C 23.378 24.107 23.272 23.752 23.059 23.511 C 22.846 23.27 22.582 23.149 22.266 23.149 C 21.945 23.149 21.679 23.269 21.468 23.509 C 21.256 23.749 21.15 24.111 21.15 24.596 Z M 27.245 26.489 L 27.245 26.011 C 27.005 26.387 26.652 26.575 26.186 26.575 C 25.885 26.575 25.607 26.492 25.354 26.325 C 25.101 26.159 24.905 25.927 24.766 25.628 C 24.627 25.33 24.557 24.987 24.557 24.6 C 24.557 24.222 24.62 23.879 24.746 23.571 C 24.872 23.264 25.061 23.028 25.313 22.864 C 25.565 22.7 25.847 22.618 26.158 22.618 C 26.386 22.618 26.589 22.666 26.767 22.762 C 26.946 22.859 27.091 22.984 27.202 23.138 L 27.202 21.264 L 27.84 21.264 L 27.84 26.489 L 27.245 26.489 Z M 25.217 24.6 C 25.217 25.085 25.319 25.447 25.523 25.687 C 25.728 25.927 25.969 26.047 26.247 26.047 C 26.527 26.047 26.765 25.932 26.961 25.703 C 27.158 25.474 27.256 25.124 27.256 24.653 C 27.256 24.135 27.156 23.755 26.956 23.513 C 26.757 23.27 26.511 23.149 26.218 23.149 C 25.933 23.149 25.695 23.265 25.504 23.498 C 25.313 23.731 25.217 24.099 25.217 24.6 Z M 31.44 25.27 L 32.103 25.352 C 31.998 25.739 31.805 26.04 31.522 26.254 C 31.239 26.468 30.878 26.575 30.439 26.575 C 29.885 26.575 29.446 26.404 29.122 26.063 C 28.797 25.722 28.635 25.244 28.635 24.628 C 28.635 23.991 28.799 23.497 29.127 23.146 C 29.455 22.794 29.88 22.618 30.403 22.618 C 30.909 22.618 31.322 22.79 31.643 23.135 C 31.964 23.48 32.125 23.964 32.125 24.589 C 32.125 24.627 32.124 24.684 32.121 24.76 L 29.298 24.76 C 29.322 25.176 29.44 25.495 29.651 25.716 C 29.862 25.937 30.126 26.047 30.442 26.047 C 30.677 26.047 30.878 25.985 31.045 25.862 C 31.211 25.738 31.343 25.541 31.44 25.27 Z M 29.334 24.233 L 31.447 24.233 C 31.419 23.914 31.338 23.675 31.205 23.516 C 31.001 23.269 30.736 23.146 30.41 23.146 C 30.115 23.146 29.868 23.244 29.667 23.441 C 29.466 23.638 29.355 23.902 29.334 24.233 Z'
-    );
-    glyphs.setAttribute('fill', 'white');
-
-    badge.appendChild(rect);
-    badge.appendChild(glyphs);
-
-    root.appendChild(arrow);
-    root.appendChild(badge);
-
-    // Initial state and transforms
-    const state = {{
-      arrow, badge, root,
-      arrowX: Math.round(x - TIP_X),
-      arrowY: Math.round(y - TIP_Y),
-      badgeX: Math.round(x - TIP_X + BADGE_OFF_X),
-      badgeY: Math.round(y - TIP_Y + BADGE_OFF_Y),
-      aAnim: null,
-      bAnim: null,
-      ignoreHoverUntil: 0,
-      curveFlip: false,
-    }};
-
-    arrow.style.transform = 'translate3d(' + state.arrowX + 'px,' + state.arrowY + 'px,0)';
-    badge.style.transform = 'translate3d(' + state.badgeX + 'px,' + state.badgeY + 'px,0)';
-    arrow.style.willChange = 'transform';
-    badge.style.willChange = 'transform';
-    // For consistent rotation pivoting
-    arrow.style.transformOrigin = '0 0';
-    badge.style.transformOrigin = '0 0';
-
-    // Motion configuration (distance-based durations)
-    const MOTION = {{
-      pxPerSec: 120,                           // much slower, relaxed glide
-      min: 600,                                // longer minimum duration
-      max: 4200,                               // ms cap
-      easing: 'cubic-bezier(0.18, 0.9, 0.18, 1)', // very soft ease-out
-      // Duration shaping
-      arrowScale: 1.50,                        // arrow takes noticeably longer
-      badgeScale: 1.70,                        // badge travels longer (smooth trail)
-      badgeDelay: 40,                          // tiny delay so it starts almost immediately
-      jitter: 0.0,                             // deterministic for consistency
-      rotateMaxDeg: 16,                        // cap rotation
-      // Rotation tuning
-      arrowTilt: 0.85,                         // slightly calmer rotation
-      badgeTilt: 0.60,                         // calmer badge rotation
-      overshootDeg: 4.0,                       // gentler overshoot
-      arrowOvershootScale: 0.5,                // arrow overshoot smaller
-      badgeOvershootScale: 0.85,               // badge overshoot gentle
-      overshootAt: 0.7,                        // overshoot moment
-      // Curve tuning
-      curveFactor: 0.25,                       // scales with distance (0..1)
-      curveMaxPx: 70,                          // pixel cap for arc height
-      curveAlternate: true                     // alternate left/right per move for variety
-    }};
-
-    function dist(x0, y0, x1, y1) {{
-      const dx = x1 - x0, dy = y1 - y0;
-      return Math.hypot(dx, dy);
-    }}
-
-    function durationForDistance(d) {{
-      // raw time from speed
-      let ms = (d / Math.max(1, MOTION.pxPerSec)) * 1000;
-      // slight variation (apply before clamping so clamps still respected)
-      if (MOTION.jitter > 0) {{
-        const j = (Math.random() * 2 - 1) * MOTION.jitter; // [-jitter, +jitter]
-        ms = ms * (1 + j);
-      }}
-      // clamp
-      ms = Math.min(MOTION.max, Math.max(MOTION.min, ms));
-      // respect reduced motion
-      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {{
-        ms = Math.min(80, ms);
-      }}
-      return Math.round(ms);
-    }}
-
-    function commit(ax, ay, bx, by) {{
-      state.arrowX = ax; state.arrowY = ay;
-      state.badgeX = bx; state.badgeY = by;
-    }}
-
-    // Ensure elements use their currently computed transform as the inline baseline
-    function pinCurrent(el) {{
-      try {{
-        const cs = getComputedStyle(el);
-        const t  = cs && cs.transform;
-        if (t && t !== 'none') {{
-          // Set inline to the current computed transform to avoid visual jumps on cancel
-          el.style.transform = t;
-        }}
-      }} catch (e) {{}}
-    }}
-
-    function moveTo(nx, ny, opts) {{
-      const o = Object.assign({{}}, MOTION, opts || {{}});
-
-      const ax1 = Math.round(nx - TIP_X), ay1 = Math.round(ny - TIP_Y);
-      const bx1 = ax1 + BADGE_OFF_X,      by1 = ay1 + BADGE_OFF_Y;
-
-      const ax0 = state.arrowX, ay0 = state.arrowY;
-      const bx0 = state.badgeX, by0 = state.badgeY;
-
-      // Helper to coerce to finite numbers
-      const _safe = (v, dv=0) => (Number.isFinite(v) ? v : dv);
-
-      const d    = dist(ax0, ay0, ax1, ay1);
-      // For tiny moves, snap without animation to avoid visible twitch
-      if (d < 1.5) {{
-        try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
-        try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
-        arrow.style.transform = 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)';
-        badge.style.transform = 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)';
-        commit(ax1, ay1, bx1, by1);
-        return;
-      }}
-
-      const base = durationForDistance(d);
-      const aDur = Math.round(base * o.arrowScale);
-      const bDur = Math.round(base * o.badgeScale);
-      const bDel = o.badgeDelay;
-      const angle = Math.atan2(ay1 - ay0, ax1 - ax0) * 180 / Math.PI; // [-180,180]
-      const rot   = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angle));
-      const sign  = rot >= 0 ? 1 : -1; // direction sign
-      // Scale rotation and overshoot by distance so tiny moves don't wiggle
-      const distNorm = Math.min(1, d / 80); // 0..1 over ~80px
-      const aRotTarget = rot * o.arrowTilt * distNorm;
-      const bRotTarget = rot * o.badgeTilt * distNorm;
-      const overs = o.overshootDeg * distNorm;
-      const aOvershoot = -sign * overs * o.arrowOvershootScale;
-      const bOvershoot = -sign * overs * o.badgeOvershootScale;
-
-      // Curved path mid-point calculation
-      const dx = ax1 - ax0, dy = ay1 - ay0;
-      const len = Math.hypot(dx, dy) || 1;
-      const nqx = -dy / len, nqy = dx / len; // unit normal (renamed to avoid param shadow)
-      if (o.curveAlternate) state.curveFlip = !state.curveFlip;
-      const curveSign = state.curveFlip ? 1 : -1;
-      const curveMag = Math.min(o.curveMaxPx || 0, Math.max(0, d * (o.curveFactor || 0)));
-      const mx = Math.round((ax0 + ax1) / 2 + nqx * curveMag * curveSign);
-      const my = Math.round((ay0 + ay1) / 2 + nqy * curveMag * curveSign);
-      const angleMid = Math.atan2(my - ay0, mx - ax0) * 180 / Math.PI;
-      const aRotMid = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angleMid)) * (o.arrowTilt * distNorm);
-      const bRotMid = Math.max(-o.rotateMaxDeg, Math.min(o.rotateMaxDeg, angleMid)) * (o.badgeTilt * distNorm);
-
-      // Pin current visual state, then cancel any in-flight animations.
-      // This prevents elements from snapping back to their old inline transforms.
-      pinCurrent(arrow);
-      pinCurrent(badge);
-      try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
-      try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
-
-      // Arrow and badge animations with robust fallback
-      try {{
-        const supportsWAAPI = typeof arrow.animate === 'function' && typeof badge.animate === 'function';
-        if (!supportsWAAPI) throw new Error('WAAPI not supported');
-
-        const aKF = [
-          {{ transform: 'translate3d(' + ax0 + 'px,' + ay0 + 'px,0) rotate(0deg)' }},
-          {{ transform: 'translate3d(' + mx  + 'px,' + my  + 'px,0) rotate(' + aRotMid + 'deg)', offset: 0.5 }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + aRotTarget + 'deg)', offset: 0.82 }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(' + aOvershoot + 'deg)', offset: Math.min(0.95, Math.max(0.5, _safe(o.overshootAt, 0.7))) }},
-          {{ transform: 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)' }}
-        ];
-        const bKF = [
-          {{ transform: 'translate3d(' + bx0 + 'px,' + by0 + 'px,0) rotate(0deg)' }},
-          {{ transform: 'translate3d(' + (mx + BADGE_OFF_X) + 'px,' + (my + BADGE_OFF_Y) + 'px,0) rotate(' + bRotMid + 'deg)', offset: 0.5 }},
-          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(' + bRotTarget + 'deg)', offset: 0.85 }},
-          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(' + bOvershoot + 'deg)', offset: Math.min(0.98, Math.max(0.55, _safe(o.overshootAt, 0.7) + 0.05)) }},
-          {{ transform: 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)' }}
-        ];
-
-        state.aAnim = arrow.animate(aKF, {{ duration: aDur, easing: o.easing, fill: 'forwards' }});
-        state.bAnim = badge.animate(bKF, {{ duration: bDur, delay: bDel, easing: o.easing, fill: 'forwards' }});
-      }} catch (e) {{
-        // Fallback: set final transforms directly (no animation)
-        arrow.style.transform = 'translate3d(' + ax1 + 'px,' + ay1 + 'px,0) rotate(0deg)';
-        badge.style.transform = 'translate3d(' + bx1 + 'px,' + by1 + 'px,0) rotate(0deg)';
-        state.aAnim = null; state.bAnim = null;
-      }}
-
-      // Commit endpoints immediately so subsequent math uses the new base
-      commit(ax1, ay1, bx1, by1);
-    }}
-
-    // --- Hover-to-dim (distance to tip) ---
-    root.style.opacity = '1';
-    root.style.transition = 'opacity 160ms ease-out';
-    const HOVER = {{ opacity: 0.2, offset: 20, radius: 55, enabled: true }};
-
-    let _mx = 0, _my = 0, _rafHover = 0, _dimmed = false;
-    function hoverTick() {{
-      _rafHover = 0;
-      const now = (window.performance && performance.now) ? performance.now() : Date.now();
-      if (now < state.ignoreHoverUntil) {{
-        // Ignore hover updates during synthetic/programmatic moves
-        return;
-      }}
-      const tipX = state.arrowX + TIP_X + HOVER.offset;
-      const tipY = state.arrowY + TIP_Y + HOVER.offset;
-      const dx = _mx - tipX, dy = _my - tipY;
-      const over = (dx*dx + dy*dy) <= (HOVER.radius * HOVER.radius);
-      const shouldDim = HOVER.enabled && over;
-      if (shouldDim !== _dimmed) {{
-        _dimmed = shouldDim;
-        root.style.opacity = shouldDim ? String(HOVER.opacity) : '1';
-      }}
-    }}
-    function scheduleHover(ev) {{
-      _mx = ev.clientX; _my = ev.clientY;
-      if (!_rafHover) _rafHover = requestAnimationFrame(hoverTick);
-    }}
-    window.addEventListener('mousemove', scheduleHover, {{ passive: true }});
-    window.addEventListener('mouseleave', function() {{
-      if (_dimmed) {{ _dimmed = false; root.style.opacity = '1'; }}
-    }}, {{ passive: true }});
-
-    // Public API
-    window.__vc = {{
-      moveTo: moveTo,                 // preferred
-      update: function(nx, ny) {{     // backwards compat
-        moveTo(nx, ny);
-      }},
-      // Click pulse animation: bouncy scale + transient ring ripple at tip
-      clickPulse: function(opts) {{
-        const scaleDown = (opts && opts.scaleDown) || 0.84;
-        const dur       = (opts && opts.duration) || 360; // per half-cycle (slower)
-        const easing    = (opts && opts.easing) || 'cubic-bezier(0.16, 1, 0.3, 1)';
-
-        // Cancel any prior click animations
-        try {{ state.caAnim && state.caAnim.cancel(); }} catch (e) {{}}
-        try {{ state.cbAnim && state.cbAnim.cancel(); }} catch (e) {{}}
-
-        const aBase = 'translate3d(' + state.arrowX + 'px,' + state.arrowY + 'px,0)';
-        const bBase = 'translate3d(' + state.badgeX + 'px,' + state.badgeY + 'px,0)';
-
-        // Suppress hover dimming during click pulse too
-        try {{
-          const nowTS = (window.performance && performance.now) ? performance.now() : Date.now();
-          state.ignoreHoverUntil = Math.max(state.ignoreHoverUntil, nowTS + (dur*2 + 40));
-        }} catch (e) {{}}
-
-        state.caAnim = arrow.animate(
-          [ {{ transform: aBase + ' scale(1)' }},
-            {{ transform: aBase + ' scale(' + scaleDown + ')' }},
-            {{ transform: aBase + ' scale(1)' }} ],
-          {{ duration: dur * 2, easing, fill: 'none' }}
+        // First try the externalized installer for easier iteration.
+        // The JS must define `window.__vcInstall(x,y)` and create window.__vc with __version=11.
+        let external = format!(
+            "{}\n;(()=>{{ try {{ return (window.__vcInstall ? window.__vcInstall : function(x,y){{}})({:.0},{:.0}); }} catch (e) {{ return String(e && e.message || e); }} }})()",
+            VIRTUAL_CURSOR_JS,
+            cursor_x,
+            cursor_y
         );
-        state.cbAnim = badge.animate(
-          [ {{ transform: bBase + ' scale(1)' }},
-            {{ transform: bBase + ' scale(' + (scaleDown - 0.04) + ')' }},
-            {{ transform: bBase + ' scale(1)' }} ],
-          {{ duration: dur * 2 + 40, easing, fill: 'none' }}
-        );
-
-        // Transient ring ripple near the tip for visibility
-        try {{
-          const ring = document.createElement('div');
-          ring.className = '__vc_click_ring';
-          const tipX = state.arrowX + TIP_X; // approximate tip
-          const tipY = state.arrowY + TIP_Y;
-          const sz = 18; // ring base size
-          Object.assign(ring.style, {{
-            position: 'absolute',
-            left: (tipX - sz/2) + 'px',
-            top: (tipY - sz/2) + 'px',
-            width: sz + 'px',
-            height: sz + 'px',
-            borderRadius: '999px',
-            border: '2px solid rgba(255,255,255,0.95)',
-            boxShadow: '0 0 0 2px rgba(0,0,0,0.15)',
-            opacity: '0.9',
-            pointerEvents: 'none',
-            transform: 'scale(0.6)',
-            transformOrigin: 'center center',
-            willChange: 'transform, opacity',
-            zIndex: '2147483647'
-          }});
-          state.root.appendChild(ring);
-          const ringAnim = ring.animate([
-            {{ transform: 'scale(0.6)', opacity: 0.9 }},
-            {{ transform: 'scale(1.8)', opacity: 0.0 }}
-          ], {{ duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }});
-          ringAnim.onfinish = () => {{ try {{ ring.remove(); }} catch (e) {{}} }};
-        }} catch (e) {{}}
-
-        return dur * 2 + 80; // approximate total
-      }},
-      // Return an estimated remaining time (ms) for any in-flight animations
-      getSettleMs: function() {{
-        function rem(anim) {{
-          if (!anim) return 0;
-          try {{
-            const t = anim.currentTime || 0;
-            const eff = anim.effect && anim.effect.getTiming ? anim.effect.getTiming() : null;
-            let d = 0;
-            if (eff) {{
-              if (typeof eff.duration === 'number') d = eff.duration || 0;
-            }}
-            const left = Math.max(0, d - t);
-            return isFinite(left) ? Math.ceil(left) : 0;
-          }} catch (e) {{ return 0; }}
-        }}
-        return Math.max(rem(state.aAnim), rem(state.bAnim), rem(state.caAnim), rem(state.cbAnim));
-      }},
-      setSize: function(arrowPx, badgePx) {{
-        if (arrowPx) arrow.style.width = arrowPx + 'px';
-        if (badgePx) badge.style.width = badgePx + 'px';
-      }},
-      setMotion: function(p) {{ Object.assign(MOTION, p || {{}}); }},
-      setHover:  function(p) {{ Object.assign(HOVER,  p || {{}}); }},
-      destroy: function() {{
-        try {{ state.aAnim && state.aAnim.cancel(); }} catch (e) {{}}
-      try {{ state.bAnim && state.bAnim.cancel(); }} catch (e) {{}}
-
-      // During programmatic movement, suppress hover dimming as CDP will fire mousemove events
-      const nowTS = (window.performance && performance.now) ? performance.now() : Date.now();
-      const total = Math.max(aDur, bDur + bDel) + 40;
-      state.ignoreHoverUntil = nowTS + total;
-        window.removeEventListener('mousemove', scheduleHover);
-        if (root && root.parentNode) root.parentNode.removeChild(root);
-        window.__vc = null;
-      }},
-      __bootstrap: false,
-      __version: 2,
-      _s: state
-    }};
-
-    // Go to initial position
-    window.__vc.moveTo(x, y);
-
-  }} else {{
-    // Already installed; just move to the new position
-    window.__vc.moveTo(x, y);
-  }}
-}})({cursor_x}, {cursor_y});
-"#,
-            cursor_x = cursor_x,
-            cursor_y = cursor_y
-        );
-
-        self.cdp_page.evaluate(script).await?;
-        Ok(())
+        if let Ok(res) = self.cdp_page.evaluate(external).await {
+            let status = res
+                .value()
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if status == "ok" {
+                return Ok(());
+            } else {
+                warn!("Virtual cursor injection reported: {}", status);
+                return Err(BrowserError::CdpError(format!(
+                    "Virtual cursor injection failed: {}",
+                    status
+                )));
+            }
+        }
+        warn!("Virtual cursor injection failed: no response");
+        Err(BrowserError::CdpError("Virtual cursor injection failed: no response".into()))
     }
 
-    /// (NEW) Ensures an editable element is focused before typing. (Ported from TS implementation)
+    /// Ensures an editable element is focused before typing without stealing focus.
+    /// Rules:
+    /// - If the deeply focused element (piercing shadow DOM and same-origin iframes) is editable, do nothing.
+    /// - Otherwise, try to focus the editable element directly under the virtual cursor location.
+    /// - Never fall back to any other candidate (prevents unexpected focus steals).
     async fn ensure_editable_focused(&self) -> Result<bool> {
         let cursor = self.cursor_state.lock().await.clone();
         let cursor_x = cursor.x;
         let cursor_y = cursor.y;
 
-        // The JS logic from browser_session.ts
         let script = format!(
             r#"
             (function(cursorX, cursorY) {{
-                const editable = el => el && (
-                    // Refined list: exclude input types not meant for direct typing
-                    (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|image|color|hidden|range)$/i.test(el.type)) ||
+                const isEditableInputType = (t) => !/^(checkbox|radio|button|submit|reset|file|image|color|hidden|range)$/i.test(t || '');
+                const isEditable = (el) => !!el && (
+                    (el.tagName === 'INPUT' && isEditableInputType(el.type)) ||
                     el.tagName === 'TEXTAREA' ||
-                    el.isContentEditable
+                    el.isContentEditable === true
                 );
 
-                // 1) Keep current focus if editable
-                if (editable(document.activeElement)) return true;
+                const deepActiveElement = () => {{
+                    try {{
+                        let ae = document.activeElement;
+                        // Pierce shadow roots
+                        while (ae && ae.shadowRoot && ae.shadowRoot.activeElement) {{
+                            ae = ae.shadowRoot.activeElement;
+                        }}
+                        // Pierce same-origin iframes
+                        while (ae && ae.tagName === 'IFRAME') {{
+                            try {{
+                                const doc = ae.contentWindow && ae.contentWindow.document;
+                                if (!doc) break;
+                                let inner = doc.activeElement;
+                                if (!inner) break;
+                                while (inner && inner.shadowRoot && inner.shadowRoot.activeElement) {{
+                                    inner = inner.shadowRoot.activeElement;
+                                }}
+                                ae = inner;
+                            }} catch (_) {{ break; }}
+                        }}
+                        return ae || null;
+                    }} catch (_) {{ return null; }}
+                }};
 
-                // 2) Try element at cursor point
+                const deepElementFromPoint = (x, y) => {{
+                    // Walk composed tree using elementsFromPoint, then descend into open shadow roots and same-origin iframes
+                    const walk = (root, gx, gy) => {{
+                        let list = [];
+                        try {{
+                            list = (root.elementsFromPoint ? root.elementsFromPoint(gx, gy) : [root.elementFromPoint(gx, gy)].filter(Boolean)) || [];
+                        }} catch (_) {{ list = []; }}
+                        for (const el of list) {{
+                            // Descend into shadow root if present
+                            if (el && el.shadowRoot) {{
+                                const deep = walk(el.shadowRoot, gx, gy);
+                                if (deep) return deep;
+                            }}
+                            // Descend into same-origin iframe
+                            if (el && el.tagName === 'IFRAME') {{
+                                try {{
+                                    const rect = el.getBoundingClientRect();
+                                    const lx = gx - rect.left; // local X inside iframe viewport
+                                    const ly = gy - rect.top;  // local Y inside iframe viewport
+                                    const doc = el.contentWindow && el.contentWindow.document;
+                                    if (doc) {{
+                                        const deep = walk(doc, lx, ly);
+                                        if (deep) return deep;
+                                    }}
+                                }} catch(_) {{ /* cross-origin: skip */ }}
+                            }}
+                            if (el) return el;
+                        }}
+                        return null;
+                    }};
+                    return walk(document, x, y);
+                }};
+
+                // 1) If something is already focused and is editable (deeply), keep it.
+                const current = deepActiveElement();
+                if (isEditable(current)) return true;
+
+                // 2) Otherwise, only try to focus the editable element under the cursor.
                 if (Number.isFinite(cursorX) && Number.isFinite(cursorY)) {{
-                    let el = document.elementFromPoint(cursorX, cursorY);
-                    // Walk up the tree to find an editable parent
-                    while (el && !editable(el)) {{
-                        el = el.parentElement;
+                    let el = deepElementFromPoint(cursorX, cursorY);
+                    // climb up to an editable ancestor if needed within same composed tree
+                    const canFocus = (n) => n && typeof n.focus === 'function';
+                    let walker = el;
+                    while (walker && !isEditable(walker)) {{
+                        walker = walker.parentElement || (walker.getRootNode && (walker.getRootNode().host || null)) || null;
                     }}
-                    if (editable(el)) {{
-                        if (typeof el.focus === 'function') el.focus();
-                        // Verify focus was successful
-                        return document.activeElement === el;
+                    if (isEditable(walker) && canFocus(walker)) {{
+                        walker.focus();
+                        const after = deepActiveElement();
+                        return after === walker;
                     }}
                 }}
-
-                // 3) Find best visible candidate (closest to center, then bigger)
-                const cx = window.innerWidth/2, cy = window.innerHeight/2;
-                const candidates = [...document.querySelectorAll('input,textarea,[contenteditable],[contenteditable=""],[contenteditable="true"]')]
-                    .filter(n => editable(n) &&
-                        n.offsetWidth > 0 &&
-                        n.offsetHeight > 0 &&
-                        getComputedStyle(n).visibility !== 'hidden' &&
-                        getComputedStyle(n).display !== 'none')
-                    .map(n => {{
-                        const r = n.getBoundingClientRect();
-                        const dx = r.left + r.width/2 - cx;
-                        const dy = r.top + r.height/2 - cy;
-                        return {{
-                            node: n,
-                            dist: dx*dx + dy*dy,
-                            area: r.width * r.height
-                        }};
-                    }})
-                    .sort((a, b) => a.dist - b.dist || b.area - a.area);
-
-                if (candidates.length) {{
-                    if (typeof candidates[0].node.focus === 'function') candidates[0].node.focus();
-                    return document.activeElement === candidates[0].node;
-                }}
-                return false;
+                return false; // Do not steal focus by picking arbitrary candidates.
             }})({cursor_x}, {cursor_y})
-        "#,
+            "#,
             cursor_x = cursor_x,
             cursor_y = cursor_y
         );
 
         let result = self.cdp_page.evaluate(script).await?;
         let focused = result.value().and_then(|v| v.as_bool()).unwrap_or(false);
-
         Ok(focused)
     }
 
@@ -1026,11 +637,9 @@ impl Page {
         for attempt in 1..=max_retries {
             // Wrap CDP navigation with a short timeout so we don't block ~30s
             // for sites that load but don't signal expected events.
-            let nav_attempt = tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                self.cdp_page.goto(url),
-            )
-            .await;
+            let nav_attempt =
+                tokio::time::timeout(tokio::time::Duration::from_secs(5), self.cdp_page.goto(url))
+                    .await;
 
             match nav_attempt {
                 Ok(Ok(_)) => {
@@ -1050,7 +659,8 @@ impl Page {
                         // Check if the page actually navigated despite the timeout
                         if let Ok(cur_opt) = self.cdp_page.url().await {
                             if let Some(cur) = cur_opt {
-                                let looks_loaded = cur.starts_with("http://") || cur.starts_with("https://");
+                                let looks_loaded =
+                                    cur.starts_with("http://") || cur.starts_with("https://");
                                 if looks_loaded && cur != "about:blank" {
                                     info!(
                                         "Navigation reported timeout, but page URL is now {} — treating as success",
@@ -1084,7 +694,8 @@ impl Page {
                     // Check if the page actually navigated despite the timeout
                     if let Ok(cur_opt) = self.cdp_page.url().await {
                         if let Some(cur) = cur_opt {
-                            let looks_loaded = cur.starts_with("http://") || cur.starts_with("https://");
+                            let looks_loaded =
+                                cur.starts_with("http://") || cur.starts_with("https://");
                             if looks_loaded && cur != "about:blank" {
                                 info!(
                                     "Navigation exceeded timeout, but page URL is now {} — treating as success",
@@ -1126,12 +737,9 @@ impl Page {
                         let script = "document.readyState";
                         let start = std::time::Instant::now();
                         loop {
-                            let state = self
-                                .cdp_page
-                                .evaluate(script)
-                                .await
-                                .ok()
-                                .and_then(|r| r.value().and_then(|v| v.as_str().map(|s| s.to_string())));
+                            let state = self.cdp_page.evaluate(script).await.ok().and_then(|r| {
+                                r.value().and_then(|v| v.as_str().map(|s| s.to_string()))
+                            });
                             if matches!(state.as_deref(), Some("interactive") | Some("complete")) {
                                 break;
                             }
@@ -1159,12 +767,9 @@ impl Page {
                         let script = "document.readyState";
                         let start = std::time::Instant::now();
                         loop {
-                            let state = self
-                                .cdp_page
-                                .evaluate(script)
-                                .await
-                                .ok()
-                                .and_then(|r| r.value().and_then(|v| v.as_str().map(|s| s.to_string())));
+                            let state = self.cdp_page.evaluate(script).await.ok().and_then(|r| {
+                                r.value().and_then(|v| v.as_str().map(|s| s.to_string()))
+                            });
                             if matches!(state.as_deref(), Some("complete")) {
                                 break;
                             }
@@ -1246,23 +851,10 @@ impl Page {
             }
         };
 
-        // Allow a brief moment for the cursor SVG to render only if we injected it now
+        // Do not wait for animations to settle; capture current frame to preserve visible motion
+        // Small render delay only on fresh injection to avoid empty frame
         if injected {
-            tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
-        }
-
-        // Wait for any in-flight cursor animation to settle before capture
-        if let Ok(remain) = self
-            .cdp_page
-            .evaluate("(function(){ return (window.__vc && window.__vc.getSettleMs) ? window.__vc.getSettleMs() : 0; })()")
-            .await
-            .and_then(|r| Ok(r.value().and_then(|v| v.as_u64()).unwrap_or(0)))
-        {
-            if remain > 0 {
-                // Allow a bit more time so screenshots catch the settled state
-                let wait_ms = remain.min(800);
-                tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
-            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
         }
 
         match mode {
@@ -1547,35 +1139,21 @@ impl Page {
             }
         }
 
-        // Update cursor position with animation
-        let _ = self
+        // Ask the page to animate the virtual cursor and return duration
+        let dur_ms = self
             .cdp_page
             .evaluate(format!(
-                "window.__vc && window.__vc.update({:.0}, {:.0});",
+                "(function(x,y){{ try {{ if(window.__vc && window.__vc.update) return window.__vc.update(x,y)|0; }} catch(_e){{}} return 0; }})({:.0},{:.0})",
                 move_x, move_y
             ))
-            .await;
+            .await
+            .ok()
+            .and_then(|r| r.value().and_then(|v| v.as_u64()))
+            .unwrap_or(0) as u64;
 
-        // Optionally wait a tiny amount to reduce flicker in immediate snapshots
-        // (movement duration is dynamic; we defer full waiting to screenshot path)
-
-        // If using external CDP, wait for animation to settle so the next screenshot captures final state
-        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        if is_external {
-            let remain = self
-                .cdp_page
-                .evaluate("(function(){ return (window.__vc && window.__vc.getSettleMs) ? window.__vc.getSettleMs() : 0; })()")
-                .await
-                .ok()
-                .and_then(|r| r.value().and_then(|v| v.as_u64()))
-                .unwrap_or(0);
-            if remain > 0 {
-                let wait_ms = remain.min(3000);
-                tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
-            }
-        } else {
-            // Tiny delay for internal to keep interactions smooth
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        // Wait for the reported animation time before returning
+        if dur_ms > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(dur_ms)).await;
         }
 
         Ok(())
@@ -1632,7 +1210,11 @@ impl Page {
 
         // Wait for click animation to settle before returning (helps next auto-screenshot)
         let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        let settle_ms = if is_external { click_ms_val.max(120) } else { 40 };
+        let settle_ms = if is_external {
+            click_ms_val.max(120)
+        } else {
+            40
+        };
         if settle_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
         }
@@ -1647,14 +1229,14 @@ impl Page {
         let y = cursor.y;
         let is_down = cursor.is_mouse_down;
         drop(cursor);
-        
+
         if is_down {
             debug!("Mouse is already down at ({}, {})", x, y);
             return Ok((x, y));
         }
-        
+
         debug!("Mouse down at current position ({}, {})", x, y);
-        
+
         let down_params = DispatchMouseEventParams::builder()
             .r#type(DispatchMouseEventType::MousePressed)
             .x(x)
@@ -1664,16 +1246,16 @@ impl Page {
             .build()
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
-        
+
         // Update mouse state (track button for drag moves)
         let mut cursor = self.cursor_state.lock().await;
         cursor.is_mouse_down = true;
         cursor.button = MouseButton::Left;
         drop(cursor);
-        
+
         Ok((x, y))
     }
-    
+
     /// Perform mouse up at the current position
     pub async fn mouse_up_at_current(&self) -> Result<(f64, f64)> {
         let cursor = self.cursor_state.lock().await;
@@ -1681,14 +1263,14 @@ impl Page {
         let y = cursor.y;
         let is_down = cursor.is_mouse_down;
         drop(cursor);
-        
+
         if !is_down {
             debug!("Mouse is already up at ({}, {})", x, y);
             return Ok((x, y));
         }
-        
+
         debug!("Mouse up at current position ({}, {})", x, y);
-        
+
         let up_params = DispatchMouseEventParams::builder()
             .r#type(DispatchMouseEventType::MouseReleased)
             .x(x)
@@ -1698,13 +1280,13 @@ impl Page {
             .build()
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
-        
+
         // Update mouse state
         let mut cursor = self.cursor_state.lock().await;
         cursor.is_mouse_down = false;
         cursor.button = MouseButton::None;
         drop(cursor);
-        
+
         Ok((x, y))
     }
 
@@ -1715,7 +1297,10 @@ impl Page {
         let click_x = cursor.x;
         let click_y = cursor.y;
         let was_down = cursor.is_mouse_down;
-        debug!("Clicking at current position ({}, {}), mouse was_down: {}", click_x, click_y, was_down);
+        debug!(
+            "Clicking at current position ({}, {}), mouse was_down: {}",
+            click_x, click_y, was_down
+        );
         drop(cursor); // Release lock before async calls
 
         // If mouse is already down, release it first
@@ -1763,7 +1348,11 @@ impl Page {
 
         // Wait so the next auto-screenshot captures the click pulse
         let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        let settle_ms = if is_external { click_ms_val.max(120) } else { 40 };
+        let settle_ms = if is_external {
+            click_ms_val.max(120)
+        } else {
+            40
+        };
         if settle_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
         }
@@ -1777,8 +1366,102 @@ impl Page {
         let processed_text = text.replace('—', " - ");
         debug!("Typing text: {}", processed_text);
 
-        // Ensure an editable element is focused first
-        self.ensure_editable_focused().await?;
+        // Ensure an editable element is focused first. If we cannot ensure focus
+        // on an editable field, bail to avoid sending keystrokes to the wrong place.
+        let ensured = self.ensure_editable_focused().await?;
+        if !ensured {
+            debug!("No editable focus ensured; skipping typing to avoid stealing focus");
+            return Ok(());
+        }
+
+        // Install a temporary focus guard that keeps focus anchored on the
+        // currently focused editable unless the user intentionally sends Tab/Enter.
+        let _ = self.execute_javascript(
+            r#"(() => {
+                try {
+                  const isEditableInputType = (t) => !/^(checkbox|radio|button|submit|reset|file|image|color|hidden|range)$/i.test(t || '');
+                  const isEditable = (el) => !!el && (
+                    (el.tagName === 'INPUT' && isEditableInputType(el.type)) ||
+                    el.tagName === 'TEXTAREA' ||
+                    el.isContentEditable === true
+                  );
+                  const deepActiveElement = (rootDoc) => {
+                    let ae = (rootDoc || document).activeElement;
+                    // Shadow roots
+                    while (ae && ae.shadowRoot && ae.shadowRoot.activeElement) {
+                      ae = ae.shadowRoot.activeElement;
+                    }
+                    // Same-origin iframes
+                    while (ae && ae.tagName === 'IFRAME') {
+                      try {
+                        const doc = ae.contentWindow && ae.contentWindow.document;
+                        if (!doc) break;
+                        let inner = doc.activeElement;
+                        if (!inner) break;
+                        while (inner && inner.shadowRoot && inner.shadowRoot.activeElement) {
+                          inner = inner.shadowRoot.activeElement;
+                        }
+                        ae = inner;
+                      } catch (_) { break; }
+                    }
+                    return ae || null;
+                  };
+
+                  const w = window;
+                  if (!w.__codeFG) {
+                    w.__codeFG = {
+                      active: false,
+                      lastKey: null,
+                      anchor: null,
+                      onKeyDown: null,
+                      onFocusIn: null,
+                      onBlur: null,
+                      install() {
+                        const anchor = deepActiveElement();
+                        if (!isEditable(anchor)) return false;
+                        this.anchor = anchor;
+                        this.active = true;
+                        this.lastKey = null;
+                        this.onKeyDown = (e) => { this.lastKey = e && e.key; };
+                        this.onFocusIn = (e) => {
+                          if (!this.active) return;
+                          const a = this.anchor;
+                          const curr = deepActiveElement();
+                          if (!a || a === curr) return;
+                          // Allow intentional navigations
+                          if (this.lastKey === 'Tab' || this.lastKey === 'Enter') return;
+                          // If anchor was detached or hidden, stop guarding
+                          try {
+                            const cs = a.ownerDocument && a.ownerDocument.defaultView && a.ownerDocument.defaultView.getComputedStyle(a);
+                            const hidden = !a.isConnected || (cs && (cs.display === 'none' || cs.visibility === 'hidden'));
+                            if (hidden) { this.active = false; return; }
+                          } catch(_){}
+                          // Restore focus asynchronously to override app-level auto-tabbing
+                          setTimeout(() => { try { a.focus && a.focus(); } catch(_){} }, 0);
+                        };
+                        this.onBlur = () => { /* ignore */ };
+                        document.addEventListener('keydown', this.onKeyDown, true);
+                        document.addEventListener('focusin', this.onFocusIn, true);
+                        document.addEventListener('blur', this.onBlur, true);
+                        return true;
+                      },
+                      uninstall() {
+                        try {
+                          document.removeEventListener('keydown', this.onKeyDown, true);
+                          document.removeEventListener('focusin', this.onFocusIn, true);
+                          document.removeEventListener('blur', this.onBlur, true);
+                        } catch(_){}
+                        this.active = false;
+                        this.anchor = null;
+                        this.lastKey = null;
+                        return true;
+                      }
+                    };
+                  }
+                  return window.__codeFG.install();
+                } catch(_) { return false; }
+            })()"#
+        ).await;
 
         let text_len = processed_text.len();
 
@@ -1869,6 +1552,11 @@ impl Page {
             }
         }
 
+        // Remove the focus guard shortly after typing to cover post-typing side effects
+        let _ = self.execute_javascript(
+            r#"(() => { try { if (window.__codeFG && window.__codeFG.uninstall) { setTimeout(() => { try { window.__codeFG.uninstall(); } catch(_){} }, 500); return true; } return false; } catch(_) { return false; } })()"#
+        ).await;
+
         Ok(())
     }
 
@@ -1900,14 +1588,14 @@ impl Page {
             .r#type(DispatchKeyEventType::KeyDown)
             .key(key.to_string())
             .code(code.to_string());
-        
+
         if let Some(vk) = windows_virtual_key_code {
             down_builder = down_builder.windows_virtual_key_code(vk);
         }
         if let Some(nvk) = native_virtual_key_code {
             down_builder = down_builder.native_virtual_key_code(nvk);
         }
-        
+
         let down_params = down_builder.build().map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(down_params).await?;
 
@@ -1928,14 +1616,14 @@ impl Page {
             .r#type(DispatchKeyEventType::KeyUp)
             .key(key.to_string())
             .code(code.to_string());
-        
+
         if let Some(vk) = windows_virtual_key_code {
             up_builder = up_builder.windows_virtual_key_code(vk);
         }
         if let Some(nvk) = native_virtual_key_code {
             up_builder = up_builder.native_virtual_key_code(nvk);
         }
-        
+
         let up_params = up_builder.build().map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 

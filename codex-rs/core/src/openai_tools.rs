@@ -127,12 +127,14 @@ fn create_shell_tool() -> OpenAiTool {
     );
     properties.insert(
         "timeout".to_string(),
-        JsonSchema::Number { description: None },
+        JsonSchema::Number {
+            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
+        },
     );
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "shell".to_string(),
-        description: "Runs a shell command and returns its output".to_string(),
+        description: "Runs a shell command and returns its output. Default timeout: 120000 ms (120s). Override via the `timeout` parameter.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -160,7 +162,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "timeout".to_string(),
         JsonSchema::Number {
-            description: Some("The timeout for the command in milliseconds".to_string()),
+            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
         },
     );
 
@@ -198,7 +200,9 @@ The shell tool is used to execute shell commands.
     - cargo test
 - When invoking a command that will require escalated privileges:
   - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter."#,
+  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
+
+Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
                 if !network_access {
                     "\n  - Commands that require network access\n"
                 } else {
@@ -207,7 +211,7 @@ The shell tool is used to execute shell commands.
             )
         }
         SandboxPolicy::DangerFullAccess => {
-            "Runs a shell command and returns its output.".to_string()
+            "Runs a shell command and returns its output. Default timeout: 120000 ms (120s). Override via the `timeout` parameter.".to_string()
         }
         SandboxPolicy::ReadOnly => {
             r#"
@@ -225,7 +229,9 @@ The shell tool is used to execute shell commands.
     - cargo test
 - When invoking a command that will require escalated privileges:
   - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter"#.to_string()
+  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter
+
+Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#.to_string()
         }
     };
 

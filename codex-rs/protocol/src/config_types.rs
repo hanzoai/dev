@@ -7,12 +7,14 @@ use strum_macros::Display;
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// Minimal reasoning effort. For backwards compatibility, deserializes from
+    /// "none" as well.
+    #[serde(alias = "none")]
+    Minimal,
     Low,
     #[default]
     Medium,
     High,
-    /// Option to disable reasoning.
-    None,
 }
 
 /// A summary of the reasoning performed by the model. This can be useful for

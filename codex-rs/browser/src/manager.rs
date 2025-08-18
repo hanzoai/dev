@@ -796,9 +796,42 @@ impl BrowserManager {
             if !pages.is_empty() {
                 // Try to find the active/visible tab
                 // We'll check each page to see if it's visible/focused
-                let mut active_page = None;
+                let mut active_page = None;                // focused && visible
+                let mut first_visible: Option<chromiumoxide::page::Page> = None; // visible
+                let mut last_allowed: Option<chromiumoxide::page::Page> = None;  // allowed regardless of visibility
+
+                // Helper: determine if a URL is controllable (we can inject/evaluate)
+                let is_allowed = |u: &str| {
+                    let lu = u.to_lowercase();
+                    if lu.starts_with("chrome://")
+                        || lu.starts_with("devtools://")
+                        || lu.starts_with("edge://")
+                        || lu.starts_with("chrome-extension://")
+                        || lu.starts_with("brave://")
+                        || lu.starts_with("vivaldi://")
+                        || lu.starts_with("opera://")
+                    {
+                        return false;
+                    }
+                    // Allow http/https/file/about:blank
+                    lu.starts_with("http://")
+                        || lu.starts_with("https://")
+                        || lu.starts_with("file://")
+                        || lu == "about:blank"
+                };
 
                 for page in &pages {
+                    // Quick URL check first to skip uninjectable pages
+                    let url = match tokio::time::timeout(Duration::from_millis(200), page.url()).await {
+                        Ok(Ok(Some(u))) => u,
+                        _ => "unknown".to_string(),
+                    };
+                    if !is_allowed(&url) {
+                        debug!("Skipping uncontrollable tab: {}", url);
+                        continue;
+                    } else {
+                        last_allowed = Some(page.clone());
+                    }
                     // Evaluate visibility/focus of the tab. We avoid focus listeners since they won't fire when attaching.
                     let eval = page.evaluate(
                         "(() => {\n"
@@ -825,22 +858,21 @@ impl BrowserManager {
                                 .unwrap_or(false);
                             let url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("unknown");
 
-                            debug!(
-                                "Tab check - URL: {}, Visible: {}, Focused: {}",
-                                url, visible, focused
-                            );
+                            debug!("Tab check - URL: {}, Visible: {}, Focused: {}", url, visible, focused);
 
-                            // Selection heuristic:
-                            // 1) Focused tab wins immediately
-                            // 2) Otherwise, prefer first visible tab encountered
-                            // 3) Otherwise, fallback to last available tab
-                            if focused {
-                                info!("Found focused tab: {}", url);
+                            // Selection heuristic (revised to avoid minimized windows):
+                            // 1) Focused AND visible wins immediately.
+                            // 2) Otherwise, remember the first visible tab.
+                            // 3) Otherwise, fallback to the last allowed tab.
+                            if focused && visible {
+                                info!("Found focused & visible tab: {}", url);
                                 active_page = Some(page.clone());
                                 break;
-                            } else if visible && active_page.is_none() {
+                            } else if focused && !visible {
+                                info!("Focused but not visible (likely minimized): skipping {}", url);
+                            } else if visible && first_visible.is_none() {
                                 info!("Found visible tab: {}", url);
-                                active_page = Some(page.clone());
+                                first_visible = Some(page.clone());
                             }
                         } else {
                             debug!("Tab visibility check returned non-JSON; skipping");
@@ -850,15 +882,22 @@ impl BrowserManager {
                     }
                 }
 
-                // Use the active page if found, otherwise fall back to the last page
-                // (which is often the most recently used)
+                // Use focused & visible if found, else first visible, else last allowed
                 if let Some(page) = active_page {
                     info!("Using active/visible Chrome tab");
                     page
+                } else if let Some(page) = first_visible {
+                    info!("Using first visible Chrome tab");
+                    page
                 } else {
-                    // Use the last page as it's often the most recent
-                    info!("No active tab found, using most recent tab");
-                    pages.pop().unwrap()
+                    if let Some(p) = last_allowed {
+                        info!("No active tab found, using last allowed tab");
+                        p
+                    } else {
+                        // No allowed pages at all, create an about:blank tab
+                        warn!("No controllable tabs found; creating about:blank");
+                        browser.new_page("about:blank").await?
+                    }
                 }
             } else {
                 // No existing tabs found. Do NOT create a new tab for external Chrome if avoidable.

@@ -42,7 +42,11 @@ impl ReasoningSelectionView {
 
     fn get_effort_options() -> Vec<(ReasoningEffort, &'static str, &'static str)> {
         vec![
-            (ReasoningEffort::None, "None", "No reasoning (fastest)"),
+            (
+                ReasoningEffort::Minimal,
+                "Minimal",
+                "Minimal reasoning (fastest)",
+            ),
             (ReasoningEffort::Low, "Low", "Basic reasoning"),
             (
                 ReasoningEffort::Medium,
