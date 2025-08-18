@@ -1,63 +1,11 @@
-<h1 align="center">OpenAI Codex CLI</h1>
-<p align="center">Lightweight coding agent that runs in your terminal</p>
+<h1 align="center">Code (publish note)</h1>
+<p align="center">This directory contains the npm packaging for <code>@just-every/code</code>.</p>
 
-<p align="center"><code>npm i -g @openai/codex</code></p>
+> [!NOTE]
+> The canonical README is at the repository root. The release process stages a package and copies the root <code>README.md</code> into it so the npm page shows the correct docs.
 
-> [!IMPORTANT]
-> This is the documentation for the _legacy_ TypeScript implementation of the Codex CLI. It has been superseded by the _Rust_ implementation. See the [README in the root of the Codex repository](https://github.com/openai/codex/blob/main/README.md) for details.
-
-![Codex demo GIF using: codex "explain this codebase to me"](../.github/demo.gif)
-
----
-
-<details>
-<summary><strong>Table of contents</strong></summary>
-
-<!-- Begin ToC -->
-
-- [Experimental technology disclaimer](#experimental-technology-disclaimer)
-- [Quickstart](#quickstart)
-- [Why Codex?](#why-codex)
-- [Security model & permissions](#security-model--permissions)
-  - [Platform sandboxing details](#platform-sandboxing-details)
-- [System requirements](#system-requirements)
-- [CLI reference](#cli-reference)
-- [Memory & project docs](#memory--project-docs)
-- [Non-interactive / CI mode](#non-interactive--ci-mode)
-- [Tracing / verbose logging](#tracing--verbose-logging)
-- [Recipes](#recipes)
-- [Installation](#installation)
-- [Configuration guide](#configuration-guide)
-  - [Basic configuration parameters](#basic-configuration-parameters)
-  - [Custom AI provider configuration](#custom-ai-provider-configuration)
-  - [History configuration](#history-configuration)
-  - [Configuration examples](#configuration-examples)
-  - [Full configuration example](#full-configuration-example)
-  - [Custom instructions](#custom-instructions)
-  - [Environment variables setup](#environment-variables-setup)
-- [FAQ](#faq)
-- [Zero data retention (ZDR) usage](#zero-data-retention-zdr-usage)
-- [Codex open source fund](#codex-open-source-fund)
-- [Contributing](#contributing)
-  - [Development workflow](#development-workflow)
-  - [Git hooks with Husky](#git-hooks-with-husky)
-  - [Debugging](#debugging)
-  - [Writing high-impact code changes](#writing-high-impact-code-changes)
-  - [Opening a pull request](#opening-a-pull-request)
-  - [Review process](#review-process)
-  - [Community values](#community-values)
-  - [Getting help](#getting-help)
-  - [Contributor license agreement (CLA)](#contributor-license-agreement-cla)
-    - [Quick fixes](#quick-fixes)
-  - [Releasing `codex`](#releasing-codex)
-  - [Alternative build options](#alternative-build-options)
-    - [Nix flake development](#nix-flake-development)
-- [Security & responsible AI](#security--responsible-ai)
-- [License](#license)
-
-<!-- End ToC -->
-
-</details>
+- For docs, read: <code>../README.md</code>
+- To publish, use: <code>codex-cli/scripts/stage_release.sh</code>
 
 ---
 
