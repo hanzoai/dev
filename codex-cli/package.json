@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "postinstall": "node postinstall.js",
-    "prepublishOnly": "node -e \"const fs=require('fs'),path=require('path'); const repoGit=path.join(__dirname,'..','.git'); if(fs.existsSync(repoGit)){ console.error('Refusing to publish from codex-cli. Use codex-cli/scripts/stage_release.sh to stage a release.'); process.exit(1);} else { console.log('Publishing staged package...'); }\""
+    "prepublishOnly": "node -e \"const fs=require('fs'),path=require('path'); const repoGit=path.join(__dirname,'..','.git'); const inCi=process.env.GITHUB_ACTIONS==='true'||process.env.CI==='true'; if(fs.existsSync(repoGit) && !inCi){ console.error('Refusing to publish from codex-cli. Use codex-cli/scripts/stage_release.sh to stage a release.'); process.exit(1);} else { console.log(inCi ? 'CI publish detected.' : 'Publishing staged package...'); }\""
   },
   "repository": {
     "type": "git",
