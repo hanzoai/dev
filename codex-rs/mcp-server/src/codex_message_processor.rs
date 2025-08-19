@@ -12,7 +12,7 @@ use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecApprovalRequestEvent;
-use codex_protocol::protocol::ReviewDecision;
+use codex_core::protocol::ReviewDecision;
 use mcp_types::JSONRPCErrorError;
 use mcp_types::RequestId;
 use tokio::sync::Mutex;
@@ -25,10 +25,8 @@ use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::json_to_toml::json_to_toml;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
-use codex_protocol::protocol::TurnAbortReason;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
-use codex_core::protocol as core_protocol;
 use codex_login::CLIENT_ID;
 use codex_login::ServerOptions as LoginServerOptions;
 use codex_login::ShutdownHandle;
@@ -110,6 +108,9 @@ impl CodexMessageProcessor {
             ClientRequest::SendUserMessage { request_id, params } => {
                 self.send_user_message(request_id, params).await;
             }
+            ClientRequest::SendUserTurn { request_id, params } => {
+                self.send_user_turn(request_id, params).await;
+            }
             ClientRequest::InterruptConversation { request_id, params } => {
                 self.interrupt_conversation(request_id, params).await;
             }
@@ -119,25 +120,138 @@ impl CodexMessageProcessor {
             ClientRequest::RemoveConversationListener { request_id, params } => {
                 self.remove_conversation_listener(request_id, params).await;
             }
-            ClientRequest::SendUserTurn { request_id, params } => {
-                self.send_user_turn_compat(request_id, params).await;
-            }
             ClientRequest::LoginChatGpt { request_id } => {
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "login is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
+                self.login_chatgpt(request_id).await;
             }
-            ClientRequest::CancelLoginChatGpt { request_id, .. } => {
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "cancel login is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
+            ClientRequest::CancelLoginChatGpt { request_id, params } => {
+                self.cancel_login_chatgpt(request_id, params.login_id).await;
             }
+        }
+    }
+
+    async fn login_chatgpt(&mut self, request_id: RequestId) {
+        let config =
+            match Config::load_with_cli_overrides(Default::default(), ConfigOverrides::default()) {
+                Ok(cfg) => cfg,
+                Err(err) => {
+                    let error = JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("error loading config for login: {err}"),
+                        data: None,
+                    };
+                    self.outgoing.send_error(request_id, error).await;
+                    return;
+                }
+            };
+
+        let opts = LoginServerOptions {
+            open_browser: false,
+            ..LoginServerOptions::new(config.codex_home.clone(), CLIENT_ID.to_string())
+        };
+
+        enum LoginChatGptReply {
+            Response(LoginChatGptResponse),
+            Error(JSONRPCErrorError),
+        }
+
+        let reply = match run_login_server(opts) {
+            Ok(server) => {
+                let login_id = Uuid::new_v4();
+                let shutdown_handle = server.cancel_handle();
+
+                // Replace active login if present.
+                {
+                    let mut guard = self.active_login.lock().await;
+                    if let Some(existing) = guard.take() {
+                        existing.drop();
+                    }
+                    *guard = Some(ActiveLogin {
+                        shutdown_handle: shutdown_handle.clone(),
+                        login_id,
+                    });
+                }
+
+                let response = LoginChatGptResponse {
+                    login_id,
+                    auth_url: server.auth_url.clone(),
+                };
+
+                // Spawn background task to monitor completion.
+                let outgoing_clone = self.outgoing.clone();
+                let active_login = self.active_login.clone();
+                tokio::spawn(async move {
+                    let (success, error_msg) = match tokio::time::timeout(
+                        LOGIN_CHATGPT_TIMEOUT,
+                        server.block_until_done(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => (true, None),
+                        Ok(Err(err)) => (false, Some(format!("Login server error: {err}"))),
+                        Err(_elapsed) => {
+                            // Timeout: cancel server and report
+                            shutdown_handle.shutdown();
+                            (false, Some("Login timed out".to_string()))
+                        }
+                    };
+                    let notification = LoginChatGptCompleteNotification {
+                        login_id,
+                        success,
+                        error: error_msg,
+                    };
+                    let params = serde_json::to_value(&notification).ok();
+                    outgoing_clone
+                        .send_notification(OutgoingNotification {
+                            method: LOGIN_CHATGPT_COMPLETE_EVENT.to_string(),
+                            params,
+                        })
+                        .await;
+
+                    // Clear the active login if it matches this attempt. It may have been replaced or cancelled.
+                    let mut guard = active_login.lock().await;
+                    if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+                        *guard = None;
+                    }
+                });
+
+                LoginChatGptReply::Response(response)
+            }
+            Err(err) => LoginChatGptReply::Error(JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: format!("failed to start login server: {err}"),
+                data: None,
+            }),
+        };
+
+        match reply {
+            LoginChatGptReply::Response(resp) => {
+                self.outgoing.send_response(request_id, resp).await
+            }
+            LoginChatGptReply::Error(err) => self.outgoing.send_error(request_id, err).await,
+        }
+    }
+
+    async fn cancel_login_chatgpt(&mut self, request_id: RequestId, login_id: Uuid) {
+        let mut guard = self.active_login.lock().await;
+        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+            if let Some(active) = guard.take() {
+                active.drop();
+            }
+            drop(guard);
+            self.outgoing
+                .send_response(
+                    request_id,
+                    codex_protocol::mcp_protocol::CancelLoginChatGptResponse {},
+                )
+                .await;
+        } else {
+            drop(guard);
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("login id not found: {login_id}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
         }
     }
 
@@ -220,6 +334,58 @@ impl CodexMessageProcessor {
             .await;
     }
 
+    async fn send_user_turn(&self, request_id: RequestId, params: SendUserTurnParams) {
+        let SendUserTurnParams {
+            conversation_id,
+            items,
+            cwd,
+            approval_policy,
+            sandbox_policy,
+            model,
+            effort,
+            summary,
+        } = params;
+
+        let Ok(conversation) = self
+            .conversation_manager
+            .get_conversation(conversation_id.0)
+            .await
+        else {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("conversation not found: {conversation_id}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        };
+
+        let mapped_items: Vec<CoreInputItem> = items
+            .into_iter()
+            .map(|item| match item {
+                WireInputItem::Text { text } => CoreInputItem::Text { text },
+                WireInputItem::Image { image_url } => CoreInputItem::Image { image_url },
+                WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
+            })
+            .collect();
+
+        let _ = conversation
+            .submit(Op::UserTurn {
+                items: mapped_items,
+                cwd,
+                approval_policy,
+                sandbox_policy,
+                model,
+                effort,
+                summary,
+            })
+            .await;
+
+        self.outgoing
+            .send_response(request_id, SendUserTurnResponse {})
+            .await;
+    }
+
     async fn interrupt_conversation(
         &mut self,
         request_id: RequestId,
@@ -240,10 +406,14 @@ impl CodexMessageProcessor {
             return;
         };
 
-        // Submit the interrupt and respond immediately (core does not emit a dedicated event).
+        // Record the pending interrupt so we can reply when TurnAborted arrives.
+        {
+            let mut map = self.pending_interrupts.lock().await;
+            map.entry(conversation_id.0).or_default().push(request_id);
+        }
+
+        // Submit the interrupt; we'll respond upon TurnAborted.
         let _ = conversation.submit(Op::Interrupt).await;
-        let response = InterruptConversationResponse { abort_reason: TurnAbortReason::Interrupted };
-        self.outgoing.send_response(request_id, response).await;
     }
 
     async fn add_conversation_listener(
@@ -346,59 +516,6 @@ impl CodexMessageProcessor {
     }
 }
 
-impl CodexMessageProcessor {
-    // Minimal compatibility layer: translate SendUserTurn into our current
-    // flow by submitting only the user items. We intentionally do not attempt
-    // per‑turn reconfiguration here (model, cwd, approval, sandbox) to avoid
-    // destabilizing the session. This preserves behavior and acks the request
-    // so clients using the new method continue to function.
-    async fn send_user_turn_compat(
-        &self,
-        request_id: RequestId,
-        params: SendUserTurnParams,
-    ) {
-        let SendUserTurnParams {
-            conversation_id,
-            items,
-            ..
-        } = params;
-
-        let Ok(conversation) = self
-            .conversation_manager
-            .get_conversation(conversation_id.0)
-            .await
-        else {
-            let error = JSONRPCErrorError {
-                code: INVALID_REQUEST_ERROR_CODE,
-                message: format!("conversation not found: {conversation_id}"),
-                data: None,
-            };
-            self.outgoing.send_error(request_id, error).await;
-            return;
-        };
-
-        // Map wire input items into core protocol items.
-        let mapped_items: Vec<CoreInputItem> = items
-            .into_iter()
-            .map(|item| match item {
-                WireInputItem::Text { text } => CoreInputItem::Text { text },
-                WireInputItem::Image { image_url } => CoreInputItem::Image { image_url },
-                WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
-            })
-            .collect();
-
-        // Submit user input to the conversation.
-        let _ = conversation
-            .submit(Op::UserInput {
-                items: mapped_items,
-            })
-            .await;
-
-        // Acknowledge.
-        self.outgoing.send_response(request_id, SendUserTurnResponse {}).await;
-    }
-}
-
 async fn apply_bespoke_event_handling(
     event: Event,
     conversation_id: ConversationId,
@@ -414,29 +531,10 @@ async fn apply_bespoke_event_handling(
             reason,
             grant_root,
         }) => {
-            // Map core FileChange to wire FileChange
-            let file_changes: HashMap<PathBuf, codex_protocol::protocol::FileChange> = changes
-                .into_iter()
-                .map(|(p, c)| {
-                    let mapped = match c {
-                        codex_core::protocol::FileChange::Add { content } => {
-                            codex_protocol::protocol::FileChange::Add { content }
-                        }
-                        codex_core::protocol::FileChange::Delete => {
-                            codex_protocol::protocol::FileChange::Delete
-                        }
-                        codex_core::protocol::FileChange::Update { unified_diff, move_path } => {
-                            codex_protocol::protocol::FileChange::Update { unified_diff, move_path }
-                        }
-                    };
-                    (p, mapped)
-                })
-                .collect();
-
             let params = ApplyPatchApprovalParams {
                 conversation_id,
                 call_id,
-                file_changes,
+                file_changes: changes,
                 reason,
                 grant_root,
             };
@@ -472,7 +570,21 @@ async fn apply_bespoke_event_handling(
                 on_exec_approval_response(event_id, rx, conversation).await;
             });
         }
-        // No special handling needed for interrupts; responses are sent immediately.
+        // If this is a TurnAborted, reply to any pending interrupt requests.
+        EventMsg::TurnAborted(turn_aborted_event) => {
+            let pending = {
+                let mut map = pending_interrupts.lock().await;
+                map.remove(&conversation_id.0).unwrap_or_default()
+            };
+            if !pending.is_empty() {
+                let response = InterruptConversationResponse {
+                    abort_reason: turn_aborted_event.reason,
+                };
+                for rid in pending {
+                    outgoing.send_response(rid, response.clone()).await;
+                }
+            }
+        }
 
         _ => {}
     }
@@ -491,21 +603,21 @@ fn derive_config_from_params(
         config: cli_overrides,
         base_instructions,
         include_plan_tool,
-        ..
+        include_apply_patch_tool,
     } = params;
     let overrides = ConfigOverrides {
         model,
         config_profile: profile,
         cwd: cwd.map(PathBuf::from),
-        approval_policy: approval_policy.map(map_ask_for_approval_from_wire),
+        approval_policy,
         sandbox_mode,
         model_provider: None,
         codex_linux_sandbox_exe,
         base_instructions,
         include_plan_tool,
+        include_apply_patch_tool,
         disable_response_storage: None,
         show_raw_agent_reasoning: None,
-        debug: None,
     };
 
     let cli_overrides = cli_overrides
@@ -530,7 +642,7 @@ async fn on_patch_approval_response(
             if let Err(submit_err) = codex
                 .submit(Op::PatchApproval {
                     id: event_id.clone(),
-                    decision: core_protocol::ReviewDecision::Denied,
+                    decision: ReviewDecision::Denied,
                 })
                 .await
             {
@@ -551,7 +663,7 @@ async fn on_patch_approval_response(
     if let Err(err) = codex
         .submit(Op::PatchApproval {
             id: event_id,
-            decision: map_review_decision_from_wire(response.decision),
+            decision: response.decision,
         })
         .await
     {
@@ -587,28 +699,10 @@ async fn on_exec_approval_response(
     if let Err(err) = conversation
         .submit(Op::ExecApproval {
             id: event_id,
-            decision: map_review_decision_from_wire(response.decision),
+            decision: response.decision,
         })
         .await
     {
         error!("failed to submit ExecApproval: {err}");
-    }
-}
-
-fn map_review_decision_from_wire(d: codex_protocol::protocol::ReviewDecision) -> core_protocol::ReviewDecision {
-    match d {
-        codex_protocol::protocol::ReviewDecision::Approved => core_protocol::ReviewDecision::Approved,
-        codex_protocol::protocol::ReviewDecision::ApprovedForSession => core_protocol::ReviewDecision::ApprovedForSession,
-        codex_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
-        codex_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
-    }
-}
-
-fn map_ask_for_approval_from_wire(a: codex_protocol::protocol::AskForApproval) -> core_protocol::AskForApproval {
-    match a {
-        codex_protocol::protocol::AskForApproval::UnlessTrusted => core_protocol::AskForApproval::UnlessTrusted,
-        codex_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
-        codex_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
-        codex_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
     }
 }

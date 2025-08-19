@@ -149,7 +149,14 @@ impl WidgetRef for CommandPopup {
                 })
                 .collect()
         };
-        render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS);
+        render_rows(
+            indented_area,
+            buf,
+            &rows_all,
+            &self.state,
+            MAX_POPUP_ROWS,
+            false,
+        );
     }
 }
 
