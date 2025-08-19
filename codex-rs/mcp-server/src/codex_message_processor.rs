@@ -68,7 +68,7 @@ struct ActiveLogin {
 
 impl ActiveLogin {
     fn drop(&self) {
-        self.shutdown_handle.cancel();
+        self.shutdown_handle.shutdown();
     }
 }
 
