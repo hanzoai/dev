@@ -26,6 +26,7 @@ use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
+use fs2::FileExt;
 
 use crate::config::Config;
 use crate::config_types::HistoryPersistence;
@@ -129,14 +130,15 @@ async fn acquire_exclusive_lock_with_retry(file: &File) -> Result<()> {
     use tokio::time::sleep;
 
     for _ in 0..MAX_RETRIES {
-        match file.try_lock() {
+        match file.try_lock_exclusive() {
             Ok(()) => return Ok(()),
-            Err(e) => match e {
-                std::fs::TryLockError::WouldBlock => {
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
                     sleep(RETRY_SLEEP).await;
+                } else {
+                    return Err(e);
                 }
-                other => return Err(other.into()),
-            },
+            }
         }
     }
 
@@ -263,12 +265,13 @@ fn acquire_shared_lock_with_retry(file: &File) -> Result<()> {
     for _ in 0..MAX_RETRIES {
         match file.try_lock_shared() {
             Ok(()) => return Ok(()),
-            Err(e) => match e {
-                std::fs::TryLockError::WouldBlock => {
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
                     std::thread::sleep(RETRY_SLEEP);
+                } else {
+                    return Err(e);
                 }
-                other => return Err(other.into()),
-            },
+            }
         }
     }
 
