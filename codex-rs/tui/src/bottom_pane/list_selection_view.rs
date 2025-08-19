@@ -226,6 +226,7 @@ impl BottomPaneView<'_> for ListSelectionView {
                     match_indices: None,
                     is_current: it.is_current,
                     description: it.description.clone(),
+                    name_color: None,
                 }
             })
             .collect();

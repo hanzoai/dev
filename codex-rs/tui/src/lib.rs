@@ -318,6 +318,7 @@ fn restore() {
 }
 
 /// Minimal login status indicator for onboarding flow.
+#[derive(Debug, Clone, Copy)]
 pub enum LoginStatus {
     NotAuthenticated,
     AuthMode(AuthMode),
