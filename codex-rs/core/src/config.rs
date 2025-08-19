@@ -474,6 +474,9 @@ pub struct ConfigToml {
     pub internal_originator: Option<String>,
 
     pub projects: Option<HashMap<String, ProjectConfig>>,
+
+    /// If set to `true`, the API key will be signed with the `originator` header.
+    pub preferred_auth_method: Option<AuthMode>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
