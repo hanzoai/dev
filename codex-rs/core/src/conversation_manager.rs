@@ -40,7 +40,7 @@ impl Default for ConversationManager {
 
 impl ConversationManager {
     pub async fn new_conversation(&self, config: Config) -> CodexResult<NewConversation> {
-        let auth = CodexAuth::from_codex_home(&config.codex_home, config.preferred_auth_method)?;
+        let auth = CodexAuth::from_codex_home(&config.codex_home, codex_login::AuthMode::ApiKey)?;
         self.new_conversation_with_auth(config, auth).await
     }
 

@@ -11,9 +11,8 @@ use ts_rs::TS;
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum ReasoningEffort {
-    /// Minimal reasoning effort. For backwards compatibility, deserializes from
-    /// "none" as well.
-    #[serde(alias = "none")]
+    /// Minimal reasoning effort.
+    /// Note: serde alias "none" removed to avoid ts-rs warning during TS export.
     Minimal,
     Low,
     #[default]

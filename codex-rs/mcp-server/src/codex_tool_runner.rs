@@ -273,11 +273,8 @@ async fn run_codex_tool_session_inner(
                     | EventMsg::TurnDiff(_)
                     | EventMsg::GetHistoryEntryResponse(_)
                     | EventMsg::PlanUpdate(_)
-                    | EventMsg::BrowserScreenshotUpdate(_)
-                    | EventMsg::AgentStatusUpdate(_)
-                    | EventMsg::ShutdownComplete
-                    | EventMsg::CustomToolCallBegin(_)
-                    | EventMsg::CustomToolCallEnd(_) => {
+                    | EventMsg::TurnAborted(_)
+                    | EventMsg::ShutdownComplete => {
                         // For now, we do not do anything extra for these
                         // events. Note that
                         // send(codex_event_to_notification(&event)) above has

@@ -19,6 +19,7 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
+use codex_login::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
@@ -756,7 +757,7 @@ impl Config {
         use codex_login::AuthMode;
         use codex_login::CodexAuth;
         
-        match CodexAuth::from_codex_home(codex_home) {
+        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey) {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
             _ => false,
         }

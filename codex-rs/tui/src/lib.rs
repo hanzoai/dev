@@ -317,22 +317,18 @@ fn restore() {
     }
 }
 
-#[allow(clippy::unwrap_used)]
-fn should_show_login_screen(config: &Config) -> bool {
-    if config.model_provider.requires_openai_auth {
-        // Reading the OpenAI API key is an async operation because it may need
-        // to refresh the token. Block on it.
-        let codex_home = config.codex_home.clone();
-        match CodexAuth::from_codex_home(&codex_home, config.preferred_auth_method) {
-            Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
-            Ok(None) => LoginStatus::NotAuthenticated,
-            Err(err) => {
-                error!("Failed to read auth.json: {err}");
-                LoginStatus::NotAuthenticated
-            }
-        }
-    } else {
-        LoginStatus::NotAuthenticated
+/// Minimal login status indicator for onboarding flow.
+pub enum LoginStatus {
+    NotAuthenticated,
+    AuthMode(AuthMode),
+}
+
+/// Determine current login status based on auth.json presence.
+pub fn get_login_status(config: &Config) -> LoginStatus {
+    let codex_home = config.codex_home.clone();
+    match CodexAuth::from_codex_home(&codex_home, AuthMode::ApiKey) {
+        Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
+        _ => LoginStatus::NotAuthenticated,
     }
 }
 

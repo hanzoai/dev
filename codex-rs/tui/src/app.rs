@@ -1,4 +1,3 @@
-use crate::LoginStatus;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
@@ -806,22 +805,20 @@ impl App<'_> {
 }
 
 fn should_show_onboarding(
-    login_status: LoginStatus,
-    config: &Config,
+    _login_status: crate::LoginStatus,
+    _config: &Config,
     show_trust_screen: bool,
 ) -> bool {
     if show_trust_screen {
         return true;
     }
-
-    should_show_login_screen(login_status, config)
+    // Defer login screen visibility decision to onboarding screen logic.
+    // Here we only gate on trust flow.
+    false
 }
 
-fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool {
-    match login_status {
-        LoginStatus::NotAuthenticated => true,
-        LoginStatus::AuthMode(method) => method != config.preferred_auth_method,
-    }
+fn should_show_login_screen(login_status: crate::LoginStatus, _config: &Config) -> bool {
+    matches!(login_status, crate::LoginStatus::NotAuthenticated)
 }
 
 #[cfg(test)]
