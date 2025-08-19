@@ -118,11 +118,18 @@ jobs:
         # Working directory for the cache
         workspaces: "codex-rs -> target"
 
-    - name: Install sccache + mold (Linux)
+    # Compiler cache across all OSes; integrates with GitHub Actions cache
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.6
+      with:
+        # Keep separate caches per compilation target
+        cache-key: ${{ matrix.target }}
+
+    - name: Install mold (Linux)
       if: contains(matrix.os, 'ubuntu')
       run: |
         sudo apt-get update
-        sudo apt-get install -y sccache mold || true
+        sudo apt-get install -y mold || true
         
     - name: Install musl tools (Linux)
       if: contains(matrix.target, 'musl')
@@ -165,16 +172,14 @@ jobs:
         RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-C link-arg=-fuse-ld=mold' || '' }}
         # Skip macOS codesigning in CI to allow cross-arch builds
         SKIP_SIGNING: '1'
+        # sccache performs best with incremental disabled for release builds
+        CARGO_INCREMENTAL: "0"
+        # Increase cache capacity a bit to improve hit rate across targets
+        SCCACHE_CACHE_SIZE: "10G"
       run: |
         cd codex-rs
-        # Enable sccache only if installed on this runner
-        if command -v sccache >/dev/null 2>&1; then
-          export RUSTC_WRAPPER=sccache
-          export SCCACHE_GHA_ENABLED=true
-          echo "Using sccache for compilation caching"
-        else
-          echo "sccache not available; proceeding without it"
-        fi
+        # mozilla-actions/sccache-action sets RUSTC_WRAPPER and enables GHA cache
+        command -v sccache >/dev/null 2>&1 && echo "Using sccache for compilation caching" || echo "sccache not available; proceeding without it"
         # Use all available cores
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
           # Windows: Use NUMBER_OF_PROCESSORS env var
