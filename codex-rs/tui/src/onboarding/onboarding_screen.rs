@@ -81,7 +81,7 @@ impl OnboardingScreen {
                 sign_in_state: SignInState::PickMode,
                 codex_home: codex_home.clone(),
                 login_status,
-                preferred_auth_method: chat_widget_args.config.preferred_auth_method,
+                preferred_auth_method: codex_login::AuthMode::ApiKey,
             }))
         }
         let is_git_repo = is_inside_git_repo(&cwd);

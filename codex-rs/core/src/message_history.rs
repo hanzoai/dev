@@ -130,7 +130,7 @@ async fn acquire_exclusive_lock_with_retry(file: &File) -> Result<()> {
     use tokio::time::sleep;
 
     for _ in 0..MAX_RETRIES {
-        match file.try_lock_exclusive() {
+        match fs2::FileExt::try_lock_exclusive(file) {
             Ok(()) => return Ok(()),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -263,7 +263,7 @@ pub(crate) fn lookup(log_id: u64, offset: usize, config: &Config) -> Option<Hist
 #[cfg(unix)]
 fn acquire_shared_lock_with_retry(file: &File) -> Result<()> {
     for _ in 0..MAX_RETRIES {
-        match file.try_lock_shared() {
+        match fs2::FileExt::try_lock_shared(file) {
             Ok(()) => return Ok(()),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::WouldBlock {
