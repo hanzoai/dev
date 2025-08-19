@@ -1517,6 +1517,22 @@ async fn submission_loop(
                     }
                 });
             }
+            Op::ListMcpTools => {
+                let tx_event = sess.tx_event.clone();
+                let sub_id = sub.id.clone();
+
+                // This is a cheap lookup from the connection manager's cache.
+                let tools = sess.mcp_connection_manager.list_all_tools();
+                let event = Event {
+                    id: sub_id,
+                    msg: EventMsg::McpListToolsResponse(
+                        crate::protocol::McpListToolsResponseEvent { tools },
+                    ),
+                };
+                if let Err(e) = tx_event.send(event).await {
+                    warn!("failed to send McpListToolsResponse event: {e}");
+                }
+            }
             Op::Compact => {
                 let sess = match sess.as_ref() {
                     Some(sess) => sess,
