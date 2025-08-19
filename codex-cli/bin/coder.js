@@ -10,6 +10,20 @@ const __dirname = path.dirname(__filename);
 
 const { platform, arch } = process;
 
+const isWSL = () => {
+  if (platform !== "linux") return false;
+  try {
+    const os = require("os");
+    const rel = os.release().toLowerCase();
+    if (rel.includes("microsoft")) return true;
+    const fs = require("fs");
+    const txt = fs.readFileSync("/proc/version", "utf8").toLowerCase();
+    return txt.includes("microsoft");
+  } catch {
+    return false;
+  }
+};
+
 let targetTriple = null;
 switch (platform) {
   case "linux":
@@ -78,6 +92,11 @@ if (existsSync(binaryPath)) {
   console.error(`Please try reinstalling the package:`);
   console.error(`  npm uninstall -g @just-every/code`);
   console.error(`  npm install -g @just-every/code`);
+  if (isWSL()) {
+    console.error("Detected WSL. Install inside WSL (Ubuntu) separately:");
+    console.error("  npx -y @just-every/code@latest  (run inside WSL)");
+    console.error("If installed globally on Windows, those binaries are not usable from WSL.");
+  }
   process.exit(1);
 }
 
@@ -122,6 +141,10 @@ if (!validation.ok) {
     console.error("If the issue persists, clear npm cache and disable antivirus temporarily:");
     console.error("  npm cache clean --force");
   }
+  if (isWSL()) {
+    console.error("Detected WSL. Ensure you install/run inside WSL, not Windows:");
+    console.error("  npx -y @just-every/code@latest  (inside WSL)");
+  }
   process.exit(1);
 }
 
@@ -151,6 +174,10 @@ child.on("error", (err) => {
     if (platform === 'win32') {
       console.error("On Windows, ensure the .exe downloaded correctly (proxy/AV can interfere).");
       console.error("Try clearing cache: npm cache clean --force");
+    }
+    if (isWSL()) {
+      console.error("Detected WSL. Windows binaries cannot be executed from WSL.");
+      console.error("Install inside WSL and run there: npx -y @just-every/code@latest");
     }
   } else {
     console.error(err);
