@@ -1196,10 +1196,10 @@ fn simplify_once(commands: &[ParsedCommand]) -> Option<Vec<ParsedCommand>> {
     }
 
     // echo ... && ...rest => ...rest
-    if let ParsedCommand::Unknown { cmd } = &commands[0]
-        && shlex_split(cmd).is_some_and(|t| t.first().map(|s| s.as_str()) == Some("echo"))
-    {
-        return Some(commands[1..].to_vec());
+    if let ParsedCommand::Unknown { cmd } = &commands[0] {
+        if shlex_split(cmd).is_some_and(|t| t.first().map(|s| s.as_str()) == Some("echo")) {
+            return Some(commands[1..].to_vec());
+        }
     }
 
     // cd foo && [any Test command] => [any Test command]
@@ -1208,15 +1208,17 @@ fn simplify_once(commands: &[ParsedCommand]) -> Option<Vec<ParsedCommand>> {
             shlex_split(cmd).is_some_and(|t| t.first().map(|s| s.as_str()) == Some("cd"))
         }
         _ => false,
-    }) && commands
-        .iter()
-        .skip(idx + 1)
-        .any(|pc| matches!(pc, ParsedCommand::Test { .. }))
-    {
-        let mut out = Vec::with_capacity(commands.len() - 1);
-        out.extend_from_slice(&commands[..idx]);
-        out.extend_from_slice(&commands[idx + 1..]);
-        return Some(out);
+    }) {
+        if commands
+            .iter()
+            .skip(idx + 1)
+            .any(|pc| matches!(pc, ParsedCommand::Test { .. }))
+        {
+            let mut out = Vec::with_capacity(commands.len() - 1);
+            out.extend_from_slice(&commands[..idx]);
+            out.extend_from_slice(&commands[idx + 1..]);
+            return Some(out);
+        }
     }
 
     // cmd || true => cmd
@@ -1562,10 +1564,9 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
     if bash != "bash" || flag != "-lc" {
         return None;
     }
-    if let Some(tree) = try_parse_bash(script)
-        && let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script)
-        && !all_commands.is_empty()
-    {
+    if let Some(tree) = try_parse_bash(script) {
+        if let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script) {
+            if !all_commands.is_empty() {
         let script_tokens = shlex_split(script)
             .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
         // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
@@ -1680,6 +1681,8 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
                 .collect();
         }
         return Some(commands);
+            }
+        }
     }
     Some(vec![ParsedCommand::Unknown {
         cmd: script.clone(),

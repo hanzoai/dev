@@ -107,7 +107,7 @@ pub(crate) fn render_rows(
             let mut cell = Cell::from(Line::from(spans));
             if Some(i) == state.selected_idx {
                 cell = cell.style(Style::default().fg(crate::colors::primary()));
-            } else if *is_current {
+            } else if *_is_current {
                 cell = cell.style(Style::default().fg(crate::colors::light_blue()));
             }
             rows.push(Row::new(vec![cell]));
