@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Non-functional change to trigger release workflow
 
-import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync, unlinkSync, statSync, openSync, closeSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { get } from 'https';
@@ -29,31 +29,75 @@ function getTargetTriple() {
   return `${rustArch}-${rustPlatform}`;
 }
 
-async function downloadBinary(url, dest) {
+async function downloadBinary(url, dest, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
-    const file = createWriteStream(dest);
-    
-    get(url, (response) => {
-      if (response.statusCode === 302 || response.statusCode === 301) {
-        // Follow redirect
-        get(response.headers.location, (redirectResponse) => {
-          redirectResponse.pipe(file);
+    const attempt = (currentUrl, redirectsLeft) => {
+      get(currentUrl, (response) => {
+        const status = response.statusCode || 0;
+        const location = response.headers.location;
+
+        if ((status === 301 || status === 302 || status === 303 || status === 307 || status === 308) && location) {
+          if (redirectsLeft <= 0) {
+            reject(new Error(`Too many redirects while downloading ${currentUrl}`));
+            return;
+          }
+          attempt(location, redirectsLeft - 1);
+          return;
+        }
+
+        if (status === 200) {
+          // Only create the file stream after we know it's a successful response
+          const file = createWriteStream(dest);
+          response.pipe(file);
           file.on('finish', () => {
             file.close();
             resolve();
           });
-        }).on('error', reject);
-      } else if (response.statusCode === 200) {
-        response.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          resolve();
-        });
-      } else {
-        reject(new Error(`Failed to download: ${response.statusCode}`));
-      }
-    }).on('error', reject);
+          file.on('error', (err) => {
+            try { unlinkSync(dest); } catch {}
+            reject(err);
+          });
+        } else {
+          reject(new Error(`Failed to download: HTTP ${status}`));
+        }
+      }).on('error', (err) => {
+        try { unlinkSync(dest); } catch {}
+        reject(err);
+      });
+    };
+
+    attempt(url, maxRedirects);
   });
+}
+
+function validateDownloadedBinary(p) {
+  try {
+    const st = statSync(p);
+    if (!st.isFile() || st.size === 0) {
+      return { ok: false, reason: 'empty or not a regular file' };
+    }
+    const fd = openSync(p, 'r');
+    try {
+      const buf = Buffer.alloc(4);
+      const n = readSync(fd, buf, 0, 4, 0);
+      if (n < 2) return { ok: false, reason: 'too short' };
+      const plt = platform();
+      if (plt === 'win32') {
+        if (!(buf[0] === 0x4d && buf[1] === 0x5a)) return { ok: false, reason: 'invalid PE header (missing MZ)' };
+      } else if (plt === 'linux' || plt === 'android') {
+        if (!(buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46)) return { ok: false, reason: 'invalid ELF header' };
+      } else if (plt === 'darwin') {
+        const isMachO = (buf[0] === 0xcf && buf[1] === 0xfa && buf[2] === 0xed && buf[3] === 0xfe) ||
+                        (buf[0] === 0xca && buf[1] === 0xfe && buf[2] === 0xba && buf[3] === 0xbe);
+        if (!isMachO) return { ok: false, reason: 'invalid Mach-O header' };
+      }
+      return { ok: true };
+    } finally {
+      closeSync(fd);
+    }
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
 }
 
 async function main() {
@@ -124,7 +168,14 @@ async function main() {
     console.log(`Downloading ${binaryName}...`);
     try {
       await downloadBinary(downloadUrl, localPath);
-      
+
+      // Validate header to avoid corrupt binaries causing spawn EFTYPE/ENOEXEC
+      const valid = validateDownloadedBinary(localPath);
+      if (!valid.ok) {
+        try { unlinkSync(localPath); } catch {}
+        throw new Error(`invalid binary (${valid.reason})`);
+      }
+
       // Make executable on Unix-like systems
       if (!isWindows) {
         chmodSync(localPath, 0o755);
@@ -143,6 +194,20 @@ async function main() {
   const mainBinaryPath = join(binDir, mainBinary);
   
   if (existsSync(mainBinaryPath)) {
+    try {
+      const stats = statSync(mainBinaryPath);
+      if (!stats.size) {
+        throw new Error('binary is empty (download likely failed)');
+      }
+      const valid = validateDownloadedBinary(mainBinaryPath);
+      if (!valid.ok) {
+        console.warn(`⚠ Main code binary appears invalid: ${valid.reason}`);
+        console.warn('  Try reinstalling or check your network/proxy settings.');
+      }
+    } catch (e) {
+      console.warn(`⚠ Main code binary appears invalid: ${e.message}`);
+      console.warn('  Try reinstalling or check your network/proxy settings.');
+    }
     console.log('Setting up main code binary...');
     
     // On Windows, we can't use symlinks easily, so update the JS wrapper

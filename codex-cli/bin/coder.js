@@ -63,7 +63,7 @@ if (!existsSync(binaryPath)) {
 }
 
 // Check if binary exists and try to fix permissions if needed
-import { existsSync, chmodSync } from "fs";
+import { existsSync, chmodSync, statSync, openSync, readSync, closeSync } from "fs";
 if (existsSync(binaryPath)) {
   try {
     // Ensure binary is executable on Unix-like systems
@@ -81,6 +81,50 @@ if (existsSync(binaryPath)) {
   process.exit(1);
 }
 
+// Lightweight header validation to provide clearer errors before spawn
+const validateBinary = (p) => {
+  try {
+    const st = statSync(p);
+    if (!st.isFile() || st.size === 0) {
+      return { ok: false, reason: "empty or not a regular file" };
+    }
+    const fd = openSync(p, "r");
+    try {
+      const buf = Buffer.alloc(4);
+      const n = readSync(fd, buf, 0, 4, 0);
+      if (n < 2) return { ok: false, reason: "too short" };
+      if (platform === "win32") {
+        if (!(buf[0] === 0x4d && buf[1] === 0x5a)) return { ok: false, reason: "invalid PE header (missing MZ)" };
+      } else if (platform === "linux" || platform === "android") {
+        if (!(buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46)) return { ok: false, reason: "invalid ELF header" };
+      } else if (platform === "darwin") {
+        const isMachO = (buf[0] === 0xcf && buf[1] === 0xfa && buf[2] === 0xed && buf[3] === 0xfe) ||
+                        (buf[0] === 0xca && buf[1] === 0xfe && buf[2] === 0xba && buf[3] === 0xbe);
+        if (!isMachO) return { ok: false, reason: "invalid Mach-O header" };
+      }
+    } finally {
+      closeSync(fd);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+};
+
+const validation = validateBinary(binaryPath);
+if (!validation.ok) {
+  console.error(`The native binary at ${binaryPath} appears invalid: ${validation.reason}`);
+  console.error("This can happen if the download failed or was modified by antivirus/proxy.");
+  console.error("Please try reinstalling:");
+  console.error("  npm uninstall -g @just-every/code");
+  console.error("  npm install -g @just-every/code");
+  if (platform === "win32") {
+    console.error("If the issue persists, clear npm cache and disable antivirus temporarily:");
+    console.error("  npm cache clean --force");
+  }
+  process.exit(1);
+}
+
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
 // executing. This allows us to forward those signals to the child process
@@ -95,10 +139,19 @@ const child = spawn(binaryPath, process.argv.slice(2), {
 
 child.on("error", (err) => {
   // Typically triggered when the binary is missing or not executable.
-  if (err.code === 'EACCES') {
+  const code = err && err.code;
+  if (code === 'EACCES') {
     console.error(`Permission denied: ${binaryPath}`);
     console.error(`Try running: chmod +x "${binaryPath}"`);
     console.error(`Or reinstall the package with: npm install -g @just-every/code`);
+  } else if (code === 'EFTYPE' || code === 'ENOEXEC') {
+    console.error(`Failed to execute native binary: ${binaryPath}`);
+    console.error("The file may be corrupt or of the wrong type. Reinstall usually fixes this:");
+    console.error("  npm uninstall -g @just-every/code && npm install -g @just-every/code");
+    if (platform === 'win32') {
+      console.error("On Windows, ensure the .exe downloaded correctly (proxy/AV can interfere).");
+      console.error("Try clearing cache: npm cache clean --force");
+    }
   } else {
     console.error(err);
   }
