@@ -2117,14 +2117,6 @@ impl ChatWidget<'_> {
                     tracing::warn!("Failed to acquire lock for browser screenshot update");
                 }
 
-                // Also add a compact history entry so LLM‑initiated browser actions are visible
-                // in the conversation feed like other tool calls.
-                // Keep this lightweight to avoid spamming while still providing a clear cue.
-                self.add_to_history(history_cell::new_background_event(format!(
-                    "📸 Browser screenshot captured: {}",
-                    url
-                )));
-
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
