@@ -68,15 +68,15 @@ impl MessageProcessor {
     }
 
     pub(crate) async fn process_request(&mut self, request: JSONRPCRequest) {
-        if let Ok(request_json) = serde_json::to_value(request.clone())
-            && let Ok(codex_request) = serde_json::from_value::<ClientRequest>(request_json)
-        {
-            // If the request is a Codex request, handle it with the Codex
-            // message processor.
-            self.codex_message_processor
-                .process_request(codex_request)
-                .await;
-            return;
+        if let Ok(request_json) = serde_json::to_value(request.clone()) {
+            if let Ok(codex_request) = serde_json::from_value::<ClientRequest>(request_json) {
+                // If the request is a Codex request, handle it with the Codex
+                // message processor.
+                self.codex_message_processor
+                    .process_request(codex_request)
+                    .await;
+                return;
+            }
         }
 
         // Hold on to the ID so we can respond.
@@ -218,9 +218,9 @@ impl MessageProcessor {
             instructions: None,
             protocol_version: params.protocol_version.clone(),
             server_info: mcp_types::Implementation {
-                name: "codex-mcp-server".to_string(),
+                name: "code-mcp-server".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                title: Some("Codex".to_string()),
+                title: Some("Code".to_string()),
             },
         };
 
