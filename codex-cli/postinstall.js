@@ -29,10 +29,12 @@ function getTargetTriple() {
   return `${rustArch}-${rustPlatform}`;
 }
 
-async function downloadBinary(url, dest, maxRedirects = 5) {
-  return new Promise((resolve, reject) => {
+async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  const doAttempt = () => new Promise((resolve, reject) => {
     const attempt = (currentUrl, redirectsLeft) => {
-      get(currentUrl, (response) => {
+      const req = get(currentUrl, (response) => {
         const status = response.statusCode || 0;
         const location = response.headers.location;
 
@@ -46,28 +48,74 @@ async function downloadBinary(url, dest, maxRedirects = 5) {
         }
 
         if (status === 200) {
-          // Only create the file stream after we know it's a successful response
+          const expected = parseInt(response.headers['content-length'] || '0', 10) || 0;
+          let bytes = 0;
+          let timer;
+          const timeoutMs = 30000; // 30s inactivity timeout
+
+          const resetTimer = () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+              req.destroy(new Error('download stalled'));
+            }, timeoutMs);
+          };
+
+          resetTimer();
+          response.on('data', (chunk) => {
+            bytes += chunk.length;
+            resetTimer();
+          });
+
           const file = createWriteStream(dest);
           response.pipe(file);
           file.on('finish', () => {
+            if (timer) clearTimeout(timer);
             file.close();
-            resolve();
+            if (expected && bytes !== expected) {
+              try { unlinkSync(dest); } catch {}
+              reject(new Error(`incomplete download: got ${bytes} of ${expected} bytes`));
+            } else if (bytes === 0) {
+              try { unlinkSync(dest); } catch {}
+              reject(new Error('empty download'));
+            } else {
+              resolve();
+            }
           });
           file.on('error', (err) => {
+            if (timer) clearTimeout(timer);
             try { unlinkSync(dest); } catch {}
             reject(err);
           });
         } else {
           reject(new Error(`Failed to download: HTTP ${status}`));
         }
-      }).on('error', (err) => {
+      });
+
+      req.on('error', (err) => {
         try { unlinkSync(dest); } catch {}
         reject(err);
+      });
+
+      // Absolute request timeout to avoid hanging forever
+      req.setTimeout(120000, () => {
+        req.destroy(new Error('download timed out'));
       });
     };
 
     attempt(url, maxRedirects);
   });
+
+  let attemptNum = 0;
+  while (true) {
+    try {
+      return await doAttempt();
+    } catch (e) {
+      attemptNum += 1;
+      if (attemptNum > maxRetries) throw e;
+      const backoff = Math.min(2000, 200 * attemptNum);
+      await sleep(backoff);
+    }
+  }
 }
 
 function validateDownloadedBinary(p) {
