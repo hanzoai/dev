@@ -2013,21 +2013,15 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     
     // 📊 Token Usage
     lines.push(Line::from(vec!["📊 ".into(), "Token Usage".bold()]));
-    if let Some(session_id) = session_id {
-        lines.push(Line::from(vec![
-            "  • Session ID: ".into(),
-            session_id.to_string().into(),
-        ]));
-    }
     // Input: <input> [+ <cached> cached]
     let mut input_line_spans: Vec<Span<'static>> = vec![
         "  • Input: ".into(),
         usage.non_cached_input().to_string().into(),
     ];
-    if let Some(cached) = usage.cached_input_tokens
-        && cached > 0
-    {
+    if let Some(cached) = usage.cached_input_tokens {
+        if cached > 0 {
         input_line_spans.push(format!(" (+ {cached} cached)").into());
+    }
     }
     lines.push(Line::from(input_line_spans));
     // Output: <output>
