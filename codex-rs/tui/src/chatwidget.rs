@@ -3022,11 +3022,16 @@ impl ChatWidget<'_> {
                 Ok(_) => {
                     tracing::info!("[cdp] Connected to Chrome via CDP");
 
-                    // Prepare success message
-                    let success_msg = if let Some(p) = port {
-                        format!("✅ Connected to Chrome on port {}", p)
+                    // Build a detailed success message including CDP method and endpoint
+                    let (detected_port, detected_ws) = codex_browser::global::get_last_connection().await;
+                    let success_msg = if let Some(ws) = detected_ws {
+                        format!("✅ Connected to Chrome via CDP (ws: {})", ws)
+                    } else if let Some(p) = detected_port {
+                        format!("✅ Connected to Chrome via CDP (port: {})", p)
+                    } else if let Some(p) = port {
+                        format!("✅ Connected to Chrome via CDP (port: {})", p)
                     } else {
-                        "✅ Connected to Chrome (auto-detected port)".to_string()
+                        "✅ Connected to Chrome via CDP (auto-detected)".to_string()
                     };
 
                     // Immediately notify success (do not block on screenshots)
