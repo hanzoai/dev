@@ -24,6 +24,7 @@ mod popup_consts;
 mod reasoning_selection_view;
 mod scroll_state;
 mod selection_popup_common;
+pub mod list_selection_view;
 mod textarea;
 mod theme_selection_view;
 mod verbosity_selection_view;
