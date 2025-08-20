@@ -139,6 +139,8 @@ pub(crate) struct ChatWidget<'a> {
     // Track the ID of the current streaming message to prevent duplicates
     // Track the ID of the current streaming reasoning to prevent duplicates
     running_commands: HashMap<String, RunningCommand>,
+    // Track active custom tool cells by call_id so we can replace them on completion
+    running_custom_tools: HashMap<String, usize>,
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
@@ -506,36 +508,36 @@ impl ChatWidget<'_> {
         for cell in &self.history_cells {
             cell.trigger_fade();
         }
-        let McpToolCallBeginEvent {
-            call_id: _,
-            invocation,
-        } = ev;
-        
-        // Add active MCP tool call to history
-        self.add_to_history(history_cell::new_active_mcp_tool_call(invocation));
+        let McpToolCallBeginEvent { call_id, invocation } = ev;
+        // Add animated running MCP tool call to history and track index
+        let cell = history_cell::new_running_mcp_tool_call(invocation);
+        self.add_to_history(cell);
+        if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
+            self.running_custom_tools.insert(call_id, last_idx);
+        }
     }
 
     /// Handle MCP tool call end immediately
     fn handle_mcp_end_now(&mut self, ev: McpToolCallEndEvent) {
-        let McpToolCallEndEvent {
-            call_id: _,
-            duration,
-            invocation,
-            result,
-        } = ev;
-        
+        let McpToolCallEndEvent { call_id, duration, invocation, result } = ev;
         // Determine success from result
         let success = !result.as_ref().map(|r| r.is_error.unwrap_or(false)).unwrap_or(false);
-        
-        // Add completed MCP tool call to history
-        self.add_to_history(history_cell::new_completed_mcp_tool_call(
-            80,  // TODO: Use actual terminal width
+        let completed = history_cell::new_completed_mcp_tool_call(
+            80, // TODO: use actual terminal width
             invocation,
             duration,
             success,
             result,
-        ));
-        // MCP tool calls are added directly to history, no active cell to move
+        );
+        if let Some(idx) = self.running_custom_tools.remove(&call_id) {
+            if idx < self.history_cells.len() {
+                self.history_cells[idx] = completed;
+                self.invalidate_height_cache();
+                self.request_redraw();
+                return;
+            }
+        }
+        self.add_to_history(completed);
     }
 
     /// Handle patch apply end immediately
@@ -828,6 +830,7 @@ impl ChatWidget<'_> {
             content_buffer: String::new(),
             last_assistant_message: None,
             running_commands: HashMap::new(),
+            running_custom_tools: HashMap::new(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -1943,7 +1946,7 @@ impl ChatWidget<'_> {
                 );
             }
             EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
-                call_id: _,
+                call_id,
                 tool_name,
                 parameters,
             }) => {
@@ -1952,12 +1955,18 @@ impl ChatWidget<'_> {
                 self.finalize_active_stream();
                 // Flush any queued interrupts when streaming ends
                 self.flush_interrupt_queue();
-                // For browser_* and agent_* tools, suppress the separate begin entry to show a single combined section
-                if !(tool_name.starts_with("browser_") || tool_name.starts_with("agent_")) {
-                    let params_string = parameters.map(|p| p.to_string());
-                    self.add_to_history(history_cell::new_active_custom_tool_call(
-                        tool_name.clone(), params_string,
-                    ));
+                // Show an active entry immediately for all custom tools so the user sees progress
+                let params_string = parameters.map(|p| p.to_string());
+                // Animated running cell with live timer and formatted args
+                let cell = if tool_name.starts_with("browser_") {
+                    history_cell::new_running_browser_tool_call(tool_name.clone(), params_string.clone())
+                } else {
+                    history_cell::new_running_custom_tool_call(tool_name.clone(), params_string.clone())
+                };
+                self.add_to_history(cell);
+                // Track index so we can replace it on completion
+                if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
+                    self.running_custom_tools.insert(call_id.clone(), last_idx);
                 }
 
                 // Update border status based on tool
@@ -1971,7 +1980,7 @@ impl ChatWidget<'_> {
                 }
             }
             EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
-                call_id: _,
+                call_id,
                 tool_name,
                 parameters,
                 duration,
@@ -1984,13 +1993,24 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
-                self.add_to_history(history_cell::new_completed_custom_tool_call(
-                    tool_name, 
-                    params_string, 
-                    duration, 
-                    success, 
+                let completed = history_cell::new_completed_custom_tool_call(
+                    tool_name,
+                    params_string,
+                    duration,
+                    success,
                     content,
-                ));
+                );
+                if let Some(idx) = self.running_custom_tools.remove(&call_id) {
+                    if idx < self.history_cells.len() {
+                        self.history_cells[idx] = Box::new(completed);
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                    } else {
+                        self.add_to_history(completed);
+                    }
+                } else {
+                    self.add_to_history(completed);
+                }
 
                 // After tool completes, likely transitioning to response
                 self.bottom_pane.update_status_text("responding".to_string());
