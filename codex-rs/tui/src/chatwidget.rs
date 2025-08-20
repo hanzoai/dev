@@ -2014,6 +2014,15 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
+                // Surface lightweight background events in the history feed
+                // so users see confirmations (e.g., CDP connect success).
+                self.add_to_history(history_cell::new_background_event(message.clone()));
+
+                // Also reflect CDP connect success in the status line.
+                if message.starts_with("✅ Connected to Chrome via CDP") {
+                    self.bottom_pane
+                        .update_status_text("using browser (CDP)".to_string());
+                }
             }
             EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
                 agents,
