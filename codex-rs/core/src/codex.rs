@@ -3952,37 +3952,10 @@ async fn handle_browser_open(
                                     url,
                                     step_start.elapsed()
                                 );
-                                let ss_start = std::time::Instant::now();
-                                // Capture screenshot after navigation (synchronous)
-                                match capture_browser_screenshot(sess_clone).await {
-                                    Ok((screenshot_path, updated_url)) => {
-                                        tracing::info!(
-                                            "[browser_open] screenshot captured in {:?}: {} at URL: {}",
-                                            ss_start.elapsed(),
-                                            screenshot_path.display(),
-                                            updated_url
-                                        );
-                                        add_pending_screenshot(
-                                            sess_clone,
-                                            screenshot_path,
-                                            updated_url,
-                                        );
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "[browser_open] screenshot failed after {:?}: {}",
-                                            ss_start.elapsed(), e
-                                        );
-                                    }
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Browser opened to: {} [new page shown in screenshot]",
-                                            url
-                                        ),
+                                        content: format!("Browser opened to: {}", url),
                                         success: Some(true),
                                     },
                                 }
@@ -4170,7 +4143,7 @@ async fn handle_browser_click(
                     }
                 }
 
-                // If x or y provided, resolve missing coord from current position, move, then short sleep
+                // If x or y provided, resolve missing coord from current position, then move
                 if target_x.is_some() || target_y.is_some() {
                     // get current cursor for missing values
                     match browser_manager.get_cursor_position().await {
@@ -4186,8 +4159,6 @@ async fn handle_browser_click(
                                     },
                                 };
                             }
-                            // Allow small UI animation/hover effects to settle
-                            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
                         }
                         Err(e) => {
                             return ResponseInputItem::FunctionCallOutput {
@@ -4219,15 +4190,10 @@ async fn handle_browser_click(
 
                 match action_result {
                     Ok((x, y, label)) => {
-                        // Capture screenshot after action
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await {
-                            add_pending_screenshot(sess_clone, screenshot_path, url);
-                        }
-
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("{} at ({}, {}) [updated status shown in screenshot]", label, x, y),
+                                content: format!("{} at ({}, {})", label, x, y),
                                 success: Some(true),
                             },
                         }
@@ -4302,16 +4268,10 @@ async fn handle_browser_move(
 
                         match result {
                             Ok((x, y)) => {
-                                // Capture screenshot after moving mouse
-                                if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
-                                {
-                                    add_pending_screenshot(sess_clone, screenshot_path, url);
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!("Moved mouse position to ({}, {}) [updated mouse shown in screenshot]", x, y),
+                                        content: format!("Moved mouse position to ({}, {})", x, y),
                                         success: Some(true),
                                     },
                                 }
@@ -4375,20 +4335,10 @@ async fn handle_browser_type(
 
                         match browser_manager.type_text(text).await {
                             Ok(_) => {
-                                // Capture screenshot after typing
-                                if let Ok((screenshot_path, url)) =
-                                    capture_browser_screenshot(sess_clone).await
-                                {
-                                    add_pending_screenshot(sess_clone, screenshot_path, url);
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Typed: {} [updated page shown in screenshot]",
-                                            text
-                                        ),
+                                        content: format!("Typed: {}", text),
                                         success: Some(true),
                                     },
                                 }
@@ -4453,20 +4403,10 @@ async fn handle_browser_key(
 
                         match browser_manager.press_key(key).await {
                             Ok(_) => {
-                                // Capture screenshot after pressing key
-                                if let Ok((screenshot_path, url)) =
-                                    capture_browser_screenshot(sess_clone).await
-                                {
-                                    add_pending_screenshot(sess_clone, screenshot_path, url);
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "Pressed key: {} [updated page shown in screenshot]",
-                                            key
-                                        ),
+                                        content: format!("Pressed key: {}", key),
                                         success: Some(true),
                                     },
                                 }
@@ -4581,20 +4521,10 @@ async fn handle_browser_javascript(
 
                                 tracing::info!("Returning to LLM: {}", formatted_result);
 
-                                // Capture screenshot after executing JavaScript
-                                if let Ok((screenshot_path, url)) =
-                                    capture_browser_screenshot(sess_clone).await
-                                {
-                                    add_pending_screenshot(sess_clone, screenshot_path, url);
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "{} [updated page shown in screenshot]",
-                                            formatted_result
-                                        ),
+                                        content: formatted_result,
                                         success: Some(true),
                                     },
                                 }
@@ -4660,15 +4590,10 @@ async fn handle_browser_scroll(
 
                         match browser_manager.scroll_by(dx, dy).await {
                     Ok(_) => {
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await
-                        {
-                            add_pending_screenshot(sess_clone, screenshot_path, url);
-                        }
-
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone.clone(),
                             output: FunctionCallOutputPayload {
-                                content: format!("Scrolled by ({}, {}) [scrolled page shown in screenshot]", dx, dy),
+                                content: format!("Scrolled by ({}, {})", dx, dy),
                                 success: Some(true),
                             },
                         }
@@ -5018,31 +4943,7 @@ async fn handle_browser_inspect(
                             .await
                             .unwrap_or_else(|_| json!({}));
 
-                        // Highlight node (best-effort)
-                        let _ = browser_manager
-                            .execute_cdp(
-                                "Overlay.highlightNode",
-                                json!({
-                                    "nodeId": node_id,
-                                    "highlightConfig": {
-                                        "showInfo": true,
-                                        "showStyles": false,
-                                        "contentColor": {"r": 111, "g": 168, "b": 220, "a": 0.2},
-                                        "borderColor": {"r": 17, "g": 17, "b": 17, "a": 0.8},
-                                        "marginColor": {"r": 246, "g": 178, "b": 107, "a": 0.4},
-                                        "paddingColor": {"r": 147, "g": 196, "b": 125, "a": 0.4}
-                                    }
-                                }),
-                            )
-                            .await;
-
-                        // Capture screenshot with highlight
-                        if let Ok((screenshot_path, url)) = capture_browser_screenshot(sess_clone).await {
-                            add_pending_screenshot(sess_clone, screenshot_path, url);
-                        }
-
-                        // Hide highlight
-                        let _ = browser_manager.execute_cdp("Overlay.hideHighlight", json!({})).await;
+                        // Highlight/hide steps and screenshot are omitted; tools no longer capture inline
 
                         // Format output
                         let mut out = String::new();
@@ -5083,7 +4984,7 @@ async fn handle_browser_inspect(
                             out.push_str(&format!("Matched CSS rules: {}\n", rules.len()));
                         }
 
-                        out.push_str("\nNode highlighted in attached screenshot.\n");
+                        // No inline screenshot capture; result reflects DOM details only.
 
                         ResponseInputItem::FunctionCallOutput {
                             call_id: call_id_clone,
@@ -5159,19 +5060,10 @@ async fn handle_browser_history(
 
                         match action_res {
                             Ok(_) => {
-                                if let Ok((screenshot_path, url)) =
-                                    capture_browser_screenshot(sess_clone).await
-                                {
-                                    add_pending_screenshot(sess_clone, screenshot_path, url);
-                                }
-
                                 ResponseInputItem::FunctionCallOutput {
                                     call_id: call_id_clone.clone(),
                                     output: FunctionCallOutputPayload {
-                                        content: format!(
-                                            "History {} triggered [new page shown in screenshot]",
-                                            direction
-                                        ),
+                                        content: format!("History {} triggered", direction),
                                         success: Some(true),
                                     },
                                 }

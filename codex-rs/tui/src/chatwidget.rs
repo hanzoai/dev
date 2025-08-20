@@ -4816,13 +4816,20 @@ impl WidgetRef for &ChatWidget<'_> {
             let mut acc = 0u16;
             for (idx, item) in all_content.iter().enumerate() {
                 let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-                let is_cacheable = !item.has_custom_render()
+                // Cache heights for most items. Also allow caching for ExecCell once completed
+                // (custom_render but stable), to avoid repeated wrapping/measure.
+                let is_stable_exec = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::ExecCell>()
+                    .map(|e| e.output.is_some())
+                    .unwrap_or(false);
+                let is_streaming = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::StreamingContentCell>()
+                    .is_some();
+                let is_cacheable = ((!item.has_custom_render()) || is_stable_exec)
                     && !item.is_animating()
-                    && item.as_any().downcast_ref::<crate::history_cell::ExecCell>().is_none()
-                    && item
-                        .as_any()
-                        .downcast_ref::<crate::history_cell::StreamingContentCell>()
-                        .is_none();
+                    && !is_streaming;
                 let h = if is_cacheable {
                     let key = (idx, content_width);
                     // Take an immutable borrow in a small scope to avoid overlapping with the later mutable borrow
@@ -4927,13 +4934,19 @@ impl WidgetRef for &ChatWidget<'_> {
             const GUTTER_WIDTH: u16 = 2;
             let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
             // Height from cache if possible
-            let is_cacheable = !item.has_custom_render()
+            // Cache heights for most items. Also allow caching for completed ExecCell (stable).
+            let is_stable_exec = item
+                .as_any()
+                .downcast_ref::<crate::history_cell::ExecCell>()
+                .map(|e| e.output.is_some())
+                .unwrap_or(false);
+            let is_streaming = item
+                .as_any()
+                .downcast_ref::<crate::history_cell::StreamingContentCell>()
+                .is_some();
+            let is_cacheable = ((!item.has_custom_render()) || is_stable_exec)
                 && !item.is_animating()
-                && item.as_any().downcast_ref::<crate::history_cell::ExecCell>().is_none()
-                && item
-                    .as_any()
-                    .downcast_ref::<crate::history_cell::StreamingContentCell>()
-                    .is_none();
+                && !is_streaming;
             let item_height = if is_cacheable {
                 let key = (idx, content_width);
                 if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
