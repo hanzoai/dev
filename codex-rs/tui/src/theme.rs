@@ -57,6 +57,13 @@ pub fn init_theme(config: &ThemeConfig) {
     let mut theme = get_predefined_theme(config.name);
     apply_custom_colors(&mut theme, &config.colors);
 
+    // On some terminals (notably macOS Terminal.app with certain profiles),
+    // truecolor escape sequences may render incorrectly. Detect such cases
+    // and quantize the theme to the ANSI-256 palette for robust rendering.
+    if needs_ansi256_fallback() {
+        quantize_theme_to_ansi256(&mut theme);
+    }
+
     let mut current = CURRENT_THEME.write().unwrap();
     *current = theme;
 }
@@ -70,6 +77,10 @@ pub fn current_theme() -> Theme {
 pub fn switch_theme(theme_name: ThemeName) {
     let theme = get_predefined_theme(theme_name);
     let mut current = CURRENT_THEME.write().unwrap();
+    let mut theme = theme;
+    if needs_ansi256_fallback() {
+        quantize_theme_to_ansi256(&mut theme);
+    }
     *current = theme;
 }
 
@@ -216,6 +227,168 @@ fn apply_custom_colors(theme: &mut Theme, colors: &ThemeColors) {
             theme.progress = color;
         }
     }
+}
+
+/// Return true when we should prefer ANSI-256 over truecolor for safety.
+///
+/// Heuristics:
+/// - Respect `CODE_FORCE_ANSI256=1` to force fallback.
+/// - Default to ANSI-256 on Apple's built-in Terminal (TERM_PROGRAM=Apple_Terminal),
+///   where some profiles are known to misrender truecolor in alternate screen.
+/// - Otherwise, allow truecolor when `COLORTERM` advertises it or when running
+///   in modern terminals known to support it well.
+fn needs_ansi256_fallback() -> bool {
+    let force = std::env::var("CODE_FORCE_ANSI256").map(|v| v == "1").unwrap_or(false);
+    if force {
+        return true;
+    }
+    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
+    if term_program == "Apple_Terminal" {
+        return true;
+    }
+    let colorterm = std::env::var("COLORTERM").unwrap_or_default().to_lowercase();
+    let has_truecolor = colorterm.contains("truecolor") || colorterm.contains("24bit");
+    // Known good terminals
+    let known_truecolor = matches!(
+        term_program.as_str(),
+        "iTerm.app" | "WezTerm" | "Ghostty" | "Alacritty" | "kitty" | "vscode"
+    );
+    !(has_truecolor || known_truecolor)
+}
+
+/// Quantize all theme colors to the ANSI-256 palette so backends that do not
+/// render truecolor reliably still get consistent colors.
+fn quantize_theme_to_ansi256(theme: &mut Theme) {
+    // Preserve exact white backgrounds as truecolor to avoid terminals whose
+    // ANSI palette's "white" (15) is a light gray. This specifically fixes
+    // macOS Terminal.app where bright white can appear gray.
+    fn preserve_true_white(c: Color, for_background: bool) -> Option<Color> {
+        if !for_background { return None; }
+        if let Color::Rgb(r, g, b) = c {
+            if r >= 245 && g >= 245 && b >= 245 {
+                // On limited-color terminals we want a strong white for light themes.
+                // Use ANSI bright white (index 15), which maps to the profile's
+                // bright white and is reliably high‑contrast (unlike grayscale 231).
+                return Some(Color::Indexed(15));
+            }
+        }
+        None
+    }
+
+    let q = quantize_color_to_ansi256;
+    theme.primary = q(theme.primary);
+    theme.secondary = q(theme.secondary);
+    theme.background = preserve_true_white(theme.background, true).unwrap_or_else(|| q(theme.background));
+    theme.foreground = q(theme.foreground);
+    theme.border = q(theme.border);
+    theme.border_focused = q(theme.border_focused);
+    theme.selection = q(theme.selection);
+    theme.cursor = q(theme.cursor);
+    theme.success = q(theme.success);
+    theme.warning = q(theme.warning);
+    theme.error = q(theme.error);
+    theme.info = q(theme.info);
+    theme.text = q(theme.text);
+    theme.text_dim = q(theme.text_dim);
+    theme.text_bright = q(theme.text_bright);
+    theme.keyword = q(theme.keyword);
+    theme.string = q(theme.string);
+    theme.comment = q(theme.comment);
+    theme.function = q(theme.function);
+    theme.spinner = q(theme.spinner);
+    theme.progress = q(theme.progress);
+}
+
+fn quantize_color_to_ansi256(c: Color) -> Color {
+    match c {
+        Color::Rgb(r, g, b) => Color::Indexed(rgb_to_ansi256_index(r, g, b)),
+        // Named colors already map to ANSI; keep as-is.
+        other => other,
+    }
+}
+
+// Map an RGB color to the closest xterm-256 color index using the standard
+// 6x6x6 color cube + grayscale ramp.
+fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
+    // Helper to compute squared distance
+    fn dist2(a: (u8, u8, u8), b: (u8, u8, u8)) -> i32 {
+        let dr = a.0 as i32 - b.0 as i32;
+        let dg = a.1 as i32 - b.1 as i32;
+        let db = a.2 as i32 - b.2 as i32;
+        dr * dr + dg * dg + db * db
+    }
+
+    // Candidate 1: color cube (16..231)
+    const STEPS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let idx = |v: u8| -> usize {
+        // Find nearest of the 6 steps
+        let mut best_i = 0;
+        let mut best_d = i32::MAX;
+        for (i, s) in STEPS.iter().enumerate() {
+            let d = (*s as i32 - v as i32).abs();
+            if d < best_d { best_d = d; best_i = i; }
+        }
+        best_i
+    };
+    let ri = idx(r);
+    let gi = idx(g);
+    let bi = idx(b);
+    let cube_r = STEPS[ri];
+    let cube_g = STEPS[gi];
+    let cube_b = STEPS[bi];
+    let cube_index = 16 + 36 * ri as u8 + 6 * gi as u8 + bi as u8;
+
+    // Candidate 2: grayscale (232..255)
+    let gray_level = {
+        let v = (r as u16 + g as u16 + b as u16) / 3;
+        if v <= 8 { 0 } else { ((v as i32 - 8) / 10).clamp(0, 23) as u8 }
+    };
+    let gray_value = 8 + 10 * gray_level;
+    let gray_index = 232 + gray_level;
+
+    // Candidate 3: 16-color ANSI (0..15), includes true white (15) which the
+    // grayscale ramp does not reach. This fixes near-white mapping to gray.
+    const ANSI16: [(u8, u8, u8); 16] = [
+        (0, 0, 0),       // 0 black
+        (205, 0, 0),     // 1 red
+        (0, 205, 0),     // 2 green
+        (205, 205, 0),   // 3 yellow
+        (0, 0, 205),     // 4 blue
+        (205, 0, 205),   // 5 magenta
+        (0, 205, 205),   // 6 cyan
+        (229, 229, 229), // 7 gray
+        (127, 127, 127), // 8 dark gray
+        (255, 102, 102), // 9 light red
+        (102, 255, 178), // 10 light green
+        (255, 255, 102), // 11 light yellow
+        (102, 153, 255), // 12 light blue
+        (255, 102, 255), // 13 light magenta
+        (102, 255, 255), // 14 light cyan
+        (255, 255, 255), // 15 white
+    ];
+
+    let rgb = (r, g, b);
+    let cube_rgb = (cube_r, cube_g, cube_b);
+    let gray_rgb = (gray_value, gray_value, gray_value);
+
+    let mut best_index = cube_index;
+    let mut best_dist = dist2(rgb, cube_rgb);
+
+    let gray_dist = dist2(rgb, gray_rgb);
+    if gray_dist < best_dist {
+        best_dist = gray_dist;
+        best_index = gray_index;
+    }
+
+    for (i, &(ar, ag, ab)) in ANSI16.iter().enumerate() {
+        let d = dist2(rgb, (ar, ag, ab));
+        if d < best_dist {
+            best_dist = d;
+            best_index = i as u8;
+        }
+    }
+
+    best_index
 }
 /// Get a predefined theme by name
 fn get_predefined_theme(name: ThemeName) -> Theme {

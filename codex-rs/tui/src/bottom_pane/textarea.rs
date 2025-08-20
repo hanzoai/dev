@@ -779,13 +779,19 @@ impl TextArea {
         lines: &[Range<usize>],
         range: std::ops::Range<usize>,
     ) {
+        let bg = crate::colors::background();
+        let fg = crate::colors::text();
         for (row, idx) in range.enumerate() {
             let r = &lines[idx];
             let y = area.y + row as u16;
+            // Fill the entire row area with theme background to avoid terminal default leaking through.
+            let line_bg = Style::default().bg(bg).fg(fg);
+            for x in area.x..area.x + area.width {
+                buf[(x, y)].set_style(line_bg);
+            }
+            // Draw the text on top using theme foreground + background to preserve consistent look.
             let line_range = r.start..r.end - 1;
-            // Draw base line with default style.
-            buf.set_string(area.x, y, &self.text[line_range.clone()], Style::default());
-
+            buf.set_string(area.x, y, &self.text[line_range.clone()], line_bg);
         }
     }
 }

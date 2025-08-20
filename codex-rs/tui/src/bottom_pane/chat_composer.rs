@@ -107,6 +107,10 @@ pub(crate) struct ChatComposer {
     show_reasoning_hint: bool,
     show_diffs_hint: bool,
     reasoning_shown: bool,
+    // Sticky flag: after a chat ScrollUp, make the very next Down trigger
+    // chat ScrollDown instead of moving within the textarea, unless another
+    // key is pressed in between.
+    next_down_scrolls_history: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -149,6 +153,7 @@ impl ChatComposer {
             show_reasoning_hint: false,
             show_diffs_hint: false,
             reasoning_shown: false,
+            next_down_scrolls_history: false,
         }
     }
 
@@ -455,6 +460,10 @@ impl ChatComposer {
 
     /// Handle a key event coming from the main UI.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
+        // Any non-Down key clears the sticky flag; handled before popup routing
+        if !matches!(key_event.code, KeyCode::Down) {
+            self.next_down_scrolls_history = false;
+        }
         let result = match &mut self.active_popup {
             ActivePopup::Command(_) => self.handle_key_event_with_slash_popup(key_event),
             ActivePopup::File(_) => self.handle_key_event_with_file_popup(key_event),
@@ -479,16 +488,19 @@ impl ChatComposer {
         };
 
         match key_event {
-            KeyEvent {
-                code: KeyCode::Up, ..
-            } => {
+            KeyEvent { code: KeyCode::Up, .. } => {
+                // If there are 0 or 1 items, let Up behave normally (cursor/history/scroll)
+                if popup.match_count() <= 1 {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 popup.move_up();
                 (InputResult::None, true)
             }
-            KeyEvent {
-                code: KeyCode::Down,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Down, .. } => {
+                // If there are 0 or 1 items, let Down behave normally (cursor/history/scroll)
+                if popup.match_count() <= 1 {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 popup.move_down();
                 (InputResult::None, true)
             }
@@ -555,16 +567,19 @@ impl ChatComposer {
         };
 
         match key_event {
-            KeyEvent {
-                code: KeyCode::Up, ..
-            } => {
+            KeyEvent { code: KeyCode::Up, .. } => {
+                // If there are 0 or 1 items, let Up behave normally (cursor/history/scroll)
+                if popup.match_count() <= 1 {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 popup.move_up();
                 (InputResult::None, true)
             }
-            KeyEvent {
-                code: KeyCode::Down,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Down, .. } => {
+                // If there are 0 or 1 items, let Down behave normally (cursor/history/scroll)
+                if popup.match_count() <= 1 {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 popup.move_down();
                 (InputResult::None, true)
             }
@@ -956,6 +971,11 @@ impl ChatComposer {
                             }
                         }
                         KeyCode::Down => {
+                            // If sticky is set, prefer chat ScrollDown once
+                            if self.next_down_scrolls_history {
+                                self.next_down_scrolls_history = false;
+                                return (InputResult::ScrollDown, false);
+                            }
                             if before == len {
                                 (InputResult::ScrollDown, false)
                             } else {
@@ -1144,6 +1164,44 @@ impl ChatComposer {
 
     fn set_has_focus(&mut self, has_focus: bool) {
         self.has_focus = has_focus;
+    }
+
+    // -------------------------------------------------------------
+    // History navigation helpers (used by ChatWidget at scroll boundaries)
+    // -------------------------------------------------------------
+    pub(crate) fn try_history_up(&mut self) -> bool {
+        if !self
+            .history
+            .should_handle_navigation(self.textarea.text(), self.textarea.cursor())
+        {
+            return false;
+        }
+        if let Some(text) = self.history.navigate_up(self.textarea.text(), &self.app_event_tx) {
+            self.textarea.set_text(&text);
+            self.textarea.set_cursor(0);
+        }
+        true
+    }
+
+    pub(crate) fn try_history_down(&mut self) -> bool {
+        // Only meaningful when browsing or when original text is recorded
+        if !self
+            .history
+            .should_handle_navigation(self.textarea.text(), self.textarea.cursor())
+        {
+            return false;
+        }
+        if let Some(text) = self.history.navigate_down(&self.app_event_tx) {
+            self.textarea.set_text(&text);
+            self.textarea.set_cursor(0);
+        }
+        true
+    }
+
+    pub(crate) fn history_is_browsing(&self) -> bool { self.history.is_browsing() }
+
+    pub(crate) fn mark_next_down_scrolls_history(&mut self) {
+        self.next_down_scrolls_history = true;
     }
 }
 

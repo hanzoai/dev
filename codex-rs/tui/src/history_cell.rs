@@ -1,6 +1,6 @@
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::slash_command::SlashCommand;
-use crate::text_formatting::format_and_truncate_tool_result;
+use crate::text_formatting::format_json_compact;
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
 use codex_common::create_config_summary_entries;
@@ -507,7 +507,33 @@ fn exec_render_parts_parsed(
             ParsedCommand::Read { name, cmd, .. } => { let mut c = name.clone(); if let Some(ann) = parse_read_line_annotation(cmd) { c = format!("{} {}", c, ann); } ("Read".to_string(), c) }
             ParsedCommand::ListFiles { cmd, path } => match path { Some(p) => { if search_paths.contains(p) { (String::new(), String::new()) } else { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("List".to_string(), display_p) } } None => ("List".to_string(), cmd.clone()) },
             ParsedCommand::Search { query, path, cmd } => {
-                let prettify_term = |s: &str| -> String { let mut out = s.replace("\\(", "(").replace("\\)", ")").replace("\\.", "."); let opens = out.matches('(').count(); let closes = out.matches(')').count(); if opens > closes { out.push(')'); } out };
+                // Make search terms human-readable:
+                // - Unescape any backslash-escaped character (e.g., "\?" -> "?")
+                // - Close unbalanced pairs for '(' and '{' to avoid dangling text in UI
+                let prettify_term = |s: &str| -> String {
+                    // General unescape: remove backslashes that escape the next char
+                    let mut out = String::with_capacity(s.len());
+                    let mut iter = s.chars();
+                    while let Some(ch) = iter.next() {
+                        if ch == '\\' {
+                            if let Some(next) = iter.next() { out.push(next); } else { out.push('\\'); }
+                        } else {
+                            out.push(ch);
+                        }
+                    }
+
+                    // Balance parentheses
+                    let opens_paren = out.matches("(").count();
+                    let closes_paren = out.matches(")").count();
+                    for _ in 0..opens_paren.saturating_sub(closes_paren) { out.push(')'); }
+
+                    // Balance curly braces
+                    let opens_curly = out.matches("{").count();
+                    let closes_curly = out.matches("}").count();
+                    for _ in 0..opens_curly.saturating_sub(closes_curly) { out.push('}'); }
+
+                    out
+                };
                 let fmt_query = |q: &str| -> String { let mut parts: Vec<String> = q.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).map(prettify_term).collect(); match parts.len() { 0 => String::new(), 1 => parts.remove(0), 2 => format!("{} and {}", parts[0], parts[1]), _ => { let last = parts.last().cloned().unwrap_or_default(); let head = &parts[..parts.len() - 1]; format!("{} and {}", head.join(", "), last) } } };
                 match (query, path) { (Some(q), Some(p)) => { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("Search".to_string(), format!("{} in {}", fmt_query(q), display_p)) } (Some(q), None) => ("Search".to_string(), format!("{}", fmt_query(q))), (None, Some(p)) => { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("Search".to_string(), format!("in {}", display_p)) } (None, None) => ("Search".to_string(), cmd.clone()), }
             }
@@ -1060,7 +1086,56 @@ impl HistoryCell for StreamingContentCell {
 
 // ==================== Helper Functions ====================
 
-const TOOL_CALL_MAX_LINES: usize = 5;
+// Unified preview format: show first 3 and last 6 non-empty lines with an ellipsis between.
+const PREVIEW_HEAD_LINES: usize = 3;
+const PREVIEW_TAIL_LINES: usize = 6;
+
+fn build_preview_lines(text: &str, include_left_pipe: bool) -> Vec<Line<'static>> {
+    let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
+    let non_empty: Vec<&str> = processed
+        .lines()
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    enum Seg<'a> { Line(&'a str), Ellipsis }
+    let segments: Vec<Seg> = if non_empty.len() <= PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES {
+        non_empty.iter().map(|s| Seg::Line(s)).collect()
+    } else {
+        let mut v: Vec<Seg> = Vec::with_capacity(PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES + 1);
+        // Head
+        for i in 0..PREVIEW_HEAD_LINES { v.push(Seg::Line(non_empty[i])); }
+        v.push(Seg::Ellipsis);
+        // Tail
+        let start = non_empty.len().saturating_sub(PREVIEW_TAIL_LINES);
+        for s in &non_empty[start..] { v.push(Seg::Line(s)); }
+        v
+    };
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for seg in segments {
+        match seg {
+            Seg::Line(line) => {
+                if include_left_pipe {
+                    let mut spans = vec![
+                        Span::styled(
+                            "│",
+                            Style::default()
+                                .add_modifier(Modifier::DIM)
+                                .fg(crate::colors::text_dim()),
+                        ),
+                    ];
+                    let escaped = ansi_escape_line(line);
+                    spans.extend(escaped.spans);
+                    out.push(Line::from(spans));
+                } else {
+                    out.push(ansi_escape_line(line));
+                }
+            }
+            Seg::Ellipsis => out.push(Line::from("…".dim())),
+        }
+    }
+    out
+}
 
 
 fn output_lines(
@@ -1080,49 +1155,7 @@ fn output_lines(
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     if !only_err && !stdout.is_empty() {
-        // Truncate stdout to 6 lines: first 1, ellipsis, last 5 when needed
-        let non_empty: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
-        enum Seg<'a> { Line(&'a str), Ellipsis }
-        let segments: Vec<Seg> = if non_empty.len() <= 6 {
-            non_empty.iter().map(|s| Seg::Line(s)).collect()
-        } else {
-            let mut v: Vec<Seg> = Vec::with_capacity(7);
-            v.push(Seg::Line(non_empty[0]));
-            v.push(Seg::Ellipsis);
-            let start = non_empty.len() - 5;
-            for s in &non_empty[start..] { v.push(Seg::Line(s)); }
-            v
-        };
-
-        let start_time = Instant::now();
-        for seg in segments {
-            match seg {
-                Seg::Line(line) => {
-                    let elapsed = start_time.elapsed();
-                    if elapsed > Duration::from_millis(100) {
-                        tracing::warn!("Slow ansi_escape_line took {:?}", elapsed);
-                    }
-                    if include_angle_pipe {
-                        // Render a subtle left border using a dim vertical bar.
-                        // Do not indent further; content begins immediately after.
-                        let mut line_spans = vec![
-                            Span::styled(
-                                "│",
-                                Style::default()
-                                    .add_modifier(Modifier::DIM)
-                                    .fg(crate::colors::text_dim()),
-                            ),
-                        ];
-                        let escaped_line = ansi_escape_line(line);
-                        line_spans.extend(escaped_line.spans);
-                        lines.push(Line::from(line_spans));
-                    } else {
-                        lines.push(ansi_escape_line(line));
-                    }
-                }
-                Seg::Ellipsis => lines.push(Line::from("…".dim())),
-            }
-        }
+        lines.extend(build_preview_lines(stdout, include_angle_pipe));
     }
 
     if !stderr.is_empty() && *exit_code != 0 {
@@ -1538,19 +1571,26 @@ fn new_parsed_command(
                 None => ("List".to_string(), cmd.clone()),
             },
             ParsedCommand::Search { query, path, cmd } => {
-                // Format query: split on '|' and join with commas + 'and' for readability
-                // Also pretty-print common shell-escaped characters for display purposes.
+                // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
                 let prettify_term = |s: &str| -> String {
-                    let mut out = s
-                        .replace("\\(", "(")
-                        .replace("\\)", ")")
-                        .replace("\\.", ".");
-                    // Balance a single unmatched opening paren common in function-name searches
-                    let opens = out.matches('(').count();
-                    let closes = out.matches(')').count();
-                    if opens > closes {
-                        out.push(')');
+                    // General unescape: turn "\X" into "X" for any X
+                    let mut out = String::with_capacity(s.len());
+                    let mut iter = s.chars();
+                    while let Some(ch) = iter.next() {
+                        if ch == '\\' {
+                            if let Some(next) = iter.next() { out.push(next); } else { out.push('\\'); }
+                        } else {
+                            out.push(ch);
+                        }
                     }
+                    // Balance parentheses
+                    let opens_paren = out.matches("(").count();
+                    let closes_paren = out.matches(")").count();
+                    for _ in 0..opens_paren.saturating_sub(closes_paren) { out.push(')'); }
+                    // Balance curly braces
+                    let opens_curly = out.matches("{").count();
+                    let closes_curly = out.matches("}").count();
+                    for _ in 0..opens_curly.saturating_sub(closes_curly) { out.push('}'); }
                     out
                 };
                 let fmt_query = |q: &str| -> String {
@@ -1917,12 +1957,12 @@ pub(crate) fn new_completed_custom_tool_call(
 
     if !result.is_empty() {
         lines.push(Line::from(""));
-        // Truncate result if needed
-        let truncated = format_and_truncate_tool_result(&result, TOOL_CALL_MAX_LINES, 80);
-        lines.push(Line::styled(
-            truncated,
-            Style::default().fg(crate::colors::text_dim()),
-        ));
+        let mut preview = build_preview_lines(&result, true);
+        preview = preview
+            .into_iter()
+            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+            .collect();
+        lines.extend(preview);
     }
 
     lines.push(Line::from(""));
@@ -2028,14 +2068,14 @@ fn new_completed_browser_tool_call(
         }
     }
 
-    // Result line (truncated)
+    // Result lines (preview format)
     let mut result_lines: Vec<Line<'static>> = Vec::new();
     if !result.is_empty() {
-        let truncated = format_and_truncate_tool_result(&result, TOOL_CALL_MAX_LINES, 80);
-        result_lines.push(Line::from(vec![
-            Span::styled("Result: ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD)),
-            Span::styled(truncated, Style::default().fg(crate::colors::text())),
-        ]));
+        let preview = build_preview_lines(&result, true)
+            .into_iter()
+            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+            .collect::<Vec<_>>();
+        result_lines.extend(preview);
     }
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -2113,14 +2153,14 @@ fn new_completed_agent_tool_call(
         }
     }
 
-    // Result line (truncated)
+    // Result lines (preview format)
     let mut result_lines: Vec<Line<'static>> = Vec::new();
     if !result.is_empty() {
-        let truncated = format_and_truncate_tool_result(&result, TOOL_CALL_MAX_LINES, 80);
-        result_lines.push(Line::from(vec![
-            Span::styled("Result: ", Style::default().fg(crate::colors::text_dim()).add_modifier(Modifier::BOLD)),
-            Span::styled(truncated, Style::default().fg(crate::colors::text())),
-        ]));
+        let preview = build_preview_lines(&result, true)
+            .into_iter()
+            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+            .collect::<Vec<_>>();
+        result_lines.extend(preview);
     }
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -2209,33 +2249,32 @@ pub(crate) fn new_completed_mcp_tool_call(
                 lines.push(Line::from(""));
 
                 for tool_call_result in content {
-                    let line_text = match tool_call_result {
+                    match tool_call_result {
                         mcp_types::ContentBlock::TextContent(text) => {
-                            format_and_truncate_tool_result(
-                                &text.text,
-                                TOOL_CALL_MAX_LINES,
-                                num_cols,
-                            )
+                            let mut preview = build_preview_lines(&text.text, true);
+                            preview = preview
+                                .into_iter()
+                                .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+                                .collect();
+                            lines.extend(preview);
                         }
                         mcp_types::ContentBlock::ImageContent(_) => {
-                            "<image content>".to_string()
+                            lines.push(Line::from("<image content>".to_string()))
                         }
-                        mcp_types::ContentBlock::AudioContent(_) => "<audio content>".to_string(),
+                        mcp_types::ContentBlock::AudioContent(_) => {
+                            lines.push(Line::from("<audio content>".to_string()))
+                        }
                         mcp_types::ContentBlock::EmbeddedResource(resource) => {
                             let uri = match resource.resource {
                                 EmbeddedResourceResource::TextResourceContents(text) => text.uri,
                                 EmbeddedResourceResource::BlobResourceContents(blob) => blob.uri,
                             };
-                            format!("embedded resource: {uri}")
+                            lines.push(Line::from(format!("embedded resource: {uri}")));
                         }
                         mcp_types::ContentBlock::ResourceLink(ResourceLink { uri, .. }) => {
-                            format!("link: {uri}")
+                            lines.push(Line::from(format!("link: {uri}")));
                         }
-                    };
-                    lines.push(Line::styled(
-                        line_text,
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
+                    }
                 }
             }
 

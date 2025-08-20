@@ -1255,6 +1255,10 @@ impl ChatWidget<'_> {
                 self.submit_user_message(user_message);
             }
             InputResult::ScrollUp => {
+                // If already at the very top, try navigating command history instead
+                if self.scroll_offset >= self.last_max_scroll.get() {
+                    if self.bottom_pane.try_history_up() { return; }
+                }
                 // Scroll up in chat history (increase offset, towards older content)
                 // Use last_max_scroll computed during the previous render to avoid overshoot
                 let new_offset = self
@@ -1269,6 +1273,8 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::ComposerModeChange);
+                    // Mark that the very next Down should continue scrolling chat (sticky)
+                    self.bottom_pane.mark_next_down_scrolls_history();
                 }
                 self.app_event_tx.send(AppEvent::RequestRedraw);
                 self.height_manager
@@ -1276,6 +1282,10 @@ impl ChatWidget<'_> {
                     .record_event(HeightEvent::UserScroll);
             }
             InputResult::ScrollDown => {
+                // If browsing command history, give Down precedence to step forward
+                if self.bottom_pane.history_is_browsing() {
+                    if self.bottom_pane.try_history_down() { return; }
+                }
                 // Scroll down in chat history (decrease offset, towards bottom)
                 if self.scroll_offset == 0 {
                     // Already at bottom: ensure spacer above input is enabled.
