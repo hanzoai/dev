@@ -93,3 +93,6 @@ branches/
 # coder directories
 .coder/
 .code/
+
+# Merge instructions
+MERGE.md

@@ -36,6 +36,22 @@ pub(crate) fn border() -> Color {
     current_theme().border
 }
 
+/// A slightly dimmer variant of the standard border color.
+/// Blends the theme border toward the background by 30% to reduce contrast
+/// while preserving the original hue relationship.
+pub(crate) fn border_dim() -> Color {
+    let b = current_theme().border;
+    let bg = current_theme().background;
+    let (br, bg_g, bb) = color_to_rgb(b);
+    let (rr, rg, rb) = color_to_rgb(bg);
+    let t: f32 = 0.30; // 30% toward background
+    let mix = |a: u8, b: u8| -> u8 { ((a as f32) * (1.0 - t) + (b as f32) * t).round() as u8 };
+    let r = mix(br, rr);
+    let g = mix(bg_g, rg);
+    let bl = mix(bb, rb);
+    Color::Rgb(r, g, bl)
+}
+
 pub(crate) fn border_focused() -> Color {
     current_theme().border_focused
 }
