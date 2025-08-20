@@ -573,6 +573,32 @@ impl ToolCallCell {
     }
 }
 
+// ==================== RunningToolCallCell (animated) ====================
+
+pub(crate) struct RunningToolCallCell {
+    title: String,
+    start_time: Instant,
+    arg_lines: Vec<Line<'static>>,
+}
+
+impl HistoryCell for RunningToolCallCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Tool { status: ToolStatus::Running } }
+    fn is_animating(&self) -> bool { true }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        let elapsed = self.start_time.elapsed();
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::styled(
+            format!("{} ({})", self.title, format_duration(elapsed)),
+            Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
+        ));
+        lines.extend(self.arg_lines.clone());
+        lines.push(Line::from(""));
+        lines
+    }
+}
+
 // ==================== CollapsibleReasoningCell ====================
 // For reasoning content that can be collapsed to show only summary
 
@@ -1500,7 +1526,7 @@ pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String
     } else {
         format!("{}()", tool_name)
     };
-    
+
     let lines: Vec<Line> = vec![
         title_line,
         Line::styled(
@@ -1512,6 +1538,95 @@ pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String
         Line::from(""),
     ];
     ToolCallCell { lines, state: ToolState::Running }
+}
+
+// Friendly present-participle titles for running browser tools
+fn browser_running_title(tool_name: &str) -> &'static str {
+    match tool_name {
+        "browser_click" => "Clicking...",
+        "browser_type" => "Typing...",
+        "browser_key" => "Sending key...",
+        "browser_javascript" => "Running JavaScript...",
+        "browser_scroll" => "Scrolling...",
+        "browser_open" => "Opening...",
+        "browser_close" => "Closing...",
+        "browser_status" => "Checking status...",
+        "browser_history" => "Navigating...",
+        "browser_inspect" => "Inspecting...",
+        "browser_console" => "Reading console...",
+        "browser_move" => "Moving...",
+        _ => "Working...",
+    }
+}
+
+pub(crate) fn new_running_browser_tool_call(tool_name: String, args: Option<String>) -> RunningToolCallCell {
+    // Parse args JSON and format like completed cells
+    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(args_str) = args {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
+            arg_lines.extend(format_browser_args_line(&json));
+        }
+    }
+    RunningToolCallCell {
+        title: browser_running_title(&tool_name).to_string(),
+        start_time: Instant::now(),
+        arg_lines,
+    }
+}
+
+fn custom_tool_running_title(tool_name: &str) -> String {
+    if tool_name.starts_with("agent_") {
+        // Reuse agent title and append ellipsis
+        format!("{}...", agent_tool_title(tool_name))
+    } else if tool_name.starts_with("browser_") {
+        browser_running_title(tool_name).to_string()
+    } else {
+        // TitleCase from snake_case and append ellipsis
+        let pretty = tool_name
+            .split('_')
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let mut chars = s.chars();
+                match chars.next() {
+                    Some(f) => format!("{}{}", f.to_uppercase(), chars.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("{}...", pretty)
+    }
+}
+
+pub(crate) fn new_running_custom_tool_call(tool_name: String, args: Option<String>) -> RunningToolCallCell {
+    // Parse args JSON and format as key/value lines
+    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(args_str) = args {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
+            arg_lines.extend(format_browser_args_line(&json));
+        } else {
+            // Fallback to showing raw args string
+            arg_lines.push(Line::from(vec![
+                Span::styled("└ args: ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(args_str, Style::default().fg(crate::colors::text())),
+            ]));
+        }
+    }
+    RunningToolCallCell {
+        title: custom_tool_running_title(&tool_name),
+        start_time: Instant::now(),
+        arg_lines,
+    }
+}
+
+pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToolCallCell {
+    // Represent as provider.tool(...) on one dim line beneath a generic running header with timer
+    let line = format_mcp_invocation(invocation);
+    RunningToolCallCell {
+        title: "Working...".to_string(),
+        start_time: Instant::now(),
+        arg_lines: vec![line],
+    }
 }
 
 pub(crate) fn new_completed_custom_tool_call(
