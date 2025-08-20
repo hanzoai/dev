@@ -3031,16 +3031,35 @@ impl ChatWidget<'_> {
                 Ok(_) => {
                     tracing::info!("[cdp] Connected to Chrome via CDP");
 
-                    // Build a detailed success message including CDP method and endpoint
+                    // Build a detailed success message including CDP port and current URL when available
                     let (detected_port, detected_ws) = codex_browser::global::get_last_connection().await;
-                    let success_msg = if let Some(ws) = detected_ws {
-                        format!("✅ Connected to Chrome via CDP (ws: {})", ws)
-                    } else if let Some(p) = detected_port {
-                        format!("✅ Connected to Chrome via CDP (port: {})", p)
-                    } else if let Some(p) = port {
-                        format!("✅ Connected to Chrome via CDP (port: {})", p)
-                    } else {
-                        "✅ Connected to Chrome via CDP (auto-detected)".to_string()
+                    // Prefer explicit port; otherwise try to parse from ws URL
+                    let mut port_num: Option<u16> = detected_port;
+                    if port_num.is_none() {
+                        if let Some(ws) = &detected_ws {
+                            // crude parse: ws://host:port/...
+                            if let Some(after_scheme) = ws.split("//").nth(1) {
+                                if let Some(hostport) = after_scheme.split('/').next() {
+                                    if let Some(pstr) = hostport.split(':').nth(1) {
+                                        if let Ok(p) = pstr.parse::<u16>() { port_num = Some(p); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Try to capture current page URL (best-effort)
+                    let current_url = browser_manager.get_current_url().await;
+
+                    let success_msg = match (port_num, current_url) {
+                        (Some(p), Some(url)) if !url.is_empty() => {
+                            format!("✅ Connected to Chrome via CDP (port {}) to {}", p, url)
+                        }
+                        (Some(p), _) => format!("✅ Connected to Chrome via CDP (port {})", p),
+                        (None, Some(url)) if !url.is_empty() => {
+                            format!("✅ Connected to Chrome via CDP to {}", url)
+                        }
+                        _ => "✅ Connected to Chrome via CDP".to_string(),
                     };
 
                     // Immediately notify success (do not block on screenshots)
