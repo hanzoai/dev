@@ -88,10 +88,18 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Ok(source) => MaybeApplyPatch::Body(source),
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
-        [bash, flag, script]
-            if bash == "bash"
-                && flag == "-lc"
-                && script.trim_start().starts_with("apply_patch") =>
+        // Handle common shell wrappers: bash/sh/zsh with -lc or -c
+        [shell, flag, script]
+            if {
+                // accept absolute paths too (e.g., /bin/bash, /usr/bin/sh)
+                let shell_name = std::path::Path::new(shell)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                let is_shell = matches!(shell_name, "bash" | "sh" | "zsh");
+                let is_flag = matches!(flag.as_str(), "-lc" | "-c");
+                is_shell && is_flag && script.trim_start().starts_with("apply_patch")
+            } =>
         {
             match extract_heredoc_body_from_apply_patch_command(script) {
                 Ok(body) => match parse_patch(&body) {
