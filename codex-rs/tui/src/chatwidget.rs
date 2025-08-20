@@ -32,6 +32,7 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::InputItem;
+use codex_protocol::protocol::McpListToolsResponseEvent;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
@@ -63,6 +64,8 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::list_selection_view::SelectionAction;
+use crate::bottom_pane::list_selection_view::SelectionItem;
 use crate::history_cell;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::ExecCell;
@@ -2114,14 +2117,6 @@ impl ChatWidget<'_> {
                     tracing::warn!("Failed to acquire lock for browser screenshot update");
                 }
 
-                // Also add a compact history entry so LLM‑initiated browser actions are visible
-                // in the conversation feed like other tool calls.
-                // Keep this lightweight to avoid spamming while still providing a clear cue.
-                self.add_to_history(history_cell::new_background_event(format!(
-                    "📸 Browser screenshot captured: {}",
-                    url
-                )));
-
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
@@ -3027,11 +3022,16 @@ impl ChatWidget<'_> {
                 Ok(_) => {
                     tracing::info!("[cdp] Connected to Chrome via CDP");
 
-                    // Prepare success message
-                    let success_msg = if let Some(p) = port {
-                        format!("✅ Connected to Chrome on port {}", p)
+                    // Build a detailed success message including CDP method and endpoint
+                    let (detected_port, detected_ws) = codex_browser::global::get_last_connection().await;
+                    let success_msg = if let Some(ws) = detected_ws {
+                        format!("✅ Connected to Chrome via CDP (ws: {})", ws)
+                    } else if let Some(p) = detected_port {
+                        format!("✅ Connected to Chrome via CDP (port: {})", p)
+                    } else if let Some(p) = port {
+                        format!("✅ Connected to Chrome via CDP (port: {})", p)
                     } else {
-                        "✅ Connected to Chrome (auto-detected port)".to_string()
+                        "✅ Connected to Chrome via CDP (auto-detected)".to_string()
                     };
 
                     // Immediately notify success (do not block on screenshots)

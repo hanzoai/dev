@@ -19,6 +19,7 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
+use codex_login::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
@@ -474,6 +475,9 @@ pub struct ConfigToml {
     pub internal_originator: Option<String>,
 
     pub projects: Option<HashMap<String, ProjectConfig>>,
+
+    /// If set to `true`, the API key will be signed with the `originator` header.
+    pub preferred_auth_method: Option<AuthMode>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -753,7 +757,7 @@ impl Config {
         use codex_login::AuthMode;
         use codex_login::CodexAuth;
         
-        match CodexAuth::from_codex_home(codex_home) {
+        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey) {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
             _ => false,
         }

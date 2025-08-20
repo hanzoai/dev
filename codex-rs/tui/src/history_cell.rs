@@ -2020,8 +2020,8 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     ];
     if let Some(cached) = usage.cached_input_tokens {
         if cached > 0 {
-            input_line_spans.push(format!(" (+ {cached} cached)").into());
-        }
+        input_line_spans.push(format!(" (+ {cached} cached)").into());
+    }
     }
     lines.push(Line::from(input_line_spans));
     // Output: <output>

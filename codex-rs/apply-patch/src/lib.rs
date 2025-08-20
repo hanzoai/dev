@@ -88,10 +88,18 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Ok(source) => MaybeApplyPatch::Body(source),
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
-        [bash, flag, script]
-            if bash == "bash"
-                && flag == "-lc"
-                && script.trim_start().starts_with("apply_patch") =>
+        // Handle common shell wrappers: bash/sh/zsh with -lc or -c
+        [shell, flag, script]
+            if {
+                // accept absolute paths too (e.g., /bin/bash, /usr/bin/sh)
+                let shell_name = std::path::Path::new(shell)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                let is_shell = matches!(shell_name, "bash" | "sh" | "zsh");
+                let is_flag = matches!(flag.as_str(), "-lc" | "-c");
+                is_shell && is_flag && script.trim_start().starts_with("apply_patch")
+            } =>
         {
             match extract_heredoc_body_from_apply_patch_command(script) {
                 Ok(body) => match parse_patch(&body) {
@@ -442,10 +450,7 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
                     if let Some(parent) = dest.parent() {
                         if !parent.as_os_str().is_empty() {
                             std::fs::create_dir_all(parent).with_context(|| {
-                                format!(
-                                    "Failed to create parent directories for {}",
-                                    dest.display()
-                                )
+                                format!("Failed to create parent directories for {}", dest.display())
                             })?;
                         }
                     }
@@ -529,9 +534,12 @@ fn compute_replacements(
         // If a chunk has a `change_context`, we use seek_sequence to find it, then
         // adjust our `line_index` to continue from there.
         if let Some(ctx_line) = &chunk.change_context {
-            if let Some(idx) =
-                seek_sequence::seek_sequence(original_lines, &[ctx_line.clone()], line_index, false)
-            {
+            if let Some(idx) = seek_sequence::seek_sequence(
+                original_lines,
+                std::slice::from_ref(ctx_line),
+                line_index,
+                false,
+            ) {
                 line_index = idx + 1;
             } else {
                 return Err(ApplyPatchError::ComputeReplacements(format!(

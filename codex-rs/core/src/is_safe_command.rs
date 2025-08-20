@@ -15,7 +15,9 @@ pub fn is_known_safe_command(command: &[String]) -> bool {
     if let [bash, flag, script] = command {
         if bash == "bash" && flag == "-lc" {
             if let Some(tree) = try_parse_bash(script) {
-                if let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script) {
+                if let Some(all_commands) =
+                    try_parse_word_only_commands_sequence(&tree, script)
+                {
                     if !all_commands.is_empty()
                         && all_commands
                             .iter()

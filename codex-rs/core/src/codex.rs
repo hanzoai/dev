@@ -1517,6 +1517,7 @@ async fn submission_loop(
                     }
                 });
             }
+            // Upstream protocol no longer includes ListMcpTools; skip handling here.
             Op::Compact => {
                 let sess = match sess.as_ref() {
                     Some(sess) => sess,

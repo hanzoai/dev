@@ -141,6 +141,7 @@ impl StreamController {
                 }
                 self.current_stream = None;
             }
+            self.current_stream = None;
         }
 
         if self.current_stream != Some(kind) {

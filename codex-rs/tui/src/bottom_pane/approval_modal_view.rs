@@ -35,8 +35,8 @@ impl ApprovalModalView<'_> {
     fn maybe_advance(&mut self) {
         if self.current.is_complete() {
             if let Some(req) = self.queue.pop() {
-                self.current = UserApprovalWidget::new(req, self.app_event_tx.clone());
-            }
+            self.current = UserApprovalWidget::new(req, self.app_event_tx.clone());
+        }
         }
     }
 }
