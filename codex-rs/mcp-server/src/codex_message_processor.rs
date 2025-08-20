@@ -50,6 +50,8 @@ use codex_protocol::mcp_protocol::InterruptConversationResponse;
 use codex_protocol::mcp_protocol::LOGIN_CHATGPT_COMPLETE_EVENT;
 use codex_protocol::mcp_protocol::LoginChatGptCompleteNotification;
 use codex_protocol::mcp_protocol::LoginChatGptResponse;
+use codex_protocol::mcp_protocol::GitDiffToRemoteParams;
+use codex_protocol::mcp_protocol::GitDiffToRemoteResponse;
 use codex_protocol::mcp_protocol::NewConversationParams;
 use codex_protocol::mcp_protocol::NewConversationResponse;
 use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
@@ -138,6 +140,9 @@ impl CodexMessageProcessor {
                     data: None,
                 };
                 self.outgoing.send_error(request_id, error).await;
+            }
+            ClientRequest::GitDiffToRemote { request_id, params } => {
+                self.git_diff_to_origin(request_id, params.cwd).await;
             }
         }
     }
