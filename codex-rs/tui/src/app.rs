@@ -74,6 +74,11 @@ pub(crate) struct App<'a> {
 
     /// Terminal information queried at startup
     terminal_info: TerminalInfo,
+
+    /// Perform a hard clear on the first frame to ensure the entire buffer
+    /// starts with our theme background. This avoids terminals that may show
+    /// profile defaults until all cells are explicitly painted.
+    clear_on_first_frame: bool,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -200,6 +205,7 @@ impl App<'_> {
             _debug: debug,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
+            clear_on_first_frame: true,
         }
     }
 
@@ -736,8 +742,9 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
-        if matches!(self.app_state, AppState::Onboarding { .. }) {
+        if self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. }) {
             terminal.clear()?;
+            self.clear_on_first_frame = false;
         }
 
         // Terminal resize handling - simplified version since private fields aren't accessible

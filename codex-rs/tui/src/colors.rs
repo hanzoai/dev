@@ -114,7 +114,9 @@ fn color_to_rgb(c: Color) -> (u8, u8, u8) {
         Color::LightMagenta => (255, 102, 255),
         Color::LightCyan => (102, 255, 255),
         Color::Indexed(i) => (i, i, i),
-        Color::Reset => color_to_rgb(current_theme().background),
+        // When theme background is Color::Reset (to use terminal default),
+        // avoid recursion by treating Reset as pure white in RGB space.
+        Color::Reset => (255, 255, 255),
     }
 }
 

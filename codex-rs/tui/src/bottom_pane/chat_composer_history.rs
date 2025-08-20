@@ -85,6 +85,9 @@ impl ChatComposerHistory {
         self.original_text = None;
     }
 
+    /// Returns true if the user is currently browsing history.
+    pub fn is_browsing(&self) -> bool { self.history_cursor.is_some() }
+
     /// Should Up/Down key presses be interpreted as history navigation given
     /// the current content and cursor position of `textarea`?
     pub fn should_handle_navigation(&self, text: &str, cursor: usize) -> bool {
