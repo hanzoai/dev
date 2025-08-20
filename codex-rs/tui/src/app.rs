@@ -505,6 +505,11 @@ impl App<'_> {
                                 widget.add_prompts_output();
                             }
                         }
+                        SlashCommand::Perf => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_perf_command(command_args);
+                            }
+                        }
                         // Prompt-expanding commands should have been handled in submit_user_message
                         // but add a fallback just in case
                         SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {

@@ -86,6 +86,18 @@ impl BrowserTools {
                         mobile,
                     })
                     .await?;
+                // Update manager config to reflect the new viewport (no auto-resyncs)
+                let dpr = device_scale_factor.unwrap_or(1.0);
+                let mob = mobile.unwrap_or(false);
+                let _ = self
+                    .manager
+                    .update_config(|cfg| {
+                        cfg.viewport.width = width;
+                        cfg.viewport.height = height;
+                        cfg.viewport.device_scale_factor = dpr;
+                        cfg.viewport.mobile = mob;
+                    })
+                    .await;
                 Ok(BrowserToolResult::SetViewport(result))
             }
 
