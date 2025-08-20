@@ -20,6 +20,40 @@ fi
 
 echo "Building code binary (${PROFILE} mode)..."
 
+# Select the cargo/rustc toolchain to match deploy
+# Prefer rustup with the toolchain pinned in rust-toolchain.toml or $RUSTUP_TOOLCHAIN
+USE_CARGO="cargo"
+if command -v rustup >/dev/null 2>&1; then
+  # Determine desired toolchain
+  if [ -n "${RUSTUP_TOOLCHAIN:-}" ]; then
+    TOOLCHAIN="$RUSTUP_TOOLCHAIN"
+  else
+    # Try parse channel from rust-toolchain.toml in repo root
+    if [ -f "rust-toolchain.toml" ]; then
+      TOOLCHAIN=$(sed -n 's/^channel\s*=\s*"\(.*\)"/\1/p' rust-toolchain.toml | head -n1)
+    fi
+    # Fallback to active default if none found
+    TOOLCHAIN="${TOOLCHAIN:-$(rustup show active-toolchain 2>/dev/null | awk '{print $1}')}"
+  fi
+
+  if [ -n "$TOOLCHAIN" ]; then
+    # Ensure toolchain is installed; if not, attempt install quietly
+    if ! rustup toolchain list | awk '{print $1}' | grep -qx "$TOOLCHAIN"; then
+      echo "rustup: installing toolchain $TOOLCHAIN ..."
+      rustup toolchain install "$TOOLCHAIN" >/dev/null 2>&1 || true
+    fi
+    USE_CARGO="rustup run $TOOLCHAIN cargo"
+    echo "Using rustup toolchain: $TOOLCHAIN"
+    rustup run "$TOOLCHAIN" rustc --version || true
+  else
+    echo "rustup found but no toolchain detected; using system cargo"
+  fi
+else
+  echo "Error: rustup is required for consistent builds."
+  echo "Please install rustup: https://rustup.rs/"
+  exit 1
+fi
+
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
 
@@ -29,7 +63,7 @@ if [ "$PROFILE" = "dev-fast" ]; then
     export RUSTFLAGS="${RUSTFLAGS:-} -Awarnings"
 fi
 
-cargo build --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
+${USE_CARGO} build --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then

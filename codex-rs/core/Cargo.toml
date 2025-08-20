@@ -24,7 +24,6 @@ codex-protocol = { path = "../protocol" }
 dirs = "6"
 env-flags = "0.1.1"
 eventsource-stream = "0.2.3"
-fs2 = "0.4.3"
 futures = "0.3"
 image = "0.25"
 img_hash = "3.2"
@@ -46,6 +45,7 @@ strum_macros = "0.27.2"
 tempfile = "3"
 thiserror = "2.0.12"
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
+fs2 = "0.4"
 tokio = { version = "1", features = [
     "io-std",
     "macros",

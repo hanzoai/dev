@@ -96,10 +96,10 @@ impl FileSearchManager {
             // cancel it now.
             if let Some(active_search) = &st.active_search {
                 if !query.starts_with(&active_search.query) {
-                    active_search
-                        .cancellation_token
-                        .store(true, Ordering::Relaxed);
-                    st.active_search = None;
+                active_search
+                    .cancellation_token
+                    .store(true, Ordering::Relaxed);
+                st.active_search = None;
                 }
             }
 
@@ -189,8 +189,8 @@ impl FileSearchManager {
                 let mut st = search_state.lock().unwrap();
                 if let Some(active_search) = &st.active_search {
                     if Arc::ptr_eq(&active_search.cancellation_token, &cancellation_token) {
-                        st.active_search = None;
-                    }
+                    st.active_search = None;
+                }
                 }
             }
         });

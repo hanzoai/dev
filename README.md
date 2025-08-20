@@ -33,14 +33,20 @@
 &ensp;
 ## Quickstart
 
-### Install Code
+### Run
+
+```bash
+npx -y @just-every/code
+```
+
+### Install & Run
 
 ```bash
 npm install -g @just-every/code
-code
+code // or `coder` if you're using VS Code
 ```
 
-Note: If another tool already provides a `code` command (e.g., VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts. Check which command runs with `which -a code` (or `type -a code`). You can also run our CLI explicitly via `npx -y @just-every/code` or `$(npm bin -g)/code`.
+Note: If another tool already provides a `code` command (e.g. VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts.
 
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
