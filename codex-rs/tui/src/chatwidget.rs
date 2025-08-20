@@ -212,6 +212,10 @@ pub(crate) struct ChatWidget<'a> {
 
     // Most recent theme snapshot used to retint pre-rendered lines
     last_theme: crate::theme::Theme,
+
+    // Performance tracing (opt-in via /perf)
+    perf_enabled: bool,
+    perf: std::cell::RefCell<PerfStats>,
 }
 
 struct DiffOverlay {
@@ -239,6 +243,37 @@ struct DiffConfirm {
 struct UserMessage {
     text: String,
     image_paths: Vec<PathBuf>,
+}
+
+#[derive(Default, Clone, Debug)]
+struct PerfStats {
+    frames: u64,
+    prefix_rebuilds: u64,
+    height_hits_total: u64,
+    height_misses_total: u64,
+    height_hits_render: u64,
+    height_misses_render: u64,
+    ns_total_height: u128,
+    ns_render_loop: u128,
+}
+
+impl PerfStats {
+    fn reset(&mut self) { *self = PerfStats::default(); }
+    fn summary(&self) -> String {
+        let ms_total_height = (self.ns_total_height as f64) / 1_000_000.0;
+        let ms_render = (self.ns_render_loop as f64) / 1_000_000.0;
+        format!(
+            "perf: frames={}\n  prefix_rebuilds={}\n  height_cache: total hits={} misses={}\n  height_cache (render): hits={} misses={}\n  time: total_height={:.2}ms render_visible={:.2}ms",
+            self.frames,
+            self.prefix_rebuilds,
+            self.height_hits_total,
+            self.height_misses_total,
+            self.height_hits_render,
+            self.height_misses_render,
+            ms_total_height,
+            ms_render,
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -870,6 +905,8 @@ impl ChatWidget<'_> {
             vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
             scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
+            perf_enabled: false,
+            perf: std::cell::RefCell::new(PerfStats::default()),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -2154,6 +2191,44 @@ impl ChatWidget<'_> {
 
     fn request_redraw(&mut self) {
         self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    pub(crate) fn handle_perf_command(&mut self, args: String) {
+        let arg = args.trim().to_lowercase();
+        match arg.as_str() {
+            "on" => {
+                self.perf_enabled = true;
+                self.add_perf_output("performance tracing: on".to_string());
+            }
+            "off" => {
+                self.perf_enabled = false;
+                self.add_perf_output("performance tracing: off".to_string());
+            }
+            "reset" => {
+                self.perf.borrow_mut().reset();
+                self.add_perf_output("performance stats reset".to_string());
+            }
+            "show" | "" => {
+                let summary = self.perf.borrow().summary();
+                self.add_perf_output(summary);
+            }
+            _ => {
+                self.add_perf_output("usage: /perf on | off | show | reset".to_string());
+            }
+        }
+        self.request_redraw();
+    }
+
+    fn add_perf_output(&mut self, text: String) {
+        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+        lines.push(ratatui::text::Line::from("performance".dim()));
+        for l in text.lines() {
+            lines.push(ratatui::text::Line::from(l.to_string()))
+        }
+        self.add_to_history(crate::history_cell::PlainHistoryCell {
+            lines,
+            kind: crate::history_cell::HistoryCellType::Notice,
+        });
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
@@ -4808,12 +4883,24 @@ impl WidgetRef for &ChatWidget<'_> {
             self.height_cache_last_width.set(content_area.width);
         }
 
+        // Perf: count a frame
+        if self.perf_enabled {
+            let mut p = self.perf.borrow_mut();
+            p.frames = p.frames.saturating_add(1);
+        }
+
         let total_height: u16 = {
+            let perf_enabled = self.perf_enabled;
+            let total_start = if perf_enabled { Some(std::time::Instant::now()) } else { None };
             let mut ps = self.prefix_sums.borrow_mut();
             // Always rebuild to account for height changes without item count changes
             ps.clear();
             ps.push(0);
             let mut acc = 0u16;
+            if perf_enabled {
+                let mut p = self.perf.borrow_mut();
+                p.prefix_rebuilds = p.prefix_rebuilds.saturating_add(1);
+            }
             for (idx, item) in all_content.iter().enumerate() {
                 let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
                 // Cache heights for most items. Also allow caching for ExecCell once completed
@@ -4838,8 +4925,16 @@ impl WidgetRef for &ChatWidget<'_> {
                         cache_ref.get(&key).copied()
                     };
                     if let Some(cached) = cached_val {
+                        if perf_enabled {
+                            let mut p = self.perf.borrow_mut();
+                            p.height_hits_total = p.height_hits_total.saturating_add(1);
+                        }
                         cached
                     } else {
+                        if perf_enabled {
+                            let mut p = self.perf.borrow_mut();
+                            p.height_misses_total = p.height_misses_total.saturating_add(1);
+                        }
                         let computed = item.desired_height(content_width);
                         // Now take a mutable borrow to insert
                         self.height_cache.borrow_mut().insert(key, computed);
@@ -4854,7 +4949,14 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
                 ps.push(acc);
             }
-            *ps.last().unwrap_or(&0)
+            let total = *ps.last().unwrap_or(&0);
+            if let Some(start) = total_start {
+                if perf_enabled {
+                    let mut p = self.perf.borrow_mut();
+                    p.ns_total_height = p.ns_total_height.saturating_add(start.elapsed().as_nanos());
+                }
+            }
+            total
         };
 
         // Check for active animations using the trait method
@@ -4928,6 +5030,7 @@ impl WidgetRef for &ChatWidget<'_> {
         // Extend end_idx by one to include the next item when the viewport cuts into spacing
         end_idx = end_idx.saturating_add(1).min(all_content.len());
 
+        let render_loop_start = if self.perf_enabled { Some(std::time::Instant::now()) } else { None };
         for idx in start_idx..end_idx {
             let item = all_content[idx];
             // Calculate height with reduced width due to gutter
@@ -4950,8 +5053,16 @@ impl WidgetRef for &ChatWidget<'_> {
             let item_height = if is_cacheable {
                 let key = (idx, content_width);
                 if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
+                    if self.perf_enabled {
+                        let mut p = self.perf.borrow_mut();
+                        p.height_hits_render = p.height_hits_render.saturating_add(1);
+                    }
                     cached
                 } else {
+                    if self.perf_enabled {
+                        let mut p = self.perf.borrow_mut();
+                        p.height_misses_render = p.height_misses_render.saturating_add(1);
+                    }
                     let computed = item.desired_height(content_width);
                     self.height_cache.borrow_mut().insert(key, computed);
                     computed
@@ -5058,6 +5169,12 @@ impl WidgetRef for &ChatWidget<'_> {
                 if screen_y < content_area.y + content_area.height {
                     screen_y += spacing.min((content_area.y + content_area.height).saturating_sub(screen_y));
                 }
+            }
+        }
+        if let Some(start) = render_loop_start {
+            if self.perf_enabled {
+                let mut p = self.perf.borrow_mut();
+                p.ns_render_loop = p.ns_render_loop.saturating_add(start.elapsed().as_nanos());
             }
         }
 
