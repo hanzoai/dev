@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -218,6 +220,10 @@ pub(crate) struct ChatWidget<'a> {
     perf: std::cell::RefCell<PerfStats>,
 }
 
+// Global guard to prevent overlapping background screenshot captures and to rate-limit them
+static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+static BG_SHOT_LAST_START_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+
 struct DiffOverlay {
     tabs: Vec<(String, Vec<DiffBlock>)>,
     selected: usize,
@@ -255,6 +261,12 @@ struct PerfStats {
     height_misses_render: u64,
     ns_total_height: u128,
     ns_render_loop: u128,
+    // Hotspots: time spent computing heights on cache misses
+    hot_total: std::collections::HashMap<(usize, u16), ItemStat>,
+    hot_render: std::collections::HashMap<(usize, u16), ItemStat>,
+    // Aggregation by cell kind/label
+    per_kind_total: std::collections::HashMap<String, ItemStat>,
+    per_kind_render: std::collections::HashMap<String, ItemStat>,
 }
 
 impl PerfStats {
@@ -262,7 +274,8 @@ impl PerfStats {
     fn summary(&self) -> String {
         let ms_total_height = (self.ns_total_height as f64) / 1_000_000.0;
         let ms_render = (self.ns_render_loop as f64) / 1_000_000.0;
-        format!(
+        let mut out = String::new();
+        out.push_str(&format!(
             "perf: frames={}\n  prefix_rebuilds={}\n  height_cache: total hits={} misses={}\n  height_cache (render): hits={} misses={}\n  time: total_height={:.2}ms render_visible={:.2}ms",
             self.frames,
             self.prefix_rebuilds,
@@ -272,8 +285,95 @@ impl PerfStats {
             self.height_misses_render,
             ms_total_height,
             ms_render,
-        )
+        ));
+
+        // Top hotspots by (index,width)
+        let mut top_total: Vec<(&(usize, u16), &ItemStat)> = self.hot_total.iter().collect();
+        top_total.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
+        let mut top_render: Vec<(&(usize, u16), &ItemStat)> = self.hot_render.iter().collect();
+        top_render.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
+
+        if !top_total.is_empty() {
+            out.push_str("\n\n  hot items (total height, cache misses):\n");
+            for ((idx, w), stat) in top_total.into_iter().take(5) {
+                out.push_str(&format!(
+                    "    (idx={}, width={}) calls={} time={:.2}ms\n",
+                    idx,
+                    w,
+                    stat.calls,
+                    (stat.ns as f64) / 1_000_000.0,
+                ));
+            }
+        }
+
+        if !top_render.is_empty() {
+            out.push_str("\n  hot items (render visible, cache misses):\n");
+            for ((idx, w), stat) in top_render.into_iter().take(5) {
+                out.push_str(&format!(
+                    "    (idx={}, width={}) calls={} time={:.2}ms\n",
+                    idx,
+                    w,
+                    stat.calls,
+                    (stat.ns as f64) / 1_000_000.0,
+                ));
+            }
+        }
+
+        // Per-kind aggregation
+        if !self.per_kind_total.is_empty() {
+            let mut v: Vec<(&String, &ItemStat)> = self.per_kind_total.iter().collect();
+            v.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
+            out.push_str("\n  by kind (total height):\n");
+            for (k, s) in v.into_iter().take(5) {
+                out.push_str(&format!(
+                    "    {} calls={} time={:.2}ms\n",
+                    k,
+                    s.calls,
+                    (s.ns as f64) / 1_000_000.0,
+                ));
+            }
+        }
+
+        if !self.per_kind_render.is_empty() {
+            let mut v: Vec<(&String, &ItemStat)> = self.per_kind_render.iter().collect();
+            v.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
+            out.push_str("\n  by kind (render visible):\n");
+            for (k, s) in v.into_iter().take(5) {
+                out.push_str(&format!(
+                    "    {} calls={} time={:.2}ms\n",
+                    k,
+                    s.calls,
+                    (s.ns as f64) / 1_000_000.0,
+                ));
+            }
+        }
+
+        out
     }
+
+    fn record_total(&mut self, key: (usize, u16), kind: &str, ns: u128) {
+        let e = self.hot_total.entry(key).or_insert_with(ItemStat::default);
+        e.calls = e.calls.saturating_add(1);
+        e.ns = e.ns.saturating_add(ns);
+        let ek = self.per_kind_total.entry(kind.to_string()).or_insert_with(ItemStat::default);
+        ek.calls = ek.calls.saturating_add(1);
+        ek.ns = ek.ns.saturating_add(ns);
+    }
+
+    fn record_render(&mut self, key: (usize, u16), kind: &str, ns: u128) {
+        let e = self.hot_render.entry(key).or_insert_with(ItemStat::default);
+        e.calls = e.calls.saturating_add(1);
+        e.ns = e.ns.saturating_add(ns);
+        let ek = self.per_kind_render.entry(kind.to_string()).or_insert_with(ItemStat::default);
+        ek.calls = ek.calls.saturating_add(1);
+        ek.ns = ek.ns.saturating_add(ns);
+    }
+}
+
+#[derive(Default, Clone, Debug)]
+struct ItemStat {
+    calls: u64,
+    ns: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +408,54 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
+    fn perf_label_for_item(&self, item: &dyn HistoryCell) -> String {
+        use crate::history_cell::{ExecKind, ExecStatus, HistoryCellType, PatchKind, ToolStatus};
+        match item.kind() {
+            HistoryCellType::Plain => "Plain".to_string(),
+            HistoryCellType::User => "User".to_string(),
+            HistoryCellType::Assistant => "Assistant".to_string(),
+            HistoryCellType::Reasoning => "Reasoning".to_string(),
+            HistoryCellType::Error => "Error".to_string(),
+            HistoryCellType::Exec { kind, status } => {
+                let k = match kind {
+                    ExecKind::Read => "Read",
+                    ExecKind::Search => "Search",
+                    ExecKind::List => "List",
+                    ExecKind::Run => "Run",
+                };
+                let s = match status {
+                    ExecStatus::Running => "Running",
+                    ExecStatus::Success => "Success",
+                    ExecStatus::Error => "Error",
+                };
+                format!("Exec:{}:{}", k, s)
+            }
+            HistoryCellType::Tool { status } => {
+                let s = match status {
+                    ToolStatus::Running => "Running",
+                    ToolStatus::Success => "Success",
+                    ToolStatus::Failed => "Failed",
+                };
+                format!("Tool:{}", s)
+            }
+            HistoryCellType::Patch { kind } => {
+                let k = match kind {
+                    PatchKind::Proposed => "Proposed",
+                    PatchKind::ApplyBegin => "ApplyBegin",
+                    PatchKind::ApplySuccess => "ApplySuccess",
+                    PatchKind::ApplyFailure => "ApplyFailure",
+                };
+                format!("Patch:{}", k)
+            }
+            HistoryCellType::PlanUpdate => "PlanUpdate".to_string(),
+            HistoryCellType::BackgroundEvent => "BackgroundEvent".to_string(),
+            HistoryCellType::Notice => "Notice".to_string(),
+            HistoryCellType::Diff => "Diff".to_string(),
+            HistoryCellType::Image => "Image".to_string(),
+            HistoryCellType::AnimatedWelcome => "AnimatedWelcome".to_string(),
+            HistoryCellType::Loading => "Loading".to_string(),
+        }
+    }
     /// Trigger fade on the welcome cell when the composer expands (e.g., slash popup).
     pub(crate) fn on_composer_expanded(&mut self) {
         for cell in &self.history_cells {
@@ -1505,14 +1653,37 @@ impl ChatWidget<'_> {
             tokio::spawn(async move {
                 tracing::info!("Starting background screenshot capture...");
 
-                // Wait a bit longer before capturing to ensure page is ready
-                tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                // Rate-limit: skip if a capture ran very recently (< 4000ms)
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let last = BG_SHOT_LAST_START_MS.load(Ordering::Relaxed);
+                if now_ms.saturating_sub(last) < 4000 {
+                    tracing::info!("Skipping background screenshot: rate-limited");
+                    return;
+                }
+
+                // Single-flight: skip if another capture is in progress
+                if BG_SHOT_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+                    tracing::info!("Skipping background screenshot: already in-flight");
+                    return;
+                }
+                BG_SHOT_LAST_START_MS.store(now_ms, Ordering::Relaxed);
+                // Ensure we always clear the flag
+                struct ShotGuard;
+                impl Drop for ShotGuard { fn drop(&mut self) { BG_SHOT_IN_FLIGHT.store(false, Ordering::Release); } }
+                let _guard = ShotGuard;
+
+                // Short settle to allow page to reach a stable state; keep it small
+                tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
 
                 let browser_manager = ChatWidget::get_browser_manager().await;
 
                 // Retry screenshot capture with exponential backoff
+                // Keep background capture lightweight: single attempt with a modest timeout
                 let mut attempts = 0;
-                let max_attempts = 3;
+                let max_attempts = 1;
 
                 loop {
                     attempts += 1;
@@ -1524,7 +1695,7 @@ impl ChatWidget<'_> {
 
                     // Add timeout to screenshot capture
                     let capture_result = tokio::time::timeout(
-                        tokio::time::Duration::from_secs(10),
+                        tokio::time::Duration::from_secs(5),
                         browser_manager.capture_screenshot_with_url(),
                     )
                     .await;
@@ -1572,57 +1743,18 @@ impl ChatWidget<'_> {
                             break; // Success - exit retry loop
                         }
                         Ok(Err(e)) => {
-                            // Regular error from browser manager
-                            if attempts >= max_attempts {
-                                tracing::error!(
-                                    "Background screenshot capture failed after {} attempts: {}",
-                                    attempts,
-                                    e
-                                );
-                                break; // Give up after max attempts
-                            } else {
-                                tracing::warn!(
-                                    "Background screenshot capture failed on attempt {} ({}), retrying...",
-                                    attempts,
-                                    e
-                                );
-                                // Exponential backoff: wait 1s, then 2s, then 4s
-                                let wait_time =
-                                    std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
-                                tokio::time::sleep(wait_time).await;
-                            }
+                            tracing::warn!(
+                                "Background screenshot capture failed (attempt {}): {}",
+                                attempts, e
+                            );
+                            break;
                         }
                         Err(_timeout_err) => {
-                            // Timeout error - browser might be disconnected
-                            tracing::error!(
-                                "Screenshot capture timed out on attempt {} - browser may be disconnected",
+                            tracing::warn!(
+                                "Background screenshot capture timed out (attempt {})",
                                 attempts
                             );
-
-                            if attempts >= max_attempts {
-                                tracing::error!(
-                                    "Giving up after {} timeout attempts",
-                                    max_attempts
-                                );
-                                break;
-                            } else {
-                                // Try to reconnect the browser before next attempt
-                                tracing::info!("Attempting to reconnect browser...");
-                                if let Err(e) = browser_manager.close().await {
-                                    tracing::warn!("Error closing browser: {}", e);
-                                }
-
-                                // Wait a bit before reconnection
-                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-                                // Browser will auto-reconnect on next capture attempt
-                                tracing::info!("Will retry screenshot capture after reconnection");
-
-                                // Exponential backoff
-                                let wait_time =
-                                    std::time::Duration::from_millis(1000 * (1 << (attempts - 1)));
-                                tokio::time::sleep(wait_time).await;
-                            }
+                            break;
                         }
                     }
                 }
@@ -4935,7 +5067,14 @@ impl WidgetRef for &ChatWidget<'_> {
                             let mut p = self.perf.borrow_mut();
                             p.height_misses_total = p.height_misses_total.saturating_add(1);
                         }
+                        let label = if perf_enabled { Some(self.perf_label_for_item(*item)) } else { None };
+                        let t0 = if perf_enabled { Some(std::time::Instant::now()) } else { None };
                         let computed = item.desired_height(content_width);
+                        if let (true, Some(start)) = (perf_enabled, t0) {
+                            let dt = start.elapsed().as_nanos();
+                            let mut p = self.perf.borrow_mut();
+                            p.record_total((idx, content_width), label.as_deref().unwrap_or("unknown"), dt);
+                        }
                         // Now take a mutable borrow to insert
                         self.height_cache.borrow_mut().insert(key, computed);
                         computed
@@ -5063,7 +5202,14 @@ impl WidgetRef for &ChatWidget<'_> {
                         let mut p = self.perf.borrow_mut();
                         p.height_misses_render = p.height_misses_render.saturating_add(1);
                     }
+                    let label = if self.perf_enabled { Some(self.perf_label_for_item(item)) } else { None };
+                    let t0 = if self.perf_enabled { Some(std::time::Instant::now()) } else { None };
                     let computed = item.desired_height(content_width);
+                    if let (true, Some(start)) = (self.perf_enabled, t0) {
+                        let dt = start.elapsed().as_nanos();
+                        let mut p = self.perf.borrow_mut();
+                        p.record_render((idx, content_width), label.as_deref().unwrap_or("unknown"), dt);
+                    }
                     self.height_cache.borrow_mut().insert(key, computed);
                     computed
                 }

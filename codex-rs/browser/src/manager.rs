@@ -174,6 +174,10 @@ pub struct BrowserManager {
     navigation_callback: Arc<tokio::sync::RwLock<Option<Box<dyn Fn(String) + Send + Sync>>>>,
     navigation_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     viewport_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// Gate to temporarily disable all automatic viewport corrections (post-initial set)
+    auto_viewport_correction_enabled: Arc<tokio::sync::RwLock<bool>>,
+    /// Track last applied device metrics to avoid redundant overrides
+    last_metrics_applied: Arc<Mutex<Option<(i64, i64, f64, bool, std::time::Instant)>>>,
 }
 
 impl BrowserManager {
@@ -192,6 +196,8 @@ impl BrowserManager {
             navigation_callback: Arc::new(tokio::sync::RwLock::new(None)),
             navigation_monitor_handle: Arc::new(Mutex::new(None)),
             viewport_monitor_handle: Arc::new(Mutex::new(None)),
+            auto_viewport_correction_enabled: Arc::new(tokio::sync::RwLock::new(true)),
+            last_metrics_applied: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -769,8 +775,9 @@ impl BrowserManager {
                     *page_guard = None;
                 }
                 Err(_) => {
-                    warn!("Existing page timed out, likely disconnected. Will create new page");
-                    *page_guard = None;
+                    // Timeout checking URL; prefer to reuse instead of re-applying overrides repeatedly
+                    warn!("Existing page timed out checking URL; reusing current page to avoid churn");
+                    return Ok(Arc::clone(page));
                 }
             }
         }
@@ -939,6 +946,9 @@ impl BrowserManager {
         self.start_navigation_monitor(Arc::clone(&page)).await;
         // Start viewport monitor (low-frequency, non-invasive)
         self.start_viewport_monitor(Arc::clone(&page)).await;
+        // TEMP: disable auto-corrections post-initial set to validate no unintended resizes
+        // This affects both external and internal; explicit browser.setViewport still works
+        self.set_auto_viewport_correction(false).await;
         info!(
             "[bm] get_or_create_page: complete in {:?}",
             overall_start.elapsed()
@@ -1042,14 +1052,35 @@ impl BrowserManager {
 
         if is_external {
             // External Chrome: set viewport once on connection; skip humanization.
+            let w = config.viewport.width as i64;
+            let h = config.viewport.height as i64;
+            let dpr = config.viewport.device_scale_factor as f64;
+            let mob = config.viewport.mobile;
+
+            // Skip redundant overrides within a short window to prevent flash
+            {
+                let mut guard = self.last_metrics_applied.lock().await;
+                if let Some((lw, lh, ldpr, lmob, ts)) = *guard {
+                    let same = lw == w && lh == h && (ldpr - dpr).abs() < 0.001 && lmob == mob;
+                    let recent = ts.elapsed() < std::time::Duration::from_secs(30);
+                    if same && recent {
+                        debug!("Skipping redundant device metrics override (external, recent)");
+                        return Ok(());
+                    }
+                }
+            }
+
             let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
-                .width(config.viewport.width as i64)
-                .height(config.viewport.height as i64)
-                .device_scale_factor(config.viewport.device_scale_factor)
-                .mobile(config.viewport.mobile)
+                .width(w)
+                .height(h)
+                .device_scale_factor(dpr)
+                .mobile(mob)
                 .build()
                 .map_err(BrowserError::CdpError)?;
+            info!("Applying external device metrics override: {}x{} @ {} (mobile={})", w, h, dpr, mob);
             page.execute(viewport_params).await?;
+            let mut guard = self.last_metrics_applied.lock().await;
+            *guard = Some((w, h, dpr, mob, std::time::Instant::now()));
         } else {
             // Internal (launched) Chrome: apply human settings; avoid CDP viewport override here
             if let Some(ua) = &config.user_agent {
@@ -1584,6 +1615,30 @@ impl BrowserManager {
         Ok(resp.result)
     }
 
+    /// Clean up injected artifacts and restore viewport/state where possible.
+    /// This does not close the browser; it is safe to call when connected.
+    pub async fn cleanup(&self) -> Result<()> {
+        // Hide any overlay highlight
+        let _ = self.execute_cdp("Overlay.hideHighlight", serde_json::json!({})).await;
+
+        // Reset device metrics override (best-effort)
+        let _ = self
+            .execute_cdp("Emulation.clearDeviceMetricsOverride", serde_json::json!({}))
+            .await;
+
+        // Remove virtual cursor and related overlays if present
+        let page = self.get_or_create_page().await?;
+        let cleanup_js = r#"
+            (function(){
+                try { if (window.__vc && typeof window.__vc.destroy === 'function') window.__vc.destroy(); } catch(_) {}
+                try { if (window.__codex_console_logs) delete window.__codex_console_logs; } catch(_) {}
+                return true;
+            })()
+        "#;
+        let _ = page.inject_js(cleanup_js).await;
+        Ok(())
+    }
+
     /// Get the current cursor position
     pub async fn get_cursor_position(&self) -> Result<(f64, f64)> {
         let page = self.get_or_create_page().await?;
@@ -1756,17 +1811,21 @@ impl BrowserManager {
     }
 
     /// Start a low-frequency viewport monitor that checks for drift without forcing resyncs.
-    /// External Chrome: never corrects (logs only, throttled). Internal Chrome: corrects after consecutive mismatches.
+    /// Applies the same logic to internal and external: only correct after two consecutive
+    /// mismatches and at most once per minute to avoid jank. Logs when throttled.
     async fn start_viewport_monitor(&self, page: Arc<Page>) {
         // Stop any existing monitor first
         self.stop_viewport_monitor().await;
 
         let config_arc = Arc::clone(&self.config);
+        let correction_enabled = Arc::clone(&self.auto_viewport_correction_enabled);
         let handle = tokio::spawn(async move {
             let mut consecutive_mismatch = 0u32;
             let mut last_warn: Option<std::time::Instant> = None;
+            let mut last_correction: Option<std::time::Instant> = None;
             let check_interval = std::time::Duration::from_secs(60);
             let warn_interval = std::time::Duration::from_secs(300);
+            let min_correction_interval = std::time::Duration::from_secs(60);
 
             loop {
                 tokio::time::sleep(check_interval).await;
@@ -1797,25 +1856,18 @@ impl BrowserManager {
 
                     if mismatch {
                         consecutive_mismatch += 1;
-                        if is_external {
-                            // Log at most every 5 minutes
-                            let now = std::time::Instant::now();
-                            let should_warn = last_warn
-                                .map(|t| now.duration_since(t) >= warn_interval)
-                                .unwrap_or(true);
-                            if should_warn {
-                                warn!(
-                                    "Viewport drift detected (external): {}x{}@{} vs expected {}x{}@{}",
-                                    cw, ch, cdpr, expected_w, expected_h, expected_dpr
-                                );
-                                last_warn = Some(now);
-                            }
-                        } else if consecutive_mismatch >= 2 {
+                        let now = std::time::Instant::now();
+                        let can_correct = last_correction
+                            .map(|t| now.duration_since(t) >= min_correction_interval)
+                            .unwrap_or(true);
+
+                        // Check gate: allow disabling auto-corrections at runtime
+                        let enabled = *correction_enabled.read().await;
+                        if consecutive_mismatch >= 2 && can_correct && enabled {
                             info!(
-                                "Correcting internal viewport: {}x{}@{} -> {}x{}@{}",
-                                cw, ch, cdpr, expected_w, expected_h, expected_dpr
+                                "Correcting viewport: {}x{}@{} -> {}x{}@{} (external={})",
+                                cw, ch, cdpr, expected_w, expected_h, expected_dpr, is_external
                             );
-                            // Apply CDP metrics override via Page API
                             let _ = page
                                 .set_viewport(crate::page::SetViewportParams {
                                     width: cfg.viewport.width,
@@ -1824,7 +1876,20 @@ impl BrowserManager {
                                     mobile: Some(cfg.viewport.mobile),
                                 })
                                 .await;
+                            last_correction = Some(now);
                             consecutive_mismatch = 0;
+                        } else {
+                            // Throttled: log at most every 5 minutes
+                            let should_warn = last_warn
+                                .map(|t| now.duration_since(t) >= warn_interval)
+                                .unwrap_or(true);
+                            if should_warn {
+                                warn!(
+                                    "Viewport drift detected (throttled): {}x{}@{} vs expected {}x{}@{} (external={}, can_correct={})",
+                                    cw, ch, cdpr, expected_w, expected_h, expected_dpr, is_external, can_correct
+                                );
+                                last_warn = Some(now);
+                            }
                         }
                     } else {
                         consecutive_mismatch = 0;
@@ -1841,6 +1906,12 @@ impl BrowserManager {
         if let Some(handle) = handle_guard.take() {
             handle.abort();
         }
+    }
+
+    /// Temporarily enable/disable automatic viewport correction (monitor-driven)
+    pub async fn set_auto_viewport_correction(&self, enabled: bool) {
+        let mut guard = self.auto_viewport_correction_enabled.write().await;
+        *guard = enabled;
     }
 }
 

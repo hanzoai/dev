@@ -218,9 +218,11 @@ impl Page {
     }
 
     /// Injects a unified bootstrap for each new document: tab blocking + cursor bootstrap + SPA hooks
+    /// and early console capture so tools like `browser_console` can read logs reliably.
     async fn inject_bootstrap_script(cdp_page: &Arc<CdpPage>) -> Result<()> {
         // This script installs the full virtual cursor on DOM ready for each new document.
-        // It also prevents _blank tabs and hooks SPA history changes.
+        // It also prevents _blank tabs, hooks SPA history changes, and installs
+        // console/error capture early so logs accumulate from the start of the page.
         let script = r#"
 (function(){
   // 1) Tab blocking: override window.open + intercept target="_blank"
@@ -281,7 +283,59 @@ impl Page {
     dispatch();
   } catch (e) { console.warn('SPA hook failed', e); }
 
-  // 3) No cursor bootstrap here; full cursor is injected by runtime ensure_virtual_cursor
+  // 3) Console capture: install once and persist for the lifetime of the document
+  try {
+    if (!window.__codex_console_logs) {
+      window.__codex_console_logs = [];
+      const push = (level, message) => {
+        try {
+          window.__codex_console_logs.push({ timestamp: new Date().toISOString(), level, message });
+          if (window.__codex_console_logs.length > 2000) window.__codex_console_logs.shift();
+        } catch (_) {}
+      };
+
+      // Override console methods once
+      ['log','warn','error','info','debug'].forEach(function(method) {
+        try {
+          const orig = console[method];
+          console[method] = function() {
+            try {
+              var args = Array.prototype.slice.call(arguments);
+              var msg = args.map(function(a) {
+                try {
+                  if (a && typeof a === 'object') return JSON.stringify(a);
+                  return String(a);
+                } catch (_) { return String(a); }
+              }).join(' ');
+              push(method, msg);
+            } catch(_) {}
+            if (orig) return orig.apply(console, arguments);
+          };
+        } catch(_) {}
+      });
+
+      // Capture uncaught errors
+      window.addEventListener('error', function(e) {
+        try {
+          var msg = e && e.message ? e.message : 'Script error';
+          var stack = e && e.error && e.error.stack ? ('\n' + e.error.stack) : '';
+          push('exception', msg + stack);
+        } catch(_) {}
+      });
+      // Capture unhandled promise rejections
+      window.addEventListener('unhandledrejection', function(e) {
+        try {
+          var reason = e && e.reason;
+          if (reason && typeof reason === 'object') {
+            try { reason = JSON.stringify(reason); } catch(_) {}
+          }
+          push('unhandledrejection', String(reason));
+        } catch(_) {}
+      });
+    }
+  } catch (e) { /* swallow */ }
+
+  // 4) No cursor bootstrap here; full cursor is injected by runtime ensure_virtual_cursor
 })();
 "#;
 
@@ -297,9 +351,30 @@ impl Page {
         &self,
         params_builder: chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParamsBuilder,
     ) -> Result<chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotReturns> {
+        // Determine page visibility once, to decide if from_surface(true) is safe/necessary
+        let is_visible = {
+            let eval = self
+                .cdp_page
+                .evaluate(
+                    "(() => { try { return { hidden: !!document.hidden, vs: String(document.visibilityState||'unknown') }; } catch (e) { return { hidden: null, vs: 'error' }; } })()",
+                )
+                .await;
+            match eval {
+                Ok(v) => {
+                    let obj = v.value().cloned().unwrap_or(serde_json::Value::Null);
+                    let hidden = obj
+                        .get("hidden")
+                        .and_then(|x| x.as_bool())
+                        .unwrap_or(false);
+                    let vs = obj.get("vs").and_then(|x| x.as_str()).unwrap_or("visible");
+                    !(hidden || vs != "visible")
+                }
+                Err(_) => true, // assume visible to avoid risky from_surface(true)
+            }
+        };
+
         // First try with from_surface(false) to avoid flashing, with timeout
         let params = params_builder.clone().from_surface(false).build();
-
         let first_attempt = tokio::time::timeout(
             tokio::time::Duration::from_secs(8),
             self.cdp_page.execute(params),
@@ -309,53 +384,79 @@ impl Page {
         match first_attempt {
             Ok(Ok(resp)) => Ok(resp.result),
             Ok(Err(e)) => {
-                // Log the initial failure
                 debug!(
-                    "Screenshot with from_surface(false) failed: {}. Retrying with from_surface(true)...",
-                    e
+                    "Screenshot with from_surface(false) failed: {} (visible={})",
+                    e, is_visible
                 );
+                if !is_visible {
+                    // Retry with from_surface(true) ONLY when not visible (prevents flash when focused)
+                    let retry_params = params_builder.from_surface(true).build();
+                    let retry_attempt = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(8),
+                        self.cdp_page.execute(retry_params),
+                    )
+                    .await;
 
-                // Retry with from_surface(true) - this may cause flashing but will work when window is not visible
-                let retry_params = params_builder.from_surface(true).build();
-                let retry_attempt = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(8),
-                    self.cdp_page.execute(retry_params),
-                )
-                .await;
-
-                match retry_attempt {
-                    Ok(Ok(resp)) => Ok(resp.result),
-                    Ok(Err(retry_err)) => {
-                        debug!(
-                            "Screenshot retry with from_surface(true) also failed: {}",
-                            retry_err
-                        );
-                        Err(retry_err.into())
+                    match retry_attempt {
+                        Ok(Ok(resp)) => Ok(resp.result),
+                        Ok(Err(retry_err)) => Err(retry_err.into()),
+                        Err(_) => Err(BrowserError::ScreenshotError(
+                            "Screenshot retry (from_surface=true) timed out".to_string(),
+                        )),
                     }
-                    Err(_) => Err(BrowserError::ScreenshotError(
-                        "Screenshot retry timed out after 8 seconds".to_string(),
-                    )),
+                } else {
+                    // Visible: avoid from_surface(true). Brief wait and retry once with from_surface(false)
+                    tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
+                    let retry_params = params_builder.clone().from_surface(false).build();
+                    let retry_attempt = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(4),
+                        self.cdp_page.execute(retry_params),
+                    )
+                    .await;
+                    match retry_attempt {
+                        Ok(Ok(resp)) => Ok(resp.result),
+                        Ok(Err(err2)) => Err(err2.into()),
+                        Err(_) => Err(BrowserError::ScreenshotError(
+                            "Screenshot timed out (from_surface=false, retried)".to_string(),
+                        )),
+                    }
                 }
             }
             Err(_) => {
-                // First attempt timed out, try with from_surface(true)
                 debug!(
-                    "Screenshot with from_surface(false) timed out. Retrying with from_surface(true)..."
+                    "Screenshot with from_surface(false) timed out (visible={})",
+                    is_visible
                 );
-
-                let retry_params = params_builder.from_surface(true).build();
-                let retry_attempt = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(8),
-                    self.cdp_page.execute(retry_params),
-                )
-                .await;
-
-                match retry_attempt {
-                    Ok(Ok(resp)) => Ok(resp.result),
-                    Ok(Err(e)) => Err(e.into()),
-                    Err(_) => Err(BrowserError::ScreenshotError(
-                        "Screenshot timed out after 8 seconds on both attempts".to_string(),
-                    )),
+                if !is_visible {
+                    // Not visible: try from_surface(true)
+                    let retry_params = params_builder.from_surface(true).build();
+                    let retry_attempt = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(8),
+                        self.cdp_page.execute(retry_params),
+                    )
+                    .await;
+                    match retry_attempt {
+                        Ok(Ok(resp)) => Ok(resp.result),
+                        Ok(Err(e)) => Err(e.into()),
+                        Err(_) => Err(BrowserError::ScreenshotError(
+                            "Screenshot timed out with from_surface(true)".to_string(),
+                        )),
+                    }
+                } else {
+                    // Visible: do not use from_surface(true); retry quickly with false
+                    let retry_params = params_builder.clone().from_surface(false).build();
+                    let retry_attempt = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(4),
+                        self.cdp_page.execute(retry_params),
+                    )
+                    .await;
+                    match retry_attempt {
+                        Ok(Ok(resp)) => Ok(resp.result),
+                        Ok(Err(e)) => Err(e.into()),
+                        Err(_) => Err(BrowserError::ScreenshotError(
+                            "Screenshot timed out after retries (from_surface=false only)".to_string(),
+                        )),
+                    }
                 }
             }
         }
