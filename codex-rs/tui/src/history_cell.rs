@@ -24,6 +24,9 @@ use ratatui::prelude::*;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Padding;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::collections::HashMap;
@@ -116,9 +119,8 @@ pub(crate) trait HistoryCell {
     fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Check if this cell has custom rendering
         if self.has_custom_render() {
-            // Custom renders (like animations) need to render fully - they can't be skipped
-            // The area is already adjusted for the visible portion
-            self.custom_render(area, buf);
+            // Allow custom renders to handle top skipping explicitly
+            self.custom_render_with_skip(area, buf, skip_rows);
             return;
         }
 
@@ -143,6 +145,11 @@ pub(crate) trait HistoryCell {
     /// Custom render implementation for cells that need it
     fn custom_render(&self, _area: Rect, _buf: &mut Buffer) {
         // Default: do nothing (cells with custom rendering will override)
+    }
+    /// Custom render with support for skipping top rows
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, _skip_rows: u16) {
+        // Default: fall back to non-skipping custom render
+        self.custom_render(area, buf);
     }
     
     /// Returns true if this cell is currently animating and needs redraws
@@ -307,6 +314,10 @@ pub(crate) struct ExecCell {
     pub(crate) parsed: Vec<ParsedCommand>,
     pub(crate) output: Option<CommandOutput>,
     pub(crate) start_time: Option<Instant>,
+    // Caches to avoid recomputing expensive line construction for completed execs
+    cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
 }
 
 impl HistoryCell for ExecCell {
@@ -327,8 +338,213 @@ impl HistoryCell for ExecCell {
         HistoryCellType::Exec { kind, status }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        exec_command_lines(&self.command, &self.parsed, self.output.as_ref(), self.start_time)
+        // Fallback textual representation (used for height measurement only when custom rendering).
+        // For completed executions, cache the computed lines since they are immutable.
+        if let Some(cached) = self.cached_display_lines.borrow().as_ref() {
+            return cached.clone();
+        }
+        let lines = exec_command_lines(
+            &self.command,
+            &self.parsed,
+            self.output.as_ref(),
+            self.start_time,
+        );
+        if self.output.is_some() {
+            *self.cached_display_lines.borrow_mut() = Some(lines.clone());
+        }
+        lines
     }
+    fn has_custom_render(&self) -> bool { true }
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        // Render command header/content above and stdout/stderr preview inside a left-bordered block.
+        let (pre_lines, out_lines) = self.exec_render_parts();
+
+        // Prepare texts and total heights (after wrapping)
+        let pre_text = Text::from(trim_empty_lines(pre_lines));
+        let out_text = Text::from(trim_empty_lines(out_lines));
+        let pre_total: u16 = Paragraph::new(pre_text.clone()).wrap(Wrap { trim: false }).line_count(area.width).try_into().unwrap_or(0);
+        let out_total: u16 = Paragraph::new(out_text.clone()).wrap(Wrap { trim: false }).line_count(area.width).try_into().unwrap_or(0);
+
+        // Compute how many rows to skip from the preamble, then from the output
+        let pre_skip = skip_rows.min(pre_total);
+        let out_skip = skip_rows.saturating_sub(pre_total).min(out_total);
+
+        // Compute how much height is available for pre and out segments in this area
+        let pre_remaining = pre_total.saturating_sub(pre_skip);
+        let pre_height = pre_remaining.min(area.height);
+        let out_available = area.height.saturating_sub(pre_height);
+        let out_remaining = out_total.saturating_sub(out_skip);
+        let out_height = out_available.min(out_remaining);
+
+        // Render preamble (scrolled) if any space
+        if pre_height > 0 {
+            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
+            Paragraph::new(pre_text)
+                .wrap(Wrap { trim: false })
+                .scroll((pre_skip, 0))
+                .style(Style::default().bg(crate::colors::background()))
+                .render(pre_area, buf);
+        }
+
+        // Render output (scrolled) with a left border block if any space
+        if out_height > 0 {
+            let out_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: out_height };
+            let block = Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(crate::colors::border_dim()))
+                .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+            Paragraph::new(out_text)
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .scroll((out_skip, 0))
+                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                .render(out_area, buf);
+        }
+    }
+}
+
+impl ExecCell {
+    // Build separate segments: (preamble lines, output lines)
+    fn exec_render_parts(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+        // For completed executions, cache pre/output segments since they are immutable.
+        if let (true, Some(pre), Some(out)) = (
+            self.output.is_some(),
+            self.cached_pre_lines.borrow().as_ref(),
+            self.cached_out_lines.borrow().as_ref(),
+        ) {
+            return (pre.clone(), out.clone());
+        }
+
+        let parts = if self.parsed.is_empty() {
+            exec_render_parts_generic(&self.command, self.output.as_ref(), self.start_time)
+        } else {
+            exec_render_parts_parsed(&self.parsed, self.output.as_ref(), self.start_time)
+        };
+
+        if self.output.is_some() {
+            let (pre, out) = parts.clone();
+            *self.cached_pre_lines.borrow_mut() = Some(pre);
+            *self.cached_out_lines.borrow_mut() = Some(out);
+        }
+        parts
+    }
+}
+
+fn exec_render_parts_generic(
+    command: &[String],
+    output: Option<&CommandOutput>,
+    start_time: Option<Instant>,
+) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    let mut pre: Vec<Line<'static>> = Vec::new();
+    let command_escaped = strip_bash_lc_and_escape(command);
+    let mut cmd_lines = command_escaped.lines();
+
+    let header_line = match output {
+        None => {
+            let duration_str = if let Some(start) = start_time { let elapsed = start.elapsed(); format!(" ({})", format_duration(elapsed)) } else { String::new() };
+            Line::styled("Running...".to_string() + &duration_str, Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))
+        }
+        Some(o) if o.exit_code == 0 => Line::styled("Ran", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
+        Some(_) => Line::styled("Ran", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
+    };
+
+    if let Some(first) = cmd_lines.next() {
+        let duration_str = if output.is_none() && start_time.is_some() { let elapsed = start_time.unwrap().elapsed(); format!(" ({})", format_duration(elapsed)) } else { String::new() };
+        pre.push(header_line.clone());
+        pre.push(Line::from(vec![Span::styled(first.to_string(), Style::default().fg(crate::colors::text())), duration_str.dim()]));
+    } else {
+        pre.push(header_line);
+    }
+    for cont in cmd_lines {
+        pre.push(Line::styled(cont.to_string(), Style::default().fg(crate::colors::text())));
+    }
+
+    // Output: always include for generic exec
+    let out = output_lines(output, false, false);
+    (pre, out)
+}
+
+fn exec_render_parts_parsed(
+    parsed_commands: &[ParsedCommand],
+    output: Option<&CommandOutput>,
+    start_time: Option<Instant>,
+) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    let action = action_from_parsed(parsed_commands);
+    let ctx_path = first_context_path(parsed_commands);
+    let mut pre: Vec<Line<'static>> = vec![match output {
+        None => {
+            let duration_str = if let Some(start) = start_time { let elapsed = start.elapsed(); format!(" ({})", format_duration(elapsed)) } else { String::new() };
+            let header = match action {
+                "read" => "Reading...".to_string(),
+                "search" => "Searching...".to_string(),
+                "list" => "Listing files...".to_string(),
+                _ => match &ctx_path { Some(p) => format!("Running... in {}", p), None => "Running...".to_string() },
+            };
+            if matches!(action, "read" | "search" | "list") {
+                Line::styled(header + &duration_str, Style::default().fg(crate::colors::primary()))
+            } else {
+                Line::styled(header + &duration_str, Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))
+            }
+        }
+        Some(o) if o.exit_code == 0 => {
+            let done = match action { "read" => "Read".to_string(), "search" => "Searched".to_string(), "list" => "List Files".to_string(), _ => match &ctx_path { Some(p) => format!("Ran in {}", p), None => "Ran".to_string() }, };
+            if matches!(action, "read" | "search" | "list") { Line::styled(done, Style::default().fg(crate::colors::text())) } else { Line::styled(done, Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)) }
+        }
+        Some(_) => {
+            let done = match action { "read" => "Read".to_string(), "search" => "Searched".to_string(), "list" => "List Files".to_string(), _ => match &ctx_path { Some(p) => format!("Ran in {}", p), None => "Ran".to_string() }, };
+            if matches!(action, "read" | "search" | "list") { Line::styled(done, Style::default().fg(crate::colors::text())) } else { Line::styled(done, Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)) }
+        }
+    }];
+
+    // Reuse the same parsed-content rendering as new_parsed_command
+    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for pc in parsed_commands.iter() {
+        if let ParsedCommand::Search { path: Some(p), .. } = pc { search_paths.insert(p.to_string()); }
+    }
+    let mut any_content_emitted = false;
+    for parsed in parsed_commands.iter() {
+        let (label, content) = match parsed {
+            ParsedCommand::Read { name, cmd, .. } => { let mut c = name.clone(); if let Some(ann) = parse_read_line_annotation(cmd) { c = format!("{} {}", c, ann); } ("Read".to_string(), c) }
+            ParsedCommand::ListFiles { cmd, path } => match path { Some(p) => { if search_paths.contains(p) { (String::new(), String::new()) } else { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("List".to_string(), display_p) } } None => ("List".to_string(), cmd.clone()) },
+            ParsedCommand::Search { query, path, cmd } => {
+                let prettify_term = |s: &str| -> String { let mut out = s.replace("\\(", "(").replace("\\)", ")").replace("\\.", "."); let opens = out.matches('(').count(); let closes = out.matches(')').count(); if opens > closes { out.push(')'); } out };
+                let fmt_query = |q: &str| -> String { let mut parts: Vec<String> = q.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).map(prettify_term).collect(); match parts.len() { 0 => String::new(), 1 => parts.remove(0), 2 => format!("{} and {}", parts[0], parts[1]), _ => { let last = parts.last().cloned().unwrap_or_default(); let head = &parts[..parts.len() - 1]; format!("{} and {}", head.join(", "), last) } } };
+                match (query, path) { (Some(q), Some(p)) => { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("Search".to_string(), format!("{} in {}", fmt_query(q), display_p)) } (Some(q), None) => ("Search".to_string(), format!("{}", fmt_query(q))), (None, Some(p)) => { let display_p = if p.ends_with('/') { p.to_string() } else { format!("{}/", p) }; ("Search".to_string(), format!("in {}", display_p)) } (None, None) => ("Search".to_string(), cmd.clone()), }
+            }
+            ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
+            ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
+            ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
+            ParsedCommand::Unknown { cmd } => ("Run".to_string(), cmd.clone()),
+            ParsedCommand::Noop { .. } => continue,
+        };
+        if label.is_empty() && content.is_empty() { continue; }
+        for line_text in content.lines() {
+            if line_text.is_empty() { continue; }
+            let prefix = if !any_content_emitted { "└ " } else { "  " };
+            let mut spans: Vec<Span<'static>> = vec![Span::styled(prefix, Style::default().add_modifier(Modifier::DIM))];
+            match label.as_str() {
+                "Search" => {
+                    let remaining = line_text.to_string();
+                    let (terms_part, path_part) = if let Some(idx) = remaining.rfind(" (in ") { (remaining[..idx].to_string(), Some(remaining[idx..].to_string())) } else if let Some(idx) = remaining.rfind(" in ") { let suffix = &remaining[idx + 1..]; if suffix.trim_end().ends_with('/') { (remaining[..idx].to_string(), Some(remaining[idx..].to_string())) } else { (remaining.clone(), None) } } else { (remaining.clone(), None) };
+                    let tmp = terms_part.clone();
+                    let chunks: Vec<String> = if tmp.contains(", ") { tmp.split(", ").map(|s| s.to_string()).collect() } else { vec![tmp.clone()] };
+                    for (i, chunk) in chunks.iter().enumerate() { if i > 0 { spans.push(Span::styled(", ", Style::default().fg(crate::colors::text_dim()))); }
+                        if let Some((left, right)) = chunk.rsplit_once(" and ") { if !left.is_empty() { spans.push(Span::styled(left.to_string(), Style::default().fg(crate::colors::text()))); spans.push(Span::styled(" and ", Style::default().fg(crate::colors::text_dim()))); spans.push(Span::styled(right.to_string(), Style::default().fg(crate::colors::text()))); } else { spans.push(Span::styled(chunk.to_string(), Style::default().fg(crate::colors::text()))); } } else { spans.push(Span::styled(chunk.to_string(), Style::default().fg(crate::colors::text()))); } }
+                    if let Some(p) = path_part { spans.push(Span::styled(p, Style::default().fg(crate::colors::text_dim()))); }
+                }
+                "Read" => { if let Some(idx) = line_text.find(" (") { let (fname, rest) = line_text.split_at(idx); spans.push(Span::styled(fname.to_string(), Style::default().fg(crate::colors::text()))); spans.push(Span::styled(rest.to_string(), Style::default().fg(crate::colors::text_dim()))); } else { spans.push(Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text()))); } }
+                "List" => { spans.push(Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text()))); }
+                _ => { spans.push(Span::styled(line_text.to_string(), Style::default().fg(crate::colors::text()))); }
+            }
+            pre.push(Line::from(spans));
+            any_content_emitted = true;
+        }
+    }
+
+    // Output: show stdout only for real run commands; errors always included
+    let show_stdout = action == "run";
+    let out = output_lines(output, !show_stdout, false);
+    (pre, out)
 }
 
 impl WidgetRef for &ExecCell {
@@ -887,9 +1103,11 @@ fn output_lines(
                         tracing::warn!("Slow ansi_escape_line took {:?}", elapsed);
                     }
                     if include_angle_pipe {
+                        // Render a subtle left border using a dim vertical bar.
+                        // Do not indent further; content begins immediately after.
                         let mut line_spans = vec![
                             Span::styled(
-                                "> ",
+                                "│",
                                 Style::default()
                                     .add_modifier(Modifier::DIM)
                                     .fg(crate::colors::text_dim()),
@@ -1098,6 +1316,9 @@ fn new_exec_cell(
         parsed,
         output,
         start_time,
+        cached_display_lines: std::cell::RefCell::new(None),
+        cached_pre_lines: std::cell::RefCell::new(None),
+        cached_out_lines: std::cell::RefCell::new(None),
     }
 }
 

@@ -253,11 +253,11 @@
         }
 
         function durationForDistance(d) {
-          // pull values and provide sensible defaults
+          // pull values and provide sensible defaults (snappy by default)
           let minDist = Number(MOTION.min_dist ?? 0);
           let maxDist = Number(MOTION.max_dist ?? (minDist + 1)); // avoid zero range
-          let minMs   = Number(MOTION.min_ms   ?? 2000);
-          let maxMs   = Number(MOTION.max_ms   ?? 4000);
+          let minMs   = Number(MOTION.min_ms   ?? 100);
+          let maxMs   = Number(MOTION.max_ms   ?? 300);
 
           // If the user accidentally supplied reversed distances, fix by swapping
           if (minDist > maxDist) {
