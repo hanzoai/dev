@@ -60,7 +60,7 @@ pub async fn run_login_with_api_key(
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
 
-    match CodexAuth::from_codex_home(&config.codex_home) {
+    match CodexAuth::from_codex_home(&config.codex_home, AuthMode::ApiKey) {
         Ok(Some(auth)) => match auth.mode {
             AuthMode::ApiKey => match auth.get_token().await {
                 Ok(api_key) => {
@@ -68,10 +68,10 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
 
                     if let Ok(env_api_key) = env::var(OPENAI_API_KEY_ENV_VAR) {
                         if env_api_key == api_key {
-                            eprintln!(
-                                "   API loaded from OPENAI_API_KEY environment variable or .env file"
-                            );
-                        }
+                        eprintln!(
+                            "   API loaded from OPENAI_API_KEY environment variable or .env file"
+                        );
+                    }
                     }
                     std::process::exit(0);
                 }
