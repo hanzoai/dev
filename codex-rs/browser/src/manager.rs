@@ -173,6 +173,7 @@ pub struct BrowserManager {
     cleanup_profile_on_drop: Arc<Mutex<bool>>,
     navigation_callback: Arc<tokio::sync::RwLock<Option<Box<dyn Fn(String) + Send + Sync>>>>,
     navigation_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    viewport_monitor_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl BrowserManager {
@@ -190,6 +191,7 @@ impl BrowserManager {
             cleanup_profile_on_drop: Arc::new(Mutex::new(false)),
             navigation_callback: Arc::new(tokio::sync::RwLock::new(None)),
             navigation_monitor_handle: Arc::new(Mutex::new(None)),
+            viewport_monitor_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -935,6 +937,8 @@ impl BrowserManager {
 
         // Start navigation monitoring for this page
         self.start_navigation_monitor(Arc::clone(&page)).await;
+        // Start viewport monitor (low-frequency, non-invasive)
+        self.start_viewport_monitor(Arc::clone(&page)).await;
         info!(
             "[bm] get_or_create_page: complete in {:?}",
             overall_start.elapsed()
@@ -1047,7 +1051,7 @@ impl BrowserManager {
                 .map_err(BrowserError::CdpError)?;
             page.execute(viewport_params).await?;
         } else {
-            // Internal (launched) Chrome: apply human settings; do not touch viewport here.
+            // Internal (launched) Chrome: apply human settings; avoid CDP viewport override here
             if let Some(ua) = &config.user_agent {
                 let mut b = network::SetUserAgentOverrideParams::builder().user_agent(ua);
                 if let Some(al) = &config.accept_language {
@@ -1070,16 +1074,6 @@ impl BrowserManager {
                     .map_err(BrowserError::CdpError)?;
                 page.execute(p).await?;
             }
-
-            // Set viewport once on connection for internal Chrome as well
-            let viewport_params = emulation::SetDeviceMetricsOverrideParams::builder()
-                .width(config.viewport.width as i64)
-                .height(config.viewport.height as i64)
-                .device_scale_factor(config.viewport.device_scale_factor)
-                .mobile(config.viewport.mobile)
-                .build()
-                .map_err(BrowserError::CdpError)?;
-            page.execute(viewport_params).await?;
 
             if let Some(tz) = &config.timezone {
                 page.execute(emulation::SetTimezoneOverrideParams {
@@ -1756,6 +1750,94 @@ impl BrowserManager {
     /// Stop navigation monitoring
     async fn stop_navigation_monitor(&self) {
         let mut handle_guard = self.navigation_monitor_handle.lock().await;
+        if let Some(handle) = handle_guard.take() {
+            handle.abort();
+        }
+    }
+
+    /// Start a low-frequency viewport monitor that checks for drift without forcing resyncs.
+    /// External Chrome: never corrects (logs only, throttled). Internal Chrome: corrects after consecutive mismatches.
+    async fn start_viewport_monitor(&self, page: Arc<Page>) {
+        // Stop any existing monitor first
+        self.stop_viewport_monitor().await;
+
+        let config_arc = Arc::clone(&self.config);
+        let handle = tokio::spawn(async move {
+            let mut consecutive_mismatch = 0u32;
+            let mut last_warn: Option<std::time::Instant> = None;
+            let check_interval = std::time::Duration::from_secs(60);
+            let warn_interval = std::time::Duration::from_secs(300);
+
+            loop {
+                tokio::time::sleep(check_interval).await;
+
+                // Snapshot expected config
+                let cfg = config_arc.read().await.clone();
+                let is_external = cfg.connect_port.is_some() || cfg.connect_ws.is_some();
+                let expected_w = cfg.viewport.width as f64;
+                let expected_h = cfg.viewport.height as f64;
+                let expected_dpr = cfg.viewport.device_scale_factor as f64;
+
+                // Probe current viewport via JS (cheap and non-invasive)
+                let probe_js = r#"(() => ({
+                    w: (document.documentElement.clientWidth|0),
+                    h: (document.documentElement.clientHeight|0),
+                    dpr: (window.devicePixelRatio||1)
+                }))()"#;
+
+                if let Ok(val) = page.inject_js(probe_js).await {
+                    let cw = val.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
+                    let ch = val.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
+                    let cdpr = val.get("dpr").and_then(|v| v.as_f64()).unwrap_or(1.0);
+
+                    let w_ok = (cw - expected_w).abs() <= 5.0;
+                    let h_ok = (ch - expected_h).abs() <= 5.0;
+                    let dpr_ok = (cdpr - expected_dpr).abs() <= 0.05;
+                    let mismatch = !(w_ok && h_ok && dpr_ok);
+
+                    if mismatch {
+                        consecutive_mismatch += 1;
+                        if is_external {
+                            // Log at most every 5 minutes
+                            let now = std::time::Instant::now();
+                            let should_warn = last_warn
+                                .map(|t| now.duration_since(t) >= warn_interval)
+                                .unwrap_or(true);
+                            if should_warn {
+                                warn!(
+                                    "Viewport drift detected (external): {}x{}@{} vs expected {}x{}@{}",
+                                    cw, ch, cdpr, expected_w, expected_h, expected_dpr
+                                );
+                                last_warn = Some(now);
+                            }
+                        } else if consecutive_mismatch >= 2 {
+                            info!(
+                                "Correcting internal viewport: {}x{}@{} -> {}x{}@{}",
+                                cw, ch, cdpr, expected_w, expected_h, expected_dpr
+                            );
+                            // Apply CDP metrics override via Page API
+                            let _ = page
+                                .set_viewport(crate::page::SetViewportParams {
+                                    width: cfg.viewport.width,
+                                    height: cfg.viewport.height,
+                                    device_scale_factor: Some(cfg.viewport.device_scale_factor),
+                                    mobile: Some(cfg.viewport.mobile),
+                                })
+                                .await;
+                            consecutive_mismatch = 0;
+                        }
+                    } else {
+                        consecutive_mismatch = 0;
+                    }
+                }
+            }
+        });
+
+        *self.viewport_monitor_handle.lock().await = Some(handle);
+    }
+
+    async fn stop_viewport_monitor(&self) {
+        let mut handle_guard = self.viewport_monitor_handle.lock().await;
         if let Some(handle) = handle_guard.take() {
             handle.abort();
         }
