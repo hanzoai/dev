@@ -100,6 +100,11 @@ impl CommandPopup {
         self.filtered().into_iter().map(|(c, _, _)| c).collect()
     }
 
+    /// Return the current number of selectable commands under the active filter.
+    pub(crate) fn match_count(&self) -> usize {
+        self.filtered_commands().len()
+    }
+
     /// Move the selection cursor one step up.
     pub(crate) fn move_up(&mut self) {
         let matches = self.filtered_commands();

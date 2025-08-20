@@ -111,6 +111,11 @@ impl FileSearchPopup {
 
         self.matches.len().clamp(1, MAX_POPUP_ROWS) as u16
     }
+
+    /// Return the number of current matches shown in the popup.
+    pub(crate) fn match_count(&self) -> usize {
+        self.matches.len()
+    }
 }
 
 impl WidgetRef for &FileSearchPopup {
