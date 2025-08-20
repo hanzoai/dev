@@ -3204,6 +3204,9 @@ impl ChatWidget<'_> {
         browser_manager.set_enabled_sync(true);
 
         // Configure for CDP connection (prefer cached ws/port on auto-detect)
+        // Track whether we're attempting via cached WS and retain a cached port for fallback.
+        let mut attempted_via_cached_ws = false;
+        let mut cached_port_for_fallback: Option<u16> = None;
         {
             let mut config = browser_manager.config.write().await;
             config.headless = false;
@@ -3219,11 +3222,13 @@ impl ChatWidget<'_> {
                     Some(v) => v,
                     None => codex_browser::global::get_last_connection().await,
                 };
+                cached_port_for_fallback = cached_port;
                 if let Some(ws) = cached_ws {
                     tracing::info!("[cdp] using cached Chrome WS endpoint");
+                    attempted_via_cached_ws = true;
                     config.connect_ws = Some(ws);
                     config.connect_port = None;
-                } else if let Some(p) = cached_port {
+                } else if let Some(p) = cached_port_for_fallback {
                     tracing::info!("[cdp] using cached Chrome debug port: {}", p);
                     config.connect_ws = None;
                     config.connect_port = Some(p);
@@ -3404,15 +3409,195 @@ impl ChatWidget<'_> {
                     }
                 }
                 Err(e) => {
-                    tracing::error!("[cdp] connect_to_chrome_only failed immediately: {}", e);
-                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!("❌ Failed to connect to Chrome: {}", e),
-                        }),
-                    }));
-                    return;
+                    let err_msg = format!("{}", e);
+                    // If we attempted via a cached WS, clear it and fallback to port-based discovery once.
+                    if attempted_via_cached_ws {
+                        tracing::warn!("[cdp] cached WS connect failed: {} — clearing WS cache and retrying via port discovery", err_msg);
+                        let port_to_keep = cached_port_for_fallback;
+                        // Clear WS in-memory and on-disk
+                        codex_browser::global::set_last_connection(port_to_keep, None).await;
+                        let _ = write_cached_connection(port_to_keep, None).await;
+
+                        // Reconfigure to use port (prefer cached port, else auto-detect)
+                        {
+                            let mut cfg = browser_manager.config.write().await;
+                            cfg.connect_ws = None;
+                            cfg.connect_port = Some(port_to_keep.unwrap_or(0));
+                        }
+
+                        tracing::info!("[cdp] retrying connect via port discovery after WS failure…");
+                        let retry_deadline = tokio::time::Duration::from_secs(20);
+                        let retry = tokio::time::timeout(retry_deadline, browser_manager.connect_to_chrome_only()).await;
+                        match retry {
+                            Ok(Ok(_)) => {
+                                tracing::info!("[cdp] Fallback connect succeeded after clearing cached WS");
+                                // Emit success event and set up callbacks, mirroring the success path above
+                                let (detected_port, detected_ws) = codex_browser::global::get_last_connection().await;
+                                let mut port_num: Option<u16> = detected_port;
+                                if port_num.is_none() {
+                                    if let Some(ws) = &detected_ws {
+                                        if let Some(after_scheme) = ws.split("//").nth(1) {
+                                            if let Some(hostport) = after_scheme.split('/').next() {
+                                                if let Some(pstr) = hostport.split(':').nth(1) {
+                                                    if let Ok(p) = pstr.parse::<u16>() { port_num = Some(p); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                let current_url = browser_manager.get_current_url().await;
+                                let success_msg = match (port_num, current_url) {
+                                    (Some(p), Some(url)) if !url.is_empty() => {
+                                        format!("✅ Connected to Chrome via CDP (port {}) to {}", p, url)
+                                    }
+                                    (Some(p), _) => format!("✅ Connected to Chrome via CDP (port {})", p),
+                                    (None, Some(url)) if !url.is_empty() => {
+                                        format!("✅ Connected to Chrome via CDP to {}", url)
+                                    }
+                                    _ => "✅ Connected to Chrome via CDP".to_string(),
+                                };
+                                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: success_msg }),
+                                }));
+
+                                // Persist last connection cache
+                                tokio::spawn(async move {
+                                    let (p, ws) = codex_browser::global::get_last_connection().await;
+                                    let _ = write_cached_connection(p, ws).await;
+                                });
+
+                                // Navigation callback
+                                let latest_screenshot_callback = latest_screenshot.clone();
+                                let app_event_tx_callback = app_event_tx.clone();
+                                browser_manager
+                                    .set_navigation_callback(move |url| {
+                                        tracing::info!("CDP Navigation callback triggered for URL: {}", url);
+                                        let latest_screenshot_inner = latest_screenshot_callback.clone();
+                                        let app_event_tx_inner = app_event_tx_callback.clone();
+                                        let url_inner = url.clone();
+                                        tokio::spawn(async move {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                            let browser_manager_inner = ChatWidget::get_browser_manager().await;
+                                            let mut attempt = 0;
+                                            let max_attempts = 2;
+                                            loop {
+                                                attempt += 1;
+                                                match browser_manager_inner.capture_screenshot_with_url().await {
+                                                    Ok((paths, _)) => {
+                                                        if let Some(first_path) = paths.first() {
+                                                            tracing::info!("[cdp] auto-captured screenshot: {}", first_path.display());
+                                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
+                                                                *latest = Some((first_path.clone(), url_inner.clone()));
+                                                            }
+                                                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                                id: uuid::Uuid::new_v4().to_string(),
+                                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                    screenshot_path: first_path.clone(),
+                                                                    url: url_inner,
+                                                                }),
+                                                            }));
+                                                            break;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!("[cdp] auto-capture failed (attempt {}): {}", attempt, e);
+                                                        if attempt >= max_attempts { break; }
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    })
+                                    .await;
+                                // Set as global manager like success path
+                                codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
+
+                                // Initial screenshot in background (best-effort)
+                                {
+                                    let latest_screenshot_bg = latest_screenshot.clone();
+                                    let app_event_tx_bg = app_event_tx.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                        let browser_manager = ChatWidget::get_browser_manager().await;
+                                        let mut attempt = 0;
+                                        let max_attempts = 2;
+                                        loop {
+                                            attempt += 1;
+                                            match browser_manager.capture_screenshot_with_url().await {
+                                                Ok((paths, url)) => {
+                                                    if let Some(first_path) = paths.first() {
+                                                        tracing::info!("Initial CDP screenshot captured: {}", first_path.display());
+                                                        if let Ok(mut latest) = latest_screenshot_bg.lock() {
+                                                            *latest = Some((
+                                                                first_path.clone(),
+                                                                url.clone().unwrap_or_else(|| "Chrome".to_string()),
+                                                            ));
+                                                        }
+                                                        use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                        let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                            id: uuid::Uuid::new_v4().to_string(),
+                                                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url.unwrap_or_else(|| "Chrome".to_string()),
+                                                            }),
+                                                        }));
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!("Failed to capture initial CDP screenshot (attempt {}): {}", attempt, e);
+                                                    if attempt >= max_attempts { break; }
+                                                    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                                return;
+                            }
+                            Ok(Err(e2)) => {
+                                tracing::error!("[cdp] Fallback connect failed: {}", e2);
+                                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                        message: format!(
+                                            "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
+                                            e2, err_msg
+                                        ),
+                                    }),
+                                }));
+                                return;
+                            }
+                            Err(_) => {
+                                tracing::error!("[cdp] Fallback connect timed out after {:?}", retry_deadline);
+                                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                        message: format!(
+                                            "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
+                                            retry_deadline.as_secs()
+                                        ),
+                                    }),
+                                }));
+                                return;
+                            }
+                        }
+                    } else {
+                        tracing::error!("[cdp] connect_to_chrome_only failed immediately: {}", err_msg);
+                        use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                message: format!("❌ Failed to connect to Chrome: {}", err_msg),
+                            }),
+                        }));
+                        return;
+                    }
                 }
             }
         }
