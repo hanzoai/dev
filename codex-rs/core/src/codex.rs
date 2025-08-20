@@ -2368,6 +2368,7 @@ async fn handle_function_call(
         "browser_console" => handle_browser_console(sess, arguments, sub_id, call_id).await,
         "browser_inspect" => handle_browser_inspect(sess, arguments, sub_id, call_id).await,
         "browser_cdp" => handle_browser_cdp(sess, arguments, sub_id, call_id).await,
+        "browser_cleanup" => handle_browser_cleanup(sess, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -2391,6 +2392,41 @@ async fn handle_function_call(
             }
         }
     }
+}
+
+async fn handle_browser_cleanup(
+    sess: &Session,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    let sess_clone = sess;
+    let call_id_clone = call_id.clone();
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "browser_cleanup".to_string(),
+        Some(serde_json::json!({})),
+        || async move {
+            if let Some(browser_manager) = get_browser_manager_for_session(sess_clone).await {
+                match browser_manager.cleanup().await {
+                    Ok(_) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: "Browser cleanup completed".to_string(), success: Some(true) },
+                    },
+                    Err(e) => ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: format!("Cleanup failed: {}", e), success: Some(false) },
+                    },
+                }
+            } else {
+                ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload { content: "Browser is not initialized. Use browser_open to start the browser.".to_string(), success: Some(false) },
+                }
+            }
+        }
+    ).await
 }
 
 fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
@@ -3869,12 +3905,12 @@ where
     let result = tool_fn().await;
     let duration = start.elapsed();
 
-    // Extract success/failure from result
+    // Extract success/failure from result. Prefer explicit success flag when available.
     let (success, message) = match &result {
         ResponseInputItem::FunctionCallOutput { output, .. } => {
             let content = &output.content;
-            let is_error = content.contains("error") || content.contains("failed");
-            (!is_error, content.clone())
+            let success_flag = output.success;
+            (success_flag.unwrap_or(true), content.clone())
         }
         _ => (true, String::from("Tool completed")),
     };
@@ -3942,6 +3978,10 @@ async fn handle_browser_open(
                     };
 
                     if let Some(browser_manager) = browser_manager {
+                        // Clear any lingering node highlight from previous commands
+                        let _ = browser_manager
+                            .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                            .await;
                         // Navigate to the URL with detailed timing logs
                         let step_start = std::time::Instant::now();
                         tracing::info!("[browser_open] begin goto: {}", url);
@@ -4019,6 +4059,10 @@ async fn handle_browser_close(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                // Clear any lingering highlight before closing
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 match browser_manager.stop().await {
                     Ok(_) => {
                         // Clear the browser manager from global
@@ -4070,6 +4114,9 @@ async fn handle_browser_status(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let status = browser_manager.get_status().await;
                 let status_msg = if status.enabled {
                     if let Some(url) = status.current_url {
@@ -4124,6 +4171,9 @@ async fn handle_browser_click(
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 // Determine click type: default 'click', or 'mousedown'/'mouseup'
                 let click_type = params
                     .as_ref()
@@ -4242,6 +4292,9 @@ async fn handle_browser_move(
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4328,6 +4381,9 @@ async fn handle_browser_type(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4396,6 +4452,9 @@ async fn handle_browser_key(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4464,6 +4523,9 @@ async fn handle_browser_javascript(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4582,6 +4644,9 @@ async fn handle_browser_scroll(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4735,6 +4800,9 @@ async fn handle_browser_cdp(
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
+                let _ = browser_manager
+                    .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))
+                    .await;
                 let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
                 match args {
                     Ok(json) => {
@@ -4943,7 +5011,22 @@ async fn handle_browser_inspect(
                             .await
                             .unwrap_or_else(|_| json!({}));
 
-                        // Highlight/hide steps and screenshot are omitted; tools no longer capture inline
+                        // Highlight the inspected node using Overlay domain (no screenshot capture here)
+                        let _ = browser_manager.execute_cdp("Overlay.enable", json!({})).await;
+                        let highlight_config = json!({
+                            "showInfo": true,
+                            "showStyles": false,
+                            "showRulers": false,
+                            "contentColor": {"r": 111, "g": 168, "b": 220, "a": 0.20},
+                            "paddingColor": {"r": 147, "g": 196, "b": 125, "a": 0.55},
+                            "borderColor": {"r": 255, "g": 229, "b": 153, "a": 0.60},
+                            "marginColor": {"r": 246, "g": 178, "b": 107, "a": 0.60}
+                        });
+                        let _ = browser_manager.execute_cdp(
+                            "Overlay.highlightNode",
+                            json!({ "nodeId": node_id, "highlightConfig": highlight_config })
+                        ).await;
+                        // Do not hide here; keep highlight until the next browser command.
 
                         // Format output
                         let mut out = String::new();

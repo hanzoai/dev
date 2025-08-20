@@ -558,6 +558,24 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     event.tool_name.style(self.bold),
                     status,
                 );
+                // Print the tool's textual result for visibility in exec mode
+                match &event.result {
+                    Ok(content) => {
+                        if !content.is_empty() {
+                            // Keep output concise; print as-is (it may be pre-formatted)
+                            for line in content.lines() {
+                                println!("{}", line.style(self.dimmed));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if !err.is_empty() {
+                            for line in err.lines() {
+                                println!("{}", line.style(self.red));
+                            }
+                        }
+                    }
+                }
             }
         }
         CodexStatus::Running
