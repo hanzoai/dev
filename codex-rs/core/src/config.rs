@@ -750,7 +750,7 @@ impl Config {
 
             experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
-            internal_originator: cfg.internal_originator,
+            responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving codex_home
             using_chatgpt_auth,

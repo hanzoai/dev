@@ -162,27 +162,31 @@ async fn get_default_branch(cwd: &Path) -> Option<String> {
             cwd,
         )
         .await
-            && symref_output.status.success()
-            && let Ok(sym) = String::from_utf8(symref_output.stdout)
         {
-            let trimmed = sym.trim();
-            if let Some((_, name)) = trimmed.rsplit_once('/') {
-                return Some(name.to_string());
+            if symref_output.status.success() {
+                if let Ok(sym) = String::from_utf8(symref_output.stdout) {
+                    let trimmed = sym.trim();
+                    if let Some((_, name)) = trimmed.rsplit_once('/') {
+                        return Some(name.to_string());
+                    }
+                }
             }
         }
 
         // Fall back to parsing `git remote show <remote>` output
         if let Some(show_output) =
             run_git_command_with_timeout(&["remote", "show", &remote], cwd).await
-            && show_output.status.success()
-            && let Ok(text) = String::from_utf8(show_output.stdout)
         {
-            for line in text.lines() {
-                let line = line.trim();
-                if let Some(rest) = line.strip_prefix("HEAD branch:") {
-                    let name = rest.trim();
-                    if !name.is_empty() {
-                        return Some(name.to_string());
+            if show_output.status.success() {
+                if let Ok(text) = String::from_utf8(show_output.stdout) {
+                    for line in text.lines() {
+                        let line = line.trim();
+                        if let Some(rest) = line.strip_prefix("HEAD branch:") {
+                            let name = rest.trim();
+                            if !name.is_empty() {
+                                return Some(name.to_string());
+                            }
+                        }
                     }
                 }
             }
@@ -201,9 +205,10 @@ async fn get_default_branch(cwd: &Path) -> Option<String> {
             cwd,
         )
         .await
-            && verify.status.success()
         {
-            return Some(candidate.to_string());
+            if verify.status.success() {
+                return Some(candidate.to_string());
+            }
         }
     }
 
@@ -235,11 +240,11 @@ async fn branch_ancestry(cwd: &Path) -> Option<Vec<String>> {
         seen.insert(cb.clone());
         ancestry.push(cb);
     }
-    if let Some(db) = default_branch
-        && !seen.contains(&db)
-    {
-        seen.insert(db.clone());
-        ancestry.push(db);
+    if let Some(db) = default_branch.clone() {
+        if !seen.contains(&db) {
+            seen.insert(db.clone());
+            ancestry.push(db);
+        }
     }
 
     // Expand candidates: include any remote branches that already contain HEAD.
@@ -258,18 +263,18 @@ async fn branch_ancestry(cwd: &Path) -> Option<Vec<String>> {
             cwd,
         )
         .await
-            && output.status.success()
-            && let Ok(text) = String::from_utf8(output.stdout)
         {
-            for line in text.lines() {
-                let short = line.trim();
-                // Expect format like: "origin/feature"; extract the branch path after "remote/"
-                if let Some(stripped) = short.strip_prefix(&format!("{remote}/"))
-                    && !stripped.is_empty()
-                    && !seen.contains(stripped)
-                {
-                    seen.insert(stripped.to_string());
-                    ancestry.push(stripped.to_string());
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    for line in text.lines() {
+                        let short = line.trim();
+                        if let Some(stripped) = short.strip_prefix(&format!("{remote}/")) {
+                            if !stripped.is_empty() && !seen.contains(stripped) {
+                                seen.insert(stripped.to_string());
+                                ancestry.push(stripped.to_string());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -398,28 +403,29 @@ async fn diff_against_sha(cwd: &Path, sha: &GitSha) -> Option<String> {
 
     if let Some(untracked_output) =
         run_git_command_with_timeout(&["ls-files", "--others", "--exclude-standard"], cwd).await
-        && untracked_output.status.success()
     {
-        let untracked: Vec<String> = String::from_utf8(untracked_output.stdout)
-            .ok()?
-            .lines()
-            .map(|s| s.to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        if untracked_output.status.success() {
+            let untracked: Vec<String> = String::from_utf8(untracked_output.stdout)
+                .ok()?
+                .lines()
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
 
-        if !untracked.is_empty() {
-            let futures_iter = untracked.into_iter().map(|file| async move {
-                let file_owned = file;
-                let args_vec: Vec<&str> =
-                    vec!["diff", "--binary", "--no-index", "/dev/null", &file_owned];
-                run_git_command_with_timeout(&args_vec, cwd).await
-            });
-            let results = join_all(futures_iter).await;
-            for extra in results.into_iter().flatten() {
-                if extra.status.code().is_some_and(|c| c == 0 || c == 1)
-                    && let Ok(s) = String::from_utf8(extra.stdout)
-                {
-                    diff.push_str(&s);
+            if !untracked.is_empty() {
+                let futures_iter = untracked.into_iter().map(|file| async move {
+                    let file_owned = file;
+                    let args_vec: Vec<&str> =
+                        vec!["diff", "--binary", "--no-index", "/dev/null", &file_owned];
+                    run_git_command_with_timeout(&args_vec, cwd).await
+                });
+                let results = join_all(futures_iter).await;
+                for extra in results.into_iter().flatten() {
+                    if extra.status.code().is_some_and(|c| c == 0 || c == 1) {
+                        if let Ok(s) = String::from_utf8(extra.stdout) {
+                            diff.push_str(&s);
+                        }
+                    }
                 }
             }
         }
