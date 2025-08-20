@@ -368,6 +368,13 @@ impl Page {
 
     /// Check and fix viewport scaling issues before taking screenshots
     async fn check_and_fix_scaling(&self) -> Result<()> {
+        // Never touch viewport metrics for external Chrome connections.
+        // Changing device metrics on a user's Chrome causes a visible flash
+        // and slows down screenshots. We only verify/correct for internally
+        // launched Chrome where we control the window.
+        if self.config.connect_port.is_some() || self.config.connect_ws.is_some() {
+            return Ok(());
+        }
         // Check current viewport and scaling
         let check_script = r#"
             (() => {
@@ -389,11 +396,12 @@ impl Page {
                     expectedWidth: expectedWidth,
                     expectedHeight: expectedHeight,
                     expectedDpr: expectedDpr,
+                    // Only correct when there's a meaningful mismatch in size/DPR.
+                    // Ignore zoom heuristics which can be noisy on some platforms.
                     needsCorrection: (
-                        Math.abs(vw - expectedWidth) > 5 || 
+                        Math.abs(vw - expectedWidth) > 5 ||
                         Math.abs(vh - expectedHeight) > 5 ||
-                        Math.abs(dpr - expectedDpr) > 0.1 ||
-                        Math.abs(zoom - 1.0) > 0.1
+                        Math.abs(dpr - expectedDpr) > 0.05
                     )
                 };
             })()
@@ -461,18 +469,8 @@ impl Page {
 
                 self.cdp_page.execute(params).await?;
 
-                // Also reset zoom if it's not 1.0
-                if (current_zoom - 1.0).abs() > 0.1 {
-                    debug!("Resetting zoom from {} to 1.0", current_zoom);
-                    let reset_zoom_script = r#"
-                        // Reset zoom to 100%
-                        document.body.style.zoom = '1.0';
-                        // Also try to reset CSS transform scale if present
-                        document.documentElement.style.transform = 'scale(1)';
-                        document.documentElement.style.transformOrigin = '0 0';
-                    "#;
-                    let _ = self.cdp_page.evaluate(reset_zoom_script).await;
-                }
+                // Avoid aggressive zoom resets to reduce reflow/flash.
+                // If internal zoom is off, leave it unless size/DPR corrected above isn't sufficient.
 
                 info!("Viewport scaling corrected");
             }
@@ -1139,20 +1137,33 @@ impl Page {
             }
         }
 
-        // Ask the page to animate the virtual cursor and return duration
-        let dur_ms = self
-            .cdp_page
-            .evaluate(format!(
-                "(function(x,y){{ try {{ if(window.__vc && window.__vc.update) return window.__vc.update(x,y)|0; }} catch(_e){{}} return 0; }})({:.0},{:.0})",
-                move_x, move_y
-            ))
-            .await
-            .ok()
-            .and_then(|r| r.value().and_then(|v| v.as_u64()))
-            .unwrap_or(0) as u64;
+        // For internal browser, snap instantly without animation. For external, animate and respect duration.
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        let dur_ms = if is_external {
+            self
+                .cdp_page
+                .evaluate(format!(
+                    "(function(x,y){{ try {{ if(window.__vc && window.__vc.update) return window.__vc.update(x,y)|0; }} catch(_e){{}} return 0; }})({:.0},{:.0})",
+                    move_x, move_y
+                ))
+                .await
+                .ok()
+                .and_then(|r| r.value().and_then(|v| v.as_u64()))
+                .unwrap_or(0) as u64
+        } else {
+            // Internal browser: snap immediately and report zero duration
+            let _ = self
+                .cdp_page
+                .evaluate(format!(
+                    "(function(x,y){{ try {{ if(window.__vc && window.__vc.snapTo) {{ window.__vc.snapTo(x,y); return 0; }} }} catch(_e){{}} return 0; }})({:.0},{:.0})",
+                    move_x, move_y
+                ))
+                .await;
+            0
+        };
 
-        // Wait for the reported animation time before returning
-        if dur_ms > 0 {
+        // Only wait when connected to an external browser and there is a non-zero duration
+        if is_external && dur_ms > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(dur_ms)).await;
         }
 
@@ -1208,15 +1219,11 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
-        // Wait for click animation to settle before returning (helps next auto-screenshot)
+        // Wait briefly so the page processes the click; avoid long animation waits
         let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        let settle_ms = if is_external {
-            click_ms_val.max(120)
-        } else {
-            40
-        };
+        let settle_ms = if is_external { click_ms_val.min(240) } else { 40 };
         if settle_ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms)).await;
         }
 
         Ok(())
@@ -1346,15 +1353,11 @@ impl Page {
             .map_err(BrowserError::CdpError)?;
         self.cdp_page.execute(up_params).await?;
 
-        // Wait so the next auto-screenshot captures the click pulse
+        // Wait briefly so the page processes the click; avoid long animation waits
         let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
-        let settle_ms = if is_external {
-            click_ms_val.max(120)
-        } else {
-            40
-        };
+        let settle_ms = if is_external { click_ms_val.min(240) } else { 40 };
         if settle_ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms.min(3000))).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms)).await;
         }
 
         Ok((click_x, click_y))
@@ -1465,8 +1468,63 @@ impl Page {
 
         let text_len = processed_text.len();
 
-        if text_len < 20 {
-            // Short text: character-by-character with natural delays
+        if text_len >= 100 {
+            // Large text: paste-style insertion with no per-char delay
+            // Try to insert at caret for input/textarea and contenteditable; fall back to raw key events without delay.
+            let js = format!(
+                r#"(() => {{
+  try {{
+    const T = {text_json};
+    const isEditableInputType = (t) => !/^(checkbox|radio|button|submit|reset|file|image|color|hidden|range)$/i.test(t || '');
+    const isEditable = (el) => !!el && ((el.tagName === 'INPUT' && isEditableInputType(el.type)) || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+    const deepActiveElement = (rootDoc) => {{
+      let ae = (rootDoc || document).activeElement;
+      while (ae && ae.shadowRoot && ae.shadowRoot.activeElement) {{ ae = ae.shadowRoot.activeElement; }}
+      while (ae && ae.tagName === 'IFRAME') {{
+        try {{
+          const doc = ae.contentWindow && ae.contentWindow.document; if (!doc) break;
+          let inner = doc.activeElement; if (!inner) break;
+          while (inner && inner.shadowRoot && inner.shadowRoot.activeElement) {{ inner = inner.shadowRoot.activeElement; }}
+          ae = inner;
+        }} catch (_) {{ break; }}
+      }}
+      return ae || null;
+    }};
+    const ae = deepActiveElement();
+    if (!isEditable(ae)) return {{ success: false, reason: 'no-editable' }};
+
+    if (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA') {{
+      const start = ae.selectionStart|0, end = ae.selectionEnd|0;
+      const val = String(ae.value || '');
+      const before = val.slice(0, start), after = val.slice(end);
+      ae.value = before + T + after;
+      const pos = (before + T).length;
+      ae.selectionStart = ae.selectionEnd = pos;
+      try {{ ae.dispatchEvent(new InputEvent('input', {{ bubbles: true, inputType: 'insertText', data: T }})); }} catch (_e) {{}}
+      return {{ success: true, inserted: T.length, caret: pos }};
+    }} else if (ae.isContentEditable === true) {{
+      try {{ if (document.execCommand) {{ document.execCommand('insertText', false, T); return {{ success: true, inserted: T.length }}; }} }} catch (_e) {{}}
+      try {{
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {{
+          const r = sel.getRangeAt(0);
+          r.deleteContents();
+          r.insertNode(document.createTextNode(T));
+          r.collapse(false);
+          return {{ success: true, inserted: T.length }};
+        }}
+      }} catch (_e) {{}}
+      return {{ success: false, reason: 'contenteditable-failed' }};
+    }}
+    return {{ success: false, reason: 'unsupported' }};
+  }} catch (e) {{ return {{ success: false, error: String(e) }}; }}
+}})()"#,
+                text_json = serde_json::to_string(&processed_text).unwrap_or_else(|_| "".to_string())
+            );
+
+            let _ = self.execute_javascript(&js).await;
+        } else {
+            // Short/medium text: per-character with reduced delay 30–60ms
             for ch in processed_text.chars() {
                 if ch == '\n' {
                     self.press_key("Enter").await?;
@@ -1481,74 +1539,9 @@ impl Page {
                     self.cdp_page.execute(params).await?;
                 }
 
-                // Natural typing delay with slight randomization
-                let delay = 50 + (rand::random::<u64>() % 30);
+                // Reduced natural typing delay
+                let delay = 30 + (rand::random::<u64>() % 31); // 30–60ms
                 tokio::time::sleep(Duration::from_millis(delay)).await;
-            }
-        } else if text_len < 100 {
-            // Medium text: small chunks with InsertTextParams
-            let chunk_size = 3;
-            let chars: Vec<char> = processed_text.chars().collect();
-            let chunks: Vec<String> = chars
-                .chunks(chunk_size)
-                .map(|chunk| chunk.iter().collect())
-                .collect();
-
-            for chunk in chunks {
-                // Type each character in the chunk
-                for ch in chunk.chars() {
-                    if ch == '\n' {
-                        self.press_key("Enter").await?;
-                    } else if ch == '\t' {
-                        self.press_key("Tab").await?;
-                    } else {
-                        let params = DispatchKeyEventParams::builder()
-                            .r#type(DispatchKeyEventType::Char)
-                            .text(ch.to_string())
-                            .build()
-                            .map_err(BrowserError::CdpError)?;
-                        self.cdp_page.execute(params).await?;
-                    }
-                }
-
-                // Delay between chunks
-                let delay = 100 + (rand::random::<u64>() % 50);
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-            }
-        } else {
-            // Long text: larger chunks for efficiency
-            let chunk_size = 10;
-            let chars: Vec<char> = processed_text.chars().collect();
-            let chunks: Vec<String> = chars
-                .chunks(chunk_size)
-                .map(|chunk| chunk.iter().collect())
-                .collect();
-
-            for (i, chunk) in chunks.iter().enumerate() {
-                // Type each character in the chunk
-                for ch in chunk.chars() {
-                    if ch == '\n' {
-                        self.press_key("Enter").await?;
-                    } else if ch == '\t' {
-                        self.press_key("Tab").await?;
-                    } else {
-                        let params = DispatchKeyEventParams::builder()
-                            .r#type(DispatchKeyEventType::Char)
-                            .text(ch.to_string())
-                            .build()
-                            .map_err(BrowserError::CdpError)?;
-                        self.cdp_page.execute(params).await?;
-                    }
-                }
-
-                // Add occasional longer pauses to simulate thinking
-                if i % 5 == 0 && i > 0 {
-                    let delay = 300 + (rand::random::<u64>() % 200);
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                } else {
-                    let delay = 150 + (rand::random::<u64>() % 100);
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                }
             }
         }
 
@@ -1743,10 +1736,11 @@ impl Page {
 
         tracing::debug!("JavaScript execution result: {}", result_value);
 
-        // Give a brief moment for potential navigation triggered by the script
-        // (e.g., element.click(), location changes) to take effect before
-        // downstream consumers capture screenshots.
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        // Give a very brief moment for potential navigation or DOM updates triggered
+        // by the script. Keep this low to avoid inflating tool latency.
+        let is_external = self.config.connect_port.is_some() || self.config.connect_ws.is_some();
+        let settle_ms = if is_external { 120 } else { 40 };
+        tokio::time::sleep(tokio::time::Duration::from_millis(settle_ms)).await;
 
         Ok(result_value)
     }
