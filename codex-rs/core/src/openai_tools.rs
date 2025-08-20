@@ -482,6 +482,7 @@ pub(crate) fn get_openai_tools(
         tools.push(create_browser_history_tool());
         tools.push(create_browser_inspect_tool());
         tools.push(create_browser_console_tool());
+        tools.push(create_browser_cleanup_tool());
         tools.push(create_browser_cdp_tool());
     } else {
         // Only include browser_open and browser_status when browser is disabled
@@ -1147,7 +1148,7 @@ fn create_browser_inspect_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_inspect".to_string(),
-        description: "Inspects a DOM element by coordinates or id, returns attributes, outerHTML, box model, matched styles, and briefly highlights the node with a screenshot.".to_string(),
+        description: "Inspects a DOM element by coordinates or id, returns attributes, outerHTML, box model, and matched styles.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1172,6 +1173,19 @@ fn create_browser_console_tool() -> OpenAiTool {
         strict: false,
         parameters: JsonSchema::Object {
             properties,
+            required: Some(vec![]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_browser_cleanup_tool() -> OpenAiTool {
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "browser_cleanup".to_string(),
+        description: "Cleans up injected artifacts (cursor overlays, highlights) and resets viewport metrics without closing the browser.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties: BTreeMap::new(),
             required: Some(vec![]),
             additional_properties: Some(false),
         },
