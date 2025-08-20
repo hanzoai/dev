@@ -831,13 +831,8 @@ impl Page {
 
     // (UPDATED) Inject cursor before taking screenshot
     pub async fn screenshot(&self, mode: ScreenshotMode) -> Result<Vec<Screenshot>> {
-        // Always verify and correct viewport before capturing
-        if let Err(e) = self.check_and_fix_scaling().await {
-            warn!(
-                "Failed to check/fix viewport scaling: {}, continuing anyway",
-                e
-            );
-        }
+        // Do not adjust device metrics before screenshots; this causes flashing on
+        // external Chrome and adds latency. Rely on connect-time configuration.
 
         // Fast path: ensure the virtual cursor exists before capturing
         let injected = match self.ensure_virtual_cursor().await {
