@@ -864,27 +864,45 @@ fn output_lines(
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     if !only_err && !stdout.is_empty() {
+        // Truncate stdout to 6 lines: first 1, ellipsis, last 5 when needed
+        let non_empty: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
+        enum Seg<'a> { Line(&'a str), Ellipsis }
+        let segments: Vec<Seg> = if non_empty.len() <= 6 {
+            non_empty.iter().map(|s| Seg::Line(s)).collect()
+        } else {
+            let mut v: Vec<Seg> = Vec::with_capacity(7);
+            v.push(Seg::Line(non_empty[0]));
+            v.push(Seg::Ellipsis);
+            let start = non_empty.len() - 5;
+            for s in &non_empty[start..] { v.push(Seg::Line(s)); }
+            v
+        };
+
         let start_time = Instant::now();
-        let output_lines = stdout.lines().filter(|line| !line.is_empty());
-        for line in output_lines {
-            let elapsed = start_time.elapsed();
-            if elapsed > Duration::from_millis(100) {
-                tracing::warn!("Slow ansi_escape_line took {:?}", elapsed);
-            }
-            if include_angle_pipe {
-                let mut line_spans = vec![
-                    Span::styled(
-                        "> ",
-                        Style::default()
-                            .add_modifier(Modifier::DIM)
-                            .fg(crate::colors::text_dim()),
-                    ),
-                ];
-                let escaped_line = ansi_escape_line(line);
-                line_spans.extend(escaped_line.spans);
-                lines.push(Line::from(line_spans));
-            } else {
-                lines.push(ansi_escape_line(line));
+        for seg in segments {
+            match seg {
+                Seg::Line(line) => {
+                    let elapsed = start_time.elapsed();
+                    if elapsed > Duration::from_millis(100) {
+                        tracing::warn!("Slow ansi_escape_line took {:?}", elapsed);
+                    }
+                    if include_angle_pipe {
+                        let mut line_spans = vec![
+                            Span::styled(
+                                "> ",
+                                Style::default()
+                                    .add_modifier(Modifier::DIM)
+                                    .fg(crate::colors::text_dim()),
+                            ),
+                        ];
+                        let escaped_line = ansi_escape_line(line);
+                        line_spans.extend(escaped_line.spans);
+                        lines.push(Line::from(line_spans));
+                    } else {
+                        lines.push(ansi_escape_line(line));
+                    }
+                }
+                Seg::Ellipsis => lines.push(Line::from("…".dim())),
             }
         }
     }
@@ -1439,7 +1457,10 @@ fn new_parsed_command(
         }
     }
 
-    lines.extend(output_lines(output, true, false));
+    // Show stdout for real run commands; keep read/search/list concise unless error
+    let show_stdout = action == "run";
+    let use_angle_pipe = show_stdout; // add "> " prefix for run output
+    lines.extend(output_lines(output, !show_stdout, use_angle_pipe));
     lines.push(Line::from(""));
     lines
 }
