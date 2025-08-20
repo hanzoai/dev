@@ -39,6 +39,8 @@ pub(crate) const PROJECT_DOC_MAX_BYTES: usize = 32 * 1024; // 32 KiB
 
 const CONFIG_TOML_FILE: &str = "config.toml";
 
+const DEFAULT_RESPONSES_ORIGINATOR_HEADER: &str = "codex_cli_rs";
+
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -168,7 +170,7 @@ pub struct Config {
     pub include_plan_tool: bool,
 
     /// The value for the `originator` header included with Responses API requests.
-    pub internal_originator: Option<String>,
+    pub responses_originator_header: String,
 
     /// Enable debug logging of LLM requests and responses
     pub debug: bool,
@@ -472,7 +474,7 @@ pub struct ConfigToml {
     pub experimental_instructions_file: Option<PathBuf>,
 
     /// The value for the `originator` header included with Responses API requests.
-    pub internal_originator: Option<String>,
+    pub responses_originator_header_internal_override: Option<String>,
 
     pub projects: Option<HashMap<String, ProjectConfig>>,
 
@@ -687,6 +689,10 @@ impl Config {
         // Check if we're using ChatGPT auth before moving codex_home
         let using_chatgpt_auth = Self::is_using_chatgpt_auth(&codex_home);
 
+        let responses_originator_header: String = cfg
+            .responses_originator_header_internal_override
+            .unwrap_or(DEFAULT_RESPONSES_ORIGINATOR_HEADER.to_owned());
+
         let config = Self {
             model,
             model_family,
@@ -744,7 +750,7 @@ impl Config {
 
             experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
-            internal_originator: cfg.internal_originator,
+            responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving codex_home
             using_chatgpt_auth,
