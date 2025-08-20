@@ -11,6 +11,8 @@ use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
 use crossterm::style::SetColors;
+use crossterm::style::{Color as CtColor, SetBackgroundColor, SetForegroundColor, ResetColor};
+use crossterm::style::Print;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
 use ratatui::Terminal;
@@ -86,6 +88,22 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         crossterm::terminal::SetTitle("Code"),
         crossterm::terminal::EnableLineWrap
     )?;
+
+    // Some terminals (notably macOS Terminal.app with certain profiles)
+    // clear to the terminal's default background color instead of the
+    // currently set background attribute. Proactively paint the entire
+    // screen area with our theme background to ensure consistent visuals.
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
+        // Build a single line of spaces once to reduce allocations.
+        let blank = " ".repeat(cols as usize);
+        // Set explicit fg/bg to the theme's colors while painting.
+        execute!(stdout(), SetForegroundColor(CtColor::from(theme_fg)), SetBackgroundColor(CtColor::from(theme_bg)))?;
+        for y in 0..rows {
+            execute!(stdout(), MoveTo(0, y), Print(&blank))?;
+        }
+        // Restore cursor to home and leave colors configured for subsequent drawing.
+        execute!(stdout(), MoveTo(0, 0), ResetColor, SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
+    }
 
     let backend = CrosstermBackend::new(stdout());
     let tui = Terminal::new(backend)?;
