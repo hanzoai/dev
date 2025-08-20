@@ -50,6 +50,15 @@ struct TokenUsageInfo {
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
     model_context_window: Option<u64>,
+    /// Baseline token count present in the context before the user's first
+    /// message content is considered. This is used to normalize the
+    /// "context left" percentage so it reflects the portion the user can
+    /// influence rather than fixed prompt overhead (system prompt, tool
+    /// instructions, etc.).
+    ///
+    /// Preferred source is `cached_input_tokens` from the first turn (when
+    /// available), otherwise we fall back to 0.
+    initial_prompt_tokens: u64,
 }
 
 // Format an integer with thousands separators (e.g., 125,654).
@@ -346,10 +355,17 @@ impl ChatComposer {
         last_token_usage: TokenUsage,
         model_context_window: Option<u64>,
     ) {
+        let initial_prompt_tokens = self
+            .token_usage_info
+            .as_ref()
+            .map(|info| info.initial_prompt_tokens)
+            .unwrap_or_else(|| last_token_usage.cached_input_tokens.unwrap_or(0));
+
         self.token_usage_info = Some(TokenUsageInfo {
             total_token_usage,
             last_token_usage,
             model_context_window,
+            initial_prompt_tokens,
         });
     }
 
@@ -488,6 +504,7 @@ impl ChatComposer {
 
                     if !starts_with_cmd {
                         self.textarea.set_text(&format!("/{} ", cmd.command()));
+                        self.textarea.set_cursor(self.textarea.text().len());
                     }
                     // After completing, place the cursor at the end of the
                     // slash command so the user can immediately type args.
@@ -1700,6 +1717,28 @@ mod tests {
             Err(TryRecvError::Empty) => panic!("expected a DispatchCommand event for '/init'"),
             Err(TryRecvError::Disconnected) => panic!("app event channel disconnected"),
         }
+    }
+
+    #[test]
+    fn slash_tab_completion_moves_cursor_to_end() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer =
+            ChatComposer::new(true, sender, false, "Ask Codex to do anything".to_string());
+
+        for ch in ['/', 'c'] {
+            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        let (_result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(composer.textarea.text(), "/compact ");
+        assert_eq!(composer.textarea.cursor(), composer.textarea.text().len());
     }
 
     #[test]

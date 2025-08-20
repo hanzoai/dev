@@ -1567,122 +1567,120 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
     if let Some(tree) = try_parse_bash(script) {
         if let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script) {
             if !all_commands.is_empty() {
-                let script_tokens = shlex_split(script)
-                    .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
-                // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
-                // bias toward the primary command when pipelines are present.
-                // First, drop obvious small formatting helpers (e.g., wc/awk/etc).
-                let had_multiple_commands = all_commands.len() > 1;
-                // The bash AST walker yields commands in right-to-left order for
-                // connector/pipeline sequences. Reverse to reflect actual execution order.
-                let mut filtered_commands = drop_small_formatting_commands(all_commands);
-                filtered_commands.reverse();
-                if filtered_commands.is_empty() {
-                    return Some(vec![ParsedCommand::Unknown {
-                        cmd: script.clone(),
-                    }]);
-                }
-                let mut commands: Vec<ParsedCommand> = filtered_commands
-                    .into_iter()
-                    .map(|tokens| summarize_main_tokens(&tokens))
-                    .collect();
-                if commands.len() > 1 {
-                    commands.retain(|pc| !matches!(pc, ParsedCommand::Noop { .. }));
-                }
-                if commands.len() == 1 {
-                    // If we reduced to a single command, attribute the full original script
-                    // for clearer UX in file-reading and listing scenarios, or when there were
-                    // no connectors in the original script. For search commands that came from
-                    // a pipeline (e.g. `rg --files | sed -n`), keep only the primary command.
-                    let had_connectors = had_multiple_commands
-                        || script_tokens
-                            .iter()
-                            .any(|t| t == "|" || t == "&&" || t == "||" || t == ";");
-                    commands = commands
-                        .into_iter()
-                        .map(|pc| match pc {
-                            ParsedCommand::Read { name, cmd, .. } => {
-                                if had_connectors {
-                                    let has_pipe = script_tokens.iter().any(|t| t == "|");
-                                    let has_sed_n = script_tokens.windows(2).any(|w| {
-                                        w.first().map(|s| s.as_str()) == Some("sed")
-                                            && w.get(1).map(|s| s.as_str()) == Some("-n")
-                                    });
-                                    if has_pipe && has_sed_n {
-                                        ParsedCommand::Read {
-                                            cmd: script.clone(),
-                                            name,
-                                        }
-                                    } else {
-                                        ParsedCommand::Read {
-                                            cmd: cmd.clone(),
-                                            name,
-                                        }
-                                    }
-                                } else {
-                                    ParsedCommand::Read {
-                                        cmd: shlex_join(&script_tokens),
-                                        name,
-                                    }
+        let script_tokens = shlex_split(script)
+            .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
+        // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
+        // bias toward the primary command when pipelines are present.
+        // First, drop obvious small formatting helpers (e.g., wc/awk/etc).
+        let had_multiple_commands = all_commands.len() > 1;
+        // The bash AST walker yields commands in right-to-left order for
+        // connector/pipeline sequences. Reverse to reflect actual execution order.
+        let mut filtered_commands = drop_small_formatting_commands(all_commands);
+        filtered_commands.reverse();
+        if filtered_commands.is_empty() {
+            return Some(vec![ParsedCommand::Unknown {
+                cmd: script.clone(),
+            }]);
+        }
+        let mut commands: Vec<ParsedCommand> = filtered_commands
+            .into_iter()
+            .map(|tokens| summarize_main_tokens(&tokens))
+            .collect();
+        if commands.len() > 1 {
+            commands.retain(|pc| !matches!(pc, ParsedCommand::Noop { .. }));
+        }
+        if commands.len() == 1 {
+            // If we reduced to a single command, attribute the full original script
+            // for clearer UX in file-reading and listing scenarios, or when there were
+            // no connectors in the original script. For search commands that came from
+            // a pipeline (e.g. `rg --files | sed -n`), keep only the primary command.
+            let had_connectors = had_multiple_commands
+                || script_tokens
+                    .iter()
+                    .any(|t| t == "|" || t == "&&" || t == "||" || t == ";");
+            commands = commands
+                .into_iter()
+                .map(|pc| match pc {
+                    ParsedCommand::Read { name, cmd, .. } => {
+                        if had_connectors {
+                            let has_pipe = script_tokens.iter().any(|t| t == "|");
+                            let has_sed_n = script_tokens.windows(2).any(|w| {
+                                w.first().map(|s| s.as_str()) == Some("sed")
+                                    && w.get(1).map(|s| s.as_str()) == Some("-n")
+                            });
+                            if has_pipe && has_sed_n {
+                                ParsedCommand::Read {
+                                    cmd: script.clone(),
+                                    name,
+                                }
+                            } else {
+                                ParsedCommand::Read {
+                                    cmd: cmd.clone(),
+                                    name,
                                 }
                             }
-                            ParsedCommand::ListFiles { path, cmd, .. } => {
-                                if had_connectors {
-                                    ParsedCommand::ListFiles {
-                                        cmd: cmd.clone(),
-                                        path,
-                                    }
-                                } else {
-                                    ParsedCommand::ListFiles {
-                                        cmd: shlex_join(&script_tokens),
-                                        path,
-                                    }
-                                }
+                        } else {
+                            ParsedCommand::Read {
+                                cmd: shlex_join(&script_tokens),
+                                name,
                             }
+                        }
+                    }
+                    ParsedCommand::ListFiles { path, cmd, .. } => {
+                        if had_connectors {
+                            ParsedCommand::ListFiles {
+                                cmd: cmd.clone(),
+                                path,
+                            }
+                        } else {
+                            ParsedCommand::ListFiles {
+                                cmd: shlex_join(&script_tokens),
+                                path,
+                            }
+                        }
+                    }
+                    ParsedCommand::Search {
+                        query, path, cmd, ..
+                    } => {
+                        if had_connectors {
                             ParsedCommand::Search {
-                                query, path, cmd, ..
-                            } => {
-                                if had_connectors {
-                                    ParsedCommand::Search {
-                                        cmd: cmd.clone(),
-                                        query,
-                                        path,
-                                    }
-                                } else {
-                                    ParsedCommand::Search {
-                                        cmd: shlex_join(&script_tokens),
-                                        query,
-                                        path,
-                                    }
-                                }
-                            }
-                            ParsedCommand::Format {
-                                tool, targets, cmd, ..
-                            } => ParsedCommand::Format {
                                 cmd: cmd.clone(),
-                                tool,
-                                targets,
-                            },
-                            ParsedCommand::Test { cmd, .. } => {
-                                ParsedCommand::Test { cmd: cmd.clone() }
+                                query,
+                                path,
                             }
-                            ParsedCommand::Lint {
-                                tool, targets, cmd, ..
-                            } => ParsedCommand::Lint {
-                                cmd: cmd.clone(),
-                                tool,
-                                targets,
-                            },
-                            ParsedCommand::Unknown { .. } => ParsedCommand::Unknown {
-                                cmd: script.clone(),
-                            },
-                            ParsedCommand::Noop { .. } => ParsedCommand::Noop {
-                                cmd: script.clone(),
-                            },
-                        })
-                        .collect();
-                }
-                return Some(commands);
+                        } else {
+                            ParsedCommand::Search {
+                                cmd: shlex_join(&script_tokens),
+                                query,
+                                path,
+                            }
+                        }
+                    }
+                    ParsedCommand::Format {
+                        tool, targets, cmd, ..
+                    } => ParsedCommand::Format {
+                        cmd: cmd.clone(),
+                        tool,
+                        targets,
+                    },
+                    ParsedCommand::Test { cmd, .. } => ParsedCommand::Test { cmd: cmd.clone() },
+                    ParsedCommand::Lint {
+                        tool, targets, cmd, ..
+                    } => ParsedCommand::Lint {
+                        cmd: cmd.clone(),
+                        tool,
+                        targets,
+                    },
+                    ParsedCommand::Unknown { .. } => ParsedCommand::Unknown {
+                        cmd: script.clone(),
+                    },
+                    ParsedCommand::Noop { .. } => ParsedCommand::Noop {
+                        cmd: script.clone(),
+                    },
+                })
+                .collect();
+        }
+        return Some(commands);
             }
         }
     }

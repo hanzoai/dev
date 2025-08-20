@@ -32,6 +32,7 @@ pub(crate) fn render_rows(
     rows_all: &[GenericDisplayRow],
     state: &ScrollState,
     max_results: usize,
+    _dim_non_selected: bool,
 ) {
     let mut rows: Vec<Row> = Vec::new();
     if rows_all.is_empty() {
@@ -67,7 +68,7 @@ pub(crate) fn render_rows(
             let GenericDisplayRow {
                 name,
                 match_indices,
-                is_current,
+                is_current: _is_current,
                 description,
                 name_color,
             } = row;
@@ -106,7 +107,7 @@ pub(crate) fn render_rows(
             let mut cell = Cell::from(Line::from(spans));
             if Some(i) == state.selected_idx {
                 cell = cell.style(Style::default().fg(crate::colors::primary()));
-            } else if *is_current {
+            } else if *_is_current {
                 cell = cell.style(Style::default().fg(crate::colors::light_blue()));
             }
             rows.push(Row::new(vec![cell]));
