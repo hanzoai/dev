@@ -243,11 +243,11 @@ mod tests {
     use super::*;
     use crate::app_event::AppEvent;
     use codex_core::protocol::Op;
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::mpsc::channel;
 
     #[test]
     fn navigation_with_async_fetch() {
-        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx, rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx);
 
         let mut history = ChatComposerHistory::new();

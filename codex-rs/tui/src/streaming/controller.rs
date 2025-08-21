@@ -4,6 +4,7 @@ use codex_core::config::Config;
 use ratatui::text::Line;
 
 use super::HeaderEmitter;
+use super::StreamKind;
 use super::StreamState;
 
 /// Sink for history insertions and animation control.
@@ -29,7 +30,7 @@ impl HistorySink for AppEventHistorySink {
             }
         }
         self.0
-            .send(crate::app_event::AppEvent::InsertHistoryLines(lines))
+            .send(crate::app_event::AppEvent::InsertHistory(lines))
     }
     fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>) {
         tracing::debug!("insert_history_with_kind({:?}) {} lines", kind, lines.len());
@@ -52,8 +53,8 @@ type Lines = Vec<Line<'static>>;
 pub(crate) struct StreamController {
     config: Config,
     header: HeaderEmitter,
-    state: StreamState,
-    active: bool,
+    states: [StreamState; 2],
+    current_stream: Option<StreamKind>,
     finishing_after_drain: bool,
     thinking_placeholder_shown: bool,
 }
@@ -75,7 +76,7 @@ impl StreamController {
     }
 
     pub(crate) fn is_write_cycle_active(&self) -> bool {
-        self.active
+        self.current_stream.is_some()
     }
     
 
@@ -88,8 +89,19 @@ impl StreamController {
         // leave header state unchanged; caller decides when to reset
     }
 
-    fn emit_header_if_needed(&mut self, out_lines: &mut Lines) -> bool {
-        self.header.maybe_emit(out_lines)
+    #[inline]
+    fn idx(kind: StreamKind) -> usize {
+        kind as usize
+    }
+    fn state(&self, kind: StreamKind) -> &StreamState {
+        &self.states[Self::idx(kind)]
+    }
+    fn state_mut(&mut self, kind: StreamKind) -> &mut StreamState {
+        &mut self.states[Self::idx(kind)]
+    }
+
+    fn emit_header_if_needed(&mut self, kind: StreamKind, out_lines: &mut Lines) -> bool {
+        self.header.maybe_emit(kind, out_lines)
     }
 
     #[inline]
@@ -149,8 +161,6 @@ impl StreamController {
                 }
             }
         }
-        self.finishing_after_drain = false;
-        self.active = true;
     }
 
     /// Push a delta; if it contains a newline, commit completed lines and start animation.
@@ -265,21 +275,26 @@ impl StreamController {
     }
 
     /// Finalize the active stream. If `flush_immediately` is true, drain and emit now.
-    pub(crate) fn finalize(&mut self, flush_immediately: bool, sink: &impl HistorySink) -> bool {
-        if !self.active {
+    pub(crate) fn finalize(
+        &mut self,
+        kind: StreamKind,
+        flush_immediately: bool,
+        sink: &impl HistorySink,
+    ) -> bool {
+        if self.current_stream != Some(kind) {
             return false;
         }
         let cfg = self.config.clone();
         // Finalize collector first.
         let remaining = {
-            let state = &mut self.state;
+            let state = self.state_mut(kind);
             state.collector.finalize_and_drain(&cfg)
         };
         if flush_immediately {
             // Collect all output first to avoid emitting headers when there is no content.
             let mut out_lines: Lines = Vec::new();
             {
-                let state = &mut self.state;
+                let state = self.state_mut(kind);
                 if !remaining.is_empty() {
                     state.enqueue(remaining);
                 }
@@ -335,17 +350,17 @@ impl StreamController {
             }
 
             // Cleanup
-            self.state.clear();
-            // Allow a subsequent block in this turn to emit its header.
-            self.header.allow_reemit_in_turn();
+            self.state_mut(kind).clear();
+            // Allow a subsequent block of the same kind in this turn to emit its header.
+            self.header.allow_reemit_for_same_kind_in_turn(kind);
             // Also clear the per-stream emitted flag so the header can render again.
-            self.header.reset_for_stream();
-            self.active = false;
+            self.header.reset_for_stream(kind);
+            self.current_stream = None;
             self.finishing_after_drain = false;
             true
         } else {
             if !remaining.is_empty() {
-                let state = &mut self.state;
+                let state = self.state_mut(kind);
                 state.enqueue(remaining);
             }
             // Don't add spacer - causes extra blank lines
@@ -358,10 +373,13 @@ impl StreamController {
 
     /// Step animation: commit at most one queued line and handle end-of-drain cleanup.
     pub(crate) fn on_commit_tick(&mut self, sink: &impl HistorySink) -> bool {
-        if !self.active {
+        let Some(kind) = self.current_stream else {
             return false;
-        }
-        let step = { self.state.step() };
+        };
+        let step = {
+            let state = self.state_mut(kind);
+            state.step()
+        };
         if !step.history.is_empty() {
             let mut lines: Lines = Vec::new();
             // Emit header if needed for this stream; ignore return value
@@ -413,17 +431,17 @@ impl StreamController {
             sink.insert_history_with_kind(kind, out);
         }
 
-        let is_idle = self.state.is_idle();
+        let is_idle = self.state(kind).is_idle();
         if is_idle {
             sink.stop_commit_animation();
             if self.finishing_after_drain {
                 // Reset and notify
-                self.state.clear();
-                // Allow a subsequent block in this turn to emit its header.
-                self.header.allow_reemit_in_turn();
+                self.state_mut(kind).clear();
+                // Allow a subsequent block of the same kind in this turn to emit its header.
+                self.header.allow_reemit_for_same_kind_in_turn(kind);
                 // Also clear the per-stream emitted flag so the header can render again.
-                self.header.reset_for_stream();
-                self.active = false;
+                self.header.reset_for_stream(kind);
+                self.current_stream = None;
                 self.finishing_after_drain = false;
                 return true;
             }
@@ -499,6 +517,7 @@ impl StreamController {
                     .replace_with_and_mark_committed(&msg, committed);
             }
         }
-        self.finalize(true, sink)
+
+        self.finalize(kind, immediate, sink)
     }
 }
