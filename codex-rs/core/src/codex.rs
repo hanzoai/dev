@@ -120,6 +120,9 @@ reasoning: {:?}"#,
             // Try to capture screenshot and compare with last one
             let screenshot_status = match capture_browser_screenshot(sess).await {
                 Ok((screenshot_path, _url)) => {
+                    // Always update the UI with the latest screenshot, even if unchanged for LLM payload
+                    // This ensures the user sees that a fresh capture occurred each turn.
+                    add_pending_screenshot(sess, screenshot_path.clone(), url.clone());
                     // Check if screenshot has changed using image hashing
                     let mut last_screenshot_info = sess.last_screenshot_info.lock().unwrap();
 
