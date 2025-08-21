@@ -124,10 +124,10 @@ struct RunningCommand {
     history_index: Option<usize>,
 }
 
-pub(crate) struct ChatWidget<'a> {
+pub(crate) struct ChatWidget {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
-    bottom_pane: BottomPane<'a>,
+    bottom_pane: BottomPane,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     config: Config,
@@ -1048,6 +1048,7 @@ impl ChatWidget<'_> {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
             bottom_pane: BottomPane::new(BottomPaneParams {
+                frame_requester,
                 app_event_tx,
                 has_input_focus: true,
                 enhanced_keys_supported,
@@ -2393,7 +2394,7 @@ impl ChatWidget<'_> {
     }
 
     fn request_redraw(&mut self) {
-        self.app_event_tx.send(AppEvent::RequestRedraw);
+        self.frame_requester.schedule_frame();
     }
 
     pub(crate) fn handle_perf_command(&mut self, args: String) {
@@ -5185,7 +5186,7 @@ impl ChatWidget<'_> {
 
 }
 
-impl WidgetRef for &ChatWidget<'_> {
+impl WidgetRef for &ChatWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
 
         // Fill entire area with theme background

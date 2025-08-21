@@ -3,19 +3,16 @@ use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
 use crate::file_search::FileSearchManager;
 use crate::get_git_diff::get_git_diff;
-use crate::get_login_status;
-use crate::onboarding::onboarding_screen::KeyboardHandler;
-use crate::onboarding::onboarding_screen::OnboardingScreen;
-use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
+use crate::transcript_app::run_transcript_app;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
+use codex_core::protocol::TokenUsage;
 use color_eyre::eyre::Result;
-use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -24,8 +21,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
@@ -53,8 +48,7 @@ enum AppState<'a> {
 pub(crate) struct App<'a> {
     _server: Arc<ConversationManager>,
     app_event_tx: AppEventSender,
-    app_event_rx: Receiver<AppEvent>,
-    app_state: AppState<'a>,
+    chat_widget: ChatWidget,
 
     /// Config is stored here so we can recreate ChatWidgets as needed.
     config: Config,
@@ -107,7 +101,7 @@ impl App<'_> {
         let app_event_tx = AppEventSender::new(app_event_tx);
         let pending_redraw = Arc::new(AtomicBool::new(false));
 
-        let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
+        let conversation_manager = Arc::new(ConversationManager::default());
 
         // Spawn a dedicated thread for reading the crossterm event loop and
         // re-publishing the events as AppEvents, as appropriate.
@@ -263,27 +257,18 @@ impl App<'_> {
                     // Draw immediately; no debounce
                     std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
                 }
-                AppEvent::Redraw => {
-                    std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
+                SlashCommand::Init => {
+                    // Guard: do not run if a task is active.
+                    const INIT_PROMPT: &str = include_str!("../prompt_for_init_command.md");
+                    self.chat_widget
+                        .submit_text_message(INIT_PROMPT.to_string());
                 }
-                AppEvent::StartCommitAnimation => {
-                    if self
-                        .commit_anim_running
-                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                        .is_ok()
-                    {
-                        let tx = self.app_event_tx.clone();
-                        let running = self.commit_anim_running.clone();
-                        thread::spawn(move || {
-                            while running.load(Ordering::Relaxed) {
-                                thread::sleep(Duration::from_millis(50));
-                                tx.send(AppEvent::CommitTick);
-                            }
-                        });
-                    }
+                SlashCommand::Compact => {
+                    self.chat_widget.clear_token_usage();
+                    self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
                 }
-                AppEvent::StopCommitAnimation => {
-                    self.commit_anim_running.store(false, Ordering::Release);
+                SlashCommand::Model => {
+                    self.chat_widget.open_model_popup();
                 }
                 AppEvent::CommitTick => {
                     // Advance streaming animation: commit at most one queued line
@@ -684,15 +669,11 @@ impl App<'_> {
                         )),
                     }
                 }
-                AppEvent::StartFileSearch(query) => {
-                    if !query.is_empty() {
-                        self.file_search.on_user_query(query);
-                    }
+                SlashCommand::Status => {
+                    self.chat_widget.add_status_output();
                 }
-                AppEvent::FileSearchResult { query, matches } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_file_search_result(query, matches);
-                    }
+                SlashCommand::Mcp => {
+                    self.chat_widget.add_mcp_output();
                 }
                 AppEvent::ShowChromeOptions(port) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -708,6 +689,21 @@ impl App<'_> {
                     // Schedule the next redraw with the requested duration
                     self.schedule_redraw_in(duration);
                 }
+            }
+            AppEvent::FileSearchResult { query, matches } => {
+                self.chat_widget.apply_file_search_result(query, matches);
+            }
+            AppEvent::UpdateReasoningEffort(effort) => {
+                self.chat_widget.set_reasoning_effort(effort);
+            }
+            AppEvent::UpdateModel(model) => {
+                self.chat_widget.set_model(model);
+            }
+            AppEvent::UpdateAskForApprovalPolicy(policy) => {
+                self.chat_widget.set_approval_policy(policy);
+            }
+            AppEvent::UpdateSandboxPolicy(policy) => {
+                self.chat_widget.set_sandbox_policy(policy);
             }
         }
         terminal.clear()?;
@@ -735,10 +731,7 @@ impl App<'_> {
     }
 
     pub(crate) fn token_usage(&self) -> codex_core::protocol::TokenUsage {
-        match &self.app_state {
-            AppState::Chat { widget } => widget.token_usage().clone(),
-            AppState::Onboarding { .. } => codex_core::protocol::TokenUsage::default(),
-        }
+        self.chat_widget.token_usage().clone()
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {

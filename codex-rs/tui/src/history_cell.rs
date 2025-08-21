@@ -1,4 +1,5 @@
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::markdown::append_markdown;
 use crate::slash_command::SlashCommand;
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
@@ -38,7 +39,7 @@ use tracing::error;
 
 // ==================== Core Types ====================
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct CommandOutput {
     pub(crate) exit_code: i32,
     pub(crate) stdout: String,
@@ -106,6 +107,10 @@ pub(crate) trait HistoryCell {
     /// This ensures consistent spacing when cells are rendered together.
     fn display_lines_trimmed(&self) -> Vec<Line<'static>> {
         trim_empty_lines(self.display_lines())
+    }
+
+    fn transcript_lines(&self) -> Vec<Line<'static>> {
+        self.display_lines()
     }
 
     fn desired_height(&self, width: u16) -> u16 {
