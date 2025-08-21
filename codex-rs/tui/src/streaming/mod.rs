@@ -4,12 +4,6 @@ use crate::markdown_stream::AnimatedLineStreamer;
 use crate::markdown_stream::MarkdownStreamCollector;
 pub(crate) mod controller;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StreamKind {
-    Answer,
-    Reasoning,
-}
-
 pub(crate) struct StreamState {
     pub(crate) collector: MarkdownStreamCollector,
     pub(crate) streamer: AnimatedLineStreamer,
@@ -92,23 +86,13 @@ impl HeaderEmitter {
         self.just_emitted_header = false;
     }
 
-    pub(crate) fn has_emitted_for_stream(&self, kind: StreamKind) -> bool {
-        match kind {
-            StreamKind::Reasoning => self.reasoning_emitted_in_stream,
-            StreamKind::Answer => self.answer_emitted_in_stream,
-        }
+    pub(crate) fn reset_for_stream(&mut self) {
+        self.emitted_in_stream = false;
     }
 
-    /// Allow emitting the header again for the same kind within the current turn.
-    ///
-    /// This is used when a stream (e.g., Answer) is finalized and a subsequent
-    /// block of the same kind is started within the same turn. Without this,
-    /// only the first block would render a header.
-    pub(crate) fn allow_reemit_for_same_kind_in_turn(&mut self, kind: StreamKind) {
-        match kind {
-            StreamKind::Reasoning => self.reasoning_emitted_this_turn = false,
-            StreamKind::Answer => self.answer_emitted_this_turn = false,
-        }
+    /// Allow emitting the header again within the current turn after a finalize.
+    pub(crate) fn allow_reemit_in_turn(&mut self) {
+        self.emitted_this_turn = false;
     }
 
     pub(crate) fn maybe_emit(
@@ -146,6 +130,7 @@ impl HeaderEmitter {
             self.just_emitted_header = false;
             false
         }
+        false
     }
     
     pub(crate) fn consume_header_flag(&mut self) -> bool {
