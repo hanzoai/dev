@@ -120,6 +120,8 @@ async fn write_cached_connection(port: Option<u16>, ws: Option<String>) -> std::
 struct RunningCommand {
     command: Vec<String>,
     parsed: Vec<ParsedCommand>,
+    // Index of the in-history Exec cell for this call, if inserted
+    history_index: Option<usize>,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -614,21 +616,24 @@ impl ChatWidget<'_> {
         for cell in &self.history_cells {
             cell.trigger_fade();
         }
-        // Create a new exec cell for the command
+        // Create a new exec cell for the command and insert directly into history
+        // so its position remains stable. This avoids showing a completed
+        // command above a still-visible running overlay.
         let parsed_command = ev.parsed_cmd.clone();
-        let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command);
-        self.active_exec_cell = Some(cell);
-        // Exec cell content changed; clear height cache
-        self.invalidate_height_cache();
-        self.height_manager
-            .borrow_mut()
-            .record_event(HeightEvent::RunBegin);
-        
-        // Store in running commands
-        self.running_commands.insert(ev.call_id.clone(), RunningCommand {
-            command: ev.command,
-            parsed: ev.parsed_cmd.clone(),
-        });
+        let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
+        // Push to history and remember the index
+        let before_len = self.history_cells.len();
+        self.add_to_history(cell);
+        let idx = if self.history_cells.len() > 0 { self.history_cells.len() - 1 } else { before_len };
+
+        // Still track run lifecycle for layout/metrics
+        self.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
+
+        // Store in running commands with history index
+        self.running_commands.insert(
+            ev.call_id.clone(),
+            RunningCommand { command: ev.command, parsed: parsed_command, history_index: Some(idx) },
+        );
 
         // Update status: show that a command is running
         let preview = self
@@ -653,28 +658,75 @@ impl ChatWidget<'_> {
         
         // Get command info and remove from tracking
         let cmd = self.running_commands.remove(&call_id);
-        self.active_exec_cell = None;
-        // Exec cell content changed; clear height cache
-        self.invalidate_height_cache();
-        self.height_manager
-            .borrow_mut()
-            .record_event(HeightEvent::RunEnd);
-        
-        // Get command and parsed info
-        let (command, parsed) = cmd
-            .map(|cmd| (cmd.command, cmd.parsed))
-            .unwrap_or_else(|| (vec![call_id], vec![]));
-        
-        // Add completed command to history
-        self.add_to_history(history_cell::new_completed_exec_command(
+        // Still mark run end for layout/metrics
+        self.height_manager.borrow_mut().record_event(HeightEvent::RunEnd);
+
+        // Determine command/parsed and where to render
+        let (command, parsed, history_index) = cmd
+            .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index))
+            .unwrap_or_else(|| (vec![call_id.clone()], vec![], None));
+
+        // Build the completed cell
+        let mut completed_opt = Some(history_cell::new_completed_exec_command(
             command,
             parsed,
-            CommandOutput {
-                exit_code,
-                stdout,
-                stderr,
-            },
+            CommandOutput { exit_code, stdout, stderr },
         ));
+
+        // Try to replace the placeholder running cell in place to preserve order.
+        let mut replaced = false;
+        if let Some(mut idx) = history_index {
+            if idx < self.history_cells.len() {
+                // Sanity check: ensure it's a running exec cell for the same command
+                let is_match = self.history_cells[idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::ExecCell>()
+                    .map(|e| {
+                        if let Some(ref c) = completed_opt {
+                            e.output.is_none() && e.command == c.command
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+                if is_match {
+                    if let Some(c) = completed_opt.take() {
+                        self.history_cells[idx] = Box::new(c);
+                    }
+                    self.invalidate_height_cache();
+                    self.request_redraw();
+                    replaced = true;
+                }
+            }
+            if !replaced {
+                // Index may have shifted due to animation cleanup. Search from the end
+                let mut found: Option<usize> = None;
+                for i in (0..self.history_cells.len()).rev() {
+                    if let Some(exec) = self.history_cells[i].as_any().downcast_ref::<history_cell::ExecCell>() {
+                        let is_same = if let Some(ref c) = completed_opt { exec.command == c.command } else { false };
+                        if exec.output.is_none() && is_same {
+                            found = Some(i);
+                            break;
+                        }
+                    }
+                }
+                if let Some(i) = found {
+                    if let Some(c) = completed_opt.take() {
+                        self.history_cells[i] = Box::new(c);
+                    }
+                    self.invalidate_height_cache();
+                    self.request_redraw();
+                    replaced = true;
+                }
+            }
+        }
+
+        if !replaced {
+            // No known placeholder; append
+            if let Some(c) = completed_opt.take() {
+                self.add_to_history(c);
+            }
+        }
 
         // Reflect command completion status in the input border
         if exit_code == 0 {
@@ -1448,6 +1500,10 @@ impl ChatWidget<'_> {
                 last_box.as_any().downcast_ref::<history_cell::ExecCell>(),
                 (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>(),
             ) {
+                // Never merge if either side is a running (in-progress) exec cell.
+                if last_exec.output.is_none() || new_exec.output.is_none() {
+                    // fall through to normal push below
+                } else {
                 // Compute header label based on parsed action and status
                 let exec_label = |e: &history_cell::ExecCell| -> &'static str {
                     let action = history_cell::action_from_parsed(&e.parsed);
@@ -1502,9 +1558,13 @@ impl ChatWidget<'_> {
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     return;
                 }
+                }
             } else {
                 // Also allow merging into an already-merged PlainHistoryCell produced above
                 if let Some(new_exec) = (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>() {
+                    // Only merge completed exec cells into a prior merged block
+                    if new_exec.output.is_none() { /* do not merge running exec */ }
+                    else {
                     // Compute the label for the incoming exec
                     let exec_label = |e: &history_cell::ExecCell| -> &'static str {
                         let action = history_cell::action_from_parsed(&e.parsed);
@@ -1562,6 +1622,7 @@ impl ChatWidget<'_> {
                             self.app_event_tx.send(AppEvent::RequestRedraw);
                             return;
                         }
+                    }
                     }
                 }
             }
