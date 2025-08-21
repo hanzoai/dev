@@ -12,13 +12,13 @@ use super::BottomPaneView;
 use super::CancellationEvent;
 
 /// Modal overlay asking the user to approve/deny a sequence of requests.
-pub(crate) struct ApprovalModalView {
-    current: UserApprovalWidget,
+pub(crate) struct ApprovalModalView<'a> {
+    current: UserApprovalWidget<'a>,
     queue: Vec<ApprovalRequest>,
     app_event_tx: AppEventSender,
 }
 
-impl ApprovalModalView {
+impl ApprovalModalView<'_> {
     pub fn new(request: ApprovalRequest, app_event_tx: AppEventSender) -> Self {
         Self {
             current: UserApprovalWidget::new(request, app_event_tx.clone()),
@@ -41,13 +41,13 @@ impl ApprovalModalView {
     }
 }
 
-impl BottomPaneView for ApprovalModalView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane, key_event: KeyEvent) {
+impl<'a> BottomPaneView<'a> for ApprovalModalView<'a> {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
         self.current.handle_key_event(key_event);
         self.maybe_advance();
     }
 
-    fn on_ctrl_c(&mut self, _pane: &mut BottomPane) -> CancellationEvent {
+    fn on_ctrl_c(&mut self, _pane: &mut BottomPane<'a>) -> CancellationEvent {
         self.current.on_ctrl_c();
         self.queue.clear();
         CancellationEvent::Handled
@@ -75,7 +75,7 @@ impl BottomPaneView for ApprovalModalView {
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::mpsc::channel;
 
     fn make_exec_request() -> ApprovalRequest {
         ApprovalRequest::Exec {
@@ -87,16 +87,15 @@ mod tests {
 
     #[test]
     fn ctrl_c_aborts_and_clears_queue() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let tx = AppEventSender::new(tx);
+        let (tx_raw, _rx) = channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
         let first = make_exec_request();
         let mut view = ApprovalModalView::new(first, tx);
         view.enqueue_request(make_exec_request());
 
-        let (tx2, _rx2) = unbounded_channel::<AppEvent>();
+        let (tx_raw2, _rx2) = channel::<AppEvent>();
         let mut pane = BottomPane::new(super::super::BottomPaneParams {
-            app_event_tx: AppEventSender::new(tx2),
-            frame_requester: crate::tui::FrameRequester::test_dummy(),
+            app_event_tx: AppEventSender::new(tx_raw2),
             has_input_focus: true,
             enhanced_keys_supported: false,
             placeholder_text: "Ask Codex to do anything".to_string(),
