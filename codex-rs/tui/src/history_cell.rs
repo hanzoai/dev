@@ -1115,51 +1115,13 @@ fn build_preview_lines(text: &str, include_left_pipe: bool) -> Vec<Line<'static>
     for seg in segments {
         match seg {
             Seg::Line(line) => {
-                if include_left_pipe {
-                    let mut spans = vec![
-                        Span::styled(
-                            "│",
-                            Style::default()
-                                .add_modifier(Modifier::DIM)
-                                .fg(crate::colors::text_dim()),
-                        ),
-                        // Ensure a single space between the border and content
-                        Span::styled(
-                            " ",
-                            Style::default()
-                                .add_modifier(Modifier::DIM)
-                                .fg(crate::colors::text_dim()),
-                        ),
-                    ];
-                    let escaped = ansi_escape_line(line);
-                    spans.extend(escaped.spans);
-                    out.push(Line::from(spans));
-                } else {
-                    out.push(ansi_escape_line(line));
-                }
+                // Do not draw manual borders; the caller wraps output in a Block
+                // with a left border and padding. Just emit the content line.
+                out.push(ansi_escape_line(line));
             }
             Seg::Ellipsis => {
-                if include_left_pipe {
-                    out.push(Line::from(vec![
-                        Span::styled(
-                            "│",
-                            Style::default()
-                                .add_modifier(Modifier::DIM)
-                                .fg(crate::colors::text_dim()),
-                        ),
-                        // Maintain one space padding inside the border
-                        Span::styled(
-                            " ",
-                            Style::default()
-                                .add_modifier(Modifier::DIM)
-                                .fg(crate::colors::text_dim()),
-                        ),
-                        // Use centered middle-dots for truncation marker
-                        Span::from("···").dim(),
-                    ]));
-                } else {
-                    out.push(Line::from("···".dim()));
-                }
+                // Use centered middle-dots for truncation marker; border comes from Block
+                out.push(Line::from("···".dim()));
             }
         }
     }
