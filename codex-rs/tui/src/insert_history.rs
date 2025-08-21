@@ -40,8 +40,9 @@ pub fn insert_history_lines_to_writer<B, W>(
     W: Write,
 {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
+    let cursor_pos = terminal.get_cursor_position().ok();
 
-    let mut area = terminal.viewport_area;
+    let mut area = terminal.get_frame().area();
 
     // Pre-wrap lines using word-aware wrapping so terminal scrollback sees the same
     // formatting as the TUI. This avoids character-level hard wrapping by the terminal.

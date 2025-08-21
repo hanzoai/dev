@@ -1,15 +1,15 @@
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::mpsc::Sender;
 
 use crate::app_event::AppEvent;
 use crate::session_log;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {
-    pub app_event_tx: UnboundedSender<AppEvent>,
+    pub app_event_tx: Sender<AppEvent>,
 }
 
 impl AppEventSender {
-    pub(crate) fn new(app_event_tx: UnboundedSender<AppEvent>) -> Self {
+    pub(crate) fn new(app_event_tx: Sender<AppEvent>) -> Self {
         Self { app_event_tx }
     }
 

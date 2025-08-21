@@ -306,10 +306,10 @@ impl ModelClient {
                         .and_then(|v| v.to_str().ok())
                         .and_then(|s| s.parse::<u64>().ok());
 
-                    if status == StatusCode::UNAUTHORIZED
-                        && let Some(a) = auth.as_ref()
-                    {
-                        let _ = a.refresh_token().await;
+                    if status == StatusCode::UNAUTHORIZED {
+                        if let Some(a) = auth.as_ref() {
+                            let _ = a.refresh_token().await;
+                        }
                     }
 
                     // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
