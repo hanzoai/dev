@@ -1,12 +1,18 @@
 use std::io::Result;
 use std::io::Stdout;
 use std::io::stdout;
+use std::pin::Pin;
+use std::time::Duration;
+use std::time::Instant;
 
-use codex_core::config::Config;
+use crossterm::SynchronizedUpdate;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableMouseCapture;
 use crossterm::event::EnableBracketedPaste;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
@@ -23,7 +29,7 @@ use ratatui::crossterm::terminal::enable_raw_mode;
 use ratatui_image::picker::Picker;
 
 /// A type alias for the terminal type used in this application
-pub type Tui = Terminal<CrosstermBackend<Stdout>>;
+pub type Terminal = CustomTerminal<CrosstermBackend<Stdout>>;
 
 /// Terminal information queried at startup
 #[derive(Clone)]
@@ -72,6 +78,24 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
                 | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
         )
     );
+    Ok(())
+}
+
+/// Restore the terminal to its original state.
+/// Inverse of `set_modes`.
+pub fn restore() -> Result<()> {
+    // Pop may fail on platforms that didn't support the push; ignore errors.
+    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    execute!(stdout(), DisableBracketedPaste)?;
+    disable_raw_mode()?;
+    let _ = execute!(stdout(), crossterm::cursor::Show);
+    Ok(())
+}
+
+/// Initialize the terminal (inline viewport; history stays in normal scrollback)
+pub fn init() -> Result<Terminal> {
+    set_modes()?;
+
     set_panic_hook();
 
     // Clear screen with theme background color

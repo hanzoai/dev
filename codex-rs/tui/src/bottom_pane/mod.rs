@@ -1,7 +1,7 @@
 //! Bottom pane: shows the ChatComposer or a BottomPaneView, if one is active.
 
-use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::tui::FrameRequester;
 use crate::user_approval_widget::ApprovalRequest;
 use bottom_pane_view::BottomPaneView;
 use codex_core::protocol::TokenUsage;
@@ -47,15 +47,17 @@ use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
 
 /// Pane displayed in the lower half of the chat UI.
-pub(crate) struct BottomPane<'a> {
+pub(crate) struct BottomPane {
     /// Composer is retained even when a BottomPaneView is displayed so the
     /// input state is retained when the view is closed.
     composer: ChatComposer,
 
     /// If present, this is displayed instead of the `composer`.
-    active_view: Option<Box<dyn BottomPaneView<'a> + 'a>>,
+    active_view: Option<Box<dyn BottomPaneView>>,
 
     app_event_tx: AppEventSender,
+    frame_requester: FrameRequester,
+
     has_input_focus: bool,
     is_task_running: bool,
     ctrl_c_quit_hint: bool,
@@ -76,6 +78,7 @@ pub(crate) struct BottomPane<'a> {
 
 pub(crate) struct BottomPaneParams {
     pub(crate) app_event_tx: AppEventSender,
+    pub(crate) frame_requester: FrameRequester,
     pub(crate) has_input_focus: bool,
     pub(crate) enhanced_keys_supported: bool,
     pub(crate) using_chatgpt_auth: bool,
@@ -95,6 +98,7 @@ impl BottomPane<'_> {
             ),
             active_view: None,
             app_event_tx: params.app_event_tx,
+            frame_requester: params.frame_requester,
             has_input_focus: params.has_input_focus,
             is_task_running: false,
             ctrl_c_quit_hint: false,
@@ -391,7 +395,7 @@ impl BottomPane<'_> {
 
     /// Height (terminal rows) required by the current bottom pane.
     pub(crate) fn request_redraw(&self) {
-        self.app_event_tx.send(AppEvent::RequestRedraw)
+        self.frame_requester.schedule_frame();
     }
 
     pub(crate) fn request_immediate_redraw(&self) {
@@ -485,7 +489,7 @@ impl BottomPane<'_> {
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
-impl WidgetRef for &BottomPane<'_> {
+impl WidgetRef for &BottomPane {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let mut y_offset = 0u16;
         if let Some(ring) = &self.live_ring {
@@ -549,7 +553,7 @@ mod tests {
     use crate::app_event::AppEvent;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use std::sync::mpsc::channel;
+    use tokio::sync::mpsc::unbounded_channel;
 
     fn exec_request() -> ApprovalRequest {
         ApprovalRequest::Exec {
@@ -561,10 +565,11 @@ mod tests {
 
     #[test]
     fn ctrl_c_on_modal_consumes_and_shows_quit_hint() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,
@@ -677,10 +682,11 @@ mod tests {
 
     #[test]
     fn overlay_not_shown_above_approval_modal() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,
@@ -708,10 +714,11 @@ mod tests {
 
     #[test]
     fn composer_not_shown_after_denied_if_task_running() {
-        let (tx_raw, rx) = channel::<AppEvent>();
+        let (tx_raw, rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx.clone(),
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
         });
@@ -758,10 +765,11 @@ mod tests {
 
     #[test]
     fn status_indicator_visible_during_command_execution() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,
@@ -792,10 +800,11 @@ mod tests {
 
     #[test]
     fn bottom_padding_present_for_status_view() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,
@@ -844,10 +853,11 @@ mod tests {
 
     #[test]
     fn bottom_padding_shrinks_when_tiny() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut pane = BottomPane::new(BottomPaneParams {
             app_event_tx: tx,
+            frame_requester: crate::tui::FrameRequester::test_dummy(),
             has_input_focus: true,
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,

@@ -2474,10 +2474,9 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
     if sess.shell_environment_policy.use_profile {
         let command = sess
             .user_shell
-            .format_default_shell_invocation(params.command.clone());
-        if let Some(command) = command {
-            return ExecParams { command, ..params };
-        }
+            .format_default_shell_invocation(params.command.clone())
+    {
+        return ExecParams { command, ..params };
     }
     params
 }
