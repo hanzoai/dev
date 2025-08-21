@@ -1086,9 +1086,9 @@ impl HistoryCell for StreamingContentCell {
 
 // ==================== Helper Functions ====================
 
-// Unified preview format: show first 3 and last 6 non-empty lines with an ellipsis between.
-const PREVIEW_HEAD_LINES: usize = 3;
-const PREVIEW_TAIL_LINES: usize = 6;
+// Unified preview format: show first 2 and last 5 non-empty lines with an ellipsis between.
+const PREVIEW_HEAD_LINES: usize = 2;
+const PREVIEW_TAIL_LINES: usize = 5;
 
 fn build_preview_lines(text: &str, include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
