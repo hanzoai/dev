@@ -1845,6 +1845,7 @@ async fn run_turn(
                 sess.cwd.clone(),
                 sess.approval_policy,
                 sess.sandbox_policy.clone(),
+                sess.user_shell.clone(),
             )),
             status_items, // Include status items with this request
         };
@@ -2472,11 +2473,12 @@ pub struct ExecInvokeArgs<'a> {
 
 fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams {
     if sess.shell_environment_policy.use_profile {
-        let command = sess
+        let maybe_command = sess
             .user_shell
-            .format_default_shell_invocation(params.command.clone())
-    {
-        return ExecParams { command, ..params };
+            .format_default_shell_invocation(params.command.clone());
+        if let Some(command) = maybe_command {
+            return ExecParams { command, ..params };
+        }
     }
     params
 }

@@ -95,11 +95,11 @@ static PATCH_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
 });
 
 /// A modal prompting the user to approve or deny the pending request.
-pub(crate) struct UserApprovalWidget {
+pub(crate) struct UserApprovalWidget<'a> {
     approval_request: ApprovalRequest,
     app_event_tx: AppEventSender,
-    confirmation_prompt: Paragraph<'static>,
-    select_options: &'static Vec<SelectOption>,
+    confirmation_prompt: Paragraph<'a>,
+    select_options: &'a Vec<SelectOption>,
 
     /// Currently selected index in *select* mode.
     selected_option: usize,
@@ -296,7 +296,7 @@ impl UserApprovalWidget<'_> {
             }
         }
         lines.push(Line::from(""));
-        self.app_event_tx.send(AppEvent::InsertHistoryLines(lines));
+        self.app_event_tx.send(AppEvent::InsertHistory(lines));
 
         let op = match &self.approval_request {
             ApprovalRequest::Exec { id, .. } => Op::ExecApproval {
@@ -324,7 +324,7 @@ impl UserApprovalWidget<'_> {
     }
 }
 
-impl WidgetRef for &UserApprovalWidget {
+impl WidgetRef for &UserApprovalWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let prompt_height = self.get_confirmation_prompt_height(area.width);
         let [prompt_chunk, response_chunk] = Layout::default()
@@ -394,11 +394,11 @@ mod tests {
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::mpsc::channel;
 
     #[test]
     fn lowercase_shortcut_is_accepted() {
-        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx_raw, rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let req = ApprovalRequest::Exec {
             id: "1".to_string(),
@@ -408,10 +408,7 @@ mod tests {
         let mut widget = UserApprovalWidget::new(req, tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
-        let mut events: Vec<AppEvent> = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
             AppEvent::CodexOp(Op::ExecApproval {
@@ -423,7 +420,7 @@ mod tests {
 
     #[test]
     fn uppercase_shortcut_is_accepted() {
-        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx_raw, rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let req = ApprovalRequest::Exec {
             id: "2".to_string(),
@@ -433,10 +430,7 @@ mod tests {
         let mut widget = UserApprovalWidget::new(req, tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
-        let mut events: Vec<AppEvent> = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
             AppEvent::CodexOp(Op::ExecApproval {

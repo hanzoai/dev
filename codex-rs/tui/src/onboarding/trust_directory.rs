@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use codex_core::config::set_project_trusted;
+use codex_core::protocol::AskForApproval;
+use codex_core::protocol::SandboxPolicy;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -21,6 +23,9 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 
 use super::onboarding_screen::StepState;
+use crate::app::ChatWidgetArgs;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 pub(crate) struct TrustDirectoryWidget {
     pub codex_home: PathBuf,
@@ -29,10 +34,11 @@ pub(crate) struct TrustDirectoryWidget {
     pub selection: Option<TrustDirectorySelection>,
     pub highlighted: TrustDirectorySelection,
     pub error: Option<String>,
+    pub chat_widget_args: Arc<Mutex<ChatWidgetArgs>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrustDirectorySelection {
+pub(crate) enum TrustDirectorySelection {
     Trust,
     DontTrust,
 }
@@ -157,6 +163,13 @@ impl TrustDirectoryWidget {
             tracing::error!("Failed to set project trusted: {e:?}");
             self.error = Some(e.to_string());
             // self.error = Some("Failed to set project trusted".to_string());
+        }
+
+        // Update the in-memory chat config for this session to a more permissive
+        // policy suitable for a trusted workspace.
+        if let Ok(mut args) = self.chat_widget_args.lock() {
+            args.config.approval_policy = AskForApproval::OnRequest;
+            args.config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
         }
 
         self.selection = Some(TrustDirectorySelection::Trust);
