@@ -98,10 +98,10 @@ impl EnvironmentContext {
                 network_access
             ));
         }
-        if let Some(shell) = self.shell
-            && let Some(shell_name) = shell.name()
-        {
-            lines.push(format!("  <shell>{}</shell>", shell_name));
+        if let Some(shell) = self.shell {
+            if let Some(shell_name) = shell.name() {
+                lines.push(format!("  <shell>{}</shell>", shell_name));
+            }
         }
         lines.push(ENVIRONMENT_CONTEXT_END.to_string());
         lines.join("\n")
