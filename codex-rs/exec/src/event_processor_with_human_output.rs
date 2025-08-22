@@ -174,6 +174,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 ts_println!(self, "{}", message.style(self.dimmed));
             }
+            // Stream errors are surfaced as Error/Background events in core
             EventMsg::TaskStarted => {
                 // Ignore.
             }

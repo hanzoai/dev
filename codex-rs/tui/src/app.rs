@@ -8,6 +8,7 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
+use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::ConversationManager;
@@ -19,8 +20,13 @@ use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::execute;
+use crossterm::terminal::EnterAlternateScreen;
+use crossterm::terminal::LeaveAlternateScreen;
 use crossterm::terminal::supports_keyboard_enhancement;
 use std::path::PathBuf;
+use ratatui::prelude::Rect;
+use ratatui::text::Line;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -63,6 +69,11 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed.
     pending_redraw: Arc<AtomicBool>,
+
+    // Transcript overlay state
+    transcript_overlay: Option<TranscriptApp>,
+    deferred_history_lines: Vec<Line<'static>>,
+    transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
 
@@ -201,6 +212,9 @@ impl App<'_> {
             config,
             file_search,
             pending_redraw,
+            transcript_overlay: None,
+            deferred_history_lines: Vec::new(),
+            transcript_saved_viewport: None,
             enhanced_keys_supported,
             _debug: debug,
             commit_anim_running: Arc::new(AtomicBool::new(false)),

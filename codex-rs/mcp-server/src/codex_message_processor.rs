@@ -31,14 +31,17 @@ use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol as core_protocol;
 use codex_login::CLIENT_ID;
+use codex_login::CodexAuth;
 use codex_login::ServerOptions as LoginServerOptions;
 use codex_login::ShutdownHandle;
+use codex_login::logout;
 use codex_login::run_login_server;
 use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
 use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalParams;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalResponse;
+use codex_protocol::mcp_protocol::AuthStatusChangeNotification;
 use codex_protocol::mcp_protocol::ClientRequest;
 use codex_protocol::mcp_protocol::ConversationId;
 use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
@@ -47,7 +50,6 @@ use codex_protocol::mcp_protocol::ExecCommandApprovalResponse;
 use codex_protocol::mcp_protocol::InputItem as WireInputItem;
 use codex_protocol::mcp_protocol::InterruptConversationParams;
 use codex_protocol::mcp_protocol::InterruptConversationResponse;
-use codex_protocol::mcp_protocol::LOGIN_CHATGPT_COMPLETE_EVENT;
 use codex_protocol::mcp_protocol::LoginChatGptCompleteNotification;
 use codex_protocol::mcp_protocol::LoginChatGptResponse;
 use codex_protocol::mcp_protocol::GitDiffToRemoteParams;
@@ -60,6 +62,7 @@ use codex_protocol::mcp_protocol::SendUserMessageParams;
 use codex_protocol::mcp_protocol::SendUserMessageResponse;
 use codex_protocol::mcp_protocol::SendUserTurnParams;
 use codex_protocol::mcp_protocol::SendUserTurnResponse;
+use codex_protocol::mcp_protocol::ServerNotification;
 
 // Duration before a ChatGPT login attempt is abandoned.
 const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -80,6 +83,7 @@ pub(crate) struct CodexMessageProcessor {
     conversation_manager: Arc<ConversationManager>,
     outgoing: Arc<OutgoingMessageSender>,
     codex_linux_sandbox_exe: Option<PathBuf>,
+    config: Arc<Config>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
     // Queue of pending interrupt requests per conversation. We reply when TurnAborted arrives.
@@ -91,11 +95,13 @@ impl CodexMessageProcessor {
         conversation_manager: Arc<ConversationManager>,
         outgoing: Arc<OutgoingMessageSender>,
         codex_linux_sandbox_exe: Option<PathBuf>,
+        config: Arc<Config>,
     ) -> Self {
         Self {
             conversation_manager,
             outgoing,
             codex_linux_sandbox_exe,
+            config,
             conversation_listeners: HashMap::new(),
             active_login: Arc::new(Mutex::new(None)),
             pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
@@ -137,6 +143,24 @@ impl CodexMessageProcessor {
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,
                     message: "cancel login is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+            ClientRequest::LogoutChatGpt { request_id } => {
+                // Not supported by this server implementation
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "logout is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+            ClientRequest::GetAuthStatus { request_id } => {
+                // Not supported by this server implementation
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "auth status is not supported by this server".to_string(),
                     data: None,
                 };
                 self.outgoing.send_error(request_id, error).await;
