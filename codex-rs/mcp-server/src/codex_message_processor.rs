@@ -148,10 +148,22 @@ impl CodexMessageProcessor {
                 self.outgoing.send_error(request_id, error).await;
             }
             ClientRequest::LogoutChatGpt { request_id } => {
-                self.logout_chatgpt(request_id).await;
+                // Not supported by this server implementation
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "logout is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
             }
             ClientRequest::GetAuthStatus { request_id } => {
-                self.get_auth_status(request_id).await;
+                // Not supported by this server implementation
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "auth status is not supported by this server".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
             }
             ClientRequest::GitDiffToRemote { request_id, params } => {
                 self.git_diff_to_origin(request_id, params.cwd).await;

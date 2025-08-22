@@ -2,7 +2,6 @@ use std::io::Result;
 
 use crate::insert_history;
 use crate::tui;
-use crate::tui::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -36,8 +35,10 @@ impl TranscriptApp {
         match event {
             TuiEvent::Key(key_event) => self.handle_key_event(tui, key_event),
             TuiEvent::Draw => {
-                tui.draw(u16::MAX, |frame| {
-                    self.render(frame.area(), frame.buffer);
+                tui.draw(|frame| {
+                    let area = frame.area();
+                    let buf = frame.buffer_mut();
+                    self.render(area, buf);
                 })?;
             }
             _ => {}
@@ -89,7 +90,8 @@ impl TranscriptApp {
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
             } => {
-                let area = self.scroll_area(tui.terminal.viewport_area);
+                let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let area = self.scroll_area(Rect::new(0, 0, w, h));
                 self.scroll_offset = self.scroll_offset.saturating_sub(area.height as usize);
             }
             KeyEvent {
@@ -97,7 +99,8 @@ impl TranscriptApp {
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
             } => {
-                let area = self.scroll_area(tui.terminal.viewport_area);
+                let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let area = self.scroll_area(Rect::new(0, 0, w, h));
                 self.scroll_offset = self.scroll_offset.saturating_add(area.height as usize);
             }
             KeyEvent {
@@ -206,4 +209,11 @@ impl TranscriptApp {
         Paragraph::new(vec![Line::from(hints1).dim(), Line::from(hints2).dim()])
             .render_ref(hints_rect, buf);
     }
+}
+
+/// Minimal local event enum for transcript overlay rendering
+pub(crate) enum TuiEvent {
+    Key(KeyEvent),
+    Draw,
+    Other,
 }

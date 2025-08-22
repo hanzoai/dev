@@ -8,6 +8,7 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
+use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::ConversationManager;
@@ -24,6 +25,8 @@ use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 use crossterm::terminal::supports_keyboard_enhancement;
 use std::path::PathBuf;
+use ratatui::prelude::Rect;
+use ratatui::text::Line;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -209,6 +212,9 @@ impl App<'_> {
             config,
             file_search,
             pending_redraw,
+            transcript_overlay: None,
+            deferred_history_lines: Vec::new(),
+            transcript_saved_viewport: None,
             enhanced_keys_supported,
             _debug: debug,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
