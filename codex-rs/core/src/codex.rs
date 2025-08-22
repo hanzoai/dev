@@ -310,7 +310,6 @@ use crate::protocol::PatchApplyEndEvent;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
-use crate::protocol::StreamErrorEvent;
 use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
 use crate::protocol::TurnDiffEvent;
@@ -910,7 +909,7 @@ impl Session {
     async fn notify_stream_error(&self, sub_id: &str, message: impl Into<String>) {
         let event = Event {
             id: sub_id.to_string(),
-            msg: EventMsg::StreamError(StreamErrorEvent {
+            msg: EventMsg::Error(ErrorEvent {
                 message: message.into(),
             }),
         };
@@ -1856,10 +1855,10 @@ async fn run_turn(
             tools: tools.clone(),
             base_instructions_override: sess.base_instructions.clone(),
             environment_context: Some(EnvironmentContext::new(
-                sess.cwd.clone(),
-                sess.approval_policy,
-                sess.sandbox_policy.clone(),
-                sess.user_shell.clone(),
+                Some(sess.cwd.clone()),
+                Some(sess.approval_policy),
+                Some(sess.sandbox_policy.clone()),
+                Some(sess.user_shell.clone()),
             )),
             status_items, // Include status items with this request
         };
