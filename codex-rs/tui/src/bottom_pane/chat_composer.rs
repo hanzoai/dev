@@ -20,6 +20,7 @@ use ratatui::widgets::WidgetRef;
 use super::chat_composer_history::ChatComposerHistory;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
+use crate::slash_command::SlashCommand;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -549,9 +550,12 @@ impl ChatComposer {
                     // Clear textarea so no residual text remains.
                     self.textarea.set_text("");
 
+                    let result = (InputResult::Command(*cmd), true);
+
                     // Hide popup since the command has been dispatched.
                     self.active_popup = ActivePopup::None;
-                    return (InputResult::None, true);
+
+                    return result;
                 }
                 // Fallback to default newline handling if no command selected.
                 self.handle_key_event_without_popup(key_event)
@@ -1755,13 +1759,14 @@ mod tests {
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        // When a slash command is dispatched, the composer should not submit
-        // literal text and should clear its textarea.
+        // When a slash command is dispatched, the composer should return a
+        // Command result (not submit literal text) and clear its textarea.
         match result {
             InputResult::None | InputResult::ScrollUp | InputResult::ScrollDown => {}
             InputResult::Submitted(text) => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
             }
+            InputResult::None => panic!("expected Command result for '/init'"),
         }
         assert!(composer.textarea.is_empty(), "composer should be cleared");
 
@@ -1822,6 +1827,7 @@ mod tests {
             InputResult::Submitted(text) => {
                 panic!("expected command dispatch, but composer submitted literal text: {text}")
             }
+            InputResult::None => panic!("expected Command result for '/mention'"),
         }
         assert!(composer.textarea.is_empty(), "composer should be cleared");
 

@@ -19,6 +19,9 @@ use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::execute;
+use crossterm::terminal::EnterAlternateScreen;
+use crossterm::terminal::LeaveAlternateScreen;
 use crossterm::terminal::supports_keyboard_enhancement;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -63,6 +66,11 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed.
     pending_redraw: Arc<AtomicBool>,
+
+    // Transcript overlay state
+    transcript_overlay: Option<TranscriptApp>,
+    deferred_history_lines: Vec<Line<'static>>,
+    transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
 
