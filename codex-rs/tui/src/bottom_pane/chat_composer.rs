@@ -42,6 +42,7 @@ const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
 /// Result returned when the user interacts with the text area.
 pub enum InputResult {
     Submitted(String),
+    Command(SlashCommand),
     ScrollUp,
     ScrollDown,
     None,
