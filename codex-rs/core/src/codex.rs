@@ -906,6 +906,16 @@ impl Session {
         let _ = self.tx_event.send(event).await;
     }
 
+    async fn notify_stream_error(&self, sub_id: &str, message: impl Into<String>) {
+        let event = Event {
+            id: sub_id.to_string(),
+            msg: EventMsg::Error(ErrorEvent {
+                message: message.into(),
+            }),
+        };
+        let _ = self.tx_event.send(event).await;
+    }
+
     /// Build the full turn input by concatenating the current conversation
     /// history with additional items for this turn.
     /// Browser screenshots are filtered out from history to keep them ephemeral.
@@ -1845,10 +1855,10 @@ async fn run_turn(
             tools: tools.clone(),
             base_instructions_override: sess.base_instructions.clone(),
             environment_context: Some(EnvironmentContext::new(
-                sess.cwd.clone(),
-                sess.approval_policy,
-                sess.sandbox_policy.clone(),
-                sess.user_shell.clone(),
+                Some(sess.cwd.clone()),
+                Some(sess.approval_policy),
+                Some(sess.sandbox_policy.clone()),
+                Some(sess.user_shell.clone()),
             )),
             status_items, // Include status items with this request
         };
@@ -1883,7 +1893,7 @@ async fn run_turn(
                     // Surface retry information to any UI/front‑end so the
                     // user understands what is happening instead of staring
                     // at a seemingly frozen screen.
-                    sess.notify_background_event(
+                    sess.notify_stream_error(
                         &sub_id,
                         format!(
                             "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
@@ -2128,7 +2138,7 @@ async fn run_compact_agent(
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);
-                    sess.notify_background_event(
+                    sess.notify_stream_error(
                         &sub_id,
                         format!(
                             "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
