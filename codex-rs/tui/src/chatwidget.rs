@@ -58,6 +58,8 @@ use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
+use crate::slash_command::SlashCommand;
+use crate::get_git_diff::get_git_diff;
 // use image::GenericImageView;
 
 use crate::app_event::AppEvent;
@@ -1453,6 +1455,10 @@ impl ChatWidget<'_> {
                 let user_message = self.parse_message_with_images(text);
                 self.submit_user_message(user_message);
             }
+            InputResult::Command(_cmd) => {
+                // Command was dispatched at the App layer; request redraw.
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
             InputResult::ScrollUp => {
                 // If already at the very top, try navigating command history instead
                 if self.scroll_offset >= self.last_max_scroll.get() {
@@ -1522,6 +1528,8 @@ impl ChatWidget<'_> {
             }
         }
     }
+
+    // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
 
     pub(crate) fn handle_paste(&mut self, text: String) {
         // Check if the pasted text is a file path to an image
