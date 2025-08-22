@@ -11,6 +11,7 @@ use codex_core::parse_command::ParsedCommand;
 use codex_core::plan_tool::PlanItemArg;
 use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
+use codex_core::project_doc::discover_project_doc_paths;
 use codex_core::protocol::FileChange;
 use crate::diff_render::create_diff_summary;
 use codex_core::protocol::McpInvocation;

@@ -118,12 +118,14 @@ fn create_shell_tool() -> OpenAiTool {
         "command".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String { description: None }),
-            description: None,
+            description: Some("The command to execute".to_string()),
         },
     );
     properties.insert(
         "workdir".to_string(),
-        JsonSchema::String { description: None },
+        JsonSchema::String {
+            description: Some("The working directory to execute the command in".to_string()),
+        },
     );
     properties.insert(
         "timeout".to_string(),
@@ -160,7 +162,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
         },
     );
     properties.insert(
-        "timeout".to_string(),
+        "timeout_ms".to_string(),
         JsonSchema::Number {
             description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
         },
@@ -176,7 +178,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
         properties.insert(
         "justification".to_string(),
         JsonSchema::String {
-            description: Some("Only set if ask_for_escalated_permissions is true. 1-sentence explanation of why we want to run this command.".to_string()),
+            description: Some("Only set if with_escalated_permissions is true. 1-sentence explanation of why we want to run this command.".to_string()),
         },
     );
     }
@@ -250,7 +252,7 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#.to_st
 /// Returns JSON values that are compatible with Function Calling in the
 /// Responses API:
 /// https://platform.openai.com/docs/guides/function-calling?api-mode=responses
-pub(crate) fn create_tools_json_for_responses_api(
+pub fn create_tools_json_for_responses_api(
     tools: &Vec<OpenAiTool>,
 ) -> crate::error::Result<Vec<serde_json::Value>> {
     let mut tools_json = Vec::new();
