@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use codex_core::CodexConversation;
 use codex_core::ConversationManager;
@@ -31,16 +30,11 @@ use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol as core_protocol;
 use codex_login::AuthManager;
-use codex_login::CLIENT_ID;
-use codex_login::ServerOptions as LoginServerOptions;
-use codex_login::ShutdownHandle;
-use codex_login::run_login_server;
 use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
 use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalParams;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalResponse;
-use codex_protocol::mcp_protocol::AuthStatusChangeNotification;
 use codex_protocol::mcp_protocol::ClientRequest;
 use codex_protocol::mcp_protocol::ConversationId;
 use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
@@ -49,9 +43,7 @@ use codex_protocol::mcp_protocol::ExecCommandApprovalResponse;
 use codex_protocol::mcp_protocol::InputItem as WireInputItem;
 use codex_protocol::mcp_protocol::InterruptConversationParams;
 use codex_protocol::mcp_protocol::InterruptConversationResponse;
-use codex_protocol::mcp_protocol::LoginChatGptCompleteNotification;
-use codex_protocol::mcp_protocol::LoginChatGptResponse;
-use codex_protocol::mcp_protocol::GitDiffToRemoteParams;
+// Unused login-related and diff param imports removed
 use codex_protocol::mcp_protocol::GitDiffToRemoteResponse;
 use codex_protocol::mcp_protocol::NewConversationParams;
 use codex_protocol::mcp_protocol::NewConversationResponse;
@@ -61,31 +53,17 @@ use codex_protocol::mcp_protocol::SendUserMessageParams;
 use codex_protocol::mcp_protocol::SendUserMessageResponse;
 use codex_protocol::mcp_protocol::SendUserTurnParams;
 use codex_protocol::mcp_protocol::SendUserTurnResponse;
-use codex_protocol::mcp_protocol::ServerNotification;
 
-// Duration before a ChatGPT login attempt is abandoned.
-const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-
-struct ActiveLogin {
-    shutdown_handle: ShutdownHandle,
-    login_id: Uuid,
-}
-
-impl ActiveLogin {
-    fn drop(&self) {
-        self.shutdown_handle.shutdown();
-    }
-}
+// Removed deprecated ChatGPT login support scaffolding
 
 /// Handles JSON-RPC messages for Codex conversations.
 pub(crate) struct CodexMessageProcessor {
-    auth_manager: Arc<AuthManager>,
+    _auth_manager: Arc<AuthManager>,
     conversation_manager: Arc<ConversationManager>,
     outgoing: Arc<OutgoingMessageSender>,
     codex_linux_sandbox_exe: Option<PathBuf>,
-    config: Arc<Config>,
+    _config: Arc<Config>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
-    active_login: Arc<Mutex<Option<ActiveLogin>>>,
     // Queue of pending interrupt requests per conversation. We reply when TurnAborted arrives.
     pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 }
@@ -99,13 +77,12 @@ impl CodexMessageProcessor {
         config: Arc<Config>,
     ) -> Self {
         Self {
-            auth_manager,
+            _auth_manager: auth_manager,
             conversation_manager,
             outgoing,
             codex_linux_sandbox_exe,
-            config,
+            _config: config,
             conversation_listeners: HashMap::new(),
-            active_login: Arc::new(Mutex::new(None)),
             pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -457,7 +434,7 @@ async fn apply_bespoke_event_handling(
     conversation_id: ConversationId,
     conversation: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
-    pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
+    _pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 ) {
     let Event { id: event_id, msg } = event;
     match msg {

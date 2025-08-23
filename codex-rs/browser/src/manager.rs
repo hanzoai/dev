@@ -1059,7 +1059,7 @@ impl BrowserManager {
 
             // Skip redundant overrides within a short window to prevent flash
             {
-                let mut guard = self.last_metrics_applied.lock().await;
+                let guard = self.last_metrics_applied.lock().await;
                 if let Some((lw, lh, ldpr, lmob, ts)) = *guard {
                     let same = lw == w && lh == h && (ldpr - dpr).abs() < 0.001 && lmob == mob;
                     let recent = ts.elapsed() < std::time::Duration::from_secs(30);

@@ -22,8 +22,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::execute;
-use crossterm::terminal::EnterAlternateScreen;
-use crossterm::terminal::LeaveAlternateScreen;
 use crossterm::terminal::supports_keyboard_enhancement;
 use std::path::PathBuf;
 use ratatui::prelude::Rect;
@@ -72,9 +70,9 @@ pub(crate) struct App<'a> {
     pending_redraw: Arc<AtomicBool>,
 
     // Transcript overlay state
-    transcript_overlay: Option<TranscriptApp>,
-    deferred_history_lines: Vec<Line<'static>>,
-    transcript_saved_viewport: Option<Rect>,
+    _transcript_overlay: Option<TranscriptApp>,
+    _deferred_history_lines: Vec<Line<'static>>,
+    _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
 
@@ -216,9 +214,9 @@ impl App<'_> {
             config,
             file_search,
             pending_redraw,
-            transcript_overlay: None,
-            deferred_history_lines: Vec::new(),
-            transcript_saved_viewport: None,
+            _transcript_overlay: None,
+            _deferred_history_lines: Vec::new(),
+            _transcript_saved_viewport: None,
             enhanced_keys_supported,
             _debug: debug,
             commit_anim_running: Arc::new(AtomicBool::new(false)),

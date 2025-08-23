@@ -394,17 +394,20 @@ impl ModelClient {
     }
 
     /// Returns the currently configured model slug.
+    #[allow(dead_code)]
     pub fn get_model(&self) -> String {
         self.config.model.clone()
     }
 
     /// Returns the currently configured model family.
+    #[allow(dead_code)]
     pub fn get_model_family(&self) -> ModelFamily {
         self.config.model_family.clone()
     }
 
     // duplicate of earlier helpers removed during merge cleanup
 
+    #[allow(dead_code)]
     pub fn get_auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
     }

@@ -52,6 +52,7 @@ pub(crate) fn border_dim() -> Color {
     Color::Rgb(r, g, bl)
 }
 
+#[allow(dead_code)]
 pub(crate) fn border_focused() -> Color {
     current_theme().border_focused
 }

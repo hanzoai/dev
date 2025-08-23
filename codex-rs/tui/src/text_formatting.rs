@@ -2,6 +2,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 /// Truncate a tool result to fit within the given height and width. If the text is valid JSON, we format it in a compact way before truncating.
 /// This is a best-effort approach that may not work perfectly for text where 1 grapheme is rendered as multiple terminal cells.
+#[allow(dead_code)]
 pub(crate) fn format_and_truncate_tool_result(
     text: &str,
     max_lines: usize,
@@ -74,6 +75,7 @@ pub(crate) fn format_json_compact(text: &str) -> Option<String> {
 }
 
 /// Truncate `text` to `max_graphemes` graphemes. Using graphemes to avoid accidentally truncating in the middle of a multi-codepoint character.
+#[allow(dead_code)]
 pub(crate) fn truncate_text(text: &str, max_graphemes: usize) -> String {
     let mut graphemes = text.grapheme_indices(true);
 
