@@ -189,6 +189,7 @@ jobs:
 
     - name: Normalize Cargo.lock workspace versions
       shell: bash
+      working-directory: codex-rs
       run: |
         set -euo pipefail
         VERSION="${{ needs.determine-version.outputs.version }}"
