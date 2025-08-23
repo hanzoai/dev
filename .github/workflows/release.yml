@@ -107,22 +107,31 @@ jobs:
       with:
         targets: ${{ matrix.target }}
     
-    # Smart caching for Rust builds - handles everything automatically
+    # Smart caching for Rust builds with better restore keys
     - name: Setup Rust Cache
       uses: Swatinem/rust-cache@v2
       with:
-        # Ensure cache is unique per target
+        # Unique cache per target
         key: ${{ matrix.target }}
-        # Cache on failure to speed up debugging
+        # Use restore keys for better cache hits across version changes
+        prefix-key: "v2-rust"
+        # Save cache even on failure for debugging
         cache-on-failure: true
-        # Working directory for the cache
+        # Cache all crates to improve hit rate
+        cache-all-crates: true
+        # Working directory
         workspaces: "codex-rs -> target"
+        # Additional cache directories
+        cache-directories: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git
 
-    # Compiler cache across all OSes; integrates with GitHub Actions cache
+    # Compiler cache across all OSes
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.6
       with:
-        # Keep separate caches per compilation target
+        # Separate caches per target
         cache-key: ${{ matrix.target }}
 
     - name: Install mold (Linux)
@@ -137,88 +146,106 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y musl-tools pkg-config
         
-    - name: Set version in Cargo.toml (workspace only)
+    - name: Set version in Cargo.toml and Cargo.lock
       run: |
         VERSION="${{ needs.determine-version.outputs.version }}"
-        echo "📝 Setting version to ${VERSION} in Cargo.toml files"
+        echo "📝 Setting version to ${VERSION}"
         
-        # Update the workspace version in root Cargo.toml
         cd codex-rs
-        # Use sed for all platforms (works on Windows bash too)
+        
+        # Save the current version for replacement
+        CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+        echo "Current version in Cargo.toml: $CURRENT_VERSION"
+        
+        # Update version in root Cargo.toml
         sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
         
-        # Verify the update
-        echo "Updated Cargo.toml:"
-        grep "^version = " Cargo.toml || true
-        
-        # Update Cargo.lock to reflect only workspace version bumps, without
-        # floating third-party dependency versions or git revisions.
-        echo "🔒 Updating Cargo.lock for workspace members only"
-        # Extract member directories from [workspace] table and update each workspace crate
-        awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
-          | while IFS= read -r dir; do
-              if [[ -f "$dir/Cargo.toml" ]]; then
-                NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
-                if [[ -n "$NAME" ]]; then
-                  echo "  • cargo update -p $NAME"
-                  cargo update -p "$NAME"
-                fi
+        # Update version in Cargo.lock WITHOUT regenerating it
+        # This preserves all dependency versions and maintains cache validity
+        if [ -f "Cargo.lock" ]; then
+          echo "🔒 Updating version in existing Cargo.lock (preserving dependencies)"
+          
+          # Get list of workspace members
+          WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
+          
+          # For each workspace member, get its package name and update version in Cargo.lock
+          for dir in $WORKSPACE_MEMBERS; do
+            if [ -f "$dir/Cargo.toml" ]; then
+              # Update version in member's Cargo.toml
+              sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
+              
+              # Get the package name
+              PKG_NAME=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+              
+              if [ -n "$PKG_NAME" ]; then
+                echo "  • Updating $PKG_NAME to version $VERSION in Cargo.lock"
+                # Update this package's version in Cargo.lock
+                # Use a more precise pattern that handles the package block structure
+                awk -v pkg="$PKG_NAME" -v old="$CURRENT_VERSION" -v new="$VERSION" '
+                  /^\[\[package\]\]$/ { in_pkg=1; is_target=0; next_line_name=1 }
+                  in_pkg && next_line_name && /^name = / {
+                    next_line_name=0
+                    if ($0 == "name = \"" pkg "\"") {
+                      is_target=1
+                    }
+                  }
+                  in_pkg && is_target && /^version = / {
+                    print "version = \"" new "\""
+                    is_target=0
+                    in_pkg=0
+                    next
+                  }
+                  in_pkg && /^$/ { in_pkg=0; is_target=0 }
+                  { print }
+                ' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
               fi
-            done
-        
-        # Now normalize the Cargo.lock workspace versions to ensure consistency
-        echo "🔧 Normalizing Cargo.lock workspace versions"
-        # Build list of workspace crate names
-        awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
-          | while IFS= read -r dir; do
-              if [[ -f "$dir/Cargo.toml" ]]; then
-                sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"
+            fi
+          done
+          
+          # Also update any references to these packages in dependencies sections
+          for dir in $WORKSPACE_MEMBERS; do
+            if [ -f "$dir/Cargo.toml" ]; then
+              PKG_NAME=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+              if [ -n "$PKG_NAME" ]; then
+                # Update dependency references (these appear in different format)
+                sed -i "s/\"$PKG_NAME $CURRENT_VERSION\"/\"$PKG_NAME $VERSION\"/g" Cargo.lock
               fi
-            done \
-          > .workspace-crate-names
-
-        if [[ -s .workspace-crate-names ]]; then
-          awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
-            /^\[\[package\]\]$/ { pkg=""; print; next }
-            /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
-            /^version = \"/ {
-              if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
-              next
-            }
-            { print }
-          ' .workspace-crate-names Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+            fi
+          done
+          
+          echo "✅ Cargo.lock updated (dependencies preserved)"
+        else
+          echo "⚠️  No Cargo.lock found, will be created during build"
         fi
-        rm -f .workspace-crate-names
-
-        # Ensure Cargo.lock is regenerated for this runner's target so that
-        # subsequent `cargo build --locked` does not fail due to missing
-        # target-specific dependencies. This does not publish changes; it only
-        # updates the lockfile in the workspace checkout for this job.
-        echo "🔒 Regenerating Cargo.lock for current runner target"
-        cargo generate-lockfile
+        
+        # Clean up backup files
+        find . -name "*.bak" -delete
       shell: bash
 
     - name: Build binaries
       shell: bash
       env:
-        # Use mold linker on Linux when available for faster linking
-        RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-C link-arg=-fuse-ld=mold' || '' }}
-        # Skip macOS codesigning in CI to allow cross-arch builds
+        # Use mold linker on Linux for faster linking
+        # Optionally suppress warnings in release builds (remove -Awarnings if you want to see them)
+        RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold' || '-Awarnings' }}
+        # Skip macOS codesigning in CI
         SKIP_SIGNING: '1'
-        # sccache performs best with incremental disabled for release builds
+        # Disable incremental compilation for release builds (better with sccache)
         CARGO_INCREMENTAL: "0"
-        # Increase cache capacity a bit to improve hit rate across targets
+        # Increase sccache cache size
         SCCACHE_CACHE_SIZE: "10G"
+        # Show more detail on failures
+        RUST_BACKTRACE: "1"
       run: |
         cd codex-rs
-        # mozilla-actions/sccache-action sets RUSTC_WRAPPER and enables GHA cache
-        command -v sccache >/dev/null 2>&1 && echo "Using sccache for compilation caching" || echo "sccache not available; proceeding without it"
-        # Use all available cores
+        
+        # Show sccache status
+        command -v sccache >/dev/null 2>&1 && echo "Using sccache for compilation caching" || echo "sccache not available"
+        
+        # Calculate parallel jobs
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          # Windows: Use NUMBER_OF_PROCESSORS env var
           export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
         else
-          # Unix-like: Prefer nproc if available, otherwise getconf/sysctl
           CORES=$((
             $( (command -v nproc >/dev/null 2>&1 && nproc) \
                || (getconf _NPROCESSORS_ONLN 2>/dev/null) \
@@ -228,10 +255,12 @@ jobs:
           export CARGO_BUILD_JOBS=$((CORES * 2))
         fi
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
-        # Use --locked to ensure reproducible builds
+        
+        # Build with --locked to ensure reproducible builds
+        # If Cargo.lock doesn't exist or is invalid, this will fail (which is what we want)
         cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
-
-        # Show sccache stats if available (non-fatal)
+        
+        # Show sccache stats
         command -v sccache >/dev/null 2>&1 && sccache --show-stats || true
         
     - name: Prepare artifacts
@@ -327,7 +356,7 @@ jobs:
           echo "skip_push=false" >> $GITHUB_OUTPUT
         fi
 
-        # Ensure the tag exists at HEAD, regardless of whether package.json changed
+        # Ensure the tag exists at HEAD
         if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
           git tag "v${NEW_VERSION}"
           echo "Created tag v${NEW_VERSION}"
@@ -356,9 +385,8 @@ jobs:
     
     - name: Push tag
       run: |
-        # Push the tag even if no commit was made in this job
+        # Push the tag even if no commit was made
         git push origin "v${{ steps.version.outputs.version }}" || true
-      
         
     - name: Push changes
       run: |
