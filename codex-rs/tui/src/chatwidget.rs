@@ -35,7 +35,6 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::InputItem;
-use codex_protocol::protocol::McpListToolsResponseEvent;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::Op;
@@ -59,8 +58,6 @@ use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
-use crate::slash_command::SlashCommand;
-use crate::get_git_diff::get_git_diff;
 // use image::GenericImageView;
 
 use crate::app_event::AppEvent;
@@ -69,8 +66,6 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
-use crate::bottom_pane::list_selection_view::SelectionAction;
-use crate::bottom_pane::list_selection_view::SelectionItem;
 use crate::history_cell;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::ExecCell;
@@ -678,7 +673,7 @@ impl ChatWidget<'_> {
 
         // Try to replace the placeholder running cell in place to preserve order.
         let mut replaced = false;
-        if let Some(mut idx) = history_index {
+        if let Some(idx) = history_index {
             if idx < self.history_cells.len() {
                 // Sanity check: ensure it's a running exec cell for the same command
                 let is_match = self.history_cells[idx]
@@ -2041,7 +2036,7 @@ impl ChatWidget<'_> {
 
         if !original_text.is_empty() {
             // Check if this is the first user prompt to trigger fade-out animation
-            let has_existing_user_prompts = self.history_cells.iter().any(|cell| {
+            let _has_existing_user_prompts = self.history_cells.iter().any(|cell| {
                 // Check if it's a user prompt by looking at display lines
                 // This is a bit indirect but works with the trait-based system
                 let lines = cell.display_lines();
@@ -4384,6 +4379,7 @@ impl ChatWidget<'_> {
         self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
     }
 
+    #[allow(dead_code)]
     fn switch_to_internal_browser(&mut self) {
         // Switch to internal browser mode
         let latest_screenshot = self.latest_browser_screenshot.clone();
@@ -5567,14 +5563,15 @@ impl WidgetRef for &ChatWidget<'_> {
         // Record current viewport height for the next frame
         self.last_history_viewport_height.set(content_area.height);
 
-        // Clear the content area to prevent stale characters from previous frames
-        // This fixes the "stuck characters" issue when scrolling through chat history
-        // We fill with spaces while preserving the theme background color
+        // Clear the entire history region (including left/right padding), not just
+        // the inner content area. This avoids occasional artifacts at the margins
+        // and ensures background is fully painted even when widths shrink.
+        // Fill with spaces while preserving the theme background color.
         let clear_style = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
-        for y in content_area.y..(content_area.y + content_area.height) {
-            for x in content_area.x..(content_area.x + content_area.width) {
+        for y in history_area.y..history_area.y.saturating_add(history_area.height) {
+            for x in history_area.x..history_area.x.saturating_add(history_area.width) {
                 buf[(x, y)].set_char(' ').set_style(clear_style);
             }
         }
@@ -5816,7 +5813,7 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             // Match the horizontal padding used by status bar and input
             let padding = 1u16;
-            let mut area = Rect {
+            let area = Rect {
                 x: history_area.x + padding,
                 y: history_area.y,
                 width: history_area.width.saturating_sub(padding * 2),

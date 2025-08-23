@@ -131,6 +131,7 @@ impl Page {
     }
 
     /// (NEW) Injects the script to prevent new tabs from opening and redirect them to the current tab.
+    #[allow(dead_code)]
     async fn inject_tab_interception_script(cdp_page: &Arc<CdpPage>) -> Result<()> {
         // The comprehensive script ported from browser_session.ts
         let script = r#"
@@ -485,7 +486,7 @@ impl Page {
                     .await;
                     match retry_attempt {
                         Ok(Ok(resp)) => Ok(resp.result),
-                        Ok(Err(err2)) => {
+                        Ok(Err(_)) => {
                             // Last resort for visible pages: try from_surface(true).
                             // This can flash; we only do it after exhausting the safer path to prevent permanent failures.
                             debug!(
@@ -557,7 +558,7 @@ impl Page {
                     .await;
                     match retry_attempt {
                         Ok(Ok(resp)) => Ok(resp.result),
-                        Ok(Err(e)) => {
+                        Ok(Err(_)) => {
                             // Final fallback with from_surface(true) even though visible (see doc rationale)
                             debug!(
                                 "Second attempt with from_surface(false) failed while visible; attempting final from_surface(true)"
@@ -607,6 +608,7 @@ impl Page {
     }
 
     /// Check and fix viewport scaling issues before taking screenshots
+    #[allow(dead_code)]
     async fn check_and_fix_scaling(&self) -> Result<()> {
         // Never touch viewport metrics for external Chrome connections.
         // Changing device metrics on a user's Chrome causes a visible flash

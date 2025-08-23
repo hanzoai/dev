@@ -11,7 +11,6 @@ use codex_core::parse_command::ParsedCommand;
 use codex_core::plan_tool::PlanItemArg;
 use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
-use codex_core::project_doc::discover_project_doc_paths;
 use codex_core::protocol::FileChange;
 use crate::diff_render::create_diff_summary;
 use codex_core::protocol::McpInvocation;
@@ -782,6 +781,7 @@ impl HistoryCell for ImageOutputCell {
 // ==================== ToolCallCell ====================
 
 pub(crate) enum ToolState {
+    #[allow(dead_code)]
     Running,
     Success,
     Failed,
@@ -1091,7 +1091,7 @@ impl HistoryCell for StreamingContentCell {
 const PREVIEW_HEAD_LINES: usize = 2;
 const PREVIEW_TAIL_LINES: usize = 5;
 
-fn build_preview_lines(text: &str, include_left_pipe: bool) -> Vec<Line<'static>> {
+fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let non_empty: Vec<&str> = processed
         .lines()
@@ -1783,6 +1783,7 @@ fn new_exec_command_generic(
     lines
 }
 
+#[allow(dead_code)]
 pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCell {
     let title_line = Line::styled("Working", Style::default().fg(crate::colors::primary()));
     let lines: Vec<Line> = vec![
@@ -1793,6 +1794,7 @@ pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCel
     ToolCallCell { lines, state: ToolState::Running }
 }
 
+#[allow(dead_code)]
 pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String>) -> ToolCallCell {
     let title_line = Line::styled("Working", Style::default().fg(crate::colors::primary()));
     let invocation_str = if let Some(args) = args {
@@ -2207,7 +2209,7 @@ fn try_new_completed_mcp_tool_call_with_image_output(
 }
 
 pub(crate) fn new_completed_mcp_tool_call(
-    num_cols: usize,
+    _num_cols: usize,
     invocation: McpInvocation,
     duration: Duration,
     success: bool,

@@ -26,7 +26,6 @@ use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use uuid::Uuid;
-use fs2::FileExt;
 
 use crate::config::Config;
 use crate::config_types::HistoryPersistence;

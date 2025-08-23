@@ -5,6 +5,9 @@ set -euo pipefail
 # Change to the Rust project root directory
 cd codex-rs
 
+# Compute repository root (one level up from codex-rs)
+REPO_ROOT="$(cd .. && pwd)"
+
 # Use dev-fast profile by default for quick iteration
 # Can override with: PROFILE=release ./build-fast.sh
 PROFILE="${PROFILE:-dev-fast}"
@@ -57,7 +60,7 @@ if command -v rustup >/dev/null 2>&1; then
 
   if [ -n "$TOOLCHAIN" ]; then
     # Ensure toolchain is installed; if not, attempt install quietly
-    if ! rustup toolchain list | awk '{print $1}' | grep -qx "$TOOLCHAIN"; then
+    if ! rustup which rustc --toolchain "$TOOLCHAIN" >/dev/null 2>&1; then
       echo "rustup: installing toolchain $TOOLCHAIN ..."
       rustup toolchain install "$TOOLCHAIN" >/dev/null 2>&1 || true
     fi
@@ -73,16 +76,44 @@ else
   exit 1
 fi
 
+# Optional trace mode for diagnosing environment differences
+if [ "${TRACE_BUILD:-}" = "1" ]; then
+  echo "--- TRACE_BUILD environment ---"
+  echo "whoami: $(whoami)"
+  echo "pwd: $(pwd)"
+  echo "SHELL: ${SHELL:-}"
+  bash --version | head -n1 || true
+  if [ -n "${TOOLCHAIN:-}" ]; then
+    echo "TOOLCHAIN: ${TOOLCHAIN}"
+    rustup run "$TOOLCHAIN" rustc -vV || true
+    rustup run "$TOOLCHAIN" cargo -vV || true
+  fi
+  echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
+  env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
+  echo "--------------------------------"
+fi
+
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
 
 # Build with or without --locked based on lockfile validity
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
+# Merge cargo's stderr into stdout so CI/harnesses that only capture stdout
+# still show all compilation lines and warnings just like an interactive shell.
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec 2>&1
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
     echo "Binary location: ${BIN_PATH}"
+    # Compute absolute path and SHA256 for clarity
+    ABS_BIN_PATH="$(cd "$(dirname "${BIN_PATH}")" && pwd)/$(basename "${BIN_PATH}")"
+    if command -v shasum >/dev/null 2>&1; then
+      BIN_SHA="$(shasum -a 256 "${ABS_BIN_PATH}" | awk '{print $1}')"
+    elif command -v sha256sum >/dev/null 2>&1; then
+      BIN_SHA="$(sha256sum "${ABS_BIN_PATH}" | awk '{print $1}')"
+    else
+      BIN_SHA=""
+    fi
     
     # Keep old symlink locations working for compatibility
     # Create symlink in target/release for npm wrapper expectations
@@ -104,7 +135,12 @@ if [ $? -eq 0 ]; then
     
     echo "✅ Symlinks updated"
     echo ""
-    echo "You can now run: code"
+    echo "You can run the CLI directly:"
+    if [ -n "$BIN_SHA" ]; then
+      echo "  ${ABS_BIN_PATH} (sha256: ${BIN_SHA})"
+    else
+      echo "  ${ABS_BIN_PATH}"
+    fi
     echo "Binary size: $(du -h ${BIN_PATH} | cut -f1)"
     echo ""
     echo "Build profile: ${PROFILE}"
@@ -113,6 +149,26 @@ if [ $? -eq 0 ]; then
         echo "  → For production build, use: PROFILE=release-prod ./build-fast.sh"
     fi
     
+    # PATH guidance and collision warning
+    REPO_BIN_DIR="${REPO_ROOT}/codex-cli/bin"
+    CODE_PATH_ON_PATH="$(command -v code 2>/dev/null || true)"
+    if [ -n "$CODE_PATH_ON_PATH" ] && [[ "$CODE_PATH_ON_PATH" != "${REPO_BIN_DIR}/code" && "$CODE_PATH_ON_PATH" != *"/codex-cli/bin/"* ]]; then
+      echo ""
+      echo "⚠️  PATH notice: 'code' currently resolves to: $CODE_PATH_ON_PATH"
+      echo "    That is likely Visual Studio Code, not this CLI."
+      echo "    To use this binary via 'code', prepend the repo bin directory to PATH:"
+      echo "      export PATH=\"${REPO_BIN_DIR}:\$PATH\""
+      echo "    Then verify with:"
+      echo "      which code"
+    fi
+
+    if [ "${TRACE_BUILD:-}" = "1" ] && [ -n "$BIN_SHA" ]; then
+      echo "--- TRACE_BUILD artifact ---"
+      echo "ABS_BIN_PATH: ${ABS_BIN_PATH}"
+      echo "SHA256: ${BIN_SHA}"
+      echo "--------------------------------"
+    fi
+
     # If lockfile was out of date, remind user
     if [ -z "$USE_LOCKED" ]; then
         echo ""
