@@ -99,7 +99,10 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
                     .unwrap_or("");
                 let is_shell = matches!(shell_name, "bash" | "sh" | "zsh");
                 let is_flag = matches!(flag.as_str(), "-lc" | "-c");
-                is_shell && is_flag && script.trim_start().starts_with("apply_patch")
+                let starts_with_apply = APPLY_PATCH_COMMANDS
+                    .iter()
+                    .any(|cmd| script.trim_start().starts_with(cmd));
+                is_shell && is_flag && starts_with_apply
             } =>
         {
             match extract_heredoc_body_from_apply_patch_command(script) {
