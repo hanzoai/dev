@@ -12,6 +12,7 @@ use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::ConversationManager;
+use codex_login::{AuthManager, AuthMode};
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
@@ -112,7 +113,10 @@ impl App<'_> {
         debug: bool,
         terminal_info: TerminalInfo,
     ) -> Self {
-        let conversation_manager = Arc::new(ConversationManager::default());
+        let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
+            config.codex_home.clone(),
+            AuthMode::ApiKey,
+        )));
 
         let (app_event_tx, app_event_rx) = channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
