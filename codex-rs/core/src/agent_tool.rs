@@ -594,9 +594,9 @@ async fn execute_model_with_permissions(
         }
         "gemini" => {
             if read_only {
-                cmd.args(&["-p", prompt]);
+                cmd.args(&["-m", "gemini-2.5-pro", "-p", prompt]);
             } else {
-                cmd.args(&["-y", "-p", prompt]);
+                cmd.args(&["-m", "gemini-2.5-pro", "-y", "-p", prompt]);
             }
         }
         "codex" => {
