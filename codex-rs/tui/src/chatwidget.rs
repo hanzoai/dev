@@ -5708,7 +5708,9 @@ impl WidgetRef for &ChatWidget<'_> {
                     // Draw the symbol at the top of this cell only when the first line is visible
                     if skip_top == 0 && gutter_area.width >= 2 {
                         // Choose color based on symbol/type
-                        let symbol_style = Style::default().fg(color);
+                        let symbol_style = Style::default()
+                            .fg(color)
+                            .bg(crate::colors::background());
                         buf.set_string(gutter_area.x, gutter_area.y, symbol, symbol_style);
                     }
                 }
@@ -5774,9 +5776,9 @@ impl WidgetRef for &ChatWidget<'_> {
                 .begin_symbol(None)
                 .end_symbol(None)
                 .track_symbol(Some("│"))
-                .track_style(Style::default().fg(crate::colors::border()))
+                .track_style(Style::default().fg(crate::colors::border()).bg(crate::colors::background()))
                 .thumb_symbol("█")
-                .thumb_style(Style::default().fg(theme.border_focused));
+                .thumb_style(Style::default().fg(theme.border_focused).bg(crate::colors::background()));
             // To avoid a small jump at the bottom due to spacer toggling,
             // render the scrollbar in a slightly shorter area (reserve 1 row).
             let sb_area = Rect {
