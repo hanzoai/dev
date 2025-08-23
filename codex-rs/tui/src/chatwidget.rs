@@ -1459,8 +1459,9 @@ impl ChatWidget<'_> {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             InputResult::ScrollUp => {
-                // If already at the very top, try navigating command history instead
-                if self.scroll_offset >= self.last_max_scroll.get() {
+                // Only allow Up to navigate command history when the top view
+                // cannot be scrolled at all (no scrollback available).
+                if self.last_max_scroll.get() == 0 {
                     if self.bottom_pane.try_history_up() { return; }
                 }
                 // Scroll up in chat history (increase offset, towards older content)
@@ -1486,8 +1487,9 @@ impl ChatWidget<'_> {
                     .record_event(HeightEvent::UserScroll);
             }
             InputResult::ScrollDown => {
-                // If browsing command history, give Down precedence to step forward
-                if self.bottom_pane.history_is_browsing() {
+                // Only allow Down to navigate command history when the top view
+                // cannot be scrolled at all (no scrollback available).
+                if self.last_max_scroll.get() == 0 && self.bottom_pane.history_is_browsing() {
                     if self.bottom_pane.try_history_down() { return; }
                 }
                 // Scroll down in chat history (decrease offset, towards bottom)
