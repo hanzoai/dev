@@ -134,7 +134,8 @@ impl App<'_> {
                     // needs to acquire the event lock, and so will fail if it
                     // can't acquire it within 2 sec. Resizing the terminal
                     // crashes the app if the cursor position can't be read.
-                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(100)) {
+                    // Keep the timeout small to minimize input-to-echo latency.
+                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(5)) {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
@@ -160,7 +161,8 @@ impl App<'_> {
                             }
                         }
                     } else {
-                        // Timeout expired, no `Event` is available
+                        // Timeout expired, no `Event` is available; yield cooperatively
+                        std::thread::yield_now();
                     }
                 }
             });
@@ -768,17 +770,6 @@ impl App<'_> {
         let _screen_size = terminal.size()?;
 
         terminal.draw(|frame| {
-            // Fill entire frame with theme background
-            let bg_style = ratatui::style::Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text());
-            let area = frame.area();
-            for y in area.top()..area.bottom() {
-                for x in area.left()..area.right() {
-                    frame.buffer_mut()[(x, y)].set_style(bg_style);
-                }
-            }
-
             match &mut self.app_state {
                 AppState::Chat { widget } => {
                     if let Some((x, y)) = widget.cursor_pos(frame.area()) {

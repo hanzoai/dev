@@ -361,14 +361,29 @@ impl HistoryCell for ExecCell {
     fn has_custom_render(&self) -> bool { true }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render command header/content above and stdout/stderr preview inside a left-bordered block.
-        let (pre_lines, out_lines) = self.exec_render_parts();
+        let (pre_lines_raw, out_lines) = self.exec_render_parts();
+
+        // For the preamble, implement a hanging indent of 2 cols by
+        // stripping the leading visual prefixes ("└ " or two spaces) and
+        // rendering into a content area shifted by 2 columns.
+        let mut pre_lines: Vec<Line<'static>> = Vec::with_capacity(pre_lines_raw.len());
+        for mut line in pre_lines_raw {
+            if let Some(first) = line.spans.first() {
+                let s = first.content.clone();
+                if s == "└ " || s == "  " {
+                    // Drop the leading prefix span
+                    line.spans.remove(0);
+                }
+            }
+            pre_lines.push(line);
+        }
 
         // Prepare texts and total heights (after wrapping)
         let pre_text = Text::from(trim_empty_lines(pre_lines));
         let out_text = Text::from(trim_empty_lines(out_lines));
         // IMPORTANT: measure with the same effective widths we will render with.
-        // Preamble renders without borders/padding, so width = area.width.
-        let pre_wrap_width = area.width;
+        // Preamble renders with a 2-col hanging indent, so reduce width.
+        let pre_wrap_width = area.width.saturating_sub(2);
         // Output renders inside a Block with a LEFT border (1 col) and left padding of 1,
         // so the inner text width is reduced accordingly.
         let out_wrap_width = area.width.saturating_sub(2);
@@ -396,7 +411,14 @@ impl HistoryCell for ExecCell {
 
         // Render preamble (scrolled) if any space
         if pre_height > 0 {
-            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
+            let pre_area = Rect { x: area.x.saturating_add(2), y: area.y, width: area.width.saturating_sub(2), height: pre_height };
+            // Fill the 2-col hanging indent margin
+            let margin_style = Style::default().bg(crate::colors::background());
+            for y in area.y..area.y.saturating_add(pre_height) {
+                for x in area.x..area.x.saturating_add(2.min(area.width)) {
+                    buf[(x, y)].set_style(margin_style);
+                }
+            }
             let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
                 .block(pre_block)
@@ -449,6 +471,103 @@ impl ExecCell {
             *self.cached_out_lines.borrow_mut() = Some(out);
         }
         parts
+    }
+}
+
+// ==================== DiffCell ====================
+
+pub(crate) struct DiffCell {
+    pub(crate) lines: Vec<Line<'static>>,
+}
+
+impl HistoryCell for DiffCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Diff }
+    fn display_lines(&self) -> Vec<Line<'static>> { self.lines.clone() }
+    fn has_custom_render(&self) -> bool { true }
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
+        // Render a two-column diff with a 1-col marker gutter and 1-col padding
+        // so wrapped lines hang under their first content column.
+        let bg = Style::default().bg(crate::colors::background());
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_style(bg);
+            }
+        }
+
+        let marker_col_x = area.x; // 1 column for marker
+        let content_x = area.x.saturating_add(2); // 1 for marker + 1 space
+        let content_w = area.width.saturating_sub(2);
+        let mut cur_y = area.y;
+
+        // Helper to classify a line and extract marker and content
+        let classify = |l: &Line<'_>| -> (Option<char>, Line<'static>, Style) {
+            let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+            let default_style = Style::default().fg(crate::colors::text());
+            if text.starts_with("+") && !text.starts_with("+++") {
+                let content = text.chars().skip(1).collect::<String>();
+                (Some('+'), Line::from(content).style(Style::default().fg(crate::colors::success())), default_style)
+            } else if text.starts_with("-") && !text.starts_with("---") {
+                let content = text.chars().skip(1).collect::<String>();
+                (Some('-'), Line::from(content).style(Style::default().fg(crate::colors::error())), default_style)
+            } else if text.starts_with("@@") {
+                (None, Line::from(text).style(Style::default().fg(crate::colors::primary())), default_style)
+            } else {
+                (None, Line::from(text), default_style)
+            }
+        };
+
+        'outer: for line in &self.lines {
+            // Measure this line at wrapped width
+            let (_marker, content_line, _sty) = classify(line);
+            let content_text = Text::from(vec![content_line.clone()]);
+            let rows: u16 = Paragraph::new(content_text.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(content_w)
+                .try_into()
+                .unwrap_or(0);
+
+            let mut local_skip = 0u16;
+            if skip_rows > 0 {
+                if skip_rows >= rows {
+                    skip_rows -= rows;
+                    continue 'outer;
+                } else {
+                    local_skip = skip_rows;
+                    skip_rows = 0;
+                }
+            }
+
+            // Remaining height available
+            if cur_y >= area.y.saturating_add(area.height) { break; }
+            let avail = area.y.saturating_add(area.height) - cur_y;
+            let draw_h = rows.saturating_sub(local_skip).min(avail);
+            if draw_h == 0 { continue; }
+
+            // Draw content with hanging indent (left margin = 2)
+            let content_area = Rect { x: content_x, y: cur_y, width: content_w, height: draw_h };
+            let block = Block::default().style(bg);
+            Paragraph::new(content_text)
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .scroll((local_skip, 0))
+                .style(bg)
+                .render(content_area, buf);
+
+            // Draw marker on the first visible visual row of this logical line
+            let (marker, _content_line2, _) = classify(line);
+            if let Some(m) = marker {
+                if local_skip == 0 && area.width >= 1 {
+                    let color = if m == '+' { crate::colors::success() } else { crate::colors::error() };
+                    let style = Style::default().fg(color).bg(crate::colors::background());
+                    buf.set_string(marker_col_x, cur_y, m.to_string(), style);
+                }
+            }
+
+            cur_y = cur_y.saturating_add(draw_h);
+            if cur_y >= area.y.saturating_add(area.height) { break; }
+        }
     }
 }
 
@@ -2330,7 +2449,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     PlainHistoryCell { lines, kind: HistoryCellType::Error }
 }
 
-pub(crate) fn new_diff_output(diff_output: String) -> PlainHistoryCell {
+pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
     // Parse the diff output into lines
     let mut lines = vec![Line::from("/diff".magenta())];
     for line in diff_output.lines() {
@@ -2345,7 +2464,7 @@ pub(crate) fn new_diff_output(diff_output: String) -> PlainHistoryCell {
         }
     }
     lines.push(Line::from(""));
-    PlainHistoryCell { lines, kind: HistoryCellType::Diff }
+    DiffCell { lines }
 }
 
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
