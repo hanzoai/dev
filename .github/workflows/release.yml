@@ -132,6 +132,7 @@ jobs:
         shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV" # keep server alive during job
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           case "${{ runner.os }}" in
             macOS)
@@ -145,6 +146,13 @@ jobs:
               echo "SCCACHE_DIR=$LOCALAPPDATA\\Mozilla\\sccache" >> "$GITHUB_ENV"
               ;;
           esac
+
+      # Ensure GH Actions cache credentials are inherited by child processes (sccache server)
+      - name: Export GH cache env for children
+        shell: bash
+        run: |
+          echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "$GITHUB_ENV"
+          echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "$GITHUB_ENV"
 
       # ✅ Persist the local sccache directory as a shared, stable fallback across runs
       - name: Cache sccache directory (fallback)
@@ -217,6 +225,8 @@ jobs:
         run: |
           cd codex-rs
 
+          echo "Restarting sccache server to avoid race conditions"
+          sccache --stop-server || true
           echo "Starting sccache server (GHAC preferred)"
           if ! sccache --start-server; then
             echo "sccache GHAC failed to start; switching to local disk cache"
