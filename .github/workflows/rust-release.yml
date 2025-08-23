@@ -91,17 +91,17 @@ jobs:
           # Update Cargo.lock to reflect only workspace version bumps, without
           # floating third-party dependency versions or git revisions.
           echo "🔒 Updating Cargo.lock for workspace members only"
-          # Extract member directories from [workspace] table
-          mapfile -t MEMBERS < <(awk '/^\[workspace\]/{f=0} f && /]/{f=0} /^members\s*=\s*\[/{f=1; next} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
-          for dir in "${MEMBERS[@]}"; do
-            if [[ -f "$dir/Cargo.toml" ]]; then
-              NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
-              if [[ -n "$NAME" ]]; then
-                echo "  • cargo update -p $NAME"
-                cargo update -p "$NAME"
-              fi
-            fi
-          done
+          # Extract member directories from [workspace] table (portable, no mapfile)
+          awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
+            | while IFS= read -r dir; do
+                if [[ -f "$dir/Cargo.toml" ]]; then
+                  NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
+                  if [[ -n "$NAME" ]]; then
+                    echo "  • cargo update -p $NAME"
+                    cargo update -p "$NAME"
+                  fi
+                fi
+              done
       
       - uses: dtolnay/rust-toolchain@1.89.0
         with:
