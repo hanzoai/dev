@@ -279,6 +279,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct SetUnderlineColor(pub CColor);
 
 impl Command for SetUnderlineColor {

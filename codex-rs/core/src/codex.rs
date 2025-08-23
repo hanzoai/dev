@@ -17,10 +17,10 @@ use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
-use codex_login::AuthManager;
-use codex_protocol::protocol::ConversationHistoryResponseEvent;
+// unused: AuthManager
+// unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;
-use codex_protocol::protocol::TurnAbortedEvent;
+// unused: TurnAbortedEvent
 use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
@@ -549,7 +549,7 @@ pub(crate) struct Session {
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     shell_environment_policy: ShellEnvironmentPolicy,
-    writable_roots: Vec<PathBuf>,
+    _writable_roots: Vec<PathBuf>,
     disable_response_storage: bool,
     tools_config: ToolsConfig,
 
@@ -580,8 +580,9 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    #[allow(dead_code)]
     pub(crate) fn get_writable_roots(&self) -> &[PathBuf] {
-        &self.writable_roots
+        &self._writable_roots
     }
 
     pub(crate) fn get_approval_policy(&self) -> AskForApproval {
@@ -903,7 +904,7 @@ impl Session {
         const MAX_STREAM_OUTPUT: usize = 5 * 1024; // 5KiB
         let stdout = stdout.text.chars().take(MAX_STREAM_OUTPUT).collect();
         let stderr = stderr.text.chars().take(MAX_STREAM_OUTPUT).collect();
-        let formatted_output = format_exec_output_str(output);
+        // Precompute formatted output if needed in future for logging/pretty UI.
 
         let msg = if is_apply_patch {
             EventMsg::PatchApplyEnd(PatchApplyEndEvent {
@@ -1279,7 +1280,7 @@ impl AgentAgent {
         }
     }
 
-    fn abort(self, reason: TurnAbortReason) {
+    fn abort(self, _reason: TurnAbortReason) {
         // TOCTOU?
         if !self.handle.is_finished() {
             self.handle.abort();
@@ -1483,7 +1484,7 @@ async fn submission_loop(
                     sandbox_policy,
                     shell_environment_policy: config.shell_environment_policy.clone(),
                     cwd,
-                    writable_roots,
+                    _writable_roots: writable_roots,
                     mcp_connection_manager,
                     agents: config.agents.clone(),
                     notify,
@@ -2532,8 +2533,8 @@ async fn handle_browser_cleanup(
     sub_id: String,
     call_id: String,
 ) -> ResponseInputItem {
-    let sess_clone = sess;
     let call_id_clone = call_id.clone();
+    let sess_clone = sess;
     execute_custom_tool(
         sess,
         &sub_id,
@@ -3132,7 +3133,7 @@ async fn handle_wait_for_agent(
                     let agents = manager.list_agents(None, Some(batch_id.clone()), false);
 
                     // Separate terminal vs non-terminal agents
-                    let mut completed_agents: Vec<_> = agents
+                    let completed_agents: Vec<_> = agents
                         .iter()
                         .filter(|t| {
                             matches!(
@@ -4085,7 +4086,6 @@ async fn handle_browser_open(
     // Parse arguments as JSON for the event
     let params = serde_json::from_str(&arguments).ok();
 
-    let sess_clone = sess;
     let arguments_clone = arguments.clone();
     let call_id_clone = call_id.clone();
 

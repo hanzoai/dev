@@ -46,7 +46,7 @@ impl Default for HeightManagerConfig {
 #[derive(Default)]
 struct DevCounters {
     frames: u64,
-    hysteresis_applied: u64,
+    _hysteresis_applied: u64,
     hud_quantized: u64,
 }
 
@@ -136,8 +136,8 @@ impl HeightManager {
         let desired = bottom_desired_height.max(5).min(bottom_cap);
 
         // Bottom pane policy: Grow immediately, confirm small decreases over a few frames
-        let mut bottom_h = match (self.last_bottom, self.bypass_once) {
-            (Some(prev), true) => desired,
+        let bottom_h = match (self.last_bottom, self.bypass_once) {
+            (Some(_), true) => desired,
             (Some(prev), false) => {
                 if desired > prev {
                     // grow immediately, reset counter
@@ -172,7 +172,7 @@ impl HeightManager {
         if self.bypass_once { self.bypass_once = false; }
 
         // Determine HUD height if present.
-        let mut hud_h: u16 = 0;
+        let mut hud_h: u16;
         if hud_present {
             // This mirrors the existing preview logic while centralizing its decision.
             // Compute HUD target height using 16:9 aspect on inner width.

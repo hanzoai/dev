@@ -15,9 +15,7 @@ use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
-use crate::tool_apply_patch::ApplyPatchToolType;
-use crate::tool_apply_patch::create_apply_patch_freeform_tool;
-use crate::tool_apply_patch::create_apply_patch_json_tool;
+// apply_patch tools are not currently surfaced; keep imports out to avoid warnings.
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ResponsesApiTool {
@@ -46,6 +44,7 @@ pub struct FreeformToolFormat {
 
 /// When serialized as JSON, this produces a valid "Tool" in the OpenAI
 /// Responses API.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type")]
 pub(crate) enum OpenAiTool {
@@ -87,12 +86,6 @@ impl ToolsConfig {
                 sandbox_policy: sandbox_policy.clone(),
             }
         }
-
-        let apply_patch_tool_type = match model_family.apply_patch_tool_type {
-            Some(ApplyPatchToolType::Freeform) => Some(ApplyPatchToolType::Freeform),
-            Some(ApplyPatchToolType::Function) => Some(ApplyPatchToolType::Function),
-            None => Some(ApplyPatchToolType::Freeform),
-        };
 
         Self {
             shell_type,

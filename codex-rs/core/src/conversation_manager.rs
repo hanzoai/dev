@@ -31,14 +31,14 @@ pub struct NewConversation {
 /// maintaining them in memory.
 pub struct ConversationManager {
     conversations: Arc<RwLock<HashMap<Uuid, Arc<CodexConversation>>>>,
-    auth_manager: Arc<AuthManager>,
+    _auth_manager: Arc<AuthManager>,
 }
 
 impl ConversationManager {
     pub fn new(auth_manager: Arc<AuthManager>) -> Self {
         Self {
             conversations: Arc::new(RwLock::new(HashMap::new())),
-            auth_manager,
+            _auth_manager: auth_manager,
         }
     }
 
@@ -121,7 +121,7 @@ impl ConversationManager {
         config: Config,
     ) -> CodexResult<NewConversation> {
         // Compute the prefix up to the cut point.
-        let truncated_history =
+        let _truncated_history =
             truncate_after_dropping_last_messages(conversation_history, num_messages_to_drop);
 
         // Spawn a new conversation with the computed initial history.

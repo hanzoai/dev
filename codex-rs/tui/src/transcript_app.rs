@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::io::Result;
 
 use crate::insert_history;
@@ -50,7 +51,7 @@ impl TranscriptApp {
         self.transcript_lines.extend(lines);
     }
 
-    fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
+    fn handle_key_event(&mut self, _tui: &mut tui::Tui, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
                 code: KeyCode::Char('q'),

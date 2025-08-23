@@ -81,6 +81,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Result of computing a `/diff` command.
+    #[allow(dead_code)]
     DiffResult(String),
 
     InsertHistory(Vec<Line<'static>>),
