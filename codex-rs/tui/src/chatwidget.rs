@@ -5567,6 +5567,18 @@ impl WidgetRef for &ChatWidget<'_> {
         // Record current viewport height for the next frame
         self.last_history_viewport_height.set(content_area.height);
 
+        // Clear the content area to prevent stale characters from previous frames
+        // This fixes the "stuck characters" issue when scrolling through chat history
+        // We fill with spaces while preserving the theme background color
+        let clear_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        for y in content_area.y..(content_area.y + content_area.height) {
+            for x in content_area.x..(content_area.x + content_area.width) {
+                buf[(x, y)].set_char(' ').set_style(clear_style);
+            }
+        }
+
         // Render the scrollable content with spacing using prefix sums
         let mut screen_y = start_y; // Position on screen
         let spacing = 1u16; // Spacing between cells
