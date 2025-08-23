@@ -45,7 +45,6 @@ mod conversation_manager;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
 pub mod model_family;
-mod models;
 mod openai_model_info;
 mod openai_tools;
 pub mod plan_tool;
@@ -56,6 +55,7 @@ pub mod seatbelt;
 pub mod shell;
 pub mod spawn;
 pub mod terminal;
+mod tool_apply_patch;
 pub mod turn_diff_tracker;
 pub mod user_agent;
 mod user_notification;
@@ -66,3 +66,5 @@ pub use safety::get_platform_sandbox;
 pub mod protocol;
 // Optionally expose upstream protocol config enums for callers that need them.
 pub use codex_protocol::config_types as protocol_config_types;
+// Re-export protocol models for compatibility with existing imports.
+pub use codex_protocol::models as models;

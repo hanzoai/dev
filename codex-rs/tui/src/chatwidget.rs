@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use ratatui::style::{Modifier, Style};
 
 use codex_core::ConversationManager;
+use codex_login::{AuthManager, AuthMode};
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
@@ -1145,8 +1146,11 @@ impl ChatWidget<'_> {
         // Create the Codex asynchronously so the UI loads as quickly as possible.
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
-            // Use ConversationManager to properly handle authentication
-            let conversation_manager = ConversationManager::default();
+            // Use ConversationManager with an AuthManager (API key by default)
+            let conversation_manager = ConversationManager::new(AuthManager::shared(
+                config_for_agent_loop.codex_home.clone(),
+                AuthMode::ApiKey,
+            ));
             let new_conversation = match conversation_manager
                 .new_conversation(config_for_agent_loop)
                 .await

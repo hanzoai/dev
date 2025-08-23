@@ -4,11 +4,11 @@ use crate::config_types::TextVerbosity as TextVerbosityConfig;
 use crate::environment_context::EnvironmentContext;
 use crate::error::Result;
 use crate::model_family::ModelFamily;
-use crate::models::ContentItem;
-use crate::models::ResponseItem;
 use crate::openai_tools::OpenAiTool;
 use crate::protocol::TokenUsage;
 use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
 use futures::Stream;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -68,13 +68,14 @@ impl Prompt {
             .unwrap_or(BASE_INSTRUCTIONS);
         let mut sections: Vec<&str> = vec![base];
 
-        // When there are no custom instructions, add apply_patch if either:
-        // - the model needs special instructions, or
+        // When there are no custom instructions, add apply_patch_tool_instructions if either:
+        // - the model needs special instructions (4.1), or
         // - there is no apply_patch tool present
-        let is_apply_patch_tool_present = self
-            .tools
-            .iter()
-            .any(|t| matches!(t, OpenAiTool::Function(f) if f.name == "apply_patch"));
+        let is_apply_patch_tool_present = self.tools.iter().any(|tool| match tool {
+            OpenAiTool::Function(f) => f.name == "apply_patch",
+            OpenAiTool::Freeform(f) => f.name == "apply_patch",
+            _ => false,
+        });
         if self.base_instructions_override.is_none()
             && (model.needs_special_apply_patch_instructions || !is_apply_patch_tool_present)
         {
@@ -319,6 +320,8 @@ pub(crate) fn create_reasoning_param_for_request(
     }
 }
 
+// Removed legacy TextControls helper; use `Text` with `OpenAiTextVerbosity` instead.
+
 pub(crate) struct ResponseStream {
     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
 }
@@ -346,5 +349,56 @@ mod tests {
         let model_family = find_family_for_model("gpt-4.1").expect("known model slug");
         let full = prompt.get_full_instructions(&model_family);
         assert_eq!(full, expected);
+    }
+
+    #[test]
+    fn serializes_text_verbosity_when_set() {
+        let input: Vec<ResponseItem> = vec![];
+        let tools: Vec<serde_json::Value> = vec![];
+        let req = ResponsesApiRequest {
+            model: "gpt-5",
+            instructions: "i",
+            input: &input,
+            tools: &tools,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: None,
+            store: true,
+            stream: true,
+            include: vec![],
+            prompt_cache_key: None,
+            text: Some(Text { verbosity: OpenAiTextVerbosity::Low }),
+        };
+
+        let v = serde_json::to_value(&req).expect("json");
+        assert_eq!(
+            v.get("text")
+                .and_then(|t| t.get("verbosity"))
+                .and_then(|s| s.as_str()),
+            Some("low")
+        );
+    }
+
+    #[test]
+    fn omits_text_when_not_set() {
+        let input: Vec<ResponseItem> = vec![];
+        let tools: Vec<serde_json::Value> = vec![];
+        let req = ResponsesApiRequest {
+            model: "gpt-5",
+            instructions: "i",
+            input: &input,
+            tools: &tools,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: None,
+            store: true,
+            stream: true,
+            include: vec![],
+            prompt_cache_key: None,
+            text: None,
+        };
+
+        let v = serde_json::to_value(&req).expect("json");
+        assert!(v.get("text").is_none());
     }
 }
