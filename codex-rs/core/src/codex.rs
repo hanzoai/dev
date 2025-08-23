@@ -368,6 +368,11 @@ use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
 use crate::exec::process_exec_tool_call;
+use crate::exec_command::EXEC_COMMAND_TOOL_NAME;
+use crate::exec_command::ExecCommandParams;
+use crate::exec_command::SESSION_MANAGER;
+use crate::exec_command::WRITE_STDIN_TOOL_NAME;
+use crate::exec_command::WriteStdinParams;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
@@ -896,6 +901,7 @@ impl Session {
         let ExecToolCallOutput {
             stdout,
             stderr,
+            aggregated_output,
             duration,
             exit_code,
         } = output;
@@ -920,6 +926,8 @@ impl Session {
                 stderr,
                 duration: *duration,
                 exit_code: *exit_code,
+                duration: *duration,
+                formatted_output,
             })
         };
 
@@ -977,6 +985,7 @@ impl Session {
                     exit_code: -1,
                     stdout: StreamOutput::new(String::new()),
                     stderr: StreamOutput::new(get_error_message_ui(e)),
+                    aggregated_output: StreamOutput::new(get_error_message_ui(e)),
                     duration: Duration::default(),
                 };
                 &output_stderr
