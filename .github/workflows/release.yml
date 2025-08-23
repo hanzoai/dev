@@ -167,7 +167,7 @@ jobs:
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
           # On Windows, use a minimal PowerShell loop to update each workspace package
           pwsh -Command "
-            $members = (Get-Content Cargo.toml) -join \"`n\" | Select-String -Pattern '^members\s*=\s*\[' -Context 0,50 | ForEach-Object { $_.Context.PostContext } | ForEach-Object { $_ -replace '[\",]','' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() }
+            $members = (Get-Content Cargo.toml) -join \"\`n\" | Select-String -Pattern '^members\s*=\s*\[' -Context 0,50 | ForEach-Object { $_.Context.PostContext } | ForEach-Object { $_ -replace '[\",]','' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() }
             foreach ($dir in $members) { if (Test-Path \"$dir/Cargo.toml\") { $name = (Get-Content \"$dir/Cargo.toml\" | Select-String -Pattern '^name\s*=\s*\"(.*)\"').Matches.Groups[1].Value; if ($name) { Write-Host \"  • cargo update -p $name\"; cargo update -p $name } } }
           "
         else
