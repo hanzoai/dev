@@ -42,7 +42,7 @@ use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
-use codex_core::protocol::TurnAbortReason;
+use codex_protocol::protocol::TurnAbortReason;
 use codex_core::protocol::TurnDiffEvent;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
