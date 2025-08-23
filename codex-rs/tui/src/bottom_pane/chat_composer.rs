@@ -1375,7 +1375,10 @@ impl WidgetRef for &ChatComposer {
         // Draw border around input area with optional "Coding" title when task is running
         let mut input_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()));
+            .border_style(Style::default().fg(crate::colors::border()))
+            // Fill input block with theme background so underlying content
+            // never shows through when the composer grows/shrinks.
+            .style(Style::default().bg(crate::colors::background()));
 
         if self.is_task_running {
             use std::time::{SystemTime, UNIX_EPOCH};

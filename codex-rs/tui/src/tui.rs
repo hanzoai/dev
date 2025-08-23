@@ -1,6 +1,7 @@
 use std::io::Result;
 use std::io::Stdout;
 use std::io::stdout;
+use std::io::BufWriter;
 
 use codex_core::config::Config;
 use crossterm::cursor::MoveTo;
@@ -23,7 +24,7 @@ use ratatui::crossterm::terminal::enable_raw_mode;
 use ratatui_image::picker::Picker;
 
 /// A type alias for the terminal type used in this application
-pub type Tui = Terminal<CrosstermBackend<Stdout>>;
+pub type Tui = Terminal<CrosstermBackend<BufWriter<Stdout>>>;
 
 /// Terminal information queried at startup
 #[derive(Clone)]
@@ -105,7 +106,8 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         execute!(stdout(), MoveTo(0, 0), ResetColor, SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
     }
 
-    let backend = CrosstermBackend::new(stdout());
+    // Wrap stdout in a BufWriter to reduce syscalls during rendering.
+    let backend = CrosstermBackend::new(BufWriter::new(stdout()));
     let tui = Terminal::new(backend)?;
     Ok((tui, terminal_info))
 }
