@@ -28,11 +28,8 @@ use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
 use serde_bytes::ByteBuf;
 
-// Maximum we send for each stream, which is either:
-// - 10KiB OR
-// - 256 lines
-const MAX_STREAM_OUTPUT: usize = 10 * 1024;
-const MAX_STREAM_OUTPUT_LINES: usize = 256;
+// Note: legacy stream caps were removed in favor of streaming all bytes and
+// truncating at the consumer where appropriate.
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 

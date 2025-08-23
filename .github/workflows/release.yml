@@ -24,47 +24,46 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        registry-url: 'https://registry.npmjs.org'
-        
-    - name: Determine next version
-      id: version
-      working-directory: codex-cli
-      run: |
-        # Get current version from package.json
-        CURRENT_VERSION=$(node -p "require('./package.json').version")
-        echo "Current version in package.json: $CURRENT_VERSION"
-        
-        # Check latest published version
-        PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
-        echo "Latest published version: $PUBLISHED_VERSION"
-        
-        # Determine the version to use for this build
-        if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
-          # Need to bump from published version
-          echo "Will bump from published version $PUBLISHED_VERSION"
-          # Calculate next patch version
-          IFS='.' read -ra VERSION_PARTS <<< "$PUBLISHED_VERSION"
-          MAJOR=${VERSION_PARTS[0]}
-          MINOR=${VERSION_PARTS[1]}
-          PATCH=${VERSION_PARTS[2]}
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-        else
-          echo "Using current version $CURRENT_VERSION which is ahead of published $PUBLISHED_VERSION"
-          NEW_VERSION=$CURRENT_VERSION
-        fi
-        
-        echo "Version for this build: $NEW_VERSION"
-        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Determine next version
+        id: version
+        working-directory: codex-cli
+        shell: bash
+        run: |
+          # Get current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version in package.json: $CURRENT_VERSION"
+
+          # Check latest published version
+          PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
+          echo "Latest published version: $PUBLISHED_VERSION"
+
+          # Determine the version to use for this build
+          if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
+            echo "Will bump from published version $PUBLISHED_VERSION"
+            IFS='.' read -ra VERSION_PARTS <<< "$PUBLISHED_VERSION"
+            MAJOR=${VERSION_PARTS[0]}
+            MINOR=${VERSION_PARTS[1]}
+            PATCH=${VERSION_PARTS[2]}
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          else
+            echo "Using current version $CURRENT_VERSION which is ahead of published $PUBLISHED_VERSION"
+            NEW_VERSION=$CURRENT_VERSION
+          fi
+
+          echo "Version for this build: $NEW_VERSION"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
     name: Build ${{ matrix.target }}
@@ -87,7 +86,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact: code-aarch64-unknown-linux-gnu
           # macOS builds
-          - os: macos-14  # ARM Mac for both targets
+          - os: macos-14
             target: x86_64-apple-darwin
             artifact: code-x86_64-apple-darwin
           - os: macos-14
@@ -97,342 +96,307 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: code-x86_64-pc-windows-msvc.exe
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@1.89.0
-      with:
-        targets: ${{ matrix.target }}
-    
-    # Smart caching for Rust builds with better restore keys
-    - name: Setup Rust Cache
-      uses: Swatinem/rust-cache@v2
-      with:
-        # Unique cache per target
-        key: ${{ matrix.target }}
-        # Use restore keys for better cache hits across version changes
-        prefix-key: "v2-rust"
-        # Save cache even on failure for debugging
-        cache-on-failure: true
-        # Cache all crates to improve hit rate
-        cache-all-crates: true
-        # Working directory
-        workspaces: "codex-rs -> target"
-        # Additional cache directories
-        cache-directories: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # Compiler cache across all OSes
-    - name: Setup sccache
-      uses: mozilla-actions/sccache-action@v0.0.6
-      with:
-        # Pin sccache version explicitly; action expects 'version' input
-        version: v0.10.0
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          targets: ${{ matrix.target }}
 
-    # Ensure GH cache env vars are exported for child processes (required by sccache GH backend)
-    - name: Export GitHub cache environment
-      uses: actions/github-script@v7
-      with:
-        script: |
-          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      # ✅ Resilient workspace/registry caching (not tied to lockfile churn)
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: codex-${{ matrix.target }}-rust-1.89
+          prefix-key: v2-rust
+          cache-on-failure: true
+          cache-all-crates: true
+          workspaces: "codex-rs -> target"
+          cache-directories: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
 
-    # Compute a writable sccache directory per-OS and export to env
-    - name: Set sccache dir
-      shell: bash
-      run: |
-        case "${{ runner.os }}" in
-          macOS)
-            echo "SCCACHE_DIR=$HOME/Library/Caches/Mozilla.sccache" >> "$GITHUB_ENV"
-            ;;
-          Linux)
-            echo "SCCACHE_DIR=$HOME/.cache/sccache" >> "$GITHUB_ENV"
-            ;;
-          *)
-            # Use sccache default on Windows; no override
-            ;;
-        esac
+      # ✅ Current sccache action (GHAC support). Do not hand-edit ACTIONS_* envs.
+      - name: Setup sccache (GHA backend)
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-    # Persist local sccache directory as a fallback/shared cache
-    - name: Cache sccache directory (fallback)
-      uses: actions/cache@v4
-      if: runner.os != 'Windows'
-      with:
-        path: ${{ env.SCCACHE_DIR }}
-        key: sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}
-        restore-keys: |
-          sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89.0-
-          sccache-${{ runner.os }}-${{ matrix.target }}-
+      # Ensure GHAC is enabled & rustc routed through sccache; also set a per-OS default local dir
+      - name: Set sccache env + dir
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          case "${{ runner.os }}" in
+            macOS)
+              echo "SCCACHE_DIR=$HOME/Library/Caches/Mozilla.sccache" >> "$GITHUB_ENV"
+              ;;
+            Linux)
+              echo "SCCACHE_DIR=$HOME/.cache/sccache" >> "$GITHUB_ENV"
+              ;;
+            Windows)
+              # Use the default local cache dir on Windows (works for fallback + actions/cache)
+              echo "SCCACHE_DIR=$LOCALAPPDATA\\Mozilla\\sccache" >> "$GITHUB_ENV"
+              ;;
+          esac
 
-    - name: Install mold (Linux)
-      if: contains(matrix.os, 'ubuntu')
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mold || true
-        
-    - name: Install musl tools (Linux)
-      if: contains(matrix.target, 'musl')
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y musl-tools pkg-config
-        
-    - name: Set version in Cargo.toml and Cargo.lock
-      run: |
-        VERSION="${{ needs.determine-version.outputs.version }}"
-        echo "📝 Setting version to ${VERSION}"
-        
-        cd codex-rs
-        
-        # Save the current version for replacement
-        CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-        echo "Current version in Cargo.toml: $CURRENT_VERSION"
-        
-        # Update version in root Cargo.toml
-        sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-        
-        # Update version in workspace members' Cargo.toml files
-        WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
-        for dir in $WORKSPACE_MEMBERS; do
-          if [ -f "$dir/Cargo.toml" ]; then
-            sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
-          fi
-        done
-        
-        # Clean up backup files
-        find . -name "*.bak" -delete
-        
-        # Use cargo to update the lock file properly
-        # This maintains all dependency versions while updating workspace package versions
-        echo "🔒 Updating Cargo.lock with cargo (preserving dependency versions)"
-        cargo update --workspace --offline || cargo update --workspace
-        
-        echo "✅ Cargo.lock updated properly"
-      shell: bash
+      # ✅ Persist the local sccache directory as a shared, stable fallback across runs
+      - name: Cache sccache directory (fallback)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89
+          restore-keys: |
+            sccache-${{ runner.os }}-${{ matrix.target }}-
+            sccache-${{ runner.os }}-
 
-    - name: Build binaries
-      shell: bash
-      env:
-        # Use mold linker on Linux for faster linking
-        # Optionally suppress warnings in release builds (remove -Awarnings if you want to see them)
-        RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold' || '-Awarnings' }}
-        # Skip macOS codesigning in CI
-        SKIP_SIGNING: '1'
-        # Disable incremental compilation for release builds (better with sccache)
-        CARGO_INCREMENTAL: "0"
-        # Increase sccache cache size
-        SCCACHE_CACHE_SIZE: "10G"
-        # Route rustc through sccache and enable GitHub Actions cache backend
-        RUSTC_WRAPPER: sccache
-        SCCACHE_GHA_ENABLED: 'true'
-        # Avoid hard-fail if sccache server has IO error; prefer fallback
-        SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
-        # Show more detail on failures
-        RUST_BACKTRACE: "1"
-      run: |
-        cd codex-rs
+      - name: Install mold (Linux)
+        if: contains(matrix.os, 'ubuntu')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mold || true
 
-        # Prepare sccache with graceful fallback if GHA backend is unavailable
-        if command -v sccache >/dev/null 2>&1; then
-          echo "Using sccache for compilation caching"
-          export SCCACHE_LOG="warn"
-          echo "Starting sccache server (GHA backend)"
-          if ! sccache --start-server; then
-            echo "sccache GHA backend failed to start; falling back to local disk cache"
-            unset SCCACHE_GHA_ENABLED
-            if [ -n "${SCCACHE_DIR:-}" ]; then
-              mkdir -p "$SCCACHE_DIR"
+      - name: Install musl tools (Linux musl)
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools pkg-config
+
+      - name: Set version in Cargo.toml and Cargo.lock
+        shell: bash
+        run: |
+          VERSION="${{ needs.determine-version.outputs.version }}"
+          echo "📝 Setting version to ${VERSION}"
+
+          cd codex-rs
+
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Current version in Cargo.toml: $CURRENT_VERSION"
+
+          # Update version in root Cargo.toml
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+
+          # Update version in workspace members' Cargo.toml files
+          WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
+          for dir in $WORKSPACE_MEMBERS; do
+            if [ -f "$dir/Cargo.toml" ]; then
+              sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
             fi
+          done
+
+          # Clean up backup files
+          find . -name "*.bak" -delete
+
+          echo "🔒 Updating Cargo.lock with cargo (preserving dependency versions)"
+          cargo update --workspace --offline || cargo update --workspace
+          echo "✅ Cargo.lock updated properly"
+
+      - name: Build binaries
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold' || '-Awarnings' }}
+          SKIP_SIGNING: '1'
+          CARGO_INCREMENTAL: "0"
+          SCCACHE_CACHE_SIZE: "10G"
+          # Route rustc through sccache (server fallback may unset this)
+          RUSTC_WRAPPER: sccache
+          # Prefer successful build over failing on cache IO issues
+          SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
+          RUST_BACKTRACE: "1"
+          SCCACHE_LOG: "warn"
+          # Keep GHAC enabled initially; we may disable it below if startup fails
+          SCCACHE_GHA_ENABLED: 'true'
+        run: |
+          cd codex-rs
+
+          echo "Starting sccache server (GHAC preferred)"
+          if ! sccache --start-server; then
+            echo "sccache GHAC failed to start; switching to local disk cache"
+            unset SCCACHE_GHA_ENABLED
+            # Ensure local cache dir exists
+            mkdir -p "${SCCACHE_DIR}"
             if ! sccache --start-server; then
               echo "sccache local cache also failed; disabling sccache"
               unset RUSTC_WRAPPER
             fi
           fi
-          # Show initial stats to confirm server health
+
+          # Show initial stats (useful to confirm GHAC vs Local)
           sccache --show-stats || true
-        else
-          echo "sccache not available"
-        fi
-        
-        # Calculate parallel jobs
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
-        else
-          CORES=$((
-            $( (command -v nproc >/dev/null 2>&1 && nproc) \
-               || (getconf _NPROCESSORS_ONLN 2>/dev/null) \
-               || (sysctl -n hw.ncpu 2>/dev/null) \
-               || echo 2 )
-          ))
-          export CARGO_BUILD_JOBS=$((CORES * 2))
-        fi
-        echo "Building with $CARGO_BUILD_JOBS parallel jobs"
-        
-        # Build with --locked to ensure reproducible builds
-        # The lock file was properly updated using cargo update --workspace
-        cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
-        
-        # Show sccache stats
-        command -v sccache >/dev/null 2>&1 && sccache --show-stats || true
-        
-    - name: Prepare artifacts
-      run: |
-        mkdir -p artifacts
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
-        else
-          cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
-          cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
-        fi
-      shell: bash
-      
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: binaries-${{ matrix.target }}
-        path: artifacts/
+
+          # Calculate parallel jobs
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
+          else
+            CORES=$((
+              $( (command -v nproc >/dev/null 2>&1 && nproc) \
+                 || (getconf _NPROCESSORS_ONLN 2>/dev/null) \
+                 || (sysctl -n hw.ncpu 2>/dev/null) \
+                 || echo 2 )
+            ))
+            export CARGO_BUILD_JOBS=$((CORES * 2))
+          fi
+          echo "Building with $CARGO_BUILD_JOBS parallel jobs"
+
+          # Reproducible CI builds
+          cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+
+          # Print final stats
+          command -v sccache >/dev/null 2>&1 && sccache --show-stats || true
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
+            cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
+          else
+            cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
+            cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
+            cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: artifacts/
 
   release:
     name: Publish to npm
     needs: [determine-version, build-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Skip if commit message contains [skip ci]
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-        
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        registry-url: 'https://registry.npmjs.org'
-        
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts/
-        
-    - name: Prepare release assets
-      run: |
-        # Create a directory for all release assets
-        mkdir -p release-assets
-        
-        # Copy all binaries to release-assets for GitHub Release
-        for dir in artifacts/binaries-*; do
-          cp $dir/* release-assets/
-        done
-        
-        # Make binaries executable
-        chmod +x release-assets/*
-        
-        # List assets for verification
-        ls -la release-assets/
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
-    - name: Sync README for npm
-      run: |
-        # Ensure npm package uses the repository root README
-        cp README.md codex-cli/README.md
-        
-    - name: Update package.json version
-      id: version
-      working-directory: codex-cli
-      run: |
-        # Configure git
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        
-        # Use the pre-determined version
-        NEW_VERSION="${{ needs.determine-version.outputs.version }}"
-        echo "Setting version to: $NEW_VERSION"
-        
-        # Update package.json with the new version
-        npm version $NEW_VERSION --no-git-tag-version --allow-same-version
-        
-        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
-        
-        # Commit changes
-        git add package.json
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
-          echo "skip_push=false" >> $GITHUB_OUTPUT
-        fi
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
-        # Ensure the tag exists at HEAD
-        if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
-          git tag "v${NEW_VERSION}"
-          echo "Created tag v${NEW_VERSION}"
-        else
-          echo "Tag v${NEW_VERSION} already exists"
-        fi
-        echo "tag=v${NEW_VERSION}" >> $GITHUB_OUTPUT
-      
-    - name: Check if we should publish
-      id: should_publish
-      run: |
-        if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-          echo "NPM_TOKEN not set, skipping publish"
-          echo "publish=false" >> $GITHUB_OUTPUT
-        else
-          echo "NPM_TOKEN is set, will publish"
-          echo "publish=true" >> $GITHUB_OUTPUT
-        fi
-        
-    - name: Publish to npm
-      working-directory: codex-cli
-      run: npm publish --access public
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      if: steps.should_publish.outputs.publish == 'true'
-    
-    - name: Push tag
-      run: |
-        # Push the tag even if no commit was made
-        git push origin "v${{ steps.version.outputs.version }}" || true
-        
-    - name: Push changes
-      run: |
-        git push origin main
-        git push origin --tags
-      if: steps.version.outputs.skip_push != 'true'
-      
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v${{ steps.version.outputs.version }}
-        name: Release v${{ steps.version.outputs.version }}
-        body: |
-          ## @just-every/code v${{ steps.version.outputs.version }}
-          
-          Fork of OpenAI Codex with additional features:
-          - Enhanced image handling (drag-and-drop, paste, file path detection)
-          - /reasoning slash command for dynamic reasoning effort
-          
-          ### Installation
-          ```bash
-          npm install -g @just-every/code
-          ```
-          
-          ### Usage
-          ```bash
-          code
-          ```
-        files: |
-          release-assets/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          for dir in artifacts/binaries-*; do
+            cp "$dir"/* release-assets/
+          done
+          chmod +x release-assets/* || true
+          ls -la release-assets/
+
+      - name: Sync README for npm
+        shell: bash
+        run: |
+          cp README.md codex-cli/README.md
+
+      - name: Update package.json version
+        id: version
+        working-directory: codex-cli
+        shell: bash
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          NEW_VERSION="${{ needs.determine-version.outputs.version }}"
+          echo "Setting version to: $NEW_VERSION"
+
+          npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+          git add package.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "skip_push=true" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+            echo "skip_push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
+            git tag "v${NEW_VERSION}"
+            echo "Created tag v${NEW_VERSION}"
+          else
+            echo "Tag v${NEW_VERSION} already exists"
+          fi
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if we should publish
+        id: should_publish
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "NPM_TOKEN not set, skipping publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "NPM_TOKEN is set, will publish"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.should_publish.outputs.publish == 'true'
+        working-directory: codex-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Push tag
+        shell: bash
+        run: |
+          git push origin "v${{ steps.version.outputs.version }}" || true
+
+      - name: Push changes
+        if: steps.version.outputs.skip_push != 'true'
+        shell: bash
+        run: |
+          git push origin main
+          git push origin --tags
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          body: |
+            ## @just-every/code v${{ steps.version.outputs.version }}
+
+            Fork of OpenAI Codex with additional features:
+            - Enhanced image handling (drag-and-drop, paste, file path detection)
+            - /reasoning slash command for dynamic reasoning effort
+
+            ### Installation
+            ```bash
+            npm install -g @just-every/code
+            ```
+
+            ### Usage
+            ```bash
+            code
+            ```
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
