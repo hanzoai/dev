@@ -30,11 +30,10 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol as core_protocol;
+use codex_login::AuthManager;
 use codex_login::CLIENT_ID;
-use codex_login::CodexAuth;
 use codex_login::ServerOptions as LoginServerOptions;
 use codex_login::ShutdownHandle;
-use codex_login::logout;
 use codex_login::run_login_server;
 use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
@@ -80,6 +79,7 @@ impl ActiveLogin {
 
 /// Handles JSON-RPC messages for Codex conversations.
 pub(crate) struct CodexMessageProcessor {
+    auth_manager: Arc<AuthManager>,
     conversation_manager: Arc<ConversationManager>,
     outgoing: Arc<OutgoingMessageSender>,
     codex_linux_sandbox_exe: Option<PathBuf>,
@@ -92,12 +92,14 @@ pub(crate) struct CodexMessageProcessor {
 
 impl CodexMessageProcessor {
     pub fn new(
+        auth_manager: Arc<AuthManager>,
         conversation_manager: Arc<ConversationManager>,
         outgoing: Arc<OutgoingMessageSender>,
         codex_linux_sandbox_exe: Option<PathBuf>,
         config: Arc<Config>,
     ) -> Self {
         Self {
+            auth_manager,
             conversation_manager,
             outgoing,
             codex_linux_sandbox_exe,
@@ -156,7 +158,7 @@ impl CodexMessageProcessor {
                 };
                 self.outgoing.send_error(request_id, error).await;
             }
-            ClientRequest::GetAuthStatus { request_id } => {
+            ClientRequest::GetAuthStatus { request_id, .. } => {
                 // Not supported by this server implementation
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,

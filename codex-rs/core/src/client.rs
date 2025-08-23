@@ -4,8 +4,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use bytes::Bytes;
+use codex_login::AuthManager;
 use codex_login::AuthMode;
-use codex_login::CodexAuth;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 use regex_lite::Regex;
@@ -20,6 +20,7 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use codex_protocol::models::ResponseItem;
 
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
@@ -40,7 +41,6 @@ use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::ModelFamily;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
-use crate::models::ResponseItem;
 use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::protocol::TokenUsage;
 use crate::user_agent::get_codex_user_agent;
@@ -63,7 +63,7 @@ struct Error {
 #[derive(Debug, Clone)]
 pub struct ModelClient {
     config: Arc<Config>,
-    auth: Option<CodexAuth>,
+    auth_manager: Option<Arc<AuthManager>>,
     client: reqwest::Client,
     provider: ModelProviderInfo,
     session_id: Uuid,
@@ -76,7 +76,7 @@ pub struct ModelClient {
 impl ModelClient {
     pub fn new(
         config: Arc<Config>,
-        auth: Option<CodexAuth>,
+        auth_manager: Option<Arc<AuthManager>>,
         provider: ModelProviderInfo,
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
@@ -86,7 +86,7 @@ impl ModelClient {
     ) -> Self {
         Self {
             config,
-            auth,
+            auth_manager,
             client: reqwest::Client::new(),
             provider,
             session_id,
@@ -161,7 +161,8 @@ impl ModelClient {
             return stream_from_fixture(path, self.provider.clone()).await;
         }
 
-        let auth = self.auth.clone();
+        let auth_manager = self.auth_manager.clone();
+        let auth = auth_manager.as_ref().and_then(|m| m.auth());
 
         let auth_mode = auth.as_ref().map(|a| a.mode);
 
@@ -404,8 +405,8 @@ impl ModelClient {
 
     // duplicate of earlier helpers removed during merge cleanup
 
-    pub fn get_auth(&self) -> Option<CodexAuth> {
-        self.auth.clone()
+    pub fn get_auth_manager(&self) -> Option<Arc<AuthManager>> {
+        self.auth_manager.clone()
     }
 }
 
@@ -668,6 +669,8 @@ async fn process_sse<S>(
             }
             "response.content_part.done"
             | "response.function_call_arguments.delta"
+            | "response.custom_tool_call_input.delta"
+            | "response.custom_tool_call_input.done" // also emitted as response.output_item.done
             | "response.in_progress"
             | "response.output_item.added"
             | "response.output_text.done" => {

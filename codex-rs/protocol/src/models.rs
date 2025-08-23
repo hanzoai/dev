@@ -24,6 +24,10 @@ pub enum ResponseInputItem {
         call_id: String,
         result: Result<CallToolResult, String>,
     },
+    CustomToolCallOutput {
+        call_id: String,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,6 +88,20 @@ pub enum ResponseItem {
         call_id: String,
         output: FunctionCallOutputPayload,
     },
+    CustomToolCall {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+
+        call_id: String,
+        name: String,
+        input: String,
+    },
+    CustomToolCallOutput {
+        call_id: String,
+        output: String,
+    },
     #[serde(other)]
     Other,
 }
@@ -121,6 +139,9 @@ impl From<ResponseInputItem> for ResponseItem {
                     ),
                 },
             },
+            ResponseInputItem::CustomToolCallOutput { call_id, output } => {
+                Self::CustomToolCallOutput { call_id, output }
+            }
         }
     }
 }
@@ -196,42 +217,9 @@ impl From<Vec<InputItem>> for ResponseInputItem {
                         );
                     }
                 },
-                InputItem::EphemeralImage { path, metadata } => {
-                    tracing::info!(
-                        "Processing ephemeral image: {} with metadata: {:?}",
-                        path.display(),
-                        metadata
-                    );
-
-                    // Add metadata text BEFORE the image so the LLM sees context first
-                    if let Some(meta) = metadata {
-                        content_items.push(ContentItem::InputText {
-                            text: format!("[EPHEMERAL:{}]", meta),
-                        });
-                    }
-
-                    match std::fs::read(&path) {
-                        Ok(bytes) => {
-                            let mime = mime_guess::from_path(&path)
-                                .first()
-                                .map(|m| m.essence_str().to_owned())
-                                .unwrap_or_else(|| "application/octet-stream".to_string());
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            tracing::info!("Created ephemeral image data URL with mime: {}", mime);
-                            content_items.push(ContentItem::InputImage {
-                                image_url: format!("data:{mime};base64,{encoded}"),
-                                detail: Some("high".to_string()),
-                            });
-                        }
-                        Err(err) => {
-                            tracing::error!(
-                                "Failed to read ephemeral image {} – {}",
-                                path.display(),
-                                err
-                            );
-                        }
-                    }
-                }
+                // Ephemeral image handling lives in codex-core where the
+                // ephemeral InputItem variant is defined. The protocol layer
+                // intentionally does not model ephemerals.
             }
         }
 
