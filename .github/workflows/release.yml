@@ -144,18 +144,8 @@ jobs:
         
         # Update the workspace version in root Cargo.toml
         cd codex-rs
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          # Windows: Use PowerShell with proper variable substitution
-          powershell -Command "
-            \$version = '${VERSION}'
-            \$content = Get-Content Cargo.toml
-            \$content = \$content -replace '^version = \".*\"', \"version = \`\"\$version\`\"\"
-            Set-Content -Path Cargo.toml -Value \$content
-          "
-        else
-          # Unix-like systems
-          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-        fi
+        # Use sed for all platforms (works on Windows bash too)
+        sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
         
         # Verify the update
         echo "Updated Cargo.toml:"
