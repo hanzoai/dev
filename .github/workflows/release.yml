@@ -144,18 +144,8 @@ jobs:
         
         # Update the workspace version in root Cargo.toml
         cd codex-rs
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          # Windows: Use PowerShell with proper variable substitution
-          powershell -Command "
-            \$version = '${VERSION}'
-            \$content = Get-Content Cargo.toml
-            \$content = \$content -replace '^version = \".*\"', \"version = \`\"\$version\`\"\"
-            Set-Content -Path Cargo.toml -Value \$content
-          "
-        else
-          # Unix-like systems
-          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-        fi
+        # Use sed for all platforms (works on Windows bash too)
+        sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
         
         # Verify the update
         echo "Updated Cargo.toml:"
@@ -164,35 +154,20 @@ jobs:
         # Update Cargo.lock to reflect only workspace version bumps, without
         # floating third-party dependency versions or git revisions.
         echo "🔒 Updating Cargo.lock for workspace members only"
-        # 1) Gather workspace crate names from member Cargo.toml files
+        # Extract member directories from [workspace] table and update each workspace crate
         awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
           | while IFS= read -r dir; do
               if [[ -f "$dir/Cargo.toml" ]]; then
-                sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"
+                NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
+                if [[ -n "$NAME" ]]; then
+                  echo "  • cargo update -p $NAME"
+                  cargo update -p "$NAME"
+                fi
               fi
-            done \
-          > .workspace-crate-names
-
-        # 2) Rewrite only the version lines for those workspace crates in Cargo.lock
-        #    This avoids touching third-party deps or git revisions.
-        awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
-          /^\[\[package\]\]$/ { pkg=""; print; next }
-          /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
-          /^version = \"/ {
-            if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
-            next
-          }
-          { print }
-        ' .workspace-crate-names Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
-        rm -f .workspace-crate-names
-      shell: bash
-
-    - name: Normalize Cargo.lock workspace versions
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION="${{ needs.determine-version.outputs.version }}"
-        echo "Ensuring Cargo.lock reflects workspace version ${VERSION}"
+            done
+        
+        # Now normalize the Cargo.lock workspace versions to ensure consistency
+        echo "🔧 Normalizing Cargo.lock workspace versions"
         # Build list of workspace crate names
         awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
           | while IFS= read -r dir; do
@@ -214,7 +189,8 @@ jobs:
           ' .workspace-crate-names Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
         fi
         rm -f .workspace-crate-names
-        
+      shell: bash
+
     - name: Build binaries
       shell: bash
       env:
