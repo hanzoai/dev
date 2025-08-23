@@ -53,7 +53,7 @@ jobs:
         working-directory: codex-rs
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.89
+      - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt
       - name: cargo fmt
@@ -108,7 +108,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.89
+      - uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: ${{ matrix.target }}
           components: clippy
@@ -130,7 +130,7 @@ jobs:
 
       - name: cargo clippy
         id: clippy
-        run: cargo clippy --target ${{ matrix.target }} --all-features --tests -- -D warnings
+        run: cargo clippy --locked --target ${{ matrix.target }} --all-features --tests -- -D warnings
 
       # Running `cargo build` from the workspace root builds the workspace using
       # the union of all features from third-party crates. This can mask errors
@@ -143,14 +143,14 @@ jobs:
         continue-on-error: true
         run: |
           find . -name Cargo.toml -mindepth 2 -maxdepth 2 -print0 \
-            | xargs -0 -n1 -I{} bash -c 'cd "$(dirname "{}")" && cargo check --profile ${{ matrix.profile }}'
+            | xargs -0 -n1 -I{} bash -c 'cd "$(dirname "{}")" && cargo check --locked --profile ${{ matrix.profile }}'
 
       - name: cargo test
         id: test
         # `cargo test` takes too long for release builds to run them on every PR
         if: ${{ matrix.profile != 'release' }}
         continue-on-error: true
-        run: cargo test --all-features --target ${{ matrix.target }} --profile ${{ matrix.profile }}
+        run: cargo test --locked --all-features --target ${{ matrix.target }} --profile ${{ matrix.profile }}
         env:
           RUST_BACKTRACE: 1
 
