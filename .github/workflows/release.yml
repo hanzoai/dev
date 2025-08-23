@@ -199,9 +199,27 @@ jobs:
         RUST_BACKTRACE: "1"
       run: |
         cd codex-rs
-        
-        # Show sccache status
-        command -v sccache >/dev/null 2>&1 && echo "Using sccache for compilation caching" || echo "sccache not available"
+
+        # Prepare sccache with graceful fallback if GHA backend is unavailable
+        if command -v sccache >/dev/null 2>&1; then
+          echo "Using sccache for compilation caching"
+          export SCCACHE_LOG="warn"
+          echo "Starting sccache server (GHA backend)"
+          if ! sccache --start-server; then
+            echo "sccache GHA backend failed to start; falling back to local disk cache"
+            unset SCCACHE_GHA_ENABLED
+            export SCCACHE_DIR="${HOME}/.cache/sccache"
+            mkdir -p "$SCCACHE_DIR"
+            if ! sccache --start-server; then
+              echo "sccache local cache also failed; disabling sccache"
+              unset RUSTC_WRAPPER
+            fi
+          fi
+          # Show initial stats to confirm server health
+          sccache --show-stats || true
+        else
+          echo "sccache not available"
+        fi
         
         # Calculate parallel jobs
         if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
