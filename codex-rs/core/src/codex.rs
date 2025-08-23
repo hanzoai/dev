@@ -17,7 +17,8 @@ use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
-use codex_login::CodexAuth;
+use codex_login::AuthManager;
+use codex_protocol::protocol::ConversationHistoryResponseEvent;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
@@ -32,6 +33,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use codex_login::CodexAuth;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -49,6 +51,104 @@ impl EphemeralJar {
 
     fn into_items(self) -> Vec<ResponseItem> {
         self.items
+    }
+}
+
+/// Convert a vector of core `InputItem`s into a single `ResponseInputItem`
+/// suitable for sending to the model. Handles images (local and pre‑encoded)
+/// and our fork's ephemeral image variant by inlining a brief metadata marker
+/// followed by the image as a data URL.
+fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
+    let mut content_items = Vec::new();
+
+    for item in items {
+        match item {
+            InputItem::Text { text } => {
+                content_items.push(ContentItem::InputText { text });
+            }
+            InputItem::Image { image_url } => {
+                content_items.push(ContentItem::InputImage {
+                    image_url,
+                    detail: None,
+                });
+            }
+            InputItem::LocalImage { path } => match std::fs::read(&path) {
+                Ok(bytes) => {
+                    let mime = mime_guess::from_path(&path)
+                        .first()
+                        .map(|m| m.essence_str().to_owned())
+                        .unwrap_or_else(|| "application/octet-stream".to_string());
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    content_items.push(ContentItem::InputImage {
+                        image_url: format!("data:{mime};base64,{encoded}"),
+                        detail: None,
+                    });
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Skipping image {} – could not read file: {}",
+                        path.display(),
+                        err
+                    );
+                }
+            },
+            InputItem::EphemeralImage { path, metadata } => {
+                tracing::info!(
+                    "Processing ephemeral image: {} with metadata: {:?}",
+                    path.display(),
+                    metadata
+                );
+
+                if let Some(meta) = metadata {
+                    content_items.push(ContentItem::InputText {
+                        text: format!("[EPHEMERAL:{}]", meta),
+                    });
+                }
+
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        let mime = mime_guess::from_path(&path)
+                            .first()
+                            .map(|m| m.essence_str().to_owned())
+                            .unwrap_or_else(|| "application/octet-stream".to_string());
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                        tracing::info!("Created ephemeral image data URL with mime: {}", mime);
+                        content_items.push(ContentItem::InputImage {
+                            image_url: format!("data:{mime};base64,{encoded}"),
+                            detail: Some("high".to_string()),
+                        });
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to read ephemeral image {} – {}",
+                            path.display(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    ResponseInputItem::Message {
+        role: "user".to_string(),
+        content: content_items,
+    }
+}
+
+fn convert_call_tool_result_to_function_call_output_payload(
+    result: &Result<CallToolResult, String>,
+) -> FunctionCallOutputPayload {
+    match result {
+        Ok(ok) => FunctionCallOutputPayload {
+            content: serde_json::to_string(ok)
+                .unwrap_or_else(|e| format!("JSON serialization error: {e}")),
+            success: Some(true),
+        },
+        Err(e) => FunctionCallOutputPayload {
+            content: format!("err: {e:?}"),
+            success: Some(false),
+        },
     }
 }
 
@@ -271,14 +371,14 @@ use crate::exec::process_exec_tool_call;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
-use crate::models::ContentItem;
-use crate::models::FunctionCallOutputPayload;
-use crate::models::LocalShellAction;
-use crate::models::ReasoningItemContent;
-use crate::models::ReasoningItemReasoningSummary;
-use crate::models::ResponseInputItem;
-use crate::models::ResponseItem;
-use crate::models::ShellToolCallParams;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::LocalShellAction;
+use codex_protocol::models::ReasoningItemContent;
+use codex_protocol::models::ReasoningItemReasoningSummary;
+use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::models::ShellToolCallParams;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
 use crate::parse_command::parse_command;
@@ -784,7 +884,6 @@ impl Session {
         let _ = self.tx_event.send(event).await;
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn on_exec_command_end(
         &self,
         turn_diff_tracker: &mut TurnDiffTracker,
@@ -804,6 +903,7 @@ impl Session {
         const MAX_STREAM_OUTPUT: usize = 5 * 1024; // 5KiB
         let stdout = stdout.text.chars().take(MAX_STREAM_OUTPUT).collect();
         let stderr = stderr.text.chars().take(MAX_STREAM_OUTPUT).collect();
+        let formatted_output = format_exec_output_str(output);
 
         let msg = if is_apply_patch {
             EventMsg::PatchApplyEnd(PatchApplyEndEvent {
@@ -941,7 +1041,7 @@ impl Session {
                 if let ResponseItem::Message { content, .. } = item {
                     content
                         .iter()
-                        .any(|c| matches!(c, crate::models::ContentItem::InputImage { .. }))
+                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
                 } else {
                     false
                 }
@@ -963,19 +1063,19 @@ impl Session {
                 if let ResponseItem::Message { id, role, content } = item {
                     if role == "user" {
                         // Filter out ephemeral content from user messages
-                        let mut filtered_content: Vec<crate::models::ContentItem> = Vec::new();
+                        let mut filtered_content: Vec<ContentItem> = Vec::new();
                         let mut skip_next_image = false;
 
                         for content_item in content {
                             match &content_item {
-                                crate::models::ContentItem::InputText { text }
+                                ContentItem::InputText { text }
                                     if text.starts_with("[EPHEMERAL:") =>
                                 {
                                     // This is an ephemeral marker, skip it and the next image
                                     skip_next_image = true;
                                     tracing::info!("Filtering out ephemeral marker: {}", text);
                                 }
-                                crate::models::ContentItem::InputImage { .. }
+                                ContentItem::InputImage { .. }
                                     if skip_next_image =>
                                 {
                                     // Skip this image as it follows an ephemeral marker
@@ -1014,7 +1114,7 @@ impl Session {
                 if let ResponseItem::Message { content, .. } = item {
                     content
                         .iter()
-                        .any(|c| matches!(c, crate::models::ContentItem::InputImage { .. }))
+                        .any(|c| matches!(c, ContentItem::InputImage { .. }))
                 } else {
                     false
                 }
@@ -1032,7 +1132,9 @@ impl Session {
     pub fn inject_input(&self, input: Vec<InputItem>) -> Result<(), Vec<InputItem>> {
         let mut state = self.state.lock().unwrap();
         if state.current_agent.is_some() {
-            state.pending_input.push(input.into());
+            state
+                .pending_input
+                .push(response_input_from_core_items(input));
             Ok(())
         } else {
             Err(input)
@@ -1308,9 +1410,13 @@ async fn submission_loop(
                     }
                 };
 
+                // Wrap provided auth (if any) in a minimal AuthManager for client usage.
+                let auth_manager = auth
+                    .as_ref()
+                    .map(|a| codex_login::AuthManager::from_auth_for_testing(a.clone()));
                 let client = ModelClient::new(
                     config.clone(),
-                    auth.clone(),
+                    auth_manager,
                     provider.clone(),
                     model_reasoning_effort,
                     model_reasoning_summary,
@@ -1631,7 +1737,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     }
 
     // Convert input to ResponseInputItem
-    let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
+    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
     let initial_response_item: ResponseItem = initial_input_for_turn.clone().into();
 
     // Record to history but we'll handle ephemeral images separately
@@ -1725,28 +1831,28 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                             );
                         }
                         (
+                            ResponseItem::CustomToolCall { .. },
+                            Some(ResponseInputItem::CustomToolCallOutput { call_id, output }),
+                        ) => {
+                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(
+                                ResponseItem::CustomToolCallOutput {
+                                    call_id: call_id.clone(),
+                                    output: output.clone(),
+                                },
+                            );
+                        }
+                        (
                             ResponseItem::FunctionCall { .. },
                             Some(ResponseInputItem::McpToolCallOutput { call_id, result }),
                         ) => {
                             items_to_record_in_conversation_history.push(item);
-                            let (content, success): (String, Option<bool>) = match result {
-                                Ok(CallToolResult {
-                                    content,
-                                    is_error,
-                                    structured_content: _,
-                                }) => match serde_json::to_string(content) {
-                                    Ok(content) => (content, *is_error),
-                                    Err(e) => {
-                                        warn!("Failed to serialize MCP tool call output: {e}");
-                                        (e.to_string(), Some(true))
-                                    }
-                                },
-                                Err(e) => (e.clone(), Some(true)),
-                            };
+                            let output =
+                                convert_call_tool_result_to_function_call_output_payload(&result);
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::FunctionCallOutput {
                                     call_id: call_id.clone(),
-                                    output: FunctionCallOutputPayload { content, success },
+                                    output,
                                 },
                             );
                         }
@@ -1936,6 +2042,7 @@ async fn try_run_turn(
                 call_id: Some(call_id),
                 ..
             } => Some(call_id),
+            ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1953,6 +2060,7 @@ async fn try_run_turn(
                     call_id: Some(call_id),
                     ..
                 } => Some(call_id),
+                ResponseItem::CustomToolCall { call_id, .. } => Some(call_id),
                 _ => None,
             })
             .filter_map(|call_id| {
@@ -1962,12 +2070,9 @@ async fn try_run_turn(
                     Some(call_id.clone())
                 }
             })
-            .map(|call_id| ResponseItem::FunctionCallOutput {
+            .map(|call_id| ResponseItem::CustomToolCallOutput {
                 call_id: call_id.clone(),
-                output: FunctionCallOutputPayload {
-                    content: "aborted".to_string(),
-                    success: Some(false),
-                },
+                output: "aborted".to_string(),
             })
             .collect::<Vec<_>>()
     };
@@ -2102,7 +2207,7 @@ async fn run_compact_agent(
         return;
     }
 
-    let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
+    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
     let turn_input: Vec<ResponseItem> =
         sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
 
@@ -2249,7 +2354,7 @@ async fn handle_response_item(
             call_id,
             ..
         } => {
-            info!("FunctionCall: {arguments}");
+            info!("FunctionCall: {name}({arguments})");
             Some(
                 handle_function_call(
                     sess,
@@ -2304,8 +2409,22 @@ async fn handle_response_item(
                 .await,
             )
         }
+        ResponseItem::CustomToolCall { call_id, name, .. } => {
+            // Minimal placeholder: custom tools are not handled here.
+            Some(ResponseInputItem::FunctionCallOutput {
+                call_id,
+                output: FunctionCallOutputPayload {
+                    content: format!("Custom tool '{name}' is not supported in this build"),
+                    success: Some(false),
+                },
+            })
+        }
         ResponseItem::FunctionCallOutput { .. } => {
             debug!("unexpected FunctionCallOutput from stream");
+            None
+        }
+        ResponseItem::CustomToolCallOutput { .. } => {
+            debug!("unexpected CustomToolCallOutput from stream");
             None
         }
         ResponseItem::Other => None,
@@ -3458,7 +3577,7 @@ async fn handle_container_exec_with_params(
             let ExecToolCallOutput { exit_code, .. } = &output;
 
             let is_success = *exit_code == 0;
-            let content = format_exec_output(output);
+            let content = format_exec_output(&output);
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload {
@@ -3589,7 +3708,7 @@ async fn handle_sandbox_error(
                     let ExecToolCallOutput { exit_code, .. } = &retry_output;
 
                     let is_success = *exit_code == 0;
-                    let content = format_exec_output(retry_output);
+                    let content = format_exec_output(&retry_output);
 
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id.clone(),
@@ -3621,13 +3740,33 @@ async fn handle_sandbox_error(
     }
 }
 
-/// Exec output is a pre-serialized JSON payload
-fn format_exec_output(exec_output: ExecToolCallOutput) -> String {
+fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     let ExecToolCallOutput {
         exit_code,
         stdout,
         stderr,
+        ..
+    } = exec_output;
+
+    let is_success = *exit_code == 0;
+    let output = if is_success { stdout } else { stderr };
+
+    let mut formatted_output = output.text.clone();
+    if let Some(truncated_after_lines) = output.truncated_after_lines {
+        formatted_output.push_str(&format!(
+            "\n\n[Output truncated after {truncated_after_lines} lines: too many lines or bytes.]",
+        ));
+    }
+
+    formatted_output
+}
+
+/// Exec output is a pre-serialized JSON payload
+fn format_exec_output(exec_output: &ExecToolCallOutput) -> String {
+    let ExecToolCallOutput {
+        exit_code,
         duration,
+        ..
     } = exec_output;
 
     #[derive(Serialize)]
@@ -3645,20 +3784,12 @@ fn format_exec_output(exec_output: ExecToolCallOutput) -> String {
     // round to 1 decimal place
     let duration_seconds = ((duration.as_secs_f32()) * 10.0).round() / 10.0;
 
-    let is_success = exit_code == 0;
-    let output = if is_success { stdout } else { stderr };
-
-    let mut formatted_output = output.text;
-    if let Some(truncated_after_lines) = output.truncated_after_lines {
-        formatted_output.push_str(&format!(
-            "\n\n[Output truncated after {truncated_after_lines} lines: too many lines or bytes.]",
-        ));
-    }
+    let formatted_output = format_exec_output_str(exec_output);
 
     let payload = ExecOutput {
         output: &formatted_output,
         metadata: ExecMetadata {
-            exit_code,
+            exit_code: *exit_code,
             duration_seconds,
         },
     };

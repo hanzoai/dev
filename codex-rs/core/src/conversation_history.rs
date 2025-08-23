@@ -1,4 +1,5 @@
-use crate::models::ResponseItem;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
 use tracing::debug;
 
 /// Transcript of conversation history
@@ -158,6 +159,8 @@ fn is_api_message(message: &ResponseItem) -> bool {
         ResponseItem::Message { role, .. } => role.as_str() != "system",
         ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::Reasoning { .. } => true,
         ResponseItem::Other => false,
@@ -165,12 +168,9 @@ fn is_api_message(message: &ResponseItem) -> bool {
 }
 
 /// Helper to append the textual content from `src` into `dst` in place.
-fn append_text_content(
-    dst: &mut Vec<crate::models::ContentItem>,
-    src: &Vec<crate::models::ContentItem>,
-) {
+fn append_text_content(dst: &mut Vec<ContentItem>, src: &Vec<ContentItem>) {
     for c in src {
-        if let crate::models::ContentItem::OutputText { text } = c {
+        if let ContentItem::OutputText { text } = c {
             append_text_delta(dst, text);
         }
     }
@@ -178,25 +178,25 @@ fn append_text_content(
 
 /// Append a single text delta to the last OutputText item in `content`, or
 /// push a new OutputText item if none exists.
-fn append_text_delta(content: &mut Vec<crate::models::ContentItem>, delta: &str) {
-    if let Some(crate::models::ContentItem::OutputText { text }) = content
+fn append_text_delta(content: &mut Vec<ContentItem>, delta: &str) {
+    if let Some(ContentItem::OutputText { text }) = content
         .iter_mut()
         .rev()
-        .find(|c| matches!(c, crate::models::ContentItem::OutputText { .. }))
+        .find(|c| matches!(c, ContentItem::OutputText { .. }))
     {
         text.push_str(delta);
     } else {
-        content.push(crate::models::ContentItem::OutputText {
+        content.push(ContentItem::OutputText {
             text: delta.to_string(),
         });
     }
 }
 
 /// Concatenate all OutputText segments into a single string.
-fn collect_text_content(content: &Vec<crate::models::ContentItem>) -> String {
+fn collect_text_content(content: &Vec<ContentItem>) -> String {
     let mut out = String::new();
     for c in content {
-        if let crate::models::ContentItem::OutputText { text } = c {
+        if let ContentItem::OutputText { text } = c {
             out.push_str(text);
         }
     }
@@ -204,18 +204,15 @@ fn collect_text_content(content: &Vec<crate::models::ContentItem>) -> String {
 }
 
 /// Replace the text content with a single OutputText item containing `text`.
-fn replace_text_content(content: &mut Vec<crate::models::ContentItem>, text: &str) {
+fn replace_text_content(content: &mut Vec<ContentItem>, text: &str) {
     content.clear();
-    content.push(crate::models::ContentItem::OutputText {
+    content.push(ContentItem::OutputText {
         text: text.to_string(),
     });
 }
 
 /// Merge strategy: if the new text starts with the old, replace; otherwise append deltas.
-fn replace_or_append_text(
-    existing: &mut Vec<crate::models::ContentItem>,
-    new_content: &Vec<crate::models::ContentItem>,
-) {
+fn replace_or_append_text(existing: &mut Vec<ContentItem>, new_content: &Vec<ContentItem>) {
     let prev = collect_text_content(existing);
     let new_full = collect_text_content(new_content);
     if !prev.is_empty() && new_full.starts_with(&prev) {
@@ -245,7 +242,7 @@ fn find_assistant_index_by_id(items: &Vec<ResponseItem>, id: &str) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::ContentItem;
+    use codex_protocol::models::ContentItem;
 
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {
