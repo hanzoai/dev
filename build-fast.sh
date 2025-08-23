@@ -21,6 +21,28 @@ else
     BIN_PATH="./target/${PROFILE}/code"
 fi
 
+# Optional deterministic mode: aim for more stable hashes by removing
+# UUIDs on macOS, disabling debuginfo, and preferring a single-codegen
+# optimized profile when user hasn't explicitly chosen a profile.
+if [ "${DETERMINISTIC:-}" = "1" ]; then
+    echo "Deterministic build: enabled"
+    DET_FORCE_REL="${DETERMINISTIC_FORCE_RELEASE:-1}"
+    if [ "$PROFILE" = "dev-fast" ] && [ "$DET_FORCE_REL" = "1" ]; then
+        PROFILE="release-prod"
+        BIN_PATH="./target/${PROFILE}/code"
+        echo "Deterministic build: switching profile to ${PROFILE}"
+    elif [ "$PROFILE" = "dev-fast" ]; then
+        echo "Deterministic build: keeping profile ${PROFILE} (DETERMINISTIC_FORCE_RELEASE=0)"
+    fi
+    # Use SOURCE_DATE_EPOCH if available to stabilize timestamps
+    if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        export SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --pretty=%ct 2>/dev/null || true)"
+    fi
+    # Disable debuginfo (safer to apply globally); avoid touching UUID here
+    # since some proc-macro dylibs require LC_UUID and will fail to load.
+    export RUSTFLAGS="${RUSTFLAGS:-} -C debuginfo=0"
+fi
+
 echo "Building code binary (${PROFILE} mode)..."
 
 # Check Cargo.lock validity (fast, non-blocking check)
@@ -105,15 +127,6 @@ ${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tu
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
     echo "Binary location: ${BIN_PATH}"
-    # Compute absolute path and SHA256 for clarity
-    ABS_BIN_PATH="$(cd "$(dirname "${BIN_PATH}")" && pwd)/$(basename "${BIN_PATH}")"
-    if command -v shasum >/dev/null 2>&1; then
-      BIN_SHA="$(shasum -a 256 "${ABS_BIN_PATH}" | awk '{print $1}')"
-    elif command -v sha256sum >/dev/null 2>&1; then
-      BIN_SHA="$(sha256sum "${ABS_BIN_PATH}" | awk '{print $1}')"
-    else
-      BIN_SHA=""
-    fi
     
     # Keep old symlink locations working for compatibility
     # Create symlink in target/release for npm wrapper expectations
@@ -135,6 +148,26 @@ if [ $? -eq 0 ]; then
     
     echo "✅ Symlinks updated"
     echo ""
+    # Optional post-link step for deterministic builds: re-link executables
+    # with -no_uuid only on macOS. Apply per-bin via `cargo rustc` so
+    # dependencies/proc-macro dylibs are not affected.
+    if [ "${DETERMINISTIC:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
+      echo "Deterministic post-link: removing LC_UUID from executables"
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code-tui -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code-exec -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+    fi
+
+    # Compute absolute path and SHA256 for clarity (after any post-linking)
+    ABS_BIN_PATH="$(cd "$(dirname "${BIN_PATH}")" && pwd)/$(basename "${BIN_PATH}")"
+    if command -v shasum >/dev/null 2>&1; then
+      BIN_SHA="$(shasum -a 256 "${ABS_BIN_PATH}" | awk '{print $1}')"
+    elif command -v sha256sum >/dev/null 2>&1; then
+      BIN_SHA="$(sha256sum "${ABS_BIN_PATH}" | awk '{print $1}')"
+    else
+      BIN_SHA=""
+    fi
+
     echo "You can run the CLI directly:"
     if [ -n "$BIN_SHA" ]; then
       echo "  ${ABS_BIN_PATH} (sha256: ${BIN_SHA})"
