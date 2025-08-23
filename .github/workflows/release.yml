@@ -131,8 +131,9 @@ jobs:
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.6
       with:
-        # Separate caches per target
-        cache-key: ${{ matrix.target }}
+        # Pin sccache version explicitly; action expects 'version' input
+        version: v0.10.0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install mold (Linux)
       if: contains(matrix.os, 'ubuntu')
@@ -191,6 +192,9 @@ jobs:
         CARGO_INCREMENTAL: "0"
         # Increase sccache cache size
         SCCACHE_CACHE_SIZE: "10G"
+        # Route rustc through sccache and enable GitHub Actions cache backend
+        RUSTC_WRAPPER: sccache
+        SCCACHE_GHA_ENABLED: 'true'
         # Show more detail on failures
         RUST_BACKTRACE: "1"
       run: |
