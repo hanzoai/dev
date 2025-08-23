@@ -127,10 +127,14 @@ pub(crate) trait HistoryCell {
         // Default path: render the full text and use Paragraph.scroll to skip
         // vertical rows AFTER wrapping. Slicing lines before wrapping causes
         // incorrect blank space when lines wrap across multiple rows.
+        // Ensure the entire allocated area is painted with the theme background
+        // by attaching a background-styled Block to the Paragraph.
         let lines = self.display_lines_trimmed();
         let text = Text::from(lines);
 
+        let bg_block = Block::default().style(Style::default().bg(crate::colors::background()));
         Paragraph::new(text)
+            .block(bg_block)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
             .style(Style::default().bg(crate::colors::background()))
@@ -379,7 +383,9 @@ impl HistoryCell for ExecCell {
         // Render preamble (scrolled) if any space
         if pre_height > 0 {
             let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
+            let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
+                .block(pre_block)
                 .wrap(Wrap { trim: false })
                 .scroll((pre_skip, 0))
                 .style(Style::default().bg(crate::colors::background()))
@@ -391,7 +397,8 @@ impl HistoryCell for ExecCell {
             let out_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: out_height };
             let block = Block::default()
                 .borders(Borders::LEFT)
-                .border_style(Style::default().fg(crate::colors::border_dim()))
+                .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                .style(Style::default().bg(crate::colors::background()))
                 .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
             Paragraph::new(out_text)
                 .block(block)
