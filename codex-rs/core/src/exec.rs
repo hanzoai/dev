@@ -29,7 +29,7 @@ use crate::spawn::spawn_child_async;
 use serde_bytes::ByteBuf;
 
 // Note: legacy stream caps were removed in favor of streaming all bytes and
-// truncating at the consumer where appropriate.
+// truncating at the consumer where appropriate. (CI cache test touch)
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
