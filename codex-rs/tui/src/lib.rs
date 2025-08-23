@@ -322,7 +322,7 @@ fn run_ratatui_app(
         }
 
         lines.push(Line::from(""));
-        tui.insert_history_lines(lines);
+        crate::insert_history::insert_history_lines(&mut terminal, lines);
     }
 
     // Initialize high-fidelity session event logging if enabled.
