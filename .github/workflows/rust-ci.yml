@@ -26,7 +26,10 @@ jobs:
             BASE_SHA='${{ github.event.pull_request.base.sha }}'
             echo "Base SHA: $BASE_SHA"
             # List files changed between base and current HEAD (merge-base aware)
-            mapfile -t files < <(git diff --name-only --no-renames "$BASE_SHA"...HEAD)
+            files=()
+            while IFS= read -r f; do
+              files+=("$f")
+            done < <(git diff --name-only --no-renames "$BASE_SHA"...HEAD)
           else
             # On push / manual runs, default to running everything
             files=("codex-rs/force" ".github/force")
