@@ -127,6 +127,14 @@ jobs:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Configure stable cache keys for sccache
+      - name: Configure sccache cache keys
+        shell: bash
+        run: |
+          # Use stable cache keys that persist across runs
+          echo "SCCACHE_GHA_CACHE_TO=sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_CACHE_FROM=sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
+
       # Ensure GHAC is enabled & rustc routed through sccache; also set a per-OS default local dir
       - name: Set sccache env + dir
         shell: bash
@@ -219,7 +227,7 @@ jobs:
           # Prefer successful build over failing on cache IO issues
           SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
           RUST_BACKTRACE: "1"
-          SCCACHE_LOG: "warn"
+          SCCACHE_LOG: "info"
           # Keep GHAC enabled initially; we may disable it below if startup fails
           SCCACHE_GHA_ENABLED: 'true'
         run: |
@@ -240,7 +248,11 @@ jobs:
           fi
 
           # Show initial stats (useful to confirm GHAC vs Local)
-          sccache --show-stats || true
+          echo "=== Initial sccache stats ==="
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats || true
+            echo "Cache keys: TO=${SCCACHE_GHA_CACHE_TO:-not set}, FROM=${SCCACHE_GHA_CACHE_FROM:-not set}"
+          fi
 
           # Calculate parallel jobs
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
@@ -260,7 +272,15 @@ jobs:
           cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
           # Print final stats
-          command -v sccache >/dev/null 2>&1 && sccache --show-stats || true
+          echo "=== Final sccache stats ==="
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats || true
+            # Also show detailed stats in JSON for debugging
+            if [[ "${SCCACHE_LOG}" == "debug" ]] || [[ "${SCCACHE_LOG}" == "info" ]]; then
+              echo "=== Detailed stats (JSON) ==="
+              sccache --show-stats --stats-format json || true
+            fi
+          fi
 
       - name: Prepare artifacts
         shell: bash
