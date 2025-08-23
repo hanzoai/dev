@@ -366,8 +366,22 @@ impl HistoryCell for ExecCell {
         // Prepare texts and total heights (after wrapping)
         let pre_text = Text::from(trim_empty_lines(pre_lines));
         let out_text = Text::from(trim_empty_lines(out_lines));
-        let pre_total: u16 = Paragraph::new(pre_text.clone()).wrap(Wrap { trim: false }).line_count(area.width).try_into().unwrap_or(0);
-        let out_total: u16 = Paragraph::new(out_text.clone()).wrap(Wrap { trim: false }).line_count(area.width).try_into().unwrap_or(0);
+        // IMPORTANT: measure with the same effective widths we will render with.
+        // Preamble renders without borders/padding, so width = area.width.
+        let pre_wrap_width = area.width;
+        // Output renders inside a Block with a LEFT border (1 col) and left padding of 1,
+        // so the inner text width is reduced accordingly.
+        let out_wrap_width = area.width.saturating_sub(2);
+        let pre_total: u16 = Paragraph::new(pre_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(pre_wrap_width)
+            .try_into()
+            .unwrap_or(0);
+        let out_total: u16 = Paragraph::new(out_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(out_wrap_width)
+            .try_into()
+            .unwrap_or(0);
 
         // Compute how many rows to skip from the preamble, then from the output
         let pre_skip = skip_rows.min(pre_total);
@@ -403,6 +417,7 @@ impl HistoryCell for ExecCell {
             Paragraph::new(out_text)
                 .block(block)
                 .wrap(Wrap { trim: false })
+                // Scroll count is based on the wrapped text rows at out_wrap_width
                 .scroll((out_skip, 0))
                 .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
                 .render(out_area, buf);
