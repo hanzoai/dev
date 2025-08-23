@@ -160,66 +160,23 @@ jobs:
         # Update version in root Cargo.toml
         sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
         
-        # Update version in Cargo.lock WITHOUT regenerating it
-        # This preserves all dependency versions and maintains cache validity
-        if [ -f "Cargo.lock" ]; then
-          echo "🔒 Updating version in existing Cargo.lock (preserving dependencies)"
-          
-          # Get list of workspace members
-          WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
-          
-          # For each workspace member, get its package name and update version in Cargo.lock
-          for dir in $WORKSPACE_MEMBERS; do
-            if [ -f "$dir/Cargo.toml" ]; then
-              # Update version in member's Cargo.toml
-              sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
-              
-              # Get the package name
-              PKG_NAME=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
-              
-              if [ -n "$PKG_NAME" ]; then
-                echo "  • Updating $PKG_NAME to version $VERSION in Cargo.lock"
-                # Update this package's version in Cargo.lock
-                # Use a more precise pattern that handles the package block structure
-                awk -v pkg="$PKG_NAME" -v old="$CURRENT_VERSION" -v new="$VERSION" '
-                  /^\[\[package\]\]$/ { in_pkg=1; is_target=0; next_line_name=1 }
-                  in_pkg && next_line_name && /^name = / {
-                    next_line_name=0
-                    if ($0 == "name = \"" pkg "\"") {
-                      is_target=1
-                    }
-                  }
-                  in_pkg && is_target && /^version = / {
-                    print "version = \"" new "\""
-                    is_target=0
-                    in_pkg=0
-                    next
-                  }
-                  in_pkg && /^$/ { in_pkg=0; is_target=0 }
-                  { print }
-                ' Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
-              fi
-            fi
-          done
-          
-          # Also update any references to these packages in dependencies sections
-          for dir in $WORKSPACE_MEMBERS; do
-            if [ -f "$dir/Cargo.toml" ]; then
-              PKG_NAME=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
-              if [ -n "$PKG_NAME" ]; then
-                # Update dependency references (these appear in different format)
-                sed -i "s/\"$PKG_NAME $CURRENT_VERSION\"/\"$PKG_NAME $VERSION\"/g" Cargo.lock
-              fi
-            fi
-          done
-          
-          echo "✅ Cargo.lock updated (dependencies preserved)"
-        else
-          echo "⚠️  No Cargo.lock found, will be created during build"
-        fi
+        # Update version in workspace members' Cargo.toml files
+        WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
+        for dir in $WORKSPACE_MEMBERS; do
+          if [ -f "$dir/Cargo.toml" ]; then
+            sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
+          fi
+        done
         
         # Clean up backup files
         find . -name "*.bak" -delete
+        
+        # Use cargo to update the lock file properly
+        # This maintains all dependency versions while updating workspace package versions
+        echo "🔒 Updating Cargo.lock with cargo (preserving dependency versions)"
+        cargo update --workspace --offline || cargo update --workspace
+        
+        echo "✅ Cargo.lock updated properly"
       shell: bash
 
     - name: Build binaries
@@ -257,7 +214,7 @@ jobs:
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         
         # Build with --locked to ensure reproducible builds
-        # If Cargo.lock doesn't exist or is invalid, this will fail (which is what we want)
+        # The lock file was properly updated using cargo update --workspace
         cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
         
         # Show sccache stats
