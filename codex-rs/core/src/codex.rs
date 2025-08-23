@@ -924,10 +924,8 @@ impl Session {
                 call_id: call_id.to_string(),
                 stdout,
                 stderr,
-                duration: *duration,
                 exit_code: *exit_code,
                 duration: *duration,
-                formatted_output,
             })
         };
 

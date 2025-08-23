@@ -77,6 +77,9 @@ impl ToolsConfig {
         sandbox_policy: SandboxPolicy,
         include_plan_tool: bool,
     ) -> Self {
+        // Our fork does not yet enable the experimental streamable shell tool
+        // in the tool selection phase. Default to the existing behaviors.
+        let use_streamable_shell_tool = false;
         let mut shell_type = if use_streamable_shell_tool {
             ConfigShellToolType::StreamableShell
         } else if model_family.uses_local_shell_tool {
