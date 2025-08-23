@@ -135,6 +135,24 @@ jobs:
         version: v0.10.0
         token: ${{ secrets.GITHUB_TOKEN }}
 
+    # Ensure GH cache env vars are exported for child processes (required by sccache GH backend)
+    - name: Export GitHub cache environment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+    # Persist local sccache directory as a fallback/shared cache
+    - name: Cache sccache directory (fallback)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/sccache
+        key: sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}
+        restore-keys: |
+          sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89.0-
+          sccache-${{ runner.os }}-${{ matrix.target }}-
+
     - name: Install mold (Linux)
       if: contains(matrix.os, 'ubuntu')
       run: |
@@ -195,6 +213,10 @@ jobs:
         # Route rustc through sccache and enable GitHub Actions cache backend
         RUSTC_WRAPPER: sccache
         SCCACHE_GHA_ENABLED: 'true'
+        # Avoid hard-fail if sccache server has IO error; prefer fallback
+        SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
+        # Use a consistent local cache directory across OSes for fallback and caching
+        SCCACHE_DIR: $HOME/.cache/sccache
         # Show more detail on failures
         RUST_BACKTRACE: "1"
       run: |
@@ -208,7 +230,6 @@ jobs:
           if ! sccache --start-server; then
             echo "sccache GHA backend failed to start; falling back to local disk cache"
             unset SCCACHE_GHA_ENABLED
-            export SCCACHE_DIR="${HOME}/.cache/sccache"
             mkdir -p "$SCCACHE_DIR"
             if ! sccache --start-server; then
               echo "sccache local cache also failed; disabling sccache"
