@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::sync::Mutex as StdMutex;
 
 use tokio::sync::broadcast;
