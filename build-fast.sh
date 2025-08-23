@@ -2,6 +2,31 @@
 # Fast build script for local development - optimized for speed
 set -euo pipefail
 
+# Usage banner
+usage() {
+  cat <<USAGE
+Usage: ./build-fast.sh [env flags]
+
+Environment flags:
+  PROFILE=dev-fast|dev|release-prod   Build profile (default: dev-fast)
+  TRACE_BUILD=1                       Print toolchain/env and artifact SHA
+  KEEP_ENV=1                          Do NOT sanitize env (use your current env)
+  DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
+  DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
+  DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+
+Examples:
+  ./build-fast.sh
+  TRACE_BUILD=1 ./build-fast.sh
+  DETERMINISTIC=1 DETERMINISTIC_FORCE_RELEASE=0 ./build-fast.sh
+  DETERMINISTIC=1 DETERMINISTIC_NO_UUID=1 ./build-fast.sh
+USAGE
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 # Change to the Rust project root directory
 cd codex-rs
 
@@ -45,25 +70,6 @@ fi
 
 echo "Building code binary (${PROFILE} mode)..."
 
-# Check Cargo.lock validity (fast, non-blocking check)
-if ! cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
-    echo "⚠️  Warning: Cargo.lock appears out of date or inconsistent"
-    echo "  This might mean:"
-    echo "  • You've modified Cargo.toml dependencies"
-    echo "  • You've changed workspace crate versions"
-    echo "  • The lockfile is missing entries"
-    echo ""
-    echo "  Run 'cargo update' to update all dependencies, or"
-    echo "  Run 'cargo update -p <crate-name>' to update specific crates"
-    echo ""
-    echo "  Continuing with unlocked build for development..."
-    echo ""
-    USE_LOCKED=""
-else
-    # Lockfile is valid, use it for consistent builds
-    USE_LOCKED="--locked"
-fi
-
 # Select the cargo/rustc toolchain to match deploy
 # Prefer rustup with the toolchain pinned in rust-toolchain.toml or $RUSTUP_TOOLCHAIN
 USE_CARGO="cargo"
@@ -98,6 +104,58 @@ else
   exit 1
 fi
 
+# Canonicalize build environment so everyone shares the same cache by default.
+# Set KEEP_ENV=1 to skip this sanitization.
+if [ "${KEEP_ENV:-}" != "1" ]; then
+  # Only define RUSTFLAGS via feature flags like DETERMINISTIC=1; otherwise clear.
+  if [ -z "${DETERMINISTIC:-}" ]; then
+    export RUSTFLAGS=""
+  fi
+  unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER SCCACHE SCCACHE_BIN CARGO_TARGET_DIR MACOSX_DEPLOYMENT_TARGET
+  unset CARGO_PROFILE_RELEASE_LTO CARGO_PROFILE_DEV_FAST_LTO CARGO_PROFILE_RELEASE_CODEGEN_UNITS CARGO_PROFILE_DEV_FAST_CODEGEN_UNITS
+  # Ensure incremental uses profile default
+  unset CARGO_INCREMENTAL
+  CANONICAL_ENV_APPLIED=1
+else
+  CANONICAL_ENV_APPLIED=0
+fi
+
+# Resolve actual cargo/rustc binaries that will be used (via rustup) for fingerprinting
+REAL_CARGO_BIN="$(rustup which cargo 2>/dev/null || command -v cargo || echo cargo)"
+REAL_RUSTC_BIN="$(rustup which rustc 2>/dev/null || command -v rustc || echo rustc)"
+
+# Determine current host triple for dynamic symlink naming
+HOST_TRIPLE="$(rustup run "$TOOLCHAIN" rustc -vV 2>/dev/null | awk -F': ' '/^host: /{print $2}')"
+TRIPLE="${HOST_TRIPLE:-}"
+if [ -z "$TRIPLE" ]; then
+  # Fallback for Darwin when rustup is unavailable for some reason
+  if [ "$(uname -s)" = "Darwin" ]; then
+    TRIPLE="$(uname -m)-apple-darwin"
+    [ "$TRIPLE" = "arm64-apple-darwin" ] && TRIPLE="aarch64-apple-darwin"
+  else
+    TRIPLE="unknown-unknown-unknown"
+  fi
+fi
+
+# Check Cargo.lock validity (fast, non-blocking check) using the selected cargo
+if ! ${USE_CARGO} metadata --locked --format-version 1 >/dev/null 2>&1; then
+    echo "⚠️  Warning: Cargo.lock appears out of date or inconsistent"
+    echo "  This might mean:"
+    echo "  • You've modified Cargo.toml dependencies"
+    echo "  • You've changed workspace crate versions"
+    echo "  • The lockfile is missing entries"
+    echo ""
+    echo "  Run 'cargo update' to update all dependencies, or"
+    echo "  Run 'cargo update -p <crate-name>' to update specific crates"
+    echo ""
+    echo "  Continuing with unlocked build for development..."
+    echo ""
+    USE_LOCKED=""
+else
+    # Lockfile is valid, use it for consistent builds
+    USE_LOCKED="--locked"
+fi
+
 # Optional trace mode for diagnosing environment differences
 if [ "${TRACE_BUILD:-}" = "1" ]; then
   echo "--- TRACE_BUILD environment ---"
@@ -110,9 +168,63 @@ if [ "${TRACE_BUILD:-}" = "1" ]; then
     rustup run "$TOOLCHAIN" rustc -vV || true
     rustup run "$TOOLCHAIN" cargo -vV || true
   fi
+  echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV:-})"
   echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
   env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
   echo "--------------------------------"
+fi
+
+# Compute and compare build cache fingerprint to explain incremental behavior
+FPRINT_FILE="./target/${PROFILE}/.env-fingerprint"
+# Collect fingerprint inputs (only env/toolchain/settings that affect codegen/caches)
+collect_fingerprint() {
+  local cargo_v rustc_v host which_cargo which_rustc uname_srm
+  cargo_v="$(${USE_CARGO} -V 2>/dev/null || true)"
+  rustc_v="$(rustup run "$TOOLCHAIN" rustc -vV 2>/dev/null || true)"
+  host="$(printf "%s\n" "$rustc_v" | awk -F': ' '/^host: /{print $2}' || true)"
+  which_cargo="${REAL_CARGO_BIN}"
+  which_rustc="${REAL_RUSTC_BIN}"
+  uname_srm="$(uname -srm 2>/dev/null || true)"
+  cat <<FP
+profile=${PROFILE}
+toolchain=${TOOLCHAIN:-}
+host=${host}
+cargo_bin=${which_cargo}
+rustc_bin=${which_rustc}
+cargo_version=${cargo_v}
+rustc_version=$(printf "%s" "$rustc_v" | tr '\n' ' ')
+uname=${uname_srm}
+RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-}
+CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-}
+RUSTFLAGS=${RUSTFLAGS:-}
+RUSTC_WRAPPER=${RUSTC_WRAPPER:-}
+CARGO_BUILD_RUSTC_WRAPPER=${CARGO_BUILD_RUSTC_WRAPPER:-}
+SCCACHE=${SCCACHE:-}
+SCCACHE_BIN=${SCCACHE_BIN:-}
+CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-}
+MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-}
+CODE_HOME=${CODE_HOME:-}
+CODEX_HOME=${CODEX_HOME:-}
+FP
+}
+
+NEW_FPRINT_TEXT="$(collect_fingerprint)"
+NEW_FPRINT_HASH="$(printf "%s" "$NEW_FPRINT_TEXT" | shasum -a 256 2>/dev/null | awk '{print $1}')"
+
+FPRINT_CHANGED="0"
+if [ -f "$FPRINT_FILE" ]; then
+  OLD_FPRINT_HASH="$(sed -n 's/^HASH=//p' "$FPRINT_FILE" 2>/dev/null | head -n1)"
+  if [ "${OLD_FPRINT_HASH:-}" != "$NEW_FPRINT_HASH" ]; then
+    FPRINT_CHANGED="1"
+    echo "⚠️  Build cache fingerprint changed since last run for profile '${PROFILE}'."
+    echo "   This can trigger incremental rebuilds the first time you build."
+    if [ "${TRACE_BUILD:-}" = "1" ]; then
+      echo "--- previous fingerprint (hash: ${OLD_FPRINT_HASH:-none}) ---"; sed -n '1,200p' "$FPRINT_FILE" 2>/dev/null | sed '1d'; echo "--------------------------------"
+      echo "--- current fingerprint (hash: ${NEW_FPRINT_HASH}) ---"; printf "%s\n" "$NEW_FPRINT_TEXT"; echo "--------------------------------"
+    else
+      echo "   Run with TRACE_BUILD=1 to see detailed differences."
+    fi
+  fi
 fi
 
 # Build for native target (no --target flag) for maximum speed
@@ -136,12 +248,18 @@ if [ $? -eq 0 ]; then
     fi
     ln -sf "../${PROFILE}/code" "./target/release/code"
     
-    # Update the symlink in codex-cli/bin for npm wrapper
-    CODEX_CLI_BIN_CODE="../codex-cli/bin/code-aarch64-apple-darwin"
-    mkdir -p "$(dirname "$CODEX_CLI_BIN_CODE")"
-    # Update symlinks for code (primary) and coder (fallback)
+    # Update the symlinks in codex-cli/bin
+    CLI_BIN_DIR="../codex-cli/bin"
+    mkdir -p "$CLI_BIN_DIR"
+    # Dynamic arch-targeted names
+    for LINK in "code-${TRIPLE}" "coder-${TRIPLE}"; do
+      DEST="${CLI_BIN_DIR}/${LINK}"
+      [ -e "$DEST" ] && rm -f "$DEST"
+      ln -sf "../../codex-rs/target/${PROFILE}/code" "$DEST"
+    done
+    # Back-compat fixed names (Apple Silicon triple)
     for LINK in code-aarch64-apple-darwin coder-aarch64-apple-darwin; do
-      DEST="../codex-cli/bin/$LINK"
+      DEST="${CLI_BIN_DIR}/${LINK}"
       [ -e "$DEST" ] && rm -f "$DEST"
       ln -sf "../../codex-rs/target/${PROFILE}/code" "$DEST"
     done
@@ -151,11 +269,11 @@ if [ $? -eq 0 ]; then
     # Optional post-link step for deterministic builds: re-link executables
     # with -no_uuid only on macOS. Apply per-bin via `cargo rustc` so
     # dependencies/proc-macro dylibs are not affected.
-    if [ "${DETERMINISTIC:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
+    if [ "${DETERMINISTIC_NO_UUID:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code -- -C link-arg=-Wl,-no_uuid 2>&1 || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code-tui -- -C link-arg=-Wl,-no_uuid 2>&1 || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" --bin code-exec -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-cli --bin code -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-tui --bin code-tui -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid 2>&1 || true
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)
@@ -168,13 +286,24 @@ if [ $? -eq 0 ]; then
       BIN_SHA=""
     fi
 
+    # Ensure repo-local 'code-dev' path stays mapped to latest build output
+    # so the user's alias `code-dev` (if pointing at target/dev-fast/code) keeps working
+    # Only create this symlink if we're not already building in dev-fast profile
+    if [ "$PROFILE" != "dev-fast" ]; then
+      mkdir -p ./target/dev-fast
+      if [ -e "./target/dev-fast/code" ]; then
+        rm -f ./target/dev-fast/code
+      fi
+      ln -sf "../${PROFILE}/code" "./target/dev-fast/code"
+    fi
+
     echo "You can run the CLI directly:"
     if [ -n "$BIN_SHA" ]; then
       echo "  ${ABS_BIN_PATH} (sha256: ${BIN_SHA})"
     else
       echo "  ${ABS_BIN_PATH}"
     fi
-    echo "Binary size: $(du -h ${BIN_PATH} | cut -f1)"
+    echo "Binary size: $(du -h "${ABS_BIN_PATH}" | cut -f1)"
     echo ""
     echo "Build profile: ${PROFILE}"
     if [ "$PROFILE" = "dev-fast" ]; then
@@ -182,24 +311,21 @@ if [ $? -eq 0 ]; then
         echo "  → For production build, use: PROFILE=release-prod ./build-fast.sh"
     fi
     
-    # PATH guidance and collision warning
-    REPO_BIN_DIR="${REPO_ROOT}/codex-cli/bin"
-    CODE_PATH_ON_PATH="$(command -v code 2>/dev/null || true)"
-    if [ -n "$CODE_PATH_ON_PATH" ] && [[ "$CODE_PATH_ON_PATH" != "${REPO_BIN_DIR}/code" && "$CODE_PATH_ON_PATH" != *"/codex-cli/bin/"* ]]; then
-      echo ""
-      echo "⚠️  PATH notice: 'code' currently resolves to: $CODE_PATH_ON_PATH"
-      echo "    That is likely Visual Studio Code, not this CLI."
-      echo "    To use this binary via 'code', prepend the repo bin directory to PATH:"
-      echo "      export PATH=\"${REPO_BIN_DIR}:\$PATH\""
-      echo "    Then verify with:"
-      echo "      which code"
-    fi
-
     if [ "${TRACE_BUILD:-}" = "1" ] && [ -n "$BIN_SHA" ]; then
       echo "--- TRACE_BUILD artifact ---"
       echo "ABS_BIN_PATH: ${ABS_BIN_PATH}"
       echo "SHA256: ${BIN_SHA}"
       echo "--------------------------------"
+    fi
+
+    # Persist the current fingerprint to explain future behavior
+    mkdir -p "./target/${PROFILE}" 2>/dev/null || true
+    {
+      echo "HASH=${NEW_FPRINT_HASH}"
+      printf "%s\n" "$NEW_FPRINT_TEXT"
+    } >"$FPRINT_FILE"
+    if [ "$FPRINT_CHANGED" = "1" ]; then
+      echo "🧰 Cache normalized to current environment (fingerprint ${NEW_FPRINT_HASH})."
     fi
 
     # If lockfile was out of date, remind user
