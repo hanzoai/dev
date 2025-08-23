@@ -20,6 +20,25 @@ fi
 
 echo "Building code binary (${PROFILE} mode)..."
 
+# Check Cargo.lock validity (fast, non-blocking check)
+if ! cargo metadata --locked --format-version 1 >/dev/null 2>&1; then
+    echo "⚠️  Warning: Cargo.lock appears out of date or inconsistent"
+    echo "  This might mean:"
+    echo "  • You've modified Cargo.toml dependencies"
+    echo "  • You've changed workspace crate versions"
+    echo "  • The lockfile is missing entries"
+    echo ""
+    echo "  Run 'cargo update' to update all dependencies, or"
+    echo "  Run 'cargo update -p <crate-name>' to update specific crates"
+    echo ""
+    echo "  Continuing with unlocked build for development..."
+    echo ""
+    USE_LOCKED=""
+else
+    # Lockfile is valid, use it for consistent builds
+    USE_LOCKED="--locked"
+fi
+
 # Select the cargo/rustc toolchain to match deploy
 # Prefer rustup with the toolchain pinned in rust-toolchain.toml or $RUSTUP_TOOLCHAIN
 USE_CARGO="cargo"
@@ -57,13 +76,8 @@ fi
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
 
-# In fast dev profile, suppress compiler warnings for a clean output while
-# still surfacing errors. This does not affect other profiles.
-if [ "$PROFILE" = "dev-fast" ]; then
-    export RUSTFLAGS="${RUSTFLAGS:-} -Awarnings"
-fi
-
-${USE_CARGO} build --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
+# Build with or without --locked based on lockfile validity
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -97,6 +111,13 @@ if [ $? -eq 0 ]; then
     if [ "$PROFILE" = "dev-fast" ]; then
         echo "  → Optimized for fast iteration (incremental builds enabled)"
         echo "  → For production build, use: PROFILE=release-prod ./build-fast.sh"
+    fi
+    
+    # If lockfile was out of date, remind user
+    if [ -z "$USE_LOCKED" ]; then
+        echo ""
+        echo "⚠️  Remember: Built without --locked due to Cargo.lock issues"
+        echo "  Consider running 'cargo update' and committing the changes"
     fi
 else
     echo "❌ Build failed"
