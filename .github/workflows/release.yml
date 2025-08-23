@@ -164,26 +164,56 @@ jobs:
         # Update Cargo.lock to reflect only workspace version bumps, without
         # floating third-party dependency versions or git revisions.
         echo "🔒 Updating Cargo.lock for workspace members only"
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          # On Windows, use a minimal PowerShell loop to update each workspace package
-          pwsh -Command "
-            $members = (Get-Content Cargo.toml) -join \"\`n\" | Select-String -Pattern '^members\s*=\s*\[' -Context 0,50 | ForEach-Object { $_.Context.PostContext } | ForEach-Object { $_ -replace '[\",]','' } | Where-Object { $_.Trim() -ne '' } | ForEach-Object { $_.Trim() }
-            foreach ($dir in $members) { if (Test-Path \"$dir/Cargo.toml\") { $name = (Get-Content \"$dir/Cargo.toml\" | Select-String -Pattern '^name\s*=\s*\"(.*)\"').Matches.Groups[1].Value; if ($name) { Write-Host \"  • cargo update -p $name\"; cargo update -p $name } } }
-          "
-        else
-          # Portable alternative to Bash 4+ mapfile for macOS runners (Bash 3.2)
-          awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
-            | while IFS= read -r dir; do
-                if [[ -f "$dir/Cargo.toml" ]]; then
-                  NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
-                  if [[ -n "$NAME" ]]; then
-                    echo "  • cargo update -p $NAME"
-                    cargo update -p "$NAME"
-                  fi
-                fi
-              done
-        fi
+        # 1) Gather workspace crate names from member Cargo.toml files
+        awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
+          | while IFS= read -r dir; do
+              if [[ -f "$dir/Cargo.toml" ]]; then
+                sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"
+              fi
+            done \
+          > .workspace-crate-names
+
+        # 2) Rewrite only the version lines for those workspace crates in Cargo.lock
+        #    This avoids touching third-party deps or git revisions.
+        awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
+          /^\[\[package\]\]$/ { pkg=""; print; next }
+          /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
+          /^version = \"/ {
+            if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
+            next
+          }
+          { print }
+        ' .workspace-crate-names Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+        rm -f .workspace-crate-names
       shell: bash
+
+    - name: Normalize Cargo.lock workspace versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ needs.determine-version.outputs.version }}"
+        echo "Ensuring Cargo.lock reflects workspace version ${VERSION}"
+        # Build list of workspace crate names
+        awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
+          | while IFS= read -r dir; do
+              if [[ -f "$dir/Cargo.toml" ]]; then
+                sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"
+              fi
+            done \
+          > .workspace-crate-names
+
+        if [[ -s .workspace-crate-names ]]; then
+          awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
+            /^\[\[package\]\]$/ { pkg=""; print; next }
+            /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
+            /^version = \"/ {
+              if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
+              next
+            }
+            { print }
+          ' .workspace-crate-names Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+        fi
+        rm -f .workspace-crate-names
         
     - name: Build binaries
       shell: bash
@@ -205,8 +235,14 @@ jobs:
           # Windows: Use NUMBER_OF_PROCESSORS env var
           export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
         else
-          # Unix-like: Use nproc or sysctl
-          export CARGO_BUILD_JOBS=$(($(nproc || sysctl -n hw.ncpu || echo 2) * 2))
+          # Unix-like: Prefer nproc if available, otherwise getconf/sysctl
+          CORES=$((
+            $( (command -v nproc >/dev/null 2>&1 && nproc) \
+               || (getconf _NPROCESSORS_ONLN 2>/dev/null) \
+               || (sysctl -n hw.ncpu 2>/dev/null) \
+               || echo 2 )
+          ))
+          export CARGO_BUILD_JOBS=$((CORES * 2))
         fi
         echo "Building with $CARGO_BUILD_JOBS parallel jobs"
         # Use --locked to ensure reproducible builds
