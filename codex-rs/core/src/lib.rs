@@ -1,4 +1,5 @@
 //! Root of the `codex-core` library.
+//! This module provides the core functionality for the codex CLI.
 
 // Prevent accidental direct writes to stdout/stderr in library code. All
 // user-visible output must go through the appropriate abstraction (e.g.,
