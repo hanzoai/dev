@@ -89,42 +89,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Ensure Rust workspace version matches the npm package version we are
-      # about to publish so env!("CARGO_PKG_VERSION") is correct in binaries.
-      - name: Update workspace version in Cargo.toml
+      # 🔧 Update only the publishing crate's version (root package)
+      - name: Set crate version in Cargo.toml (portable)
         shell: bash
         working-directory: codex-rs
         run: |
           set -euo pipefail
           VERSION="${{ needs.determine-version.outputs.version }}"
-          echo "📝 Embedding version ${VERSION} into codex-rs/Cargo.toml"
-          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-          echo "Updated Cargo.toml line:" && grep "^version = " Cargo.toml || true
-
-          echo "🔒 Normalizing Cargo.lock to workspace versions"
-          # Update only workspace members in Cargo.lock to the new version to keep
-          # --frozen builds reproducible while reflecting the version bump.
-          awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
-            | while IFS= read -r dir; do
-                if [[ -f "$dir/Cargo.toml" ]]; then
-                  NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
-                  if [[ -n "$NAME" ]]; then
-                    echo "  • cargo update -p $NAME"
-                    cargo update -p "$NAME"
-                  fi
-                fi
-              done
-
-          # Force lockfile to reflect the bumped version for workspace crates.
-          awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
-            /^\[\[package\]\]$/ { pkg=""; print; next }
-            /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
-            /^version = \"/ {
-              if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
-              next
+          echo "Embedding version ${VERSION} into codex-rs/Cargo.toml"
+          # Change the first version line inside the [package] table only
+          awk -v ver="$VERSION" '
+            BEGIN{inpkg=0; done=0}
+            /^\[package\]/{inpkg=1}
+            /^\[/{ if ($0 !~ /^\[package\]/) inpkg=0 }
+            { if (inpkg && !done && $0 ~ /^version = "/) {
+                print "version = \"" ver "\""; done=1; next
+              }
+              print
             }
-            { print }
-          ' <(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml | while IFS= read -r dir; do if [[ -f "$dir/Cargo.toml" ]]; then sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"; fi; done) Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+          echo "New version line:" && grep '^version = ' Cargo.toml || true
+
+      # 🔒 Bring Cargo.lock in sync without changing dependency graph
+      - name: Regenerate lockfile for --frozen
+        shell: bash
+        working-directory: codex-rs
+        run: cargo generate-lockfile
 
       # Install Rust with the minimal profile to avoid pulling clippy/rust-src/rustfmt
       - name: Install Rust (minimal)
