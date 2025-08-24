@@ -1,5 +1,6 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use regex_lite::Regex;
 
 /// Custom markdown renderer with full control over spacing and styling
 pub struct MarkdownRenderer {
@@ -397,7 +398,9 @@ impl MarkdownRenderer {
     
     fn flush_current_line(&mut self) {
         if !self.current_line.is_empty() {
-            self.lines.push(Line::from(self.current_line.clone()));
+            // Autolink URLs and markdown links inside the accumulated spans.
+            let linked = autolink_spans(std::mem::take(&mut self.current_line));
+            self.lines.push(Line::from(linked));
             self.current_line.clear();
         }
     }
@@ -414,6 +417,120 @@ impl MarkdownRenderer {
     fn finish(&mut self) {
         self.flush_current_line();
     }
+}
+
+// Turn inline markdown links and bare URLs into OSC 8 hyperlinks.
+// This runs late, on the already-styled spans for a line, so it preserves
+// bold/italic styling while adding underlines for links and embedding the
+// hyperlink escape sequences in the text.
+fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    // Patterns: markdown [label](target), explicit http(s) URLs, and plain domains.
+    // Keep conservative to avoid false positives.
+    static MD_LINK_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+    static EXPL_URL_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+    static DOMAIN_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+    let md_re = MD_LINK_RE
+        .get_or_init(|| Regex::new(r"\[([^\]]+)\]\(([^)\s]+)\)").unwrap());
+    let url_re = EXPL_URL_RE
+        .get_or_init(|| Regex::new(r"(?i)\bhttps?://[^\s)]+").unwrap());
+    let dom_re = DOMAIN_RE.get_or_init(|| {
+        // e.g., apps.shopify.com or foo.example.io/path?x=1
+        Regex::new(r"\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:/[\w\-./?%&=#]*)?)")
+            .unwrap()
+    });
+
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len());
+    for s in spans {
+        let text = s.content.clone();
+        let mut cursor = 0usize;
+        let mut changed = false;
+
+        // Scan left-to-right, preferring markdown links first (explicit intent),
+        // then explicit URLs, then bare domains.
+        while cursor < text.len() {
+            let after = &text[cursor..];
+
+            // 1) markdown links
+            if let Some(m) = md_re.find(after) {
+                let start = cursor + m.start();
+                let end = cursor + m.end();
+                // Push any plain prefix
+                if cursor < start {
+                    let mut span = s.clone();
+                    span.content = text[cursor..start].to_string().into();
+                    out.push(span);
+                }
+                let caps = md_re.captures(&text[start..end]).unwrap();
+                let label = caps.get(1).unwrap().as_str();
+                let target = caps.get(2).unwrap().as_str();
+                out.push(hyperlink_span(label, target, &s));
+                cursor = end;
+                changed = true;
+                continue;
+            }
+
+            // 2) explicit http(s) URLs
+            if let Some(m) = url_re.find(after) {
+                let start = cursor + m.start();
+                let end = cursor + m.end();
+                if cursor < start {
+                    let mut span = s.clone();
+                    span.content = text[cursor..start].to_string().into();
+                    out.push(span);
+                }
+                let url = &text[start..end];
+                out.push(hyperlink_span(url, url, &s));
+                cursor = end;
+                changed = true;
+                continue;
+            }
+
+            // 3) bare domain (assume https)
+            if let Some(m) = dom_re.find(after) {
+                let start = cursor + m.start();
+                let end = cursor + m.end();
+                if cursor < start {
+                    let mut span = s.clone();
+                    span.content = text[cursor..start].to_string().into();
+                    out.push(span);
+                }
+                let dom = &text[start..end];
+                // Skip if it obviously looks like an email or already in a link
+                if !dom.contains('@') {
+                    let target = format!("https://{dom}");
+                    out.push(hyperlink_span(dom, &target, &s));
+                    cursor = end;
+                    changed = true;
+                    continue;
+                }
+            }
+
+            // No more matches
+            break;
+        }
+
+        if changed {
+            if cursor < text.len() {
+                let mut span = s.clone();
+                span.content = text[cursor..].to_string().into();
+                out.push(span);
+            }
+        } else {
+            out.push(s);
+        }
+    }
+
+    out
+}
+
+fn hyperlink_span(label: &str, target: &str, base: &Span<'static>) -> Span<'static> {
+    // Use OSC 8 with BEL terminators (widely supported; matches existing code).
+    let content = format!(
+        "\u{1b}]8;;{target}\u{7}{label}\u{1b}]8;;\u{7}"
+    );
+    let mut style = base.style;
+    style.add_modifier.insert(Modifier::UNDERLINED);
+    Span::styled(content, style)
 }
 
 #[cfg(test)]
