@@ -608,7 +608,22 @@ mod tests {
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["local_shell", "update_plan", "web_search"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "local_shell",
+                "update_plan",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+            ],
+        );
     }
 
     #[test]
@@ -626,7 +641,22 @@ mod tests {
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["shell", "update_plan", "web_search"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "update_plan",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+            ],
+        );
     }
 
     #[test]
@@ -683,7 +713,19 @@ mod tests {
 
         assert_eq_tool_names(
             &tools,
-            &["shell", "web_search", "test_server/do_something_cool"],
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "test_server/do_something_cool",
+            ],
         );
 
         assert_eq!(
@@ -768,7 +810,22 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "web_search", "dash/search"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/search",
+            ],
+        );
 
         assert_eq!(
             tools[2],
@@ -826,7 +883,22 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "web_search", "dash/paginate"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/paginate",
+            ],
+        );
         assert_eq!(
             tools[2],
             OpenAiTool::Function(ResponsesApiTool {
@@ -881,7 +953,22 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "web_search", "dash/tags"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/tags",
+            ],
+        );
         assert_eq!(
             tools[2],
             OpenAiTool::Function(ResponsesApiTool {
@@ -939,7 +1026,22 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "web_search", "dash/value"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/value",
+            ],
+        );
         assert_eq!(
             tools[2],
             OpenAiTool::Function(ResponsesApiTool {
