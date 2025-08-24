@@ -2131,6 +2131,12 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
+            EventMsg::WebSearchBegin(_) => {
+                // Update status when a web search begins
+                self.bottom_pane
+                    .update_status_text("searching web".to_string());
+                self.mark_needs_redraw();
+            }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
                 tracing::debug!("AgentMessage event with message: {:?}...", message.chars().take(100).collect::<String>());
                 // Use StreamController for final answer
