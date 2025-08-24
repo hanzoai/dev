@@ -52,6 +52,9 @@ fn append_markdown_with_opener_and_cwd_and_bold(
     for seg in split_text_and_fences(markdown_source) {
         match seg {
             Segment::Text(s) => {
+                // Rewrite our special file citation tokens into markdown links
+                // (e.g., vscode://file...). These will later be turned
+                // into OSC8 hyperlinks by the markdown renderer.
                 let processed = rewrite_file_citations(&s, file_opener, cwd);
                 let rendered = if bold_first_sentence {
                     MarkdownRenderer::render_with_bold_first_sentence(&processed)
@@ -127,7 +130,6 @@ fn rewrite_file_citations<'a>(
     })
 }
 
-// use shared helper from `line_utils`
 
 // Minimal code block splitting.
 // - Recognizes fenced blocks opened by ``` or ~~~ (allowing leading whitespace).

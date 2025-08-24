@@ -1,7 +1,7 @@
 const DEFAULT_ORIGINATOR: &str = "codex_cli_rs";
 
 pub fn get_codex_user_agent(originator: Option<&str>) -> String {
-    let build_version = env!("CARGO_PKG_VERSION");
+    let build_version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
     let os_info = os_info::get();
     format!(
         "{}/{build_version} ({} {}; {}) {}",
