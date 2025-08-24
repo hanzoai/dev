@@ -89,6 +89,43 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Ensure Rust workspace version matches the npm package version we are
+      # about to publish so env!("CARGO_PKG_VERSION") is correct in binaries.
+      - name: Update workspace version in Cargo.toml
+        shell: bash
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.determine-version.outputs.version }}"
+          echo "📝 Embedding version ${VERSION} into codex-rs/Cargo.toml"
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          echo "Updated Cargo.toml line:" && grep "^version = " Cargo.toml || true
+
+          echo "🔒 Normalizing Cargo.lock to workspace versions"
+          # Update only workspace members in Cargo.lock to the new version to keep
+          # --frozen builds reproducible while reflecting the version bump.
+          awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml \
+            | while IFS= read -r dir; do
+                if [[ -f "$dir/Cargo.toml" ]]; then
+                  NAME=$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml" | head -n1)
+                  if [[ -n "$NAME" ]]; then
+                    echo "  • cargo update -p $NAME"
+                    cargo update -p "$NAME"
+                  fi
+                fi
+              done
+
+          # Force lockfile to reflect the bumped version for workspace crates.
+          awk -v ver="$VERSION" 'FNR==NR { if ($0!="") want[$0]=1; next }
+            /^\[\[package\]\]$/ { pkg=""; print; next }
+            /^name = \"/ && pkg=="" { if (match($0, /^name = \"([^\"]+)\"/, m)) pkg=m[1]; print; next }
+            /^version = \"/ {
+              if (pkg != "" && (pkg in want)) { print "version = \"" ver "\"" } else { print }
+              next
+            }
+            { print }
+          ' <(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml | while IFS= read -r dir; do if [[ -f "$dir/Cargo.toml" ]]; then sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' "$dir/Cargo.toml"; fi; done) Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock
+
       # Install Rust with the minimal profile to avoid pulling clippy/rust-src/rustfmt
       - name: Install Rust (minimal)
         shell: bash
@@ -128,43 +165,62 @@ jobs:
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
 
-      # 🔧 Wire C/C++ to sccache with the right compiler per target
-      - name: Configure C/C++ compilers (sccache wrappers)
+      # --- cross-platform speedups ---
+
+      # Linux: faster linker + cache C/C++ when vendoring OpenSSL
+      - name: Linux link+cache tuning
+        if: contains(matrix.os, 'ubuntu')
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            if [[ "${{ matrix.target }}" == *"musl"* ]]; then
-              # musl target: use musl-gcc behind sccache
-              echo "CC=sccache musl-gcc" >> "$GITHUB_ENV"
-              echo "CXX=sccache g++" >> "$GITHUB_ENV"
-              echo "AR=ar" >> "$GITHUB_ENV"
-              echo "RANLIB=ranlib" >> "$GITHUB_ENV"
-              echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
-              # Ensure Rust uses musl-gcc as the linker for this target
-              case "${{ matrix.target }}" in
-                x86_64-unknown-linux-musl) echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV" ;;
-                aarch64-unknown-linux-musl) echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV" ;;
-              esac
-            else
-              # GNU/Linux: prefer clang if present, else gcc
-              if command -v clang >/dev/null 2>&1; then
-                echo "CC=sccache clang" >> "$GITHUB_ENV"
-                echo "CXX=sccache clang++" >> "$GITHUB_ENV"
-              else
-                echo "CC=sccache gcc" >> "$GITHUB_ENV"
-                echo "CXX=sccache g++" >> "$GITHUB_ENV"
-              fi
-            fi
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            echo "CC=sccache clang" >> "$GITHUB_ENV"
-            echo "CXX=sccache clang++" >> "$GITHUB_ENV"
+          # Fast linker on GNU
+          if [[ "${{ matrix.target }}" == *"gnu"* ]]; then
+            sudo apt-get update
+            sudo apt-get install -y mold
+            echo "RUSTFLAGS=${RUSTFLAGS} -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
+          fi
+          # Let sccache handle C/C++ (vendored OpenSSL, etc.)
+          if command -v clang >/dev/null 2>&1; then
+            echo 'CC=sccache clang' >> $GITHUB_ENV
+            echo 'CXX=sccache clang++' >> $GITHUB_ENV
+          else
+            echo 'CC=sccache gcc' >> $GITHUB_ENV
+            echo 'CXX=sccache g++' >> $GITHUB_ENV
           fi
 
-      # Faster linkers
-      - name: Install mold (Linux GNU only)
-        if: contains(matrix.target, 'gnu')
+      # macOS: use lld
+      - name: macOS linker tuning
+        if: startsWith(matrix.os, 'macos-')
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y mold || true
+        run: |
+          brew install llvm || true
+          echo 'RUSTFLAGS=-Clinker=clang -C link-arg=-fuse-ld=lld' >> $GITHUB_ENV
+
+      # Windows: use lld-link and prebuilt OpenSSL via vcpkg (cached)
+      - name: Enable lld-link (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: echo "RUSTFLAGS=-Clinker=lld-link" >> $env:GITHUB_ENV
+
+      - name: Cache vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\vcpkg\installed
+            ~\vcpkg\packages
+          key: vcpkg-openssl-${{ runner.os }}-x64-windows
+
+      - name: Install OpenSSL via vcpkg (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (!(Test-Path "$env:USERPROFILE\vcpkg")) {
+            git clone https://github.com/microsoft/vcpkg $env:USERPROFILE\vcpkg
+            & $env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat
+          }
+          & $env:USERPROFILE\vcpkg\vcpkg.exe install openssl:x64-windows
+          echo "VCPKG_ROOT=$env:USERPROFILE\vcpkg" >> $env:GITHUB_ENV
+          echo "OPENSSL_NO_VENDOR=1" >> $env:GITHUB_ENV
 
       - name: Install musl tools (Linux musl)
         if: contains(matrix.target, 'musl')
@@ -172,14 +228,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
-
-      - name: Install zld (macOS) – optional speedup
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew install michaeleisel/zld/zld || true
-          if [ -x /opt/homebrew/bin/zld ]; then echo "MAC_ZLD=/opt/homebrew/bin/zld" >> "$GITHUB_ENV"; fi
-          if [ -x /usr/local/bin/zld ]; then echo "MAC_ZLD=/usr/local/bin/zld" >> "$GITHUB_ENV"; fi
 
       # Prefetch deps so --frozen works offline (needed for git deps like ratatui)
       - name: Prefetch dependencies (git + registry)
@@ -197,22 +245,12 @@ jobs:
       - name: Configure RUSTFLAGS
         shell: bash
         run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            if [[ "${{ matrix.target }}" == *"musl"* ]]; then
-              # musl: no mold; trim debug; smaller binaries/faster upload
-              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
-            else
-              # gnu: mold speeds link
-              echo "RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
-            fi
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            if [[ -n "${MAC_ZLD:-}" ]]; then
-              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=-fuse-ld=${MAC_ZLD}" >> "$GITHUB_ENV"
-            else
-              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
-            fi
+          BASE_FLAGS="-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort"
+          # Respect any prior RUSTFLAGS set by platform tuning steps.
+          if [[ -n "${RUSTFLAGS:-}" ]]; then
+            echo "RUSTFLAGS=${RUSTFLAGS} ${BASE_FLAGS}" >> "$GITHUB_ENV"
           else
-            echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+            echo "RUSTFLAGS=${BASE_FLAGS}" >> "$GITHUB_ENV"
           fi
 
       - name: Build binaries (with timings)
