@@ -185,6 +185,10 @@ pub enum ResponseEvent {
         item_id: Option<String>,
     },
     ReasoningSummaryPartAdded,
+    WebSearchCallBegin {
+        call_id: String,
+        query: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
