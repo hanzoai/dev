@@ -523,7 +523,7 @@ fn derive_config_from_params(
         include_plan_tool,
         ..
     } = params;
-    let overrides = ConfigOverrides {
+        let overrides = ConfigOverrides {
         model,
         config_profile: profile,
         cwd: cwd.map(PathBuf::from),
@@ -536,6 +536,7 @@ fn derive_config_from_params(
         disable_response_storage: None,
         show_raw_agent_reasoning: None,
         debug: None,
+        tools_web_search_request: None,
     };
 
     let cli_overrides = cli_overrides

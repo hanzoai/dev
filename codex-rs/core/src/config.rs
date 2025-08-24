@@ -169,7 +169,14 @@ pub struct Config {
 
     /// Include an experimental plan tool that the model can use to update its current plan and status of each step.
     pub include_plan_tool: bool,
-
+    /// Include the `apply_patch` tool for models that benefit from invoking
+    /// file edits as a structured tool call. When unset, this falls back to the
+    /// model family's default preference.
+    pub include_apply_patch_tool: bool,
+    /// Enable the native Responses web_search tool.
+    pub tools_web_search_request: bool,
+    /// Experimental: enable streamable shell tool selection (off by default).
+    pub use_experimental_streamable_shell_tool: bool,
     /// The value for the `originator` header included with Responses API requests.
     pub responses_originator_header: String,
 
@@ -534,11 +541,21 @@ pub struct ConfigToml {
 
     /// If set to `true`, the API key will be signed with the `originator` header.
     pub preferred_auth_method: Option<AuthMode>,
+
+    /// Nested tools section for feature toggles
+    pub tools: Option<ToolsToml>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ProjectConfig {
     pub trust_level: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+pub struct ToolsToml {
+    // Renamed from `web_search_request`; keep alias for backwards compatibility.
+    #[serde(default, alias = "web_search_request")]
+    pub web_search: Option<bool>,
 }
 
 impl ConfigToml {
@@ -630,6 +647,7 @@ pub struct ConfigOverrides {
     pub disable_response_storage: Option<bool>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub debug: Option<bool>,
+    pub tools_web_search_request: Option<bool>,
 }
 
 impl Config {
@@ -656,6 +674,7 @@ impl Config {
             disable_response_storage,
             show_raw_agent_reasoning,
             debug,
+            tools_web_search_request: override_tools_web_search_request,
         } = overrides;
 
         let config_profile = match config_profile_key.as_ref().or(cfg.profile.as_ref()) {
@@ -694,7 +713,7 @@ impl Config {
             })?
             .clone();
 
-        let shell_environment_policy = cfg.shell_environment_policy.into();
+        let shell_environment_policy = cfg.shell_environment_policy.clone().into();
 
         let resolved_cwd = {
             use std::env;
@@ -715,7 +734,11 @@ impl Config {
             }
         };
 
-        let history = cfg.history.unwrap_or_default();
+        let history = cfg.history.clone().unwrap_or_default();
+
+        let tools_web_search_request = override_tools_web_search_request
+            .or(cfg.tools.as_ref().and_then(|t| t.web_search))
+            .unwrap_or(false);
 
         let model = model
             .or(config_profile.model)
@@ -793,7 +816,7 @@ impl Config {
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            tui: cfg.tui.unwrap_or_default(),
+            tui: cfg.tui.clone().unwrap_or_default(),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -816,11 +839,14 @@ impl Config {
 
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
-                .or(cfg.chatgpt_base_url)
+                .or(cfg.chatgpt_base_url.clone())
                 .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
 
             experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
+            include_apply_patch_tool: false,
+            tools_web_search_request,
+            use_experimental_streamable_shell_tool: false,
             responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving codex_home
@@ -1215,7 +1241,10 @@ disable_response_storage = true
                 experimental_resume: None,
                 base_instructions: None,
                 include_plan_tool: false,
-                internal_originator: None,
+                include_apply_patch_tool: false,
+                tools_web_search_request: false,
+                use_experimental_streamable_shell_tool: false,
+                responses_originator_header: "codex_cli_rs".to_string(),
                 debug: false,
                 using_chatgpt_auth: false,
             },
@@ -1269,7 +1298,10 @@ disable_response_storage = true
             experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
-            internal_originator: None,
+            include_apply_patch_tool: false,
+            tools_web_search_request: false,
+            use_experimental_streamable_shell_tool: false,
+            responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
         };
@@ -1338,7 +1370,10 @@ disable_response_storage = true
             experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
-            internal_originator: None,
+            include_apply_patch_tool: false,
+            tools_web_search_request: false,
+            use_experimental_streamable_shell_tool: false,
+            responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
         };

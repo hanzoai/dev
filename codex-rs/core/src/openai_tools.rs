@@ -15,6 +15,7 @@ use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
+use crate::tool_apply_patch::ApplyPatchToolType;
 // apply_patch tools are not currently surfaced; keep imports out to avoid warnings.
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -52,6 +53,8 @@ pub(crate) enum OpenAiTool {
     Function(ResponsesApiTool),
     #[serde(rename = "local_shell")]
     LocalShell {},
+    #[serde(rename = "web_search")]
+    WebSearch {},
     #[serde(rename = "custom")]
     Freeform(FreeformTool),
 }
@@ -68,6 +71,8 @@ pub enum ConfigShellToolType {
 pub struct ToolsConfig {
     pub shell_type: ConfigShellToolType,
     pub plan_tool: bool,
+    pub apply_patch_tool_type: Option<ApplyPatchToolType>,
+    pub web_search_request: bool,
 }
 
 impl ToolsConfig {
@@ -76,6 +81,9 @@ impl ToolsConfig {
         approval_policy: AskForApproval,
         sandbox_policy: SandboxPolicy,
         include_plan_tool: bool,
+        include_apply_patch_tool: bool,
+        include_web_search_request: bool,
+        _use_streamable_shell_tool: bool,
     ) -> Self {
         // Our fork does not yet enable the experimental streamable shell tool
         // in the tool selection phase. Default to the existing behaviors.
@@ -93,9 +101,17 @@ impl ToolsConfig {
             }
         }
 
+        let apply_patch_tool_type = if include_apply_patch_tool {
+            model_family.apply_patch_tool_type.clone()
+        } else {
+            None
+        };
+
         Self {
             shell_type,
             plan_tool: include_plan_tool,
+            apply_patch_tool_type,
+            web_search_request: include_web_search_request,
         }
     }
 }
@@ -532,6 +548,10 @@ pub(crate) fn get_openai_tools(
     tools.push(create_wait_for_agent_tool());
     tools.push(create_list_agents_tool());
 
+    if config.web_search_request {
+        tools.push(OpenAiTool::WebSearch {});
+    }
+
     if let Some(mcp_tools) = mcp_tools {
         for (name, tool) in mcp_tools {
             match mcp_tool_to_openai_tool(name.clone(), tool.clone()) {
@@ -561,6 +581,7 @@ mod tests {
             .map(|tool| match tool {
                 OpenAiTool::Function(ResponsesApiTool { name, .. }) => name,
                 OpenAiTool::LocalShell {} => "local_shell",
+                OpenAiTool::WebSearch {} => "web_search",
                 OpenAiTool::Freeform(FreeformTool { name, .. }) => name,
             })
             .collect::<Vec<_>>();
@@ -587,10 +608,29 @@ mod tests {
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
             true,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["local_shell", "update_plan", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "local_shell",
+                "update_plan",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+            ],
+        );
     }
 
     #[test]
@@ -601,10 +641,29 @@ mod tests {
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
             true,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
         );
         let tools = get_openai_tools(&config, Some(HashMap::new()), false);
 
-        assert_eq_tool_names(&tools, &["shell", "update_plan", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "update_plan",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+            ],
+        );
     }
 
     #[test]
@@ -614,6 +673,10 @@ mod tests {
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
+            false,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
         let tools = get_openai_tools(
@@ -637,8 +700,8 @@ mod tests {
                                     "number_property": { "type": "number" },
                                 },
                                 "required": [
-                                    "string_property",
-                                    "number_property"
+                                    "string_property".to_string(),
+                                    "number_property".to_string()
                                 ],
                                 "additionalProperties": Some(false),
                             },
@@ -655,10 +718,25 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "test_server/do_something_cool"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "test_server/do_something_cool",
+            ],
+        );
 
         assert_eq!(
-            tools[1],
+            tools[2],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -709,6 +787,10 @@ mod tests {
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
             false,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
         );
 
         let tools = get_openai_tools(
@@ -735,10 +817,25 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/search"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/search",
+            ],
+        );
 
         assert_eq!(
-            tools[1],
+            tools[2],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -765,6 +862,10 @@ mod tests {
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
             false,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
         );
 
         let tools = get_openai_tools(
@@ -789,9 +890,24 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/paginate"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/paginate",
+            ],
+        );
         assert_eq!(
-            tools[1],
+            tools[2],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -815,6 +931,10 @@ mod tests {
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
+            false,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
 
@@ -840,9 +960,24 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/tags"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/tags",
+            ],
+        );
         assert_eq!(
-            tools[1],
+            tools[2],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -870,6 +1005,10 @@ mod tests {
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
             false,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
         );
 
         let tools = get_openai_tools(
@@ -894,9 +1033,24 @@ mod tests {
             false,
         );
 
-        assert_eq_tool_names(&tools, &["shell", "browser_open", "browser_status", "agent_run", "agent_check", "agent_result", "agent_cancel", "agent_wait", "agent_list", "dash/value"]);
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "agent_check",
+                "agent_result",
+                "agent_cancel",
+                "agent_wait",
+                "agent_list",
+                "web_search",
+                "dash/value",
+            ],
+        );
         assert_eq!(
-            tools[1],
+            tools[2],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {
