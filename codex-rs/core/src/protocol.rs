@@ -420,6 +420,8 @@ pub enum EventMsg {
 
     /// Model requested a native web search
     WebSearchBegin(WebSearchBeginEvent),
+    /// Native web search call completed
+    WebSearchComplete(WebSearchCompleteEvent),
 
     /// Custom tool call events for non-MCP tools (browser, agent, etc)
     CustomToolCallBegin(CustomToolCallBeginEvent),
@@ -527,6 +529,13 @@ impl From<TokenUsage> for FinalOutput {
 pub struct WebSearchBeginEvent {
     pub call_id: String,
     pub query: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WebSearchCompleteEvent {
+    pub call_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
 }
 
 impl fmt::Display for FinalOutput {

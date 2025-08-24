@@ -89,7 +89,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Rust with the minimal profile (needed before using cargo below)
+      # Install Rust (needed before using cargo)
       - name: Install Rust (minimal)
         shell: bash
         run: |
@@ -105,7 +105,6 @@ jobs:
           set -euo pipefail
           VERSION="${{ needs.determine-version.outputs.version }}"
           echo "Embedding version ${VERSION} into codex-rs/Cargo.toml"
-          # Change the first version line inside the [package] table only
           awk -v ver="$VERSION" '
             BEGIN{inpkg=0; done=0}
             /^\[package\]/{inpkg=1}
@@ -118,13 +117,13 @@ jobs:
           ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
           echo "New version line:" && grep '^version = ' Cargo.toml || true
 
-      # 🔒 Bring Cargo.lock in sync without changing dependency graph
+      # 🔒 Keep lockfile consistent for --frozen without changing deps
       - name: Regenerate lockfile for --frozen
         shell: bash
         working-directory: codex-rs
         run: cargo generate-lockfile
 
-      # ⚡ Cache target/ + registries so Cargo can skip linking when unchanged
+      # Cache target/ + registries (to skip linking when unchanged)
       - name: Setup Rust Cache (target + registries)
         uses: Swatinem/rust-cache@v2
         with:
@@ -147,31 +146,27 @@ jobs:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Enable sccache for Rust
+      # Enable sccache for Rust compiles
       - name: Enable sccache
         shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
 
-      # --- cross-platform speedups ---
+      # ---------------------------
+      # Platform-specific tuning
+      # ---------------------------
 
-      # Linux: faster linker + cache C/C++ when vendoring OpenSSL
-      - name: Linux link+cache tuning
-        if: contains(matrix.os, 'ubuntu')
+      # Linux GNU: mold linker + C/C++ through sccache (clang preferred)
+      - name: Linux (gnu) tuning
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.target, 'gnu')
         shell: bash
         run: |
           set -euo pipefail
-          # Fast linker on GNU
-          if [[ "${{ matrix.target }}" == *"gnu"* ]]; then
-            sudo apt-get update
-            sudo apt-get install -y mold
-            echo 'RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
-          else
-            echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
-          fi
-          # Let sccache handle C/C++ (vendored OpenSSL, etc.)
+          sudo apt-get update
+          sudo apt-get install -y mold || true
           if command -v clang >/dev/null 2>&1; then
             echo 'CC=sccache clang'    >> "$GITHUB_ENV"
             echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
@@ -179,8 +174,28 @@ jobs:
             echo 'CC=sccache gcc'      >> "$GITHUB_ENV"
             echo 'CXX=sccache g++'     >> "$GITHUB_ENV"
           fi
+          echo 'RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
-      # macOS: Homebrew LLVM + LLD; use documented sccache pattern for C/C++
+      # Linux MUSL: build & link with musl-gcc to avoid glibc symbol leakage
+      - name: Linux (musl) tuning
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y musl-tools pkg-config
+          # Use musl headers + libs for all C compiles (no sccache wrapper here for reliability)
+          echo 'CC=musl-gcc' >> "$GITHUB_ENV"
+          # Ensure rustc links with musl-gcc (avoids __isoc23_strtol glibc symbol)
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-musl) echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
+            aarch64-unknown-linux-musl) echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
+          esac
+          echo 'PKG_CONFIG_ALLOW_CROSS=1' >> "$GITHUB_ENV"
+          echo 'OPENSSL_STATIC=1'         >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+
+      # macOS: Homebrew LLVM + LLD; C/C++ through sccache; link via ld64.lld
       - name: macOS toolchain & linker (brew clang + lld via sccache)
         if: startsWith(matrix.os, 'macos-')
         shell: bash
@@ -192,13 +207,11 @@ jobs:
           [[ -n "${LLVM_PREFIX}" && -n "${LLD_PREFIX}" ]] || { echo "brew llvm/lld not found"; exit 1; }
           echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
-          # C/C++ through sccache using brew clang
           echo "CC=sccache clang"    >> "$GITHUB_ENV"
           echo "CXX=sccache clang++" >> "$GITHUB_ENV"
-          # rustc links via brew clang + explicit ld64.lld
           echo "RUSTFLAGS=-Awarnings -Clinker=clang -C link-arg=-fuse-ld=${LLD_PREFIX}/bin/ld64.lld -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
 
-      # Windows: use lld-link and prebuilt OpenSSL via vcpkg (cached)
+      # Windows: lld-link + prebuilt OpenSSL via vcpkg (cached)
       - name: Enable lld-link (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -226,13 +239,6 @@ jobs:
           "VCPKG_ROOT=$env:USERPROFILE\vcpkg" >> $env:GITHUB_ENV
           "OPENSSL_NO_VENDOR=1"               >> $env:GITHUB_ENV
 
-      - name: Install musl tools (Linux musl)
-        if: contains(matrix.target, 'musl')
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools pkg-config
-
       # Prefetch deps so --frozen works offline (needed for git deps like ratatui)
       - name: Prefetch dependencies (git + registry)
         working-directory: codex-rs
@@ -252,7 +258,6 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          # Reproducible + cache-friendly; --timings emits HTML under target/cargo-timings/
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
       - name: sccache stats (human + json)
