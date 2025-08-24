@@ -361,29 +361,14 @@ impl HistoryCell for ExecCell {
     fn has_custom_render(&self) -> bool { true }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render command header/content above and stdout/stderr preview inside a left-bordered block.
-        let (pre_lines_raw, out_lines) = self.exec_render_parts();
+        let (pre_lines, out_lines) = self.exec_render_parts();
 
-        // For the preamble, implement a hanging indent of 2 cols by
-        // stripping the leading visual prefixes ("└ " or two spaces) and
-        // rendering into a content area shifted by 2 columns.
-        let mut pre_lines: Vec<Line<'static>> = Vec::with_capacity(pre_lines_raw.len());
-        for mut line in pre_lines_raw {
-            if let Some(first) = line.spans.first() {
-                let s = first.content.clone();
-                if s == "└ " || s == "  " {
-                    // Drop the leading prefix span
-                    line.spans.remove(0);
-                }
-            }
-            pre_lines.push(line);
-        }
-
-        // Prepare texts and total heights (after wrapping)
+        // Prepare texts and total heights (after wrapping). Keep the visual prefix
+        // (e.g., "└ ") in the preamble to show the connector on the first line.
         let pre_text = Text::from(trim_empty_lines(pre_lines));
         let out_text = Text::from(trim_empty_lines(out_lines));
-        // IMPORTANT: measure with the same effective widths we will render with.
-        // Preamble renders with a 2-col hanging indent, so reduce width.
-        let pre_wrap_width = area.width.saturating_sub(2);
+        // Measure with the same widths we will render with.
+        let pre_wrap_width = area.width;
         // Output renders inside a Block with a LEFT border (1 col) and left padding of 1,
         // so the inner text width is reduced accordingly.
         let out_wrap_width = area.width.saturating_sub(2);
@@ -409,16 +394,10 @@ impl HistoryCell for ExecCell {
         let out_remaining = out_total.saturating_sub(out_skip);
         let out_height = out_available.min(out_remaining);
 
-        // Render preamble (scrolled) if any space
+        // Render preamble (scrolled) if any space. Do not strip or offset the
+        // leading "└ ": render at the left edge so the angle is visible.
         if pre_height > 0 {
-            let pre_area = Rect { x: area.x.saturating_add(2), y: area.y, width: area.width.saturating_sub(2), height: pre_height };
-            // Fill the 2-col hanging indent margin
-            let margin_style = Style::default().bg(crate::colors::background());
-            for y in area.y..area.y.saturating_add(pre_height) {
-                for x in area.x..area.x.saturating_add(2.min(area.width)) {
-                    buf[(x, y)].set_style(margin_style);
-                }
-            }
+            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
             let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
                 .block(pre_block)
@@ -982,6 +961,42 @@ impl HistoryCell for RunningToolCallCell {
         lines.extend(self.arg_lines.clone());
         lines.push(Line::from(""));
         lines
+    }
+}
+
+impl RunningToolCallCell {
+    pub(crate) fn has_title(&self, title: &str) -> bool {
+        self.title == title
+    }
+    /// Finalize a running web search cell into a completed ToolCallCell.
+    pub(crate) fn finalize_web_search(&self, success: bool, query: Option<String>) -> ToolCallCell {
+        let duration = self.start_time.elapsed();
+        let title = if success { "Web Search" } else { "Web Search (failed)" };
+        let duration = format_duration(duration);
+
+        let title_line = if success {
+            Line::from(vec![
+                Span::styled(title, Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD)),
+                format!(", duration: {duration}").dim(),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(title, Style::default().fg(crate::colors::error()).add_modifier(Modifier::BOLD)),
+                format!(", duration: {duration}").dim(),
+            ])
+        };
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(title_line);
+        if let Some(q) = query {
+            lines.push(Line::from(vec![
+                Span::styled("└ query: ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(q, Style::default().fg(crate::colors::text())),
+            ]));
+        }
+        lines.push(Line::from(""));
+
+        ToolCallCell { lines, state: if success { ToolState::Success } else { ToolState::Failed } }
     }
 }
 
@@ -2115,6 +2130,22 @@ pub(crate) fn new_running_custom_tool_call(tool_name: String, args: Option<Strin
     }
     RunningToolCallCell {
         title: custom_tool_running_title(&tool_name),
+        start_time: Instant::now(),
+        arg_lines,
+    }
+}
+
+/// Running web search call (native Responses web_search)
+pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCell {
+    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    if let Some(q) = query {
+        arg_lines.push(Line::from(vec![
+            Span::styled("└ query: ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled(q, Style::default().fg(crate::colors::text())),
+        ]));
+    }
+    RunningToolCallCell {
+        title: "Web Search...".to_string(),
         start_time: Instant::now(),
         arg_lines,
     }

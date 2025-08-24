@@ -773,6 +773,12 @@ where
                         query: None,
                     })));
                 }
+                Poll::Ready(Some(Ok(ResponseEvent::WebSearchCallCompleted { call_id, query }))) => {
+                    return Poll::Ready(Some(Ok(ResponseEvent::WebSearchCallCompleted {
+                        call_id,
+                        query,
+                    })));
+                }
             }
         }
     }

@@ -71,6 +71,7 @@ pub enum ConfigShellToolType {
 pub struct ToolsConfig {
     pub shell_type: ConfigShellToolType,
     pub plan_tool: bool,
+    #[allow(dead_code)]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     pub web_search_request: bool,
 }

@@ -59,9 +59,8 @@ pub struct Cli {
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
 
-    /// Enable web search (off by default). When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval).
-    #[arg(long = "search", default_value_t = false)]
-    pub web_search: bool,
+    // Web search is now enabled by default via an internal override.
+    // Intentionally not exposed as a command-line option.
     /// Enable debug logging of all LLM requests and responses to files.
     #[clap(long = "debug", short = 'd', default_value_t = false)]
     pub debug: bool,

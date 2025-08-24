@@ -362,6 +362,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id: _, query }) => {
                 ts_println!(self, "🌐 {query}");
             }
+            EventMsg::WebSearchComplete(_) => {
+                // No-op for human output; completion is reflected in UI.
+            }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id,
                 auto_approved,
