@@ -169,10 +169,7 @@ impl ModelClient {
         let store = prompt.store && auth_mode != Some(AuthMode::ChatGPT);
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
-        // Build tools list and append the special web_search_preview tool so
-        // models capable of web search can opt-in seamlessly.
-        let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
-        tools_json.push(serde_json::json!({ "type": "web_search_preview" }));
+        let tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
         let reasoning = create_reasoning_param_for_request(
             &self.config.model_family,
             self.effort,
