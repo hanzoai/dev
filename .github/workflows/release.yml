@@ -40,17 +40,13 @@ jobs:
         shell: bash
         run: |
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          echo "Current version in package.json: $CURRENT_VERSION"
           PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
-          echo "Latest published version: $PUBLISHED_VERSION"
-
           if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
             IFS='.' read -ra V <<< "$PUBLISHED_VERSION"
             NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           else
             NEW_VERSION=$CURRENT_VERSION
           fi
-
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
@@ -89,7 +85,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Rust (needed before using cargo)
       - name: Install Rust (minimal)
         shell: bash
         run: |
@@ -97,59 +92,24 @@ jobs:
           rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
           rustup default 1.89.0
 
-      # 🔧 Update workspace package version in Cargo.toml (portable)
-      # Prefer [workspace.package], fallback to [package] if present
-      - name: Set crate version in Cargo.toml (portable)
-        shell: bash
-        working-directory: codex-rs
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.determine-version.outputs.version }}"
-          echo "Embedding version ${VERSION} into codex-rs/Cargo.toml"
-          awk -v ver="$VERSION" '
-            BEGIN{in_ws_pkg=0; in_pkg=0; done=0}
-            /^\[workspace\.package\]/{in_ws_pkg=1; in_pkg=0}
-            /^\[package\]/{in_pkg=1; in_ws_pkg=0}
-            /^\[/{ if ($0 !~ /^\[(workspace\.package|package)\]/) { in_ws_pkg=0; in_pkg=0 } }
-            {
-              if ((in_ws_pkg || in_pkg) && !done && $0 ~ /^version[[:space:]]*=/) {
-                print "version = \"" ver "\""; done=1; next
-              }
-              print
-            }
-          ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
-          echo "New version line:" && awk '/^\[(workspace\.package|package)\]/{in=1; next} /^\[/{in=0} in && /^version[[:space:]]*=/{print; exit}' Cargo.toml || true
-
-      # 🔒 Keep lockfile consistent for --frozen without changing deps
-      - name: Regenerate lockfile for --frozen
-        shell: bash
-        working-directory: codex-rs
-        run: cargo generate-lockfile
-
-      # Cache target/ + registries (to skip linking when unchanged)
+      # Keep target/ across runs so Cargo can no-op when code hasn't changed
       - name: Setup Rust Cache (target + registries)
         uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: v4-rust
-          shared-key: codex-${{ matrix.target }}-rust-1.89-target
+          prefix-key: v5-rust
+          shared-key: codex-${{ matrix.target }}-toolchain-1.89
           workspaces: |
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
           cache-on-failure: true
 
-      # Stable sccache namespace per toolchain+target
-      - name: Configure sccache cache keys
-        shell: bash
-        run: echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v4" >> "$GITHUB_ENV"
-
+      # sccache: skip compiles when possible (doesn't skip linking)
       - name: Setup sccache (GHA backend)
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Enable sccache for Rust compiles
       - name: Enable sccache
         shell: bash
         run: |
@@ -158,18 +118,16 @@ jobs:
           echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=10G" >> "$GITHUB_ENV"
 
-      # ---------------------------
-      # Platform-specific tuning
-      # ---------------------------
+      # -------- Platform tuning (minimal, proven) --------
 
-      # Linux GNU: mold linker + C/C++ through sccache (clang preferred)
+      # Linux GNU: use mold if available; prefer system OpenSSL
       - name: Linux (gnu) tuning
         if: contains(matrix.os, 'ubuntu') && contains(matrix.target, 'gnu')
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y mold || true
+          sudo apt-get install -y libssl-dev pkg-config mold || true
           if command -v clang >/dev/null 2>&1; then
             echo 'CC=sccache clang'    >> "$GITHUB_ENV"
             echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
@@ -177,9 +135,10 @@ jobs:
             echo 'CC=sccache gcc'      >> "$GITHUB_ENV"
             echo 'CXX=sccache g++'     >> "$GITHUB_ENV"
           fi
+          echo 'OPENSSL_NO_VENDOR=1' >> "$GITHUB_ENV"
           echo 'RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
-      # Linux MUSL: build & link with musl-gcc to avoid glibc symbol leakage
+      # Linux MUSL: reliable static build via musl-gcc (no glibc symbol leaks)
       - name: Linux (musl) tuning
         if: contains(matrix.os, 'ubuntu') && contains(matrix.target, 'musl')
         shell: bash
@@ -187,9 +146,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
-          # Use musl headers + libs for all C compiles (no sccache wrapper here for reliability)
           echo 'CC=musl-gcc' >> "$GITHUB_ENV"
-          # Ensure rustc links with musl-gcc (avoids __isoc23_strtol glibc symbol)
           case "${{ matrix.target }}" in
             x86_64-unknown-linux-musl) echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
             aarch64-unknown-linux-musl) echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV" ;;
@@ -198,32 +155,23 @@ jobs:
           echo 'OPENSSL_STATIC=1'         >> "$GITHUB_ENV"
           echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
-      # macOS: Homebrew LLVM + LLD; C/C++ through sccache; link via ld64.lld
-      - name: macOS toolchain & linker (brew clang + lld via sccache)
+      # macOS: stick with Apple toolchain to avoid brew overhead; still cache C via sccache
+      - name: macOS tuning
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
-          set -euo pipefail
-          brew install llvm lld || true
-          LLVM_PREFIX="$(brew --prefix llvm || true)"
-          LLD_PREFIX="$(brew --prefix lld || true)"
-          [[ -n "${LLVM_PREFIX}" && -n "${LLD_PREFIX}" ]] || { echo "brew llvm/lld not found"; exit 1; }
-          echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
-          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
-          echo "CC=sccache clang"    >> "$GITHUB_ENV"
-          echo "CXX=sccache clang++" >> "$GITHUB_ENV"
-          echo "RUSTFLAGS=-Awarnings -Clinker=clang -C link-arg=-fuse-ld=${LLD_PREFIX}/bin/ld64.lld -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+          echo 'CC=sccache clang'    >> "$GITHUB_ENV"
+          echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
-      # Windows: lld-link + prebuilt OpenSSL via vcpkg (cached)
-      - name: Cache vcpkg (Windows)
+      # Windows: robust vcpkg with binary caching (x-gha)
+      - name: Cache vcpkg data (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/cache@v4
         with:
           path: |
-            ~\vcpkg\installed
-            ~\vcpkg\packages
-            ~\vcpkg\downloads
-          key: vcpkg-openssl-${{ runner.os }}-x64-windows
+            ~\vcpkg
+          key: vcpkg-root-${{ runner.os }}
 
       - name: Prepare vcpkg (Windows)
         if: matrix.os == 'windows-latest'
@@ -232,9 +180,9 @@ jobs:
           $Root = Join-Path $env:USERPROFILE 'vcpkg'
           if (-not (Test-Path $Root)) { New-Item -ItemType Directory -Path $Root | Out-Null }
           if (-not (Test-Path (Join-Path $Root '.git'))) {
-            git -C $Root init
-            git -C $Root remote remove origin 2>$null
-            git -C $Root remote add origin https://github.com/microsoft/vcpkg
+            if (Test-Path (Join-Path $Root 'src')) { Remove-Item -Recurse -Force (Join-Path $Root 'src') }
+            git clone https://github.com/microsoft/vcpkg $Root
+          } else {
             git -C $Root fetch --depth 1 origin
             git -C $Root checkout -q FETCH_HEAD
           }
@@ -243,25 +191,26 @@ jobs:
           }
           "VCPKG_ROOT=$Root"                    >> $env:GITHUB_ENV
           "VCPKG_DEFAULT_TRIPLET=x64-windows"   >> $env:GITHUB_ENV
+          # Enable true binary caching via GitHub Actions cache service
+          "VCPKG_FEATURE_FLAGS=manifests,binarycaching" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite"  >> $env:GITHUB_ENV
 
-      - name: Enable lld-link (Windows) + install OpenSSL via vcpkg
+      - name: Windows OpenSSL via vcpkg + linker flags
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          # Faster linker and lean release flags
-          "RUSTFLAGS=-Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
-          # Ensure OpenSSL from vcpkg is used (no vendoring)
           & "$env:VCPKG_ROOT\vcpkg.exe" install openssl:x64-windows
           "OPENSSL_NO_VENDOR=1" >> $env:GITHUB_ENV
+          "RUSTFLAGS=-Awarnings -Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
 
-      # Prefetch deps so --frozen works offline (needed for git deps like ratatui)
+      # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
         working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
-      # Pass chosen npm version into the Rust build (optional build.rs exposes it)
+      # Inject the display version without touching Cargo manifests
       - name: Export CODE_VERSION for Rust build
         shell: bash
         run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
@@ -269,17 +218,15 @@ jobs:
       - name: Build binaries (with timings)
         shell: bash
         env:
-          CARGO_INCREMENTAL: "0"   # keep off in CI; release profile + sccache benefits
+          CARGO_INCREMENTAL: "0"   # keep off in CI; release builds + sccache
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
-      - name: sccache stats (human + json)
+      - name: sccache stats
         shell: bash
-        run: |
-          sccache --show-stats || true
-          sccache --show-stats --stats-format=json || true
+        run: sccache --show-stats || true
 
       - name: Prepare artifacts
         shell: bash
