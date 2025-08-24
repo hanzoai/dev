@@ -177,13 +177,46 @@ jobs:
             echo 'CXX=sccache g++' >> $GITHUB_ENV
           fi
 
-      # macOS: use lld
-      - name: macOS linker tuning
+      # macOS: use Homebrew LLVM (clang + ld64.lld) instead of Apple clang
+      - name: macOS linker tuning (Homebrew LLVM + lld)
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
+          set -euo pipefail
           brew install llvm || true
-          echo 'RUSTFLAGS=-Clinker=clang -C link-arg=-fuse-ld=lld' >> $GITHUB_ENV
+
+          # Resolve Homebrew LLVM prefix for both Apple Silicon and Intel runners
+          LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
+          if [[ -z "${LLVM_PREFIX:-}" ]]; then
+            if [[ -x /opt/homebrew/opt/llvm/bin/clang ]]; then
+              LLVM_PREFIX=/opt/homebrew/opt/llvm
+            elif [[ -x /usr/local/opt/llvm/bin/clang ]]; then
+              LLVM_PREFIX=/usr/local/opt/llvm
+            else
+              echo "ERROR: Homebrew LLVM not found"; exit 1
+            fi
+          fi
+
+          # Put brew LLVM first on PATH so cc/clang resolve to it when tools probe
+          echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
+
+          # Ensure Apple SDK is discoverable by brew clang (cross-linking x86_64 on arm64 host)
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+          # Let sccache wrap C/C++ compiles correctly (no spaces in CC value)
+          echo "CC=sccache"  >> "$GITHUB_ENV"
+          echo "CXX=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CC=${LLVM_PREFIX}/bin/clang"    >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=${LLVM_PREFIX}/bin/clang++" >> "$GITHUB_ENV"
+
+          # Force rustc to use brew clang as the linker and request LLD via the driver
+          # (brew clang understands -fuse-ld=lld; Apple clang does not)
+          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-Clinker=${LLVM_PREFIX}/bin/clang -C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+
+          # Optional visibility while we iterate
+          echo "Using clang at: ${LLVM_PREFIX}/bin/clang"
+          "${LLVM_PREFIX}/bin/clang" --version || true
+          "${LLVM_PREFIX}/bin/ld64.lld" -v 2>/dev/null || true
 
       # Windows: use lld-link and prebuilt OpenSSL via vcpkg (cached)
       - name: Enable lld-link (Windows)
