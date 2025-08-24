@@ -195,13 +195,21 @@ jobs:
           "VCPKG_FEATURE_FLAGS=manifests,binarycaching" >> $env:GITHUB_ENV
           "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite"  >> $env:GITHUB_ENV
 
-      - name: Windows OpenSSL via vcpkg + linker flags
+      # Windows: use SChannel (no OpenSSL) + fast linker flags
+      - name: Windows TLS backend (SChannel) + linker flags
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install openssl:x64-windows
-          "OPENSSL_NO_VENDOR=1" >> $env:GITHUB_ENV
-          "RUSTFLAGS=-Awarnings -Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+          # Force libgit2 to use the native Windows TLS stack
+          "LIBGIT2_SYS_USE_SCHANNEL=1" >> $env:GITHUB_ENV
+          # If anything in your graph uses curl-sys, prefer SChannel there too
+          "CURL_SSL_BACKEND=schannel"  >> $env:GITHUB_ENV
+          # Prefer lld-link if present; otherwise MSVC link with good opts
+          if (Get-Command lld-link -ErrorAction SilentlyContinue) {
+            "RUSTFLAGS=-Awarnings -Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+          } else {
+            "RUSTFLAGS=-Awarnings -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+          }
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
