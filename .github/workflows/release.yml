@@ -215,12 +215,6 @@ jobs:
           echo "RUSTFLAGS=-Awarnings -Clinker=clang -C link-arg=-fuse-ld=${LLD_PREFIX}/bin/ld64.lld -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
 
       # Windows: lld-link + prebuilt OpenSSL via vcpkg (cached)
-      - name: Enable lld-link (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          "RUSTFLAGS=-Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
-
       - name: Cache vcpkg (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/cache@v4
@@ -228,19 +222,37 @@ jobs:
           path: |
             ~\vcpkg\installed
             ~\vcpkg\packages
+            ~\vcpkg\downloads
           key: vcpkg-openssl-${{ runner.os }}-x64-windows
 
-      - name: Install OpenSSL via vcpkg (Windows)
+      - name: Prepare vcpkg (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          if (!(Test-Path "$env:USERPROFILE\vcpkg")) {
-            git clone https://github.com/microsoft/vcpkg $env:USERPROFILE\vcpkg
-            & $env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat
+          $Root = Join-Path $env:USERPROFILE 'vcpkg'
+          if (-not (Test-Path $Root)) { New-Item -ItemType Directory -Path $Root | Out-Null }
+          if (-not (Test-Path (Join-Path $Root '.git'))) {
+            git -C $Root init
+            git -C $Root remote remove origin 2>$null
+            git -C $Root remote add origin https://github.com/microsoft/vcpkg
+            git -C $Root fetch --depth 1 origin
+            git -C $Root checkout -q FETCH_HEAD
           }
-          & $env:USERPROFILE\vcpkg\vcpkg.exe install openssl:x64-windows
-          "VCPKG_ROOT=$env:USERPROFILE\vcpkg" >> $env:GITHUB_ENV
-          "OPENSSL_NO_VENDOR=1"               >> $env:GITHUB_ENV
+          if (-not (Test-Path (Join-Path $Root 'vcpkg.exe'))) {
+            & (Join-Path $Root 'bootstrap-vcpkg.bat')
+          }
+          "VCPKG_ROOT=$Root"                    >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_TRIPLET=x64-windows"   >> $env:GITHUB_ENV
+
+      - name: Enable lld-link (Windows) + install OpenSSL via vcpkg
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          # Faster linker and lean release flags
+          "RUSTFLAGS=-Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
+          # Ensure OpenSSL from vcpkg is used (no vendoring)
+          & "$env:VCPKG_ROOT\vcpkg.exe" install openssl:x64-windows
+          "OPENSSL_NO_VENDOR=1" >> $env:GITHUB_ENV
 
       # Prefetch deps so --frozen works offline (needed for git deps like ratatui)
       - name: Prefetch dependencies (git + registry)
@@ -257,7 +269,7 @@ jobs:
       - name: Build binaries (with timings)
         shell: bash
         env:
-          CARGO_INCREMENTAL: "0"
+          CARGO_INCREMENTAL: "0"   # keep off in CI; release profile + sccache benefits
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
