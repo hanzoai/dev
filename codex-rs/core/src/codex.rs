@@ -34,6 +34,7 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 use codex_login::CodexAuth;
+use crate::protocol::WebSearchBeginEvent;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -1478,6 +1479,9 @@ async fn submission_loop(
                         approval_policy,
                         sandbox_policy.clone(),
                         config.include_plan_tool,
+                        config.include_apply_patch_tool,
+                        config.tools_web_search_request,
+                        config.use_experimental_streamable_shell_tool,
                     ),
                     tx_event: tx_event.clone(),
                     user_instructions,
@@ -2123,6 +2127,16 @@ async fn try_run_turn(
                     handle_response_item(sess, turn_diff_tracker, sub_id, item.clone()).await?;
 
                 output.push(ProcessedResponseItem { item, response });
+            }
+            ResponseEvent::WebSearchCallBegin { call_id, query } => {
+                let q = query.unwrap_or_else(|| "Searching Web...".to_string());
+                let _ = sess
+                    .tx_event
+                    .send(Event {
+                        id: sub_id.to_string(),
+                        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: q }),
+                    })
+                    .await;
             }
             ResponseEvent::Completed {
                 response_id: _,
