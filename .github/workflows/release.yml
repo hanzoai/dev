@@ -178,45 +178,44 @@ jobs:
           fi
 
       # macOS: use Homebrew LLVM (clang + ld64.lld) instead of Apple clang
-      - name: macOS linker tuning (Homebrew LLVM + lld)
+      - name: macOS linker & C toolchain (Homebrew LLVM + lld via sccache)
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
           set -euo pipefail
           brew install llvm || true
 
-          # Resolve Homebrew LLVM prefix for both Apple Silicon and Intel runners
+          # Find brew LLVM (Apple Silicon or Intel)
           LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
           if [[ -z "${LLVM_PREFIX:-}" ]]; then
-            if [[ -x /opt/homebrew/opt/llvm/bin/clang ]]; then
-              LLVM_PREFIX=/opt/homebrew/opt/llvm
-            elif [[ -x /usr/local/opt/llvm/bin/clang ]]; then
-              LLVM_PREFIX=/usr/local/opt/llvm
-            else
-              echo "ERROR: Homebrew LLVM not found"; exit 1
-            fi
+            if [[ -x /opt/homebrew/opt/llvm/bin/clang ]]; then LLVM_PREFIX=/opt/homebrew/opt/llvm; fi
+            if [[ -z "${LLVM_PREFIX:-}" && -x /usr/local/opt/llvm/bin/clang ]]; then LLVM_PREFIX=/usr/local/opt/llvm; fi
           fi
+          [[ -n "${LLVM_PREFIX:-}" ]] || { echo "Homebrew LLVM not found"; exit 1; }
 
-          # Put brew LLVM first on PATH so cc/clang resolve to it when tools probe
           echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
-
-          # Ensure Apple SDK is discoverable by brew clang (cross-linking x86_64 on arm64 host)
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
 
-          # Let sccache wrap C/C++ compiles correctly (no spaces in CC value)
-          echo "CC=sccache"  >> "$GITHUB_ENV"
-          echo "CXX=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CC=${LLVM_PREFIX}/bin/clang"    >> "$GITHUB_ENV"
-          echo "SCCACHE_CXX=${LLVM_PREFIX}/bin/clang++" >> "$GITHUB_ENV"
+          # Create wrappers so CC/CXX are real binaries invoking sccache with brew clang
+          WRAP_DIR="$RUNNER_TEMP/sccache-wrap"; mkdir -p "$WRAP_DIR"
+          printf '#!/usr/bin/env bash\nexec sccache "%s" "$@"\n' "${LLVM_PREFIX}/bin/clang"    > "$WRAP_DIR/clang"
+          printf '#!/usr/bin/env bash\nexec sccache "%s" "$@"\n' "${LLVM_PREFIX}/bin/clang++"  > "$WRAP_DIR/clang++"
+          chmod +x "$WRAP_DIR/clang" "$WRAP_DIR/clang++"
 
-          # Force rustc to use brew clang as the linker and request LLD via the driver
-          # (brew clang understands -fuse-ld=lld; Apple clang does not)
-          echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }-Clinker=${LLVM_PREFIX}/bin/clang -C link-arg=-fuse-ld=lld" >> "$GITHUB_ENV"
+          # Use wrappers for all build-script C/C++ compiles
+          echo "CC=$WRAP_DIR/clang"   >> "$GITHUB_ENV"
+          echo "CXX=$WRAP_DIR/clang++" >> "$GITHUB_ENV"
 
-          # Optional visibility while we iterate
-          echo "Using clang at: ${LLVM_PREFIX}/bin/clang"
+          # Force rustc to use brew clang as the linker and request lld through it
+          # Use a heredoc to avoid whitespace issues in GITHUB_ENV
+          {
+            echo 'RUSTFLAGS<<EOF'
+            echo "${RUSTFLAGS:-} -Clinker=${LLVM_PREFIX}/bin/clang -C link-arg=-fuse-ld=lld"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
+          # Optional visibility while iterating
           "${LLVM_PREFIX}/bin/clang" --version || true
-          "${LLVM_PREFIX}/bin/ld64.lld" -v 2>/dev/null || true
 
       # Windows: use lld-link and prebuilt OpenSSL via vcpkg (cached)
       - name: Enable lld-link (Windows)
