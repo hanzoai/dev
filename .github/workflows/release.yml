@@ -106,71 +106,39 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # ✅ Resilient workspace/registry caching (not tied to lockfile churn)
-      - name: Setup Rust Cache
+      # Cache registries/git only (not target/) to avoid overlapping with sccache.
+      - name: Setup Rust Cache (registries only)
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: codex-${{ matrix.target }}-rust-1.89
-          prefix-key: v2-rust
+          shared-key: codex-${{ matrix.target }}-rust-1.89-registry
+          prefix-key: v3-rust
           cache-on-failure: true
-          cache-all-crates: true
-          workspaces: "codex-rs -> target"
+          cache-targets: false
           cache-directories: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git
 
-      # Configure stable cache keys for sccache BEFORE initializing it
+      # Stable sccache namespace per target+toolchain (bump suffix to roll caches intentionally)
       - name: Configure sccache cache keys
         shell: bash
         run: |
-          # SCCACHE_GHA_VERSION creates a unique namespace for the cache
-          # This gets SHA256 hashed to create the cache "name" field
-          echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v3" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v4" >> "$GITHUB_ENV"
 
-      # ✅ Current sccache action (GHAC support). Do not hand-edit ACTIONS_* envs.
+      # Official sccache action; it handles installation & GHAC backend
       - name: Setup sccache (GHA backend)
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Ensure GHAC is enabled & rustc routed through sccache; also set a per-OS default local dir
-      - name: Set sccache env + dir
+      # Enable sccache via env (recommended by the action). Do NOT restart the server manually.
+      - name: Enable sccache
         shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV" # keep server alive during job
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          case "${{ runner.os }}" in
-            macOS)
-              echo "SCCACHE_DIR=$HOME/Library/Caches/Mozilla.sccache" >> "$GITHUB_ENV"
-              ;;
-            Linux)
-              echo "SCCACHE_DIR=$HOME/.cache/sccache" >> "$GITHUB_ENV"
-              ;;
-            Windows)
-              # Use the default local cache dir on Windows (works for fallback + actions/cache)
-              echo "SCCACHE_DIR=$LOCALAPPDATA\\Mozilla\\sccache" >> "$GITHUB_ENV"
-              ;;
-          esac
-
-      # Ensure GH Actions cache credentials are inherited by child processes (sccache server)
-      - name: Export GH cache env for children
-        shell: bash
-        run: |
-          echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "$GITHUB_ENV"
-          echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "$GITHUB_ENV"
-
-      # ✅ Persist the local sccache directory as a shared, stable fallback across runs
-      - name: Cache sccache directory (fallback)
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.SCCACHE_DIR }}
-          key: sccache-${{ runner.os }}-${{ matrix.target }}-rust-1.89
-          restore-keys: |
-            sccache-${{ runner.os }}-${{ matrix.target }}-
-            sccache-${{ runner.os }}-
+          echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
 
       - name: Install mold (Linux)
         if: contains(matrix.os, 'ubuntu')
@@ -186,102 +154,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
 
-      - name: Set version in Cargo.toml and Cargo.lock
+      # Pass the npm version into the Rust build (optional build.rs can expose this)
+      - name: Export CODE_VERSION for Rust build
         shell: bash
         run: |
-          VERSION="${{ needs.determine-version.outputs.version }}"
-          echo "📝 Setting version to ${VERSION}"
-
-          cd codex-rs
-
-          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "Current version in Cargo.toml: $CURRENT_VERSION"
-
-          # Update version in root Cargo.toml
-          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-
-          # Update version in workspace members' Cargo.toml files
-          WORKSPACE_MEMBERS=$(awk '/^\s*\[workspace\]/{ws=1} ws && /^members\s*=\s*\[/{f=1; next} f && /\]/{f=0} f{ gsub(/[",]/,""); if($1!="") print $1 }' Cargo.toml)
-          for dir in $WORKSPACE_MEMBERS; do
-            if [ -f "$dir/Cargo.toml" ]; then
-              sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$dir/Cargo.toml"
-            fi
-          done
-
-          # Clean up backup files
-          find . -name "*.bak" -delete
-
-          echo "🔒 Updating Cargo.lock with cargo (preserving dependency versions)"
-          cargo update --workspace --offline || cargo update --workspace
-          echo "✅ Cargo.lock updated properly"
+          echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
 
       - name: Build binaries
         shell: bash
         env:
           RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold' || '-Awarnings' }}
-          SKIP_SIGNING: '1'
           CARGO_INCREMENTAL: "0"
-          SCCACHE_CACHE_SIZE: "10G"
-          # Route rustc through sccache (server fallback may unset this)
-          RUSTC_WRAPPER: sccache
-          # Prefer successful build over failing on cache IO issues
-          SCCACHE_IGNORE_SERVER_IO_ERROR: '1'
           RUST_BACKTRACE: "1"
-          SCCACHE_LOG: "info"
-          # Keep GHAC enabled initially; we may disable it below if startup fails
-          SCCACHE_GHA_ENABLED: 'true'
         run: |
           cd codex-rs
+          # Reproducible, cache-friendly build; no lockfile churn
+          cargo build --release --frozen --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
-          echo "Restarting sccache server to avoid race conditions"
-          sccache --stop-server || true
-          echo "Starting sccache server (GHAC preferred)"
-          if ! sccache --start-server; then
-            echo "sccache GHAC failed to start; switching to local disk cache"
-            unset SCCACHE_GHA_ENABLED
-            # Ensure local cache dir exists
-            mkdir -p "${SCCACHE_DIR}"
-            if ! sccache --start-server; then
-              echo "sccache local cache also failed; disabling sccache"
-              unset RUSTC_WRAPPER
-            fi
-          fi
-
-          # Show initial stats (useful to confirm GHAC vs Local)
-          echo "=== Initial sccache stats ==="
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --show-stats || true
-            echo "Cache version: ${SCCACHE_GHA_VERSION:-not set}"
-            echo "Expected cache name hash: $(echo -n "sccache-v0.10.0-${SCCACHE_GHA_VERSION}" | shasum -a 256 | cut -d' ' -f1)"
-          fi
-
-          # Calculate parallel jobs
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            export CARGO_BUILD_JOBS=$((${NUMBER_OF_PROCESSORS:-2} * 2))
-          else
-            CORES=$((
-              $( (command -v nproc >/dev/null 2>&1 && nproc) \
-                 || (getconf _NPROCESSORS_ONLN 2>/dev/null) \
-                 || (sysctl -n hw.ncpu 2>/dev/null) \
-                 || echo 2 )
-            ))
-            export CARGO_BUILD_JOBS=$((CORES * 2))
-          fi
-          echo "Building with $CARGO_BUILD_JOBS parallel jobs"
-
-          # Reproducible CI builds
-          cargo build --release --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
-
-          # Print final stats
-          echo "=== Final sccache stats ==="
-          if command -v sccache >/dev/null 2>&1; then
-            sccache --show-stats || true
-            # Also show detailed stats in JSON for debugging
-            if [[ "${SCCACHE_LOG}" == "debug" ]] || [[ "${SCCACHE_LOG}" == "info" ]]; then
-              echo "=== Detailed stats (JSON) ==="
-              sccache --show-stats --stats-format json || true
-            fi
-          fi
+      # Keep this optional; the action will also report post-step stats.
+      - name: sccache stats (optional)
+        shell: bash
+        run: sccache --show-stats || true
 
       - name: Prepare artifacts
         shell: bash
