@@ -40,15 +40,11 @@ jobs:
         working-directory: codex-cli
         shell: bash
         run: |
-          # Get current version from package.json
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "Current version in package.json: $CURRENT_VERSION"
-
-          # Check latest published version
           PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
           echo "Latest published version: $PUBLISHED_VERSION"
 
-          # Determine the version to use for this build
           if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
             echo "Will bump from published version $PUBLISHED_VERSION"
             IFS='.' read -ra VERSION_PARTS <<< "$PUBLISHED_VERSION"
@@ -106,18 +102,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Cache registries/git only (not target/) to avoid overlapping with sccache.
-      - name: Setup Rust Cache (registries only)
-        uses: Swatinem/rust-cache@v2
+      # Cache registries + git only (no target/), to avoid overlapping with sccache
+      - name: Cache Cargo registries and git
+        uses: actions/cache@v4
         with:
-          shared-key: codex-${{ matrix.target }}-rust-1.89-registry
-          prefix-key: v3-rust
-          cache-on-failure: true
-          cache-targets: false
-          cache-directories: |
+          path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ matrix.target }}-rust-1.89-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.target }}-rust-1.89-
+            cargo-${{ runner.os }}-${{ matrix.target }}-
+            cargo-${{ runner.os }}-
 
       # Stable sccache namespace per target+toolchain (bump suffix to roll caches intentionally)
       - name: Configure sccache cache keys
@@ -132,7 +129,7 @@ jobs:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Enable sccache via env (recommended by the action). Do NOT restart the server manually.
+      # Enable sccache via env (per action docs). Do NOT restart the server manually.
       - name: Enable sccache
         shell: bash
         run: |
@@ -154,7 +151,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
 
-      # Pass the npm version into the Rust build (optional build.rs can expose this)
+      # NEW: prefetch deps online so the subsequent --frozen build can run offline.
+      - name: Prefetch dependencies (git + registry)
+        working-directory: codex-rs
+        env:
+          # Work around occasional libgit2 issues on macOS: fetch using the git CLI.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: cargo fetch --locked
+
+      # Pass chosen npm version into the Rust build (optional build.rs exposes it)
       - name: Export CODE_VERSION for Rust build
         shell: bash
         run: |
@@ -168,10 +173,9 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          # Reproducible, cache-friendly build; no lockfile churn
+          # Reproducible, cache-friendly build; now safe to be offline
           cargo build --release --frozen --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
-      # Keep this optional; the action will also report post-step stats.
       - name: sccache stats (optional)
         shell: bash
         run: sccache --show-stats || true
