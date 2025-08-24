@@ -580,6 +580,27 @@ async fn process_sse<S>(
             // drop the duplicated list inside `response.completed`.
             "response.output_item.done" => {
                 let Some(item_val) = event.item else { continue };
+                // Special-case: web_search_call completion -> synthesize a completion event
+                if item_val
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s == "web_search_call")
+                {
+                    let call_id = item_val
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let query = item_val
+                        .get("action")
+                        .and_then(|a| a.get("query"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let ev = ResponseEvent::WebSearchCallCompleted { call_id, query };
+                    if tx_event.send(Ok(ev)).await.is_err() {
+                        return;
+                    }
+                }
                 let Ok(item) = serde_json::from_value::<ResponseItem>(item_val.clone()) else {
                     debug!("failed to parse ResponseItem from output_item.done");
                     continue;

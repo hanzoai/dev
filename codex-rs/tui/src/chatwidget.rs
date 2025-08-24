@@ -143,6 +143,8 @@ pub(crate) struct ChatWidget<'a> {
     running_commands: HashMap<String, RunningCommand>,
     // Track active custom tool cells by call_id so we can replace them on completion
     running_custom_tools: HashMap<String, usize>,
+    // Track running web searches by call_id -> (history index, query)
+    running_web_search: HashMap<String, (usize, Option<String>)>,
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
@@ -634,14 +636,18 @@ impl ChatWidget<'_> {
         );
 
         // Update status: show that a command is running
-        let preview = self
-            .running_commands
-            .get(&ev.call_id)
-            .map(|rc| rc.command.join(" "))
-            .unwrap_or_else(|| "command".to_string());
-        let preview_short = if preview.len() > 40 { format!("{}…", &preview[..40]) } else { preview };
-        self.bottom_pane
-            .update_status_text(format!("running command: {}", preview_short));
+        if !self.running_web_search.is_empty() {
+            self.bottom_pane.update_status_text("Searching...".to_string());
+        } else {
+            let preview = self
+                .running_commands
+                .get(&ev.call_id)
+                .map(|rc| rc.command.join(" "))
+                .unwrap_or_else(|| "command".to_string());
+            let preview_short = if preview.len() > 40 { format!("{}…", &preview[..40]) } else { preview };
+            self.bottom_pane
+                .update_status_text(format!("running command: {}", preview_short));
+        }
     }
 
     /// Handle exec command end immediately
@@ -1214,6 +1220,7 @@ impl ChatWidget<'_> {
             last_assistant_message: None,
             running_commands: HashMap::new(),
             running_custom_tools: HashMap::new(),
+            running_web_search: HashMap::new(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -1715,6 +1722,54 @@ impl ChatWidget<'_> {
                     return;
                 }
                 }
+            } else if let (Some(_last_tool), Some(_new_tool)) = (
+                last_box.as_any().downcast_ref::<history_cell::ToolCallCell>(),
+                (&*new_cell).as_any().downcast_ref::<history_cell::ToolCallCell>(),
+            ) {
+                // Merge consecutive Tool cells with the same header (e.g., "Web Search")
+                let last_lines = last_box.display_lines();
+                let new_lines = new_cell.display_lines();
+                let last_header = last_lines
+                    .first()
+                    .and_then(|l| l.spans.get(0))
+                    .map(|s| s.content.clone().to_string())
+                    .unwrap_or_default();
+                let new_header = new_lines
+                    .first()
+                    .and_then(|l| l.spans.get(0))
+                    .map(|s| s.content.clone().to_string())
+                    .unwrap_or_default();
+                if !last_header.is_empty() && last_header == new_header {
+                    let mut combined = last_lines.clone();
+                    while combined
+                        .last()
+                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+                        .unwrap_or(false)
+                    {
+                        combined.pop();
+                    }
+                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                        body.remove(0);
+                    }
+                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                        body.pop();
+                    }
+                    if let Some(first_line) = body.first_mut() {
+                        if let Some(first_span) = first_line.spans.get_mut(0) {
+                            if first_span.content == "  └ " || first_span.content == "└ " {
+                                first_span.content = "  ".into();
+                            }
+                        }
+                    }
+                    combined.extend(body);
+                    *last_box = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
+                    self.autoscroll_if_near_bottom();
+                    self.bottom_pane.set_has_chat_history(true);
+                    self.process_animation_cleanup();
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                    return;
+                }
             } else {
                 // Also allow merging into an already-merged PlainHistoryCell produced above
                 if let Some(new_exec) = (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>() {
@@ -1779,6 +1834,54 @@ impl ChatWidget<'_> {
                             return;
                         }
                     }
+                    }
+                }
+                // Also allow merging Tool cells into a prior merged PlainHistoryCell with same header
+                if let Some(new_tool) = (&*new_cell).as_any().downcast_ref::<history_cell::ToolCallCell>() {
+                    if let Some(last_plain) = last_box.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
+                        let last_lines_snapshot = last_plain.lines.clone();
+                        let last_header = last_lines_snapshot
+                            .first()
+                            .and_then(|l| l.spans.get(0))
+                            .map(|s| s.content.clone().to_string())
+                            .unwrap_or_default();
+                        let new_lines = new_tool.display_lines();
+                        let new_header = new_lines
+                            .first()
+                            .and_then(|l| l.spans.get(0))
+                            .map(|s| s.content.clone().to_string())
+                            .unwrap_or_default();
+                        if !new_header.is_empty() && new_header == last_header {
+                            let mut combined = last_plain.lines.clone();
+                            while combined
+                                .last()
+                                .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+                                .unwrap_or(false)
+                            {
+                                combined.pop();
+                            }
+                            let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+                            while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                body.remove(0);
+                            }
+                            while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                body.pop();
+                            }
+                            if let Some(first_line) = body.first_mut() {
+                                if let Some(first_span) = first_line.spans.get_mut(0) {
+                                    if first_span.content == "  └ " || first_span.content == "└ " {
+                                        first_span.content = "  ".into();
+                                    }
+                                }
+                            }
+                            combined.extend(body);
+                            last_plain.lines = combined;
+                            self.autoscroll_if_near_bottom();
+                            self.bottom_pane.set_has_chat_history(true);
+                            self.process_animation_cleanup();
+                            self.app_event_tx.send(AppEvent::RequestRedraw);
+                            return;
+                        }
                     }
                 }
             }
@@ -2131,10 +2234,23 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
-            EventMsg::WebSearchBegin(_) => {
-                // Update status when a web search begins
-                self.bottom_pane
-                    .update_status_text("searching web".to_string());
+            EventMsg::WebSearchBegin(ev) => {
+                // Fade out welcome, end any active streams, then surface running web search
+                for cell in &self.history_cells { cell.trigger_fade(); }
+                self.finalize_active_stream();
+                self.flush_interrupt_queue();
+
+                // Show an active Web Search entry with live timer and query (if present)
+                let cell = history_cell::new_running_web_search(Some(ev.query.clone()));
+                self.add_to_history(cell);
+
+                // Track by call_id so we can mark complete later
+                if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
+                    self.running_web_search.insert(ev.call_id, (last_idx, Some(ev.query)));
+                }
+
+                // Reflect status in the input border
+                self.bottom_pane.update_status_text("Searching...".to_string());
                 self.mark_needs_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
@@ -2146,6 +2262,94 @@ impl ChatWidget<'_> {
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
                 self.mark_needs_redraw();
+            }
+            EventMsg::WebSearchComplete(ev) => {
+                // Replace the specific running web search cell with a completed one
+                if let Some((idx, maybe_query)) = self.running_web_search.remove(&ev.call_id) {
+                    // If index is still valid and is a running web search, replace it
+                    let mut target_idx = None;
+                    if idx < self.history_cells.len() {
+                        let is_ws = self.history_cells[idx]
+                            .as_any()
+                            .downcast_ref::<history_cell::RunningToolCallCell>()
+                            .is_some_and(|rt| rt.has_title("Web Search..."));
+                        if is_ws { target_idx = Some(idx); }
+                    }
+                    if target_idx.is_none() {
+                        for i in (0..self.history_cells.len()).rev() {
+                            if let Some(rt) = self.history_cells[i]
+                                .as_any()
+                                .downcast_ref::<history_cell::RunningToolCallCell>()
+                            {
+                                if rt.has_title("Web Search...") {
+                                    target_idx = Some(i);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(i) = target_idx {
+                        if let Some(rt) = self.history_cells[i]
+                            .as_any()
+                            .downcast_ref::<history_cell::RunningToolCallCell>()
+                        {
+                            let query = ev.query.or(maybe_query);
+                            let completed = rt.finalize_web_search(true, query);
+                            self.history_cells[i] = Box::new(completed);
+                            // Try to merge with previous item if same header (e.g., multiple Web Search blocks)
+                            // Reuse the same logic as add_to_history by converting the completed
+                            // tool cell into a transient and merging with the previous cell.
+                            if i > 0 {
+                                // Snapshot new lines for comparison
+                                let new_lines = self.history_cells[i].display_lines();
+                                let new_header = new_lines
+                                    .first()
+                                    .and_then(|l| l.spans.get(0))
+                                    .map(|s| s.content.clone().to_string())
+                                    .unwrap_or_default();
+                                // Previous cell header (if any)
+                                let prev_lines = self.history_cells[i - 1].display_lines();
+                                let prev_header = prev_lines
+                                    .first()
+                                    .and_then(|l| l.spans.get(0))
+                                    .map(|s| s.content.clone().to_string())
+                                    .unwrap_or_default();
+                                if !new_header.is_empty() && new_header == prev_header {
+                                    // Merge previous and current into Plain
+                                    let mut combined = prev_lines.clone();
+                                    while combined
+                                        .last()
+                                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+                                        .unwrap_or(false)
+                                    {
+                                        combined.pop();
+                                    }
+                                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+                                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                        body.remove(0);
+                                    }
+                                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
+                                        body.pop();
+                                    }
+                                    if let Some(first_line) = body.first_mut() {
+                                        if let Some(first_span) = first_line.spans.get_mut(0) {
+                                            if first_span.content == "  └ " || first_span.content == "└ " {
+                                                first_span.content = "  ".into();
+                                            }
+                                        }
+                                    }
+                                    combined.extend(body);
+                                    self.history_cells[i - 1] = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
+                                    self.history_cells.remove(i);
+                                }
+                            }
+                            self.invalidate_height_cache();
+                            self.request_redraw();
+                        }
+                    }
+                }
+                // Update status to reflect we're done searching
+                self.bottom_pane.update_status_text("responding".to_string());
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -2200,6 +2404,53 @@ impl ChatWidget<'_> {
                     self.stream.finalize(StreamKind::Reasoning, true, &sink);
                     self.current_stream_kind = Some(StreamKind::Answer);
                     self.stream.finalize(StreamKind::Answer, true, &sink);
+                }
+                // Mark any running web searches as completed
+                if !self.running_web_search.is_empty() {
+                    // Replace each running web search cell in-place with a completed one
+                    // Iterate over a snapshot of keys to avoid borrow issues
+                    let entries: Vec<(String, (usize, Option<String>))> = self
+                        .running_web_search
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    for (call_id, (idx, query_opt)) in entries {
+                        // Try exact index; if out of bounds or shifted, search nearby from end
+                        let mut target_idx = None;
+                        if idx < self.history_cells.len() {
+                            // Verify this index is still a running web search cell
+                            let is_ws = self.history_cells[idx]
+                                .as_any()
+                                .downcast_ref::<history_cell::RunningToolCallCell>()
+                                .is_some_and(|rt| rt.has_title("Web Search..."));
+                            if is_ws { target_idx = Some(idx); }
+                        }
+                        if target_idx.is_none() {
+                            for i in (0..self.history_cells.len()).rev() {
+                                if let Some(rt) = self.history_cells[i]
+                                    .as_any()
+                                    .downcast_ref::<history_cell::RunningToolCallCell>()
+                                {
+                                    if rt.has_title("Web Search...") {
+                                        target_idx = Some(i);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(i) = target_idx {
+                            if let Some(rt) = self.history_cells[i]
+                                .as_any()
+                                .downcast_ref::<history_cell::RunningToolCallCell>()
+                            {
+                                let completed = rt.finalize_web_search(true, query_opt);
+                                self.history_cells[i] = Box::new(completed);
+                                self.invalidate_height_cache();
+                            }
+                        }
+                        // Remove from running set
+                        self.running_web_search.remove(&call_id);
+                    }
                 }
                 // Now that streaming is complete, flush any queued interrupts
                 self.flush_interrupt_queue();

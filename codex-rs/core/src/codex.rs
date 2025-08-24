@@ -35,6 +35,7 @@ use tracing::warn;
 use uuid::Uuid;
 use codex_login::CodexAuth;
 use crate::protocol::WebSearchBeginEvent;
+use crate::protocol::WebSearchCompleteEvent;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -2135,6 +2136,15 @@ async fn try_run_turn(
                     .send(Event {
                         id: sub_id.to_string(),
                         msg: EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: q }),
+                    })
+                    .await;
+            }
+            ResponseEvent::WebSearchCallCompleted { call_id, query } => {
+                let _ = sess
+                    .tx_event
+                    .send(Event {
+                        id: sub_id.to_string(),
+                        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query }),
                     })
                     .await;
             }
