@@ -5964,8 +5964,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     };
 
-                    // Draw the symbol at the top of this cell only when the first line is visible
-                    if skip_top == 0 && gutter_area.width >= 2 {
+                    // Draw the symbol at the top of the visible portion of this cell
+                    // so the gutter icon remains present even when scrolled.
+                    if gutter_area.width >= 2 {
                         // Choose color based on symbol/type
                         let symbol_style = Style::default()
                             .fg(color)
