@@ -58,7 +58,7 @@ jobs:
             NEW_VERSION=$CURRENT_VERSION
           fi
 
-          echo "Build version: $NEW_VERSION"
+          echo "Version for this build: $NEW_VERSION"
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
@@ -102,19 +102,20 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Cache registries + git only (no target/), to avoid overlapping with sccache
-      - name: Cache Cargo registries and git
-        uses: actions/cache@v4
+      # ⚡ Cache target/ + registries + (opt-in) workspace crates to skip linking when unchanged
+      - name: Setup Rust Cache (target + registries)
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ matrix.target }}-rust-1.89-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-${{ matrix.target }}-rust-1.89-
-            cargo-${{ runner.os }}-${{ matrix.target }}-
-            cargo-${{ runner.os }}-
+          # bump prefix to invalidate caches if we change layout/flags
+          prefix-key: v4-rust
+          # stable namespace per toolchain+target
+          shared-key: codex-${{ matrix.target }}-rust-1.89-target
+          # cache the workspace target dir
+          workspaces: |
+            codex-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
 
       # Stable sccache namespace per target+toolchain (bump suffix to roll caches intentionally)
       - name: Configure sccache cache keys
@@ -122,14 +123,14 @@ jobs:
         run: |
           echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v4" >> "$GITHUB_ENV"
 
-      # Official sccache action; it handles installation & GHAC backend
+      # sccache manages GH Actions Cache backend; no manual restarts/creds
       - name: Setup sccache (GHA backend)
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Enable sccache via env (per action docs). Do NOT restart the server manually.
+      # Enable sccache via env (per action docs)
       - name: Enable sccache
         shell: bash
         run: |
@@ -151,11 +152,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools pkg-config
 
-      # NEW: prefetch deps online so the subsequent --frozen build can run offline.
+      # Prefetch deps (git + registry) so the subsequent --frozen build works offline
       - name: Prefetch dependencies (git + registry)
         working-directory: codex-rs
         env:
-          # Work around occasional libgit2 issues on macOS: fetch using the git CLI.
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
@@ -165,20 +165,23 @@ jobs:
         run: |
           echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
 
-      - name: Build binaries
+      - name: Build binaries (with timings)
         shell: bash
         env:
-          RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold' || '-Awarnings' }}
+          # keep mold on Linux; trim debug for faster links; avoid warnings noise
+          RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0' || '-Awarnings -C debuginfo=0' }}
           CARGO_INCREMENTAL: "0"
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          # Reproducible, cache-friendly build; now safe to be offline
-          cargo build --release --frozen --locked --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+          # Reproducible, cache-friendly build; --timings writes HTML to target/cargo-timings/
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
-      - name: sccache stats (optional)
+      - name: sccache stats (human + json)
         shell: bash
-        run: sccache --show-stats || true
+        run: |
+          sccache --show-stats || true
+          sccache --show-stats --stats-format=json || true
 
       - name: Prepare artifacts
         shell: bash
@@ -194,11 +197,19 @@ jobs:
             cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
           fi
 
-      - name: Upload artifacts
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
+
+      # Upload Cargo timing reports for this target (HTML files)
+      - name: Upload cargo timings
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-${{ matrix.target }}
+          path: codex-rs/target/cargo-timings/*.html
+          if-no-files-found: ignore
 
   release:
     name: Publish to npm
