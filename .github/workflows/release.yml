@@ -120,20 +120,20 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git
 
+      # Configure stable cache keys for sccache BEFORE initializing it
+      - name: Configure sccache cache keys
+        shell: bash
+        run: |
+          # Use stable cache keys that persist across runs
+          echo "SCCACHE_GHA_CACHE_TO=sccache-${{ matrix.target }}-rust-1.89-v3" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_CACHE_FROM=sccache-${{ matrix.target }}-rust-1.89-v3,sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
+
       # ✅ Current sccache action (GHAC support). Do not hand-edit ACTIONS_* envs.
       - name: Setup sccache (GHA backend)
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Configure stable cache keys for sccache
-      - name: Configure sccache cache keys
-        shell: bash
-        run: |
-          # Use stable cache keys that persist across runs
-          echo "SCCACHE_GHA_CACHE_TO=sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_CACHE_FROM=sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
 
       # Ensure GHAC is enabled & rustc routed through sccache; also set a per-OS default local dir
       - name: Set sccache env + dir
