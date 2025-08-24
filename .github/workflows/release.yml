@@ -43,12 +43,14 @@ jobs:
           echo "Current version in package.json: $CURRENT_VERSION"
           PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
           echo "Latest published version: $PUBLISHED_VERSION"
+
           if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
             IFS='.' read -ra V <<< "$PUBLISHED_VERSION"
             NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           else
             NEW_VERSION=$CURRENT_VERSION
           fi
+
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
@@ -87,7 +89,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Rust toolchain with MINIMAL profile and ignore repo components.
+      # Install Rust with the minimal profile to avoid pulling clippy/rust-src/rustfmt
       - name: Install Rust (minimal)
         shell: bash
         run: |
@@ -95,9 +97,8 @@ jobs:
           rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
           rustup default 1.89.0
 
-      # ⚡ Cache target/ + registries + workspace crates so Cargo can skip linking when unchanged.
+      # ⚡ Cache target/ + registries so Cargo can skip linking when unchanged
       - name: Setup Rust Cache (target + registries)
-        id: rust_cache
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v4-rust
@@ -106,10 +107,7 @@ jobs:
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
-          cache-all-crates: false
           cache-on-failure: true
-          # Optionally reduce post-job save cost if you only care about restores.
-          # save-if: ${{ github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
 
       # Stable sccache namespace per toolchain+target
       - name: Configure sccache cache keys
@@ -121,48 +119,92 @@ jobs:
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Enable sccache for Rust; we'll wire C/C++ explicitly below
       - name: Enable sccache
         shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
-        # sccache+GHA docs: set these envs; the action manages server lifecycle. 
-        # (No manual restarts.)   [oai_citation:4‡GitHub](https://github.com/mozilla/sccache/blob/main/docs/GHA.md?utm_source=chatgpt.com)
+
+      # 🔧 Wire C/C++ to sccache with the right compiler per target
+      - name: Configure C/C++ compilers (sccache wrappers)
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            if [[ "${{ matrix.target }}" == *"musl"* ]]; then
+              # musl target: use musl-gcc behind sccache
+              echo "CC=sccache musl-gcc" >> "$GITHUB_ENV"
+              echo "CXX=sccache g++" >> "$GITHUB_ENV"
+              echo "AR=ar" >> "$GITHUB_ENV"
+              echo "RANLIB=ranlib" >> "$GITHUB_ENV"
+              echo "PKG_CONFIG_ALLOW_CROSS=1" >> "$GITHUB_ENV"
+              # Ensure Rust uses musl-gcc as the linker for this target
+              case "${{ matrix.target }}" in
+                x86_64-unknown-linux-musl) echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV" ;;
+                aarch64-unknown-linux-musl) echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV" ;;
+              esac
+            else
+              # GNU/Linux: prefer clang if present, else gcc
+              if command -v clang >/dev/null 2>&1; then
+                echo "CC=sccache clang" >> "$GITHUB_ENV"
+                echo "CXX=sccache clang++" >> "$GITHUB_ENV"
+              else
+                echo "CC=sccache gcc" >> "$GITHUB_ENV"
+                echo "CXX=sccache g++" >> "$GITHUB_ENV"
+              fi
+            fi
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            echo "CC=sccache clang" >> "$GITHUB_ENV"
+            echo "CXX=sccache clang++" >> "$GITHUB_ENV"
+          fi
 
       # Faster linkers
-      - name: Install mold (Linux)
-        if: contains(matrix.os, 'ubuntu')
+      - name: Install mold (Linux GNU only)
+        if: contains(matrix.target, 'gnu')
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y mold || true
+
+      - name: Install musl tools (Linux musl)
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools pkg-config
+
       - name: Install zld (macOS) – optional speedup
         if: runner.os == 'macOS'
         shell: bash
         run: |
           brew install michaeleisel/zld/zld || true
-          # record path for either Apple Silicon or Intel Homebrew
           if [ -x /opt/homebrew/bin/zld ]; then echo "MAC_ZLD=/opt/homebrew/bin/zld" >> "$GITHUB_ENV"; fi
           if [ -x /usr/local/bin/zld ]; then echo "MAC_ZLD=/usr/local/bin/zld" >> "$GITHUB_ENV"; fi
-        # zld can speed macOS linking; has caveats, we fall back automatically if absent.  [oai_citation:5‡GitHub](https://github.com/michaeleisel/zld?utm_source=chatgpt.com) [oai_citation:6‡rustprojectprimer.com](https://rustprojectprimer.com/building/linker.html?utm_source=chatgpt.com)
 
-      # Prefetch deps (git + registry) so --frozen can run offline even with git deps
+      # Prefetch deps so --frozen works offline (needed for git deps like ratatui)
       - name: Prefetch dependencies (git + registry)
         working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
-      # Pass chosen npm version (optional build.rs can expose it)
+      # Pass chosen npm version into the Rust build (optional build.rs exposes it)
       - name: Export CODE_VERSION for Rust build
         shell: bash
         run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
 
-      # Configure RUSTFLAGS per-OS (trim debug; use fast linker where available; smaller uploads)
+      # Configure RUSTFLAGS per-OS/target
       - name: Configure RUSTFLAGS
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            echo "RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+            if [[ "${{ matrix.target }}" == *"musl"* ]]; then
+              # musl: no mold; trim debug; smaller binaries/faster upload
+              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+            else
+              # gnu: mold speeds link
+              echo "RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+            fi
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
             if [[ -n "${MAC_ZLD:-}" ]]; then
               echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=-fuse-ld=${MAC_ZLD}" >> "$GITHUB_ENV"
@@ -180,7 +222,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          # Reproducible, cache-friendly; --timings emits HTML under target/cargo-timings/
+          # Reproducible + cache-friendly; --timings emits HTML under target/cargo-timings/
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
       - name: sccache stats (human + json)
@@ -208,8 +250,7 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
-          compression-level: 0  # maximize upload speed for already-compressed binaries
-        # v4 supports tuning compression for much faster uploads.  [oai_citation:7‡GitHub](https://github.com/actions/upload-artifact?utm_source=chatgpt.com)
+          compression-level: 0
 
       - name: Upload cargo timings
         uses: actions/upload-artifact@v4
