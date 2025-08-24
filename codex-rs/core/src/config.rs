@@ -844,7 +844,7 @@ impl Config {
 
             experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
-            include_apply_patch_tool: include_apply_patch_tool.unwrap_or(false),
+            include_apply_patch_tool: false,
             tools_web_search_request,
             use_experimental_streamable_shell_tool: false,
             responses_originator_header,
