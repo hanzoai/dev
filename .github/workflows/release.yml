@@ -124,9 +124,9 @@ jobs:
       - name: Configure sccache cache keys
         shell: bash
         run: |
-          # Use stable cache keys that persist across runs
-          echo "SCCACHE_GHA_CACHE_TO=sccache-${{ matrix.target }}-rust-1.89-v3" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_CACHE_FROM=sccache-${{ matrix.target }}-rust-1.89-v3,sccache-${{ matrix.target }}-rust-1.89-v2" >> "$GITHUB_ENV"
+          # SCCACHE_GHA_VERSION creates a unique namespace for the cache
+          # This gets SHA256 hashed to create the cache "name" field
+          echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v3" >> "$GITHUB_ENV"
 
       # ✅ Current sccache action (GHAC support). Do not hand-edit ACTIONS_* envs.
       - name: Setup sccache (GHA backend)
@@ -251,7 +251,8 @@ jobs:
           echo "=== Initial sccache stats ==="
           if command -v sccache >/dev/null 2>&1; then
             sccache --show-stats || true
-            echo "Cache keys: TO=${SCCACHE_GHA_CACHE_TO:-not set}, FROM=${SCCACHE_GHA_CACHE_FROM:-not set}"
+            echo "Cache version: ${SCCACHE_GHA_VERSION:-not set}"
+            echo "Expected cache name hash: $(echo -n "sccache-v0.10.0-${SCCACHE_GHA_VERSION}" | shasum -a 256 | cut -d' ' -f1)"
           fi
 
           # Calculate parallel jobs

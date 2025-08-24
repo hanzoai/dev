@@ -238,7 +238,8 @@ ${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tu
 # Check if build succeeded
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
-    echo "Binary location: ${BIN_PATH}"
+    echo "Binary location: ./codex-rs/target/${PROFILE}/code"
+    echo ""
     
     # Keep old symlink locations working for compatibility
     # Create symlink in target/release for npm wrapper expectations
@@ -264,8 +265,6 @@ if [ $? -eq 0 ]; then
       ln -sf "../../codex-rs/target/${PROFILE}/code" "$DEST"
     done
     
-    echo "✅ Symlinks updated"
-    echo ""
     # Optional post-link step for deterministic builds: re-link executables
     # with -no_uuid only on macOS. Apply per-bin via `cargo rustc` so
     # dependencies/proc-macro dylibs are not affected.
@@ -297,18 +296,10 @@ if [ $? -eq 0 ]; then
       ln -sf "../${PROFILE}/code" "./target/dev-fast/code"
     fi
 
-    echo "You can run the CLI directly:"
     if [ -n "$BIN_SHA" ]; then
-      echo "  ${ABS_BIN_PATH} (sha256: ${BIN_SHA})"
+      echo "Binary Hash: ${BIN_SHA} ($(du -sh "${ABS_BIN_PATH}" | awk '{print $1}'))"
     else
-      echo "  ${ABS_BIN_PATH}"
-    fi
-    echo "Binary size: $(du -h "${ABS_BIN_PATH}" | cut -f1)"
-    echo ""
-    echo "Build profile: ${PROFILE}"
-    if [ "$PROFILE" = "dev-fast" ]; then
-        echo "  → Optimized for fast iteration (incremental builds enabled)"
-        echo "  → For production build, use: PROFILE=release-prod ./build-fast.sh"
+      echo "Binary Size: $(du -h "${ABS_BIN_PATH}" | cut -f1)"
     fi
     
     if [ "${TRACE_BUILD:-}" = "1" ] && [ -n "$BIN_SHA" ]; then
