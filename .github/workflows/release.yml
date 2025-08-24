@@ -26,8 +26,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -44,21 +43,12 @@ jobs:
           echo "Current version in package.json: $CURRENT_VERSION"
           PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
           echo "Latest published version: $PUBLISHED_VERSION"
-
           if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
-            echo "Will bump from published version $PUBLISHED_VERSION"
-            IFS='.' read -ra VERSION_PARTS <<< "$PUBLISHED_VERSION"
-            MAJOR=${VERSION_PARTS[0]}
-            MINOR=${VERSION_PARTS[1]}
-            PATCH=${VERSION_PARTS[2]}
-            NEW_PATCH=$((PATCH + 1))
-            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            IFS='.' read -ra V <<< "$PUBLISHED_VERSION"
+            NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           else
-            echo "Using current version $CURRENT_VERSION which is ahead of published $PUBLISHED_VERSION"
             NEW_VERSION=$CURRENT_VERSION
           fi
-
-          echo "Version for build: $NEW_VERSION"
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
@@ -97,84 +87,100 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.89.0
-        with:
-          targets: ${{ matrix.target }}
+      # Install Rust toolchain with MINIMAL profile and ignore repo components.
+      - name: Install Rust (minimal)
+        shell: bash
+        run: |
+          rustup set profile minimal
+          rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
+          rustup default 1.89.0
 
-      # ⚡ Cache target/ + registries + (opt-in) workspace crates to skip linking when unchanged
+      # ⚡ Cache target/ + registries + workspace crates so Cargo can skip linking when unchanged.
       - name: Setup Rust Cache (target + registries)
+        id: rust_cache
         uses: Swatinem/rust-cache@v2
         with:
-          # bump prefix to invalidate caches if we change layout/flags
           prefix-key: v4-rust
-          # stable namespace per toolchain+target
           shared-key: codex-${{ matrix.target }}-rust-1.89-target
-          # cache the workspace target dir
           workspaces: |
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
+          cache-all-crates: false
           cache-on-failure: true
+          # Optionally reduce post-job save cost if you only care about restores.
+          # save-if: ${{ github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
 
-      # Stable sccache namespace per target+toolchain (bump suffix to roll caches intentionally)
+      # Stable sccache namespace per toolchain+target
       - name: Configure sccache cache keys
         shell: bash
-        run: |
-          echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v4" >> "$GITHUB_ENV"
+        run: echo "SCCACHE_GHA_VERSION=${{ matrix.target }}-rust-1.89-v4" >> "$GITHUB_ENV"
 
-      # sccache manages GH Actions Cache backend; no manual restarts/creds
       - name: Setup sccache (GHA backend)
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Enable sccache via env (per action docs)
       - name: Enable sccache
         shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_IDLE_TIMEOUT=1800" >> "$GITHUB_ENV"
+        # sccache+GHA docs: set these envs; the action manages server lifecycle. 
+        # (No manual restarts.)   [oai_citation:4‡GitHub](https://github.com/mozilla/sccache/blob/main/docs/GHA.md?utm_source=chatgpt.com)
 
+      # Faster linkers
       - name: Install mold (Linux)
         if: contains(matrix.os, 'ubuntu')
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mold || true
-
-      - name: Install musl tools (Linux musl)
-        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y mold || true
+      - name: Install zld (macOS) – optional speedup
+        if: runner.os == 'macOS'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools pkg-config
+          brew install michaeleisel/zld/zld || true
+          # record path for either Apple Silicon or Intel Homebrew
+          if [ -x /opt/homebrew/bin/zld ]; then echo "MAC_ZLD=/opt/homebrew/bin/zld" >> "$GITHUB_ENV"; fi
+          if [ -x /usr/local/bin/zld ]; then echo "MAC_ZLD=/usr/local/bin/zld" >> "$GITHUB_ENV"; fi
+        # zld can speed macOS linking; has caveats, we fall back automatically if absent.  [oai_citation:5‡GitHub](https://github.com/michaeleisel/zld?utm_source=chatgpt.com) [oai_citation:6‡rustprojectprimer.com](https://rustprojectprimer.com/building/linker.html?utm_source=chatgpt.com)
 
-      # Prefetch deps (git + registry) so the subsequent --frozen build works offline
+      # Prefetch deps (git + registry) so --frozen can run offline even with git deps
       - name: Prefetch dependencies (git + registry)
         working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
 
-      # Pass chosen npm version into the Rust build (optional build.rs exposes it)
+      # Pass chosen npm version (optional build.rs can expose it)
       - name: Export CODE_VERSION for Rust build
         shell: bash
+        run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
+
+      # Configure RUSTFLAGS per-OS (trim debug; use fast linker where available; smaller uploads)
+      - name: Configure RUSTFLAGS
+        shell: bash
         run: |
-          echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            echo "RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            if [[ -n "${MAC_ZLD:-}" ]]; then
+              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=-fuse-ld=${MAC_ZLD}" >> "$GITHUB_ENV"
+            else
+              echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
+          fi
 
       - name: Build binaries (with timings)
         shell: bash
         env:
-          # keep mold on Linux; trim debug for faster links; avoid warnings noise
-          RUSTFLAGS: ${{ contains(matrix.os, 'ubuntu') && '-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0' || '-Awarnings -C debuginfo=0' }}
           CARGO_INCREMENTAL: "0"
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          # Reproducible, cache-friendly build; --timings writes HTML to target/cargo-timings/
+          # Reproducible, cache-friendly; --timings emits HTML under target/cargo-timings/
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
 
       - name: sccache stats (human + json)
@@ -197,19 +203,21 @@ jobs:
             cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
           fi
 
-      - name: Upload binaries
+      - name: Upload binaries (no compression)
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
+          compression-level: 0  # maximize upload speed for already-compressed binaries
+        # v4 supports tuning compression for much faster uploads.  [oai_citation:7‡GitHub](https://github.com/actions/upload-artifact?utm_source=chatgpt.com)
 
-      # Upload Cargo timing reports for this target (HTML files)
       - name: Upload cargo timings
         uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
           path: codex-rs/target/cargo-timings/*.html
           if-no-files-found: ignore
+          compression-level: 0
 
   release:
     name: Publish to npm
@@ -248,8 +256,7 @@ jobs:
 
       - name: Sync README for npm
         shell: bash
-        run: |
-          cp README.md codex-cli/README.md
+        run: cp README.md codex-cli/README.md
 
       - name: Update package.json version
         id: version
@@ -258,28 +265,18 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-
           NEW_VERSION="${{ needs.determine-version.outputs.version }}"
-          echo "Setting version to: $NEW_VERSION"
-
           npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
-
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-
           git add package.json
           if git diff --staged --quiet; then
-            echo "No changes to commit"
             echo "skip_push=true" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
             echo "skip_push=false" >> "$GITHUB_OUTPUT"
           fi
-
           if ! git rev-parse "v${NEW_VERSION}" >/dev/null 2>&1; then
             git tag "v${NEW_VERSION}"
-            echo "Created tag v${NEW_VERSION}"
-          else
-            echo "Tag v${NEW_VERSION} already exists"
           fi
           echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -288,10 +285,8 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "NPM_TOKEN not set, skipping publish"
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "NPM_TOKEN is set, will publish"
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -304,8 +299,7 @@ jobs:
 
       - name: Push tag
         shell: bash
-        run: |
-          git push origin "v${{ steps.version.outputs.version }}" || true
+        run: git push origin "v${{ steps.version.outputs.version }}" || true
 
       - name: Push changes
         if: steps.version.outputs.skip_push != 'true'
