@@ -15,6 +15,7 @@ use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
+use crate::tool_apply_patch::ApplyPatchToolType;
 // apply_patch tools are not currently surfaced; keep imports out to avoid warnings.
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -99,6 +100,12 @@ impl ToolsConfig {
                 sandbox_policy: sandbox_policy.clone(),
             }
         }
+
+        let apply_patch_tool_type = if include_apply_patch_tool {
+            model_family.apply_patch_tool_type.clone()
+        } else {
+            None
+        };
 
         Self {
             shell_type,

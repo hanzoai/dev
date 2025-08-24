@@ -127,6 +127,7 @@ pub async fn run_main(
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
+        tools_web_search_request: cli.web_search.then_some(true),
     };
 
     // Parse `-c` overrides from the CLI.

@@ -418,6 +418,9 @@ pub enum EventMsg {
 
     McpToolCallEnd(McpToolCallEndEvent),
 
+    /// Model requested a native web search
+    WebSearchBegin(WebSearchBeginEvent),
+
     /// Custom tool call events for non-MCP tools (browser, agent, etc)
     CustomToolCallBegin(CustomToolCallBeginEvent),
     CustomToolCallEnd(CustomToolCallEndEvent),
@@ -518,6 +521,12 @@ impl From<TokenUsage> for FinalOutput {
     fn from(token_usage: TokenUsage) -> Self {
         Self { token_usage }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WebSearchBeginEvent {
+    pub call_id: String,
+    pub query: String,
 }
 
 impl fmt::Display for FinalOutput {
