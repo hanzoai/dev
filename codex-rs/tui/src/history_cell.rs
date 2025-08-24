@@ -12,7 +12,7 @@ use codex_core::plan_tool::PlanItemArg;
 use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::FileChange;
-use crate::diff_render::create_diff_summary;
+use crate::diff_render::create_diff_summary_with_width;
 use codex_core::protocol::McpInvocation;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
@@ -45,6 +45,7 @@ pub(crate) struct CommandOutput {
     pub(crate) stderr: String,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum PatchEventType {
     ApprovalRequest,
     ApplyBegin { auto_approved: bool },
@@ -2801,21 +2802,16 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
 pub(crate) fn new_patch_event(
     event_type: PatchEventType,
     changes: HashMap<PathBuf, FileChange>,
-) -> PlainHistoryCell {
+) -> PatchSummaryCell {
     let title = match event_type {
-        PatchEventType::ApprovalRequest => "proposed patch",
-        PatchEventType::ApplyBegin { auto_approved: true } => "Updating...",
-        PatchEventType::ApplyBegin { auto_approved: false } => "Updating...",
+        PatchEventType::ApprovalRequest => "proposed patch".to_string(),
+        PatchEventType::ApplyBegin { .. } => "Updating...".to_string(),
     };
-
-    let lines: Vec<Line<'static>> = create_diff_summary(title, &changes, event_type)
-        .into_iter()
-        .collect();
-    let kind = match title {
-        "proposed patch" => HistoryCellType::Patch { kind: PatchKind::Proposed },
-        _ => HistoryCellType::Patch { kind: PatchKind::ApplyBegin },
+    let kind = match event_type {
+        PatchEventType::ApprovalRequest => PatchKind::Proposed,
+        PatchEventType::ApplyBegin { .. } => PatchKind::ApplyBegin,
     };
-    PlainHistoryCell { lines, kind }
+    PatchSummaryCell { title, changes, event_type, kind }
 }
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
@@ -2830,6 +2826,69 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     
     lines.push(Line::from(""));
     PlainHistoryCell { lines, kind: HistoryCellType::Patch { kind: PatchKind::ApplyFailure } }
+}
+
+// ==================== PatchSummaryCell ====================
+// Renders patch summary + details with width-aware hanging indents so wrapped
+// diff lines align under their code indentation.
+
+pub(crate) struct PatchSummaryCell {
+    pub(crate) title: String,
+    pub(crate) changes: HashMap<PathBuf, FileChange>,
+    pub(crate) event_type: PatchEventType,
+    pub(crate) kind: PatchKind,
+}
+
+impl HistoryCell for PatchSummaryCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Patch { kind: self.kind } }
+
+    // We compute lines based on width at render time; provide a conservative
+    // default for non-width callers (not normally used in our pipeline).
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        create_diff_summary_with_width(&self.title, &self.changes, self.event_type, Some(80))
+            .into_iter()
+            .collect()
+    }
+
+    fn has_custom_render(&self) -> bool { true }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        let lines: Vec<Line<'static>> = create_diff_summary_with_width(
+            &self.title,
+            &self.changes,
+            self.event_type,
+            Some(width as usize),
+        )
+        .into_iter()
+        .collect();
+        Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
+            .line_count(width)
+            .try_into()
+            .unwrap_or(0)
+    }
+
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        let lines: Vec<Line<'static>> = create_diff_summary_with_width(
+            &self.title,
+            &self.changes,
+            self.event_type,
+            Some(area.width as usize),
+        )
+        .into_iter()
+        .collect();
+
+        let text = Text::from(lines);
+        let bg_block = Block::default().style(Style::default().bg(crate::colors::background()));
+        Paragraph::new(text)
+            .block(bg_block)
+            .wrap(Wrap { trim: false })
+            .scroll((skip_rows, 0))
+            .style(Style::default().bg(crate::colors::background()))
+            .render(area, buf);
+    }
 }
 
 // new_patch_apply_success was removed in favor of in-place header mutation and type update in chatwidget
