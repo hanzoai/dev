@@ -25,7 +25,7 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     });
 
     info.and_then(|info| {
-        let current_version = env!("CARGO_PKG_VERSION");
+        let current_version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
         if is_newer(&info.latest_version, current_version).unwrap_or(false) {
             Some(info.latest_version)
         } else {

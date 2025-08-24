@@ -26,7 +26,7 @@ use crate::proto::ProtoCli;
 #[clap(
     author,
     name = "code",
-    version = env!("CARGO_PKG_VERSION"),
+    version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
