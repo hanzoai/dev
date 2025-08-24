@@ -15,7 +15,7 @@ use crate::history_cell::PatchEventType;
 // Keep one space between the line number and the sign column for typical
 // 4‑digit line numbers (e.g., "1235 + "). This value is the total target
 // width for "<ln><gap>", so with 4 digits we get 1 space gap.
-const SPACES_AFTER_LINE_NUMBER: usize = 5;
+const SPACES_AFTER_LINE_NUMBER: usize = 6;
 
 // Internal representation for diff line rendering
 #[allow(dead_code)]
@@ -310,6 +310,10 @@ fn push_wrapped_diff_line(
     let prefix_cols = indent.len() + ln_str.len() + gap_after_ln;
 
     let mut first = true;
+    // Continuation hanging indent equals the leading spaces of the content
+    // (after the diff sign). This keeps wrapped rows aligned under the code
+    // indentation.
+    let continuation_indent: usize = text.chars().take_while(|c| *c == ' ').count();
     let (sign_opt, line_style) = match kind {
         DiffLineType::Insert => (Some('+'), Some(style_add())),
         DiffLineType::Delete => (Some('-'), Some(style_del())),
@@ -323,8 +327,9 @@ fn push_wrapped_diff_line(
         // at a UTF-8 character boundary so this row's chunk fits exactly.
         // First line includes a visible sign plus a trailing space after it.
         // Continuation lines include only the hanging space (no sign).
+        let base_prefix = if first { prefix_cols + 2 } else { prefix_cols + 1 + continuation_indent };
         let available_content_cols = term_cols
-            .saturating_sub(if first { prefix_cols + 2 } else { prefix_cols + 1 })
+            .saturating_sub(base_prefix)
             .max(1);
         let split_at_byte_index = remaining_text
             .char_indices()
@@ -369,9 +374,10 @@ fn push_wrapped_diff_line(
         } else {
             // Continuation lines keep a space for the sign column so content aligns
             let hang_prefix = format!(
-                "{indent}{}{} ",
+                "{indent}{}{} {}",
                 " ".repeat(ln_str.len()),
-                " ".repeat(gap_after_ln)
+                " ".repeat(gap_after_ln),
+                " ".repeat(continuation_indent)
             );
             let content_span = match line_style {
                 Some(style) => RtSpan::styled(chunk.to_string(), style),
