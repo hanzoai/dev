@@ -97,7 +97,8 @@ jobs:
           rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
           rustup default 1.89.0
 
-      # 🔧 Update only the publishing crate's version (root package)
+      # 🔧 Update workspace package version in Cargo.toml (portable)
+      # Prefer [workspace.package], fallback to [package] if present
       - name: Set crate version in Cargo.toml (portable)
         shell: bash
         working-directory: codex-rs
@@ -106,16 +107,18 @@ jobs:
           VERSION="${{ needs.determine-version.outputs.version }}"
           echo "Embedding version ${VERSION} into codex-rs/Cargo.toml"
           awk -v ver="$VERSION" '
-            BEGIN{inpkg=0; done=0}
-            /^\[package\]/{inpkg=1}
-            /^\[/{ if ($0 !~ /^\[package\]/) inpkg=0 }
-            { if (inpkg && !done && $0 ~ /^version = "/) {
+            BEGIN{in_ws_pkg=0; in_pkg=0; done=0}
+            /^\[workspace\.package\]/{in_ws_pkg=1; in_pkg=0}
+            /^\[package\]/{in_pkg=1; in_ws_pkg=0}
+            /^\[/{ if ($0 !~ /^\[(workspace\.package|package)\]/) { in_ws_pkg=0; in_pkg=0 } }
+            {
+              if ((in_ws_pkg || in_pkg) && !done && $0 ~ /^version[[:space:]]*=/) {
                 print "version = \"" ver "\""; done=1; next
               }
               print
             }
           ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
-          echo "New version line:" && grep '^version = ' Cargo.toml || true
+          echo "New version line:" && awk '/^\[(workspace\.package|package)\]/{in=1; next} /^\[/{in=0} in && /^version[[:space:]]*=/{print; exit}' Cargo.toml || true
 
       # 🔒 Keep lockfile consistent for --frozen without changing deps
       - name: Regenerate lockfile for --frozen
