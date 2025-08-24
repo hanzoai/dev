@@ -12,7 +12,10 @@ use codex_core::protocol::FileChange;
 use crate::history_cell::PatchEventType;
 
 #[allow(dead_code)]
-const SPACES_AFTER_LINE_NUMBER: usize = 6;
+// Keep one space between the line number and the sign column for typical
+// 4‑digit line numbers (e.g., "1235 + "). This value is the total target
+// width for "<ln><gap>", so with 4 digits we get 1 space gap.
+const SPACES_AFTER_LINE_NUMBER: usize = 5;
 
 // Internal representation for diff line rendering
 #[allow(dead_code)]
@@ -318,8 +321,10 @@ fn push_wrapped_diff_line(
         // Fit the content for the current terminal row:
         // compute how many columns are available after the prefix, then split
         // at a UTF-8 character boundary so this row's chunk fits exactly.
+        // First line includes a visible sign plus a trailing space after it.
+        // Continuation lines include only the hanging space (no sign).
         let available_content_cols = term_cols
-            .saturating_sub(if first { prefix_cols + 1 } else { prefix_cols })
+            .saturating_sub(if first { prefix_cols + 2 } else { prefix_cols + 1 })
             .max(1);
         let split_at_byte_index = remaining_text
             .char_indices()
@@ -337,7 +342,9 @@ fn push_wrapped_diff_line(
 
             // Always prefix the content with a sign char for consistent gutters
             let sign_char = sign_opt.unwrap_or(' ');
-            let display_chunk = format!("{sign_char}{chunk}");
+            // Add a space after the sign so it sits centered in the sign column
+            // and content starts one cell to the right: "+ <content>".
+            let display_chunk = format!("{sign_char} {chunk}");
 
             let content_span = match line_style {
                 Some(style) => RtSpan::styled(display_chunk, style),
