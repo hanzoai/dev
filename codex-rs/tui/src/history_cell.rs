@@ -496,8 +496,10 @@ impl HistoryCell for DiffCell {
             }
         }
 
-        let marker_col_x = area.x; // 1 column for marker
-        let content_x = area.x.saturating_add(2); // 1 for marker + 1 space
+        // Center the sign in the two-column gutter by leaving one leading
+        // space and drawing the sign in the second column.
+        let marker_col_x = area.x.saturating_add(1); // draw '+'/'-' here
+        let content_x = area.x.saturating_add(2); // one space after the sign
         let content_w = area.width.saturating_sub(2);
         let mut cur_y = area.y;
 
@@ -1232,8 +1234,88 @@ impl HistoryCell for StreamingContentCell {
 const PREVIEW_HEAD_LINES: usize = 2;
 const PREVIEW_TAIL_LINES: usize = 5;
 
+/// Normalize common TTY overwrite sequences within a text block so that
+/// progress lines using carriage returns, backspaces, or ESC[K erase behave as
+/// expected when rendered in a pure-buffered UI (no cursor movement).
+fn normalize_overwrite_sequences(input: &str) -> String {
+    // Process per line, but keep CR/BS semantics within logical lines.
+    // We treat "\n" as committing a line and resetting the cursor.
+    let mut out = String::with_capacity(input.len());
+    let mut line: Vec<char> = Vec::new();
+    let mut cursor: usize = 0;
+
+    // Helper to flush current line to out
+    let flush_line = |line: &mut Vec<char>, cursor: &mut usize, out: &mut String| {
+        if !line.is_empty() {
+            out.push_str(&line.iter().collect::<String>());
+        }
+        out.push('\n');
+        line.clear();
+        *cursor = 0;
+    };
+
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        match ch {
+            '\n' => {
+                flush_line(&mut line, &mut cursor, &mut out);
+                i += 1;
+            }
+            '\r' => {
+                // Carriage return: move cursor to column 0
+                cursor = 0;
+                i += 1;
+            }
+            '\u{0008}' => {
+                // Backspace
+                if cursor > 0 { cursor -= 1; }
+                i += 1;
+            }
+            '\u{001B}' => {
+                // Possible CSI sequence for Erase in Line (K). Parse minimally.
+                if i + 1 < chars.len() && chars[i + 1] == '[' {
+                    // Scan ahead until a letter terminator or end
+                    let mut j = i + 2;
+                    while j < chars.len() && !chars[j].is_alphabetic() { j += 1; }
+                    if j < chars.len() && chars[j] == 'K' {
+                        // ESC [ n K — erase in line from cursor to end
+                        // Truncate the current line from cursor to end
+                        if cursor < line.len() {
+                            line.truncate(cursor);
+                        }
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                // Unrecognized escape — drop it; ansi_to_tui will still colorize later spans.
+                i += 1;
+            }
+            _ => {
+                // Put char at cursor, expanding with spaces if needed
+                if cursor < line.len() {
+                    line[cursor] = ch;
+                } else {
+                    // Fill any gap with spaces
+                    while line.len() < cursor { line.push(' '); }
+                    line.push(ch);
+                }
+                cursor += 1;
+                i += 1;
+            }
+        }
+    }
+    // Flush remainder without forcing a trailing newline if input didn't end with one
+    if !line.is_empty() {
+        out.push_str(&line.iter().collect::<String>());
+    }
+    out
+}
+
 fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
+    let processed = normalize_overwrite_sequences(&processed);
     let non_empty: Vec<&str> = processed
         .lines()
         .filter(|line| !line.is_empty())
@@ -1299,7 +1381,8 @@ fn output_lines(
             format!("Error (exit code {})", exit_code),
             Style::default().fg(crate::colors::error()),
         ));
-        for line in stderr.lines().filter(|line| !line.is_empty()) {
+        let stderr_norm = normalize_overwrite_sequences(stderr);
+        for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
     }
@@ -1345,7 +1428,8 @@ fn pretty_provider_name(id: &str) -> String {
 pub(crate) fn new_background_event(message: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("event".dim()));
-    lines.extend(message.lines().map(|line| ansi_escape_line(line).dim()));
+    let msg_norm = normalize_overwrite_sequences(&message);
+    lines.extend(msg_norm.lines().map(|line| ansi_escape_line(line).dim()));
     // No empty line at end - trimming and spacing handled by renderer
     PlainHistoryCell { lines, kind: HistoryCellType::BackgroundEvent }
 }
@@ -2440,11 +2524,10 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
             .fg(crate::colors::error())
             .add_modifier(Modifier::BOLD),
     ));
-    lines.extend(
-        message
-            .lines()
-            .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
-    );
+    let msg_norm = normalize_overwrite_sequences(&message);
+    lines.extend(msg_norm.lines().map(|line| {
+        ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))
+    }));
     // No empty line at end - trimming and spacing handled by renderer
     PlainHistoryCell { lines, kind: HistoryCellType::Error }
 }
