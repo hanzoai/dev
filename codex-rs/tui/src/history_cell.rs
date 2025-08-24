@@ -498,9 +498,9 @@ impl HistoryCell for DiffCell {
 
         // Center the sign in the two-column gutter by leaving one leading
         // space and drawing the sign in the second column.
-        let marker_col_x = area.x.saturating_add(1); // draw '+'/'-' here
-        let content_x = area.x.saturating_add(2); // one space after the sign
-        let content_w = area.width.saturating_sub(2);
+        let marker_col_x = area.x.saturating_add(2); // two spaces then '+'/'-'
+        let content_x = area.x.saturating_add(4); // two spaces before sign + one after sign
+        let content_w = area.width.saturating_sub(4);
         let mut cur_y = area.y;
 
         // Helper to classify a line and extract marker and content
