@@ -31,6 +31,18 @@ pub(super) fn create_diff_summary(
     changes: &HashMap<PathBuf, FileChange>,
     event_type: PatchEventType,
 ) -> Vec<RtLine<'static>> {
+    create_diff_summary_with_width(title, changes, event_type, None)
+}
+
+/// Same as `create_diff_summary` but allows specifying a target content width in columns.
+/// When `width_cols` is provided, wrapping for detailed diff lines uses that width to
+/// ensure hanging indents align within the caller’s render area.
+pub(super) fn create_diff_summary_with_width(
+    title: &str,
+    changes: &HashMap<PathBuf, FileChange>,
+    event_type: PatchEventType,
+    width_cols: Option<usize>,
+) -> Vec<RtLine<'static>> {
     struct FileSummary {
         display_path: String,
         added: usize,
@@ -172,17 +184,32 @@ pub(super) fn create_diff_summary(
     );
 
     if show_details {
-        out.extend(render_patch_details(changes));
+        out.extend(render_patch_details_with_width(changes, width_cols));
     }
 
     out
 }
 
 #[allow(dead_code)]
-fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
+pub(super) fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'static>> {
+    render_patch_details_with_width(changes, None)
+}
+
+#[allow(dead_code)]
+fn render_patch_details_with_width(
+    changes: &HashMap<PathBuf, FileChange>,
+    width_cols: Option<usize>,
+) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
-    // Use terminal width or a reasonable fallback
-    let term_cols: usize = terminal::size().map(|(w, _)| w as usize).unwrap_or(120);
+    // Use caller-provided width or fall back to a conservative estimate based on terminal width.
+    // Subtract a gutter safety margin so our pre-wrapping rarely exceeds the
+    // actual chat content width (prevents secondary wrapping that breaks hanging indents).
+    let term_cols: usize = if let Some(w) = width_cols {
+        w as usize
+    } else {
+        let full = terminal::size().map(|(w, _)| w as usize).unwrap_or(120);
+        full.saturating_sub(20).max(40)
+    };
 
     for (index, (path, change)) in changes.iter().enumerate() {
         let is_first_file = index == 0;
@@ -197,7 +224,7 @@ fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'s
             FileChange::Add { content } => {
                 for (i, raw) in content.lines().enumerate() {
                     let ln = i + 1;
-                    out.extend(push_wrapped_diff_line(
+                    out.extend(push_wrapped_diff_line_with_width(
                         ln,
                         DiffLineType::Insert,
                         raw,
@@ -209,7 +236,7 @@ fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'s
                 let original = std::fs::read_to_string(path).unwrap_or_default();
                 for (i, raw) in original.lines().enumerate() {
                     let ln = i + 1;
-                    out.extend(push_wrapped_diff_line(
+                    out.extend(push_wrapped_diff_line_with_width(
                         ln,
                         DiffLineType::Delete,
                         raw,
@@ -240,32 +267,32 @@ fn render_patch_details(changes: &HashMap<PathBuf, FileChange>) -> Vec<RtLine<'s
                             match l {
                                 diffy::Line::Insert(text) => {
                                     let s = text.trim_end_matches('\n');
-                                    out.extend(push_wrapped_diff_line(
-                                        new_ln,
-                                        DiffLineType::Insert,
-                                        s,
-                                        term_cols,
-                                    ));
+                    out.extend(push_wrapped_diff_line_with_width(
+                        new_ln,
+                        DiffLineType::Insert,
+                        s,
+                        term_cols,
+                    ));
                                     new_ln += 1;
                                 }
                                 diffy::Line::Delete(text) => {
                                     let s = text.trim_end_matches('\n');
-                                    out.extend(push_wrapped_diff_line(
-                                        old_ln,
-                                        DiffLineType::Delete,
-                                        s,
-                                        term_cols,
-                                    ));
+                    out.extend(push_wrapped_diff_line_with_width(
+                        old_ln,
+                        DiffLineType::Delete,
+                        s,
+                        term_cols,
+                    ));
                                     old_ln += 1;
                                 }
                                 diffy::Line::Context(text) => {
                                     let s = text.trim_end_matches('\n');
-                                    out.extend(push_wrapped_diff_line(
-                                        new_ln,
-                                        DiffLineType::Context,
-                                        s,
-                                        term_cols,
-                                    ));
+                    out.extend(push_wrapped_diff_line_with_width(
+                        new_ln,
+                        DiffLineType::Context,
+                        s,
+                        term_cols,
+                    ));
                                     old_ln += 1;
                                     new_ln += 1;
                                 }
@@ -292,7 +319,7 @@ pub(super) fn create_diff_details_only(
 }
 
 #[allow(dead_code)]
-fn push_wrapped_diff_line(
+fn push_wrapped_diff_line_with_width(
     line_number: usize,
     kind: DiffLineType,
     text: &str,
@@ -545,7 +572,7 @@ mod tests {
         // Call the wrapping function directly so we can precisely control the width
         // Use a fixed width for testing wrapping behavior
         const TEST_WRAP_WIDTH: usize = 80;
-        let lines = push_wrapped_diff_line(1, DiffLineType::Insert, long_line, TEST_WRAP_WIDTH);
+        let lines = push_wrapped_diff_line_with_width(1, DiffLineType::Insert, long_line, TEST_WRAP_WIDTH);
 
         // Render into a small terminal to capture the visual layout
         snapshot_lines(
