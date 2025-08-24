@@ -89,6 +89,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Install Rust with the minimal profile (needed before using cargo below)
+      - name: Install Rust (minimal)
+        shell: bash
+        run: |
+          rustup set profile minimal
+          rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
+          rustup default 1.89.0
+
       # 🔧 Update only the publishing crate's version (root package)
       - name: Set crate version in Cargo.toml (portable)
         shell: bash
@@ -116,14 +124,6 @@ jobs:
         working-directory: codex-rs
         run: cargo generate-lockfile
 
-      # Install Rust with the minimal profile to avoid pulling clippy/rust-src/rustfmt
-      - name: Install Rust (minimal)
-        shell: bash
-        run: |
-          rustup set profile minimal
-          rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
-          rustup default 1.89.0
-
       # ⚡ Cache target/ + registries so Cargo can skip linking when unchanged
       - name: Setup Rust Cache (target + registries)
         uses: Swatinem/rust-cache@v2
@@ -147,7 +147,7 @@ jobs:
           version: v0.10.0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Enable sccache for Rust; we'll wire C/C++ explicitly below
+      # Enable sccache for Rust
       - name: Enable sccache
         shell: bash
         run: |
@@ -162,66 +162,48 @@ jobs:
         if: contains(matrix.os, 'ubuntu')
         shell: bash
         run: |
+          set -euo pipefail
           # Fast linker on GNU
           if [[ "${{ matrix.target }}" == *"gnu"* ]]; then
             sudo apt-get update
             sudo apt-get install -y mold
-            echo "RUSTFLAGS=${RUSTFLAGS} -C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
+            echo 'RUSTFLAGS=-Awarnings -C link-arg=-fuse-ld=mold -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
+          else
+            echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
           fi
           # Let sccache handle C/C++ (vendored OpenSSL, etc.)
           if command -v clang >/dev/null 2>&1; then
-            echo 'CC=sccache clang' >> $GITHUB_ENV
-            echo 'CXX=sccache clang++' >> $GITHUB_ENV
+            echo 'CC=sccache clang'    >> "$GITHUB_ENV"
+            echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
           else
-            echo 'CC=sccache gcc' >> $GITHUB_ENV
-            echo 'CXX=sccache g++' >> $GITHUB_ENV
+            echo 'CC=sccache gcc'      >> "$GITHUB_ENV"
+            echo 'CXX=sccache g++'     >> "$GITHUB_ENV"
           fi
 
-      # macOS: use Homebrew LLVM (clang + ld64.lld) instead of Apple clang
-      - name: macOS linker & C toolchain (Homebrew LLVM + lld via sccache)
+      # macOS: Homebrew LLVM + LLD; use documented sccache pattern for C/C++
+      - name: macOS toolchain & linker (brew clang + lld via sccache)
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
           set -euo pipefail
-          brew install llvm || true
-
-          # Find brew LLVM (Apple Silicon or Intel)
-          LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
-          if [[ -z "${LLVM_PREFIX:-}" ]]; then
-            if [[ -x /opt/homebrew/opt/llvm/bin/clang ]]; then LLVM_PREFIX=/opt/homebrew/opt/llvm; fi
-            if [[ -z "${LLVM_PREFIX:-}" && -x /usr/local/opt/llvm/bin/clang ]]; then LLVM_PREFIX=/usr/local/opt/llvm; fi
-          fi
-          [[ -n "${LLVM_PREFIX:-}" ]] || { echo "Homebrew LLVM not found"; exit 1; }
-
+          brew install llvm lld || true
+          LLVM_PREFIX="$(brew --prefix llvm || true)"
+          LLD_PREFIX="$(brew --prefix lld || true)"
+          [[ -n "${LLVM_PREFIX}" && -n "${LLD_PREFIX}" ]] || { echo "brew llvm/lld not found"; exit 1; }
           echo "${LLVM_PREFIX}/bin" >> "$GITHUB_PATH"
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
-
-          # Create wrappers so CC/CXX are real binaries invoking sccache with brew clang
-          WRAP_DIR="$RUNNER_TEMP/sccache-wrap"; mkdir -p "$WRAP_DIR"
-          printf '#!/usr/bin/env bash\nexec sccache "%s" "$@"\n' "${LLVM_PREFIX}/bin/clang"    > "$WRAP_DIR/clang"
-          printf '#!/usr/bin/env bash\nexec sccache "%s" "$@"\n' "${LLVM_PREFIX}/bin/clang++"  > "$WRAP_DIR/clang++"
-          chmod +x "$WRAP_DIR/clang" "$WRAP_DIR/clang++"
-
-          # Use wrappers for all build-script C/C++ compiles
-          echo "CC=$WRAP_DIR/clang"   >> "$GITHUB_ENV"
-          echo "CXX=$WRAP_DIR/clang++" >> "$GITHUB_ENV"
-
-          # Force rustc to use brew clang as the linker and request lld through it
-          # Use a heredoc to avoid whitespace issues in GITHUB_ENV
-          {
-            echo 'RUSTFLAGS<<EOF'
-            echo "${RUSTFLAGS:-} -Clinker=${LLVM_PREFIX}/bin/clang -C link-arg=-fuse-ld=lld"
-            echo 'EOF'
-          } >> "$GITHUB_ENV"
-
-          # Optional visibility while iterating
-          "${LLVM_PREFIX}/bin/clang" --version || true
+          # C/C++ through sccache using brew clang
+          echo "CC=sccache clang"    >> "$GITHUB_ENV"
+          echo "CXX=sccache clang++" >> "$GITHUB_ENV"
+          # rustc links via brew clang + explicit ld64.lld
+          echo "RUSTFLAGS=-Awarnings -Clinker=clang -C link-arg=-fuse-ld=${LLD_PREFIX}/bin/ld64.lld -C debuginfo=0 -C strip=symbols -C panic=abort" >> "$GITHUB_ENV"
 
       # Windows: use lld-link and prebuilt OpenSSL via vcpkg (cached)
       - name: Enable lld-link (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
-        run: echo "RUSTFLAGS=-Clinker=lld-link" >> $env:GITHUB_ENV
+        run: |
+          "RUSTFLAGS=-Clinker=lld-link -C codegen-units=16 -C debuginfo=0 -C strip=symbols -C panic=abort -C link-arg=/OPT:REF -C link-arg=/OPT:ICF -C link-arg=/DEBUG:NONE" >> $env:GITHUB_ENV
 
       - name: Cache vcpkg (Windows)
         if: matrix.os == 'windows-latest'
@@ -241,8 +223,8 @@ jobs:
             & $env:USERPROFILE\vcpkg\bootstrap-vcpkg.bat
           }
           & $env:USERPROFILE\vcpkg\vcpkg.exe install openssl:x64-windows
-          echo "VCPKG_ROOT=$env:USERPROFILE\vcpkg" >> $env:GITHUB_ENV
-          echo "OPENSSL_NO_VENDOR=1" >> $env:GITHUB_ENV
+          "VCPKG_ROOT=$env:USERPROFILE\vcpkg" >> $env:GITHUB_ENV
+          "OPENSSL_NO_VENDOR=1"               >> $env:GITHUB_ENV
 
       - name: Install musl tools (Linux musl)
         if: contains(matrix.target, 'musl')
@@ -262,18 +244,6 @@ jobs:
       - name: Export CODE_VERSION for Rust build
         shell: bash
         run: echo "CODE_VERSION=${{ needs.determine-version.outputs.version }}" >> "$GITHUB_ENV"
-
-      # Configure RUSTFLAGS per-OS/target
-      - name: Configure RUSTFLAGS
-        shell: bash
-        run: |
-          BASE_FLAGS="-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort"
-          # Respect any prior RUSTFLAGS set by platform tuning steps.
-          if [[ -n "${RUSTFLAGS:-}" ]]; then
-            echo "RUSTFLAGS=${RUSTFLAGS} ${BASE_FLAGS}" >> "$GITHUB_ENV"
-          else
-            echo "RUSTFLAGS=${BASE_FLAGS}" >> "$GITHUB_ENV"
-          fi
 
       - name: Build binaries (with timings)
         shell: bash
