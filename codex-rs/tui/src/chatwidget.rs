@@ -471,14 +471,52 @@ impl ChatWidget<'_> {
             ));
             return;
         }
-        // Convert to simple rows
-        let items: Vec<(String, Option<String>, std::path::PathBuf)> = candidates
+        // Convert to simple rows with aligned columns and human-friendly times
+        fn human_ago(ts: &str) -> String {
+            use chrono::{DateTime, Utc};
+            if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                let now = Utc::now();
+                let delta = now.signed_duration_since(dt.with_timezone(&Utc));
+                let secs = delta.num_seconds().max(0);
+                let mins = secs / 60;
+                let hours = mins / 60;
+                let days = hours / 24;
+                if days >= 7 {
+                    // Show date for older entries
+                    return dt.format("%Y-%m-%d").to_string();
+                }
+                if days >= 1 {
+                    return format!("{}d ago", days);
+                }
+                if hours >= 1 {
+                    return format!("{}h ago", hours);
+                }
+                if mins >= 1 {
+                    return format!("{}m ago", mins);
+                }
+                return "just now".to_string();
+            }
+            ts.to_string()
+        }
+
+        let rows: Vec<crate::bottom_pane::resume_selection_view::ResumeRow> = candidates
             .into_iter()
-            .map(|c| (c.title, c.subtitle, c.path))
+            .map(|c| {
+                let modified = human_ago(&c.modified_ts.unwrap_or_default());
+                let created = human_ago(&c.created_ts.unwrap_or_default());
+                let msgs = format!("{}", c.message_count);
+                let branch = c.branch.unwrap_or_else(|| "-".to_string());
+                let mut summary = c.snippet.unwrap_or_else(|| c.subtitle.unwrap_or_default());
+                const SNIPPET_MAX: usize = 64;
+                if summary.chars().count() > SNIPPET_MAX {
+                    summary = summary.chars().take(SNIPPET_MAX).collect::<String>() + "…";
+                }
+                crate::bottom_pane::resume_selection_view::ResumeRow { modified, created, msgs, branch, summary, path: c.path }
+            })
             .collect();
-        let title = "Resume Session".to_string();
-        let subtitle = Some(format!("{}", cwd.display()));
-        self.bottom_pane.show_resume_selection(title, subtitle, items);
+        let title = format!("Resume Session — {}", cwd.display());
+        let subtitle = Some(String::new());
+        self.bottom_pane.show_resume_selection(title, subtitle, rows);
     }
 
     /// Render a single recorded ResponseItem into history without executing tools
@@ -496,6 +534,10 @@ impl ChatWidget<'_> {
                         _ => {}
                     }
                 }
+                // Skip internal system status messages
+                if text.contains("== System Status ==") {
+                    return;
+                }
                 if role == "user" {
                     self.add_to_history(crate::history_cell::new_user_prompt(text));
                 } else {
@@ -509,19 +551,24 @@ impl ChatWidget<'_> {
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for s in summary {
-                    if let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s {
-                        // Reasoning cell – use the existing reasoning output styling
-                        let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
-                        self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
-                        let _ = self.stream.apply_final_reasoning(&text, &sink);
-                        // finalize immediately for static replay
-                        self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
-                    }
+                    let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s;
+                    // Reasoning cell – use the existing reasoning output styling
+                    let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
+                    self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
+                    let _ = self.stream.apply_final_reasoning(&text, &sink);
+                    // finalize immediately for static replay
+                    self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
                 }
             }
             ResponseItem::FunctionCallOutput { output, .. } => {
-                // Show as a background event for now
-                self.add_to_history(crate::history_cell::new_background_event(output.content));
+                // Try to unwrap common JSON wrapper {"output": "...", ...}
+                let mut content = output.content;
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(s) = v.get("output").and_then(|x| x.as_str()) {
+                        content = s.to_string();
+                    }
+                }
+                self.add_to_history(crate::history_cell::new_background_event(content));
             }
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
@@ -1265,6 +1312,27 @@ impl ChatWidget<'_> {
         let welcome_cell = Box::new(history_cell::new_animated_welcome());
         // add AnimatedWelcomeCell silently
         history_cells.push(welcome_cell);
+
+        // Startup hint: show /resume tip if a recent session exists for this cwd (within 72h)
+        {
+            let cwd = config.cwd.clone();
+            let codex_home = config.codex_home.clone();
+            let recent = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home).into_iter().next();
+            if let Some(rec) = recent {
+                if let Some(ts) = rec.modified_ts.as_ref() {
+                    use chrono::{DateTime, Utc};
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                        let now = Utc::now();
+                        let age = now.signed_duration_since(dt.with_timezone(&Utc));
+                        if age.num_hours() <= 72 {
+                            history_cells.push(Box::new(history_cell::new_background_event(
+                                "Tip: /resume to continue your last session".to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
 
         // Initialize image protocol for rendering screenshots
 
