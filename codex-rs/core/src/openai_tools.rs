@@ -76,6 +76,7 @@ pub(crate) struct ToolsConfig {
     pub web_search_request: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) model_family: &'a ModelFamily,
     pub(crate) approval_policy: AskForApproval,
@@ -120,10 +121,24 @@ impl ToolsConfig {
 
         Self {
             shell_type,
-            plan_tool: *include_plan_tool,
+            plan_tool: include_plan_tool,
             apply_patch_tool_type,
-            web_search_request: *include_web_search_request,
+            web_search_request: include_web_search_request,
         }
+    }
+
+    // Compatibility constructor used by some tests/upstream calls.
+    #[allow(dead_code)]
+    pub fn new_from_params(p: &ToolsConfigParams) -> Self {
+        Self::new(
+            p.model_family,
+            p.approval_policy,
+            p.sandbox_policy.clone(),
+            p.include_plan_tool,
+            p.include_apply_patch_tool,
+            p.include_web_search_request,
+            p.use_streamable_shell_tool,
+        )
     }
 }
 
@@ -813,7 +828,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_property_missing_type_defaults_to_string() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(&ToolsConfigParams {
+        let config = ToolsConfig::new_from_params(&ToolsConfigParams {
             model_family: &model_family,
             approval_policy: AskForApproval::Never,
             sandbox_policy: SandboxPolicy::ReadOnly,
