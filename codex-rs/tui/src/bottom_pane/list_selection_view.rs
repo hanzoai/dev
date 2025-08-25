@@ -8,7 +8,8 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Block, Borders, Clear};
+use ratatui::layout::Alignment;
 use ratatui::widgets::Widget;
 
 use crate::app_event_sender::AppEventSender;
@@ -156,57 +157,33 @@ impl BottomPaneView<'_> for ListSelectionView {
             return;
         }
 
-        let title_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 1,
-        };
+        // Clear and draw a bordered block matching other slash popups
+        Clear.render(area, buf);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::light_blue()))
+            .title(self.title.clone())
+            .title_alignment(Alignment::Center);
+        let inner = block.inner(area);
+        block.render(area, buf);
 
-        let title_spans: Vec<Span<'static>> = vec![
-            Self::dim_prefix_span(),
-            Span::styled(
-                self.title.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-        ];
-        let title_para = Paragraph::new(Line::from(title_spans));
-        title_para.render(title_area, buf);
-
-        let mut next_y = area.y.saturating_add(1);
+        // Layout inside the block: optional subtitle header, rows, footer
+        let mut next_y = inner.y;
         if let Some(sub) = &self.subtitle {
-            let subtitle_area = Rect {
-                x: area.x,
-                y: next_y,
-                width: area.width,
-                height: 1,
-            };
+            let subtitle_area = Rect { x: inner.x, y: next_y, width: inner.width, height: 1 };
             let subtitle_spans: Vec<Span<'static>> = vec![
-                Self::dim_prefix_span(),
-                Span::styled(sub.clone(), Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(sub.clone(), Style::default().fg(crate::colors::text_dim())),
             ];
-            let subtitle_para = Paragraph::new(Line::from(subtitle_spans));
-            subtitle_para.render(subtitle_area, buf);
-            // Render the extra spacer line with the dimmed prefix to align with title/subtitle
-            let spacer_area = Rect {
-                x: area.x,
-                y: next_y.saturating_add(1),
-                width: area.width,
-                height: 1,
-            };
-            Self::render_dim_prefix_line(spacer_area, buf);
-            next_y = next_y.saturating_add(2);
+            Paragraph::new(Line::from(subtitle_spans)).render(subtitle_area, buf);
+            next_y = next_y.saturating_add(1);
         }
 
-        let footer_reserved = if self.footer_hint.is_some() { 2 } else { 0 };
+        let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
         let rows_area = Rect {
-            x: area.x,
+            x: inner.x,
             y: next_y,
-            width: area.width,
-            height: area
-                .height
-                .saturating_sub(next_y.saturating_sub(area.y))
-                .saturating_sub(footer_reserved),
+            width: inner.width,
+            height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(footer_reserved),
         };
 
         let rows: Vec<GenericDisplayRow> = self
@@ -235,18 +212,17 @@ impl BottomPaneView<'_> for ListSelectionView {
             render_rows(rows_area, buf, &rows, &self.state, MAX_POPUP_ROWS, true);
         }
 
-        if let Some(hint) = &self.footer_hint {
-            let footer_area = Rect {
-                x: area.x,
-                y: area.y + area.height - 1,
-                width: area.width,
-                height: 1,
-            };
-            let footer_para = Paragraph::new(Line::from(Span::styled(
-                hint.clone(),
-                Style::default().add_modifier(Modifier::DIM),
-            )));
-            footer_para.render(footer_area, buf);
+        if self.footer_hint.is_some() {
+            let footer_area = Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 };
+            let line = Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
+                Span::raw(" Navigate  "),
+                Span::styled("Enter", Style::default().fg(crate::colors::success())),
+                Span::raw(" Select  "),
+                Span::styled("Esc", Style::default().fg(crate::colors::error())),
+                Span::raw(" Cancel"),
+            ]);
+            Paragraph::new(line).render(footer_area, buf);
         }
     }
 }
