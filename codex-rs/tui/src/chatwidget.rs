@@ -31,6 +31,7 @@ use codex_core::protocol::CustomToolCallEndEvent;
 use codex_core::protocol::ErrorEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
+use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
@@ -221,6 +222,15 @@ pub(crate) struct ChatWidget<'a> {
     // Performance tracing (opt-in via /perf)
     perf_enabled: bool,
     perf: std::cell::RefCell<PerfStats>,
+    // Current session id (from SessionConfigured)
+    session_id: Option<uuid::Uuid>,
+
+    // Pending jump-back state (reversible until submit)
+    pending_jump_back: Option<PendingJumpBack>,
+}
+
+struct PendingJumpBack {
+    removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
 }
 
 // Global guard to prevent overlapping background screenshot captures and to rate-limit them
@@ -471,14 +481,52 @@ impl ChatWidget<'_> {
             ));
             return;
         }
-        // Convert to simple rows
-        let items: Vec<(String, Option<String>, std::path::PathBuf)> = candidates
+        // Convert to simple rows with aligned columns and human-friendly times
+        fn human_ago(ts: &str) -> String {
+            use chrono::{DateTime, Utc};
+            if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                let now = Utc::now();
+                let delta = now.signed_duration_since(dt.with_timezone(&Utc));
+                let secs = delta.num_seconds().max(0);
+                let mins = secs / 60;
+                let hours = mins / 60;
+                let days = hours / 24;
+                if days >= 7 {
+                    // Show date for older entries
+                    return dt.format("%Y-%m-%d").to_string();
+                }
+                if days >= 1 {
+                    return format!("{}d ago", days);
+                }
+                if hours >= 1 {
+                    return format!("{}h ago", hours);
+                }
+                if mins >= 1 {
+                    return format!("{}m ago", mins);
+                }
+                return "just now".to_string();
+            }
+            ts.to_string()
+        }
+
+        let rows: Vec<crate::bottom_pane::resume_selection_view::ResumeRow> = candidates
             .into_iter()
-            .map(|c| (c.title, c.subtitle, c.path))
+            .map(|c| {
+                let modified = human_ago(&c.modified_ts.unwrap_or_default());
+                let created = human_ago(&c.created_ts.unwrap_or_default());
+                let msgs = format!("{}", c.message_count);
+                let branch = c.branch.unwrap_or_else(|| "-".to_string());
+                let mut summary = c.snippet.unwrap_or_else(|| c.subtitle.unwrap_or_default());
+                const SNIPPET_MAX: usize = 64;
+                if summary.chars().count() > SNIPPET_MAX {
+                    summary = summary.chars().take(SNIPPET_MAX).collect::<String>() + "…";
+                }
+                crate::bottom_pane::resume_selection_view::ResumeRow { modified, created, msgs, branch, summary, path: c.path }
+            })
             .collect();
-        let title = "Resume Session".to_string();
-        let subtitle = Some(format!("{}", cwd.display()));
-        self.bottom_pane.show_resume_selection(title, subtitle, items);
+        let title = format!("Resume Session — {}", cwd.display());
+        let subtitle = Some(String::new());
+        self.bottom_pane.show_resume_selection(title, subtitle, rows);
     }
 
     /// Render a single recorded ResponseItem into history without executing tools
@@ -496,6 +544,10 @@ impl ChatWidget<'_> {
                         _ => {}
                     }
                 }
+                // Skip internal system status messages
+                if text.contains("== System Status ==") {
+                    return;
+                }
                 if role == "user" {
                     self.add_to_history(crate::history_cell::new_user_prompt(text));
                 } else {
@@ -509,19 +561,24 @@ impl ChatWidget<'_> {
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for s in summary {
-                    if let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s {
-                        // Reasoning cell – use the existing reasoning output styling
-                        let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
-                        self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
-                        let _ = self.stream.apply_final_reasoning(&text, &sink);
-                        // finalize immediately for static replay
-                        self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
-                    }
+                    let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s;
+                    // Reasoning cell – use the existing reasoning output styling
+                    let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
+                    self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
+                    let _ = self.stream.apply_final_reasoning(&text, &sink);
+                    // finalize immediately for static replay
+                    self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
                 }
             }
             ResponseItem::FunctionCallOutput { output, .. } => {
-                // Show as a background event for now
-                self.add_to_history(crate::history_cell::new_background_event(output.content));
+                // Try to unwrap common JSON wrapper {"output": "...", ...}
+                let mut content = output.content;
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(s) = v.get("output").and_then(|x| x.as_str()) {
+                        content = s.to_string();
+                    }
+                }
+                self.add_to_history(crate::history_cell::new_background_event(content));
             }
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
@@ -1266,6 +1323,27 @@ impl ChatWidget<'_> {
         // add AnimatedWelcomeCell silently
         history_cells.push(welcome_cell);
 
+        // Startup hint: show /resume tip if a recent session exists for this cwd (within 72h)
+        {
+            let cwd = config.cwd.clone();
+            let codex_home = config.codex_home.clone();
+            let recent = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home).into_iter().next();
+            if let Some(rec) = recent {
+                if let Some(ts) = rec.modified_ts.as_ref() {
+                    use chrono::{DateTime, Utc};
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                        let now = Utc::now();
+                        let age = now.signed_duration_since(dt.with_timezone(&Utc));
+                        if age.num_hours() <= 72 {
+                            history_cells.push(Box::new(history_cell::new_background_event(
+                                "Tip: /resume to continue your last session".to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
         // Initialize image protocol for rendering screenshots
 
         let new_widget = Self {
@@ -1332,6 +1410,8 @@ impl ChatWidget<'_> {
             last_theme: crate::theme::current_theme(),
             perf_enabled: false,
             perf: std::cell::RefCell::new(PerfStats::default()),
+            session_id: None,
+            pending_jump_back: None,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1339,6 +1419,129 @@ impl ChatWidget<'_> {
         
         new_widget
     }
+
+    /// Construct a ChatWidget from an existing conversation (forked session).
+    pub(crate) fn new_from_existing(
+        config: Config,
+        conversation: std::sync::Arc<codex_core::CodexConversation>,
+        session_configured: SessionConfiguredEvent,
+        app_event_tx: AppEventSender,
+        enhanced_keys_supported: bool,
+        terminal_info: crate::tui::TerminalInfo,
+    ) -> Self {
+        let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
+
+        // Forward events from existing conversation
+        let app_event_tx_clone = app_event_tx.clone();
+        tokio::spawn(async move {
+            // Send the provided SessionConfigured to the UI first
+            let event = Event { id: "fork".to_string(), msg: EventMsg::SessionConfigured(session_configured) };
+            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+
+            let conversation_clone = conversation.clone();
+            tokio::spawn(async move {
+                while let Some(op) = codex_op_rx.recv().await {
+                    let id = conversation_clone.submit(op).await;
+                    if let Err(e) = id {
+                        tracing::error!("failed to submit op: {e}");
+                    }
+                }
+            });
+
+            while let Ok(event) = conversation.next_event().await {
+                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            }
+        });
+
+        // Basic widget state mirrors `new`
+        let mut history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
+        history_cells.push(Box::new(history_cell::new_animated_welcome()));
+
+        Self {
+            app_event_tx: app_event_tx.clone(),
+            codex_op_tx,
+            bottom_pane: BottomPane::new(BottomPaneParams {
+                app_event_tx,
+                has_input_focus: true,
+                enhanced_keys_supported,
+                using_chatgpt_auth: config.using_chatgpt_auth,
+            }),
+            active_exec_cell: None,
+            history_cells,
+            config: config.clone(),
+            initial_user_message: None,
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            content_buffer: String::new(),
+            last_assistant_message: None,
+            running_commands: HashMap::new(),
+            running_custom_tools: HashMap::new(),
+            running_web_search: HashMap::new(),
+            live_builder: RowBuilder::new(usize::MAX),
+            pending_images: HashMap::new(),
+            welcome_shown: false,
+            latest_browser_screenshot: Arc::new(Mutex::new(None)),
+            cached_image_protocol: RefCell::new(None),
+            cached_picker: RefCell::new(terminal_info.picker.clone()),
+            cached_cell_size: std::cell::OnceCell::new(),
+            terminal_info,
+            scroll_offset: 0,
+            last_max_scroll: std::cell::Cell::new(0),
+            active_agents: Vec::new(),
+            agents_ready_to_start: false,
+            last_agent_prompt: None,
+            agent_context: None,
+            agent_task: None,
+            overall_task_status: "preparing".to_string(),
+            sparkline_data: std::cell::RefCell::new(Vec::new()),
+            last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
+            stream: crate::streaming::controller::StreamController::new(config.clone()),
+            current_stream_kind: None,
+            interrupts: interrupts::InterruptManager::new(),
+            session_patch_sets: Vec::new(),
+            baseline_file_contents: HashMap::new(),
+            diff_overlay: None,
+            diff_confirm: None,
+            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            height_cache_last_width: std::cell::Cell::new(0),
+            last_history_viewport_height: std::cell::Cell::new(0),
+            diff_body_visible_rows: std::cell::Cell::new(0),
+            height_manager: RefCell::new(HeightManager::new(
+                crate::height_manager::HeightManagerConfig::default(),
+            )),
+            last_hud_present: std::cell::Cell::new(false),
+            prefix_sums: std::cell::RefCell::new(Vec::new()),
+            vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+            scrollbar_visible_until: std::cell::Cell::new(None),
+            last_theme: crate::theme::current_theme(),
+            perf_enabled: false,
+            perf: std::cell::RefCell::new(PerfStats::default()),
+            session_id: None,
+            pending_jump_back: None,
+        }
+    }
+
+    /// Export current user/assistant messages into ResponseItem list for forking.
+    pub(crate) fn export_response_items(&self) -> Vec<codex_protocol::models::ResponseItem> {
+        use codex_protocol::models::{ContentItem, ResponseItem};
+        let mut items = Vec::new();
+        for cell in &self.history_cells {
+            match cell.kind() {
+                crate::history_cell::HistoryCellType::User => {
+                    let text = cell.display_lines().iter().map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>()).collect::<Vec<_>>().join("\n");
+                    items.push(ResponseItem::Message { id: None, role: "user".to_string(), content: vec![ContentItem::OutputText { text }] });
+                }
+                crate::history_cell::HistoryCellType::Assistant => {
+                    let text = cell.display_lines().iter().map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>()).collect::<Vec<_>>().join("\n");
+                    items.push(ResponseItem::Message { id: None, role: "assistant".to_string(), content: vec![ContentItem::OutputText { text }] });
+                }
+                _ => {}
+            }
+        }
+        items
+    }
+
+    pub(crate) fn config_ref(&self) -> &Config { &self.config }
 
     /// Check if there are any animations and trigger redraw if needed
     pub fn check_for_initial_animations(&mut self) {
@@ -1528,6 +1731,10 @@ impl ChatWidget<'_> {
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
+                // Commit pending jump-back (make trimming permanent) before submission
+                if self.pending_jump_back.is_some() {
+                    self.pending_jump_back = None;
+                }
                 let user_message = self.parse_message_with_images(text);
                 self.submit_user_message(user_message);
             }
@@ -2286,6 +2493,8 @@ impl ChatWidget<'_> {
         let Event { id, msg } = event;
         match msg {
             EventMsg::SessionConfigured(event) => {
+                // Record session id for potential future fork/backtrack features
+                self.session_id = Some(event.session_id);
                 self.bottom_pane
                     .set_history_metadata(event.history_log_id, event.history_entry_count);
                 // Record session information at the top of the conversation.
@@ -3413,6 +3622,99 @@ impl ChatWidget<'_> {
     pub(crate) fn composer_is_empty(&self) -> bool {
         self.bottom_pane.composer_is_empty()
     }
+
+    // --- Double‑Escape helpers ---
+    pub(crate) fn show_esc_backtrack_hint(&mut self) {
+        self.bottom_pane
+            .flash_footer_notice("Esc edit prev".to_string());
+    }
+
+    pub(crate) fn show_edit_previous_picker(&mut self) {
+        use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
+        // Collect recent user prompts (newest first)
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let mut nth_counter = 0usize;
+        for cell in self.history_cells.iter().rev() {
+            if cell.kind() == crate::history_cell::HistoryCellType::User {
+                nth_counter += 1; // 1-based index for Nth last
+                let content_lines = cell.display_lines();
+                if content_lines.is_empty() {
+                    continue;
+                }
+                let full_text: String = content_lines
+                    .iter()
+                    .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                // Build a concise name from first line
+                let mut first = content_lines[0]
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                const MAX: usize = 64;
+                if first.chars().count() > MAX {
+                    first = first.chars().take(MAX).collect::<String>() + "…";
+                }
+
+                let nth = nth_counter;
+                let actions: Vec<crate::bottom_pane::list_selection_view::SelectionAction> = vec![
+                    Box::new({
+                        let text = full_text.clone();
+                        move |tx: &crate::app_event_sender::AppEventSender| {
+                            tx.send(crate::app_event::AppEvent::JumpBack { nth, prefill: text.clone() });
+                        }
+                    })
+                ];
+
+                items.push(SelectionItem {
+                    name: first,
+                    description: None,
+                    is_current: false,
+                    actions,
+                });
+            }
+        }
+
+        if items.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No previous messages to edit".to_string());
+            return;
+        }
+
+        let view = ListSelectionView::new(
+            "Edit Previous Message".to_string(),
+            Some("Select a message to prefill".to_string()),
+            Some("Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+        );
+        self.bottom_pane.show_list_selection(
+            "Edit Previous Message".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn is_task_running(&self) -> bool {
+        self.bottom_pane.is_task_running()
+    }
+
+    // begin_jump_back no longer used: backend fork handles it.
+
+    pub(crate) fn undo_jump_back(&mut self) {
+        if let Some(mut st) = self.pending_jump_back.take() {
+            // Restore removed cells in original order
+            self.history_cells.extend(st.removed_cells.drain(..));
+            // Clear composer (no reliable way to restore prior text)
+            self.insert_str("");
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn has_pending_jump_back(&self) -> bool { self.pending_jump_back.is_some() }
 
     /// Forward an `Op` directly to codex.
     pub(crate) fn submit_op(&self, op: Op) {

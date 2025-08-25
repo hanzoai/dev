@@ -707,6 +707,7 @@ name = "codex-apply-patch"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "pretty_assertions",
  "similar",
  "tempfile",
@@ -724,6 +725,7 @@ dependencies = [
  "codex-core",
  "codex-linux-sandbox",
  "dotenvy",
+ "tempfile",
  "tokio",
 ]
 
