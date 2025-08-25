@@ -391,6 +391,20 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
+    /// Show a generic list selection popup with items and actions.
+    pub fn show_list_selection(
+        &mut self,
+        _title: String,
+        _subtitle: Option<String>,
+        _footer_hint: Option<String>,
+        items: crate::bottom_pane::list_selection_view::ListSelectionView,
+    ) {
+        self.active_view = Some(Box::new(items));
+        // Status shown in composer title now
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
     /// Show the resume selection UI with structured rows
     pub fn show_resume_selection(
         &mut self,
