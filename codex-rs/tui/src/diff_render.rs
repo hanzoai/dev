@@ -354,7 +354,10 @@ fn push_wrapped_diff_line_with_width(
         // at a UTF-8 character boundary so this row's chunk fits exactly.
         // First line includes a visible sign plus a trailing space after it.
         // Continuation lines include only the hanging space (no sign).
-        let base_prefix = if first { prefix_cols + 2 } else { prefix_cols + 1 + continuation_indent };
+        // First line reserves 1 col for the sign ('+'/'-') and 1 space after it.
+        // Continuation lines must reserve BOTH columns as well (sign column + its trailing space)
+        // before applying the hanging indent equal to the content's leading spaces.
+        let base_prefix = if first { prefix_cols + 2 } else { prefix_cols + 2 + continuation_indent };
         let available_content_cols = term_cols
             .saturating_sub(base_prefix)
             .max(1);
@@ -401,7 +404,7 @@ fn push_wrapped_diff_line_with_width(
         } else {
             // Continuation lines keep a space for the sign column so content aligns
             let hang_prefix = format!(
-                "{indent}{}{} {}",
+                "{indent}{}{}  {}",
                 " ".repeat(ln_str.len()),
                 " ".repeat(gap_after_ln),
                 " ".repeat(continuation_indent)

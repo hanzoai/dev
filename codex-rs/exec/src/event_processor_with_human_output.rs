@@ -530,6 +530,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::GetHistoryEntryResponse(_) => {
                 // Currently ignored in exec output.
             }
+            EventMsg::ReplayHistory(_) => {
+                // Replay is a TUI concern; ignore in headless output
+            }
             EventMsg::BrowserScreenshotUpdate(_) => {
                 // Currently ignored in exec output.
             }

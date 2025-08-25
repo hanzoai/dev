@@ -103,4 +103,7 @@ pub(crate) enum AppEvent {
 
     /// Chrome launch option selected by user
     ChromeLaunchOptionSelected(ChromeLaunchOption, Option<u16>),
+
+    /// Start a new chat session by resuming from the given rollout file
+    ResumeFrom(std::path::PathBuf),
 }

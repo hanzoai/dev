@@ -1508,9 +1508,9 @@ async fn submission_loop(
 
                 // Patch restored state into the newly created session.
                 if let Some(sess_arc) = &sess {
-                    if restored_items.is_some() {
+                    if let Some(items) = &restored_items {
                         let mut st = sess_arc.state.lock().unwrap();
-                        st.history.record_items(restored_items.unwrap().iter());
+                        st.history.record_items(items.iter());
                     }
                 }
 
@@ -1532,6 +1532,16 @@ async fn submission_loop(
                 for event in events {
                     if let Err(e) = tx_event.send(event).await {
                         error!("failed to send event: {e:?}");
+                    }
+                }
+                // If we resumed from a rollout, replay the prior transcript into the UI.
+                if let Some(items) = restored_items {
+                    let event = Event {
+                        id: sub.id.clone(),
+                        msg: EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }),
+                    };
+                    if let Err(e) = tx_event.send(event).await {
+                        warn!("failed to send ReplayHistory event: {e}");
                     }
                 }
                 

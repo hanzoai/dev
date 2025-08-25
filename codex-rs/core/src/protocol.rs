@@ -463,6 +463,11 @@ pub enum EventMsg {
 
     /// Notification that the agent is shutting down.
     ShutdownComplete,
+
+    /// Replay a previously recorded transcript into the UI.
+    /// Used after resuming from a rollout file so the user sees the full
+    /// history for that session without re-executing any actions.
+    ReplayHistory(ReplayHistoryEvent),
 }
 
 // Individual event payload types matching each `EventMsg` variant.
@@ -517,6 +522,14 @@ impl TokenUsage {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FinalOutput {
     pub token_usage: TokenUsage,
+}
+
+/// Payload for `ReplayHistory` containing prior `ResponseItem`s.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReplayHistoryEvent {
+    /// Items to render in order. Front-ends should render these as static
+    /// history without triggering any tool execution.
+    pub items: Vec<codex_protocol::models::ResponseItem>,
 }
 
 impl From<TokenUsage> for FinalOutput {

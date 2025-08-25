@@ -48,6 +48,7 @@ mod render;
 mod session_log;
 mod shimmer;
 mod slash_command;
+mod resume;
 mod streaming;
 mod terminal_info;
 // mod text_block; // Orphaned after trait-based HistoryCell migration

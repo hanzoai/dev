@@ -433,6 +433,11 @@ impl App<'_> {
                     };
 
                     match command {
+                        SlashCommand::Resume => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.show_resume_picker();
+                            }
+                        }
                         SlashCommand::New => {
                             // Clear the current conversation and start fresh
                             if let AppState::Chat { widget } = &mut self.app_state {
@@ -596,6 +601,23 @@ impl App<'_> {
                                 ),
                             }));
                         }
+                    }
+                }
+                AppEvent::ResumeFrom(path) => {
+                    // Replace the current chat widget with a new one configured to resume
+                    let mut cfg = self.config.clone();
+                    cfg.experimental_resume = Some(path);
+                    if let AppState::Chat { .. } = &self.app_state {
+                        let new_widget = Box::new(ChatWidget::new(
+                            cfg,
+                            self.app_event_tx.clone(),
+                            None,
+                            Vec::new(),
+                            self.enhanced_keys_supported,
+                            self.terminal_info.clone(),
+                        ));
+                        self.app_state = AppState::Chat { widget: new_widget };
+                        self.app_event_tx.send(AppEvent::RequestRedraw);
                     }
                 }
                 AppEvent::PrepareAgents => {

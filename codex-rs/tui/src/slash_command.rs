@@ -25,6 +25,7 @@ pub enum SlashCommand {
     Verbosity,
     Prompts,
     Perf,
+    Resume,
     // Prompt-expanding commands
     Plan,
     Solve,
@@ -41,6 +42,7 @@ impl SlashCommand {
         match self {
             SlashCommand::Chrome => "connect to Chrome",
             SlashCommand::Browser => "open internal browser",
+            SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
             SlashCommand::Solve => "solve a challenging problem (multiple agents)",
             SlashCommand::Code => "perform a coding task (multiple agents)",
