@@ -70,6 +70,7 @@ use crate::history_cell;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
+use codex_protocol::models::{ContentItem, ResponseItem};
 use crate::history_cell::PatchEventType;
 use crate::live_wrap::RowBuilder;
 use crate::user_approval_widget::ApprovalRequest;
@@ -456,6 +457,75 @@ impl ChatWidget<'_> {
             HistoryCellType::Image => "Image".to_string(),
             HistoryCellType::AnimatedWelcome => "AnimatedWelcome".to_string(),
             HistoryCellType::Loading => "Loading".to_string(),
+        }
+    }
+
+    pub(crate) fn show_resume_picker(&mut self) {
+        // Discover candidates
+        let cwd = self.config.cwd.clone();
+        let codex_home = self.config.codex_home.clone();
+        let candidates = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home);
+        if candidates.is_empty() {
+            self.add_to_history(crate::history_cell::new_background_event(
+                "No past sessions found for this folder".to_string(),
+            ));
+            return;
+        }
+        // Convert to simple rows
+        let items: Vec<(String, Option<String>, std::path::PathBuf)> = candidates
+            .into_iter()
+            .map(|c| (c.title, c.subtitle, c.path))
+            .collect();
+        let title = "Resume Session".to_string();
+        let subtitle = Some(format!("{}", cwd.display()));
+        self.bottom_pane.show_resume_selection(title, subtitle, items);
+    }
+
+    /// Render a single recorded ResponseItem into history without executing tools
+    fn render_replay_item(&mut self, item: ResponseItem) {
+        match item {
+            ResponseItem::Message { role, content, .. } => {
+                let mut text = String::new();
+                for c in content {
+                    match c {
+                        ContentItem::OutputText { text: t }
+                        | ContentItem::InputText { text: t } => {
+                            if !text.is_empty() { text.push('\n'); }
+                            text.push_str(&t);
+                        }
+                        _ => {}
+                    }
+                }
+                if role == "user" {
+                    self.add_to_history(crate::history_cell::new_user_prompt(text));
+                } else {
+                    // Build a PlainHistoryCell with Assistant kind; header line hidden by renderer
+                    use crate::history_cell::{PlainHistoryCell, HistoryCellType};
+                    let mut lines = Vec::new();
+                    lines.push(ratatui::text::Line::from("assistant"));
+                    for l in text.lines() { lines.push(ratatui::text::Line::from(l.to_string())); }
+                    self.add_to_history(PlainHistoryCell { lines, kind: HistoryCellType::Assistant });
+                }
+            }
+            ResponseItem::Reasoning { summary, .. } => {
+                for s in summary {
+                    if let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s {
+                        // Reasoning cell – use the existing reasoning output styling
+                        let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
+                        self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
+                        let _ = self.stream.apply_final_reasoning(&text, &sink);
+                        // finalize immediately for static replay
+                        self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
+                    }
+                }
+            }
+            ResponseItem::FunctionCallOutput { output, .. } => {
+                // Show as a background event for now
+                self.add_to_history(crate::history_cell::new_background_event(output.content));
+            }
+            _ => {
+                // Ignore other item kinds for replay (tool calls, etc.)
+            }
         }
     }
     /// Trigger fade on the welcome cell when the composer expands (e.g., slash popup).
@@ -2262,6 +2332,13 @@ impl ChatWidget<'_> {
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
                 self.mark_needs_redraw();
+            }
+            EventMsg::ReplayHistory(ev) => {
+                // Render prior transcript items statically without executing tools
+                for item in ev.items {
+                    self.render_replay_item(item);
+                }
+                self.request_redraw();
             }
             EventMsg::WebSearchComplete(ev) => {
                 // Replace the specific running web search cell with a completed one

@@ -274,6 +274,7 @@ async fn run_codex_tool_session_inner(
                     | EventMsg::WebSearchBegin(_)
                     | EventMsg::WebSearchComplete(_)
                     | EventMsg::GetHistoryEntryResponse(_)
+                    | EventMsg::ReplayHistory(_)
                     | EventMsg::PlanUpdate(_)
                     | EventMsg::BrowserScreenshotUpdate(_)
                     | EventMsg::AgentStatusUpdate(_)

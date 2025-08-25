@@ -31,6 +31,10 @@ pub struct SessionMeta {
     pub id: Uuid,
     pub timestamp: String,
     pub instructions: Option<String>,
+    /// Absolute working directory for the session. Optional for back-compat
+    /// with older rollout files that did not record this information.
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -114,6 +118,7 @@ impl RolloutRecorder {
                 timestamp,
                 id: session_id,
                 instructions,
+                cwd: Some(config.cwd.to_string_lossy().to_string()),
             }),
             cwd,
         ));
