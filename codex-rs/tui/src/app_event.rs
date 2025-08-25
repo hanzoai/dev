@@ -106,4 +106,9 @@ pub(crate) enum AppEvent {
 
     /// Start a new chat session by resuming from the given rollout file
     ResumeFrom(std::path::PathBuf),
+
+    /// Begin jump-back to the Nth last user message (1 = latest).
+    /// Trims visible history up to that point and pre-fills the composer.
+    JumpBack { nth: usize, prefill: String },
+    
 }

@@ -424,6 +424,7 @@ use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
 use serde_json::Value;
+use crate::exec_command::ExecSessionManager;
 
 /// The high-level interface to the Codex system.
 /// It operates as a queue pair where you send submissions and receive events.
@@ -557,6 +558,8 @@ pub(crate) struct Session {
 
     /// Manager for external MCP servers/tools.
     mcp_connection_manager: McpConnectionManager,
+    #[allow(dead_code)]
+    session_manager: ExecSessionManager,
 
     /// Configuration for available agent models
     agents: Vec<crate::config_types::AgentConfig>,
@@ -1493,6 +1496,7 @@ async fn submission_loop(
                     cwd,
                     _writable_roots: writable_roots,
                     mcp_connection_manager,
+                    session_manager: crate::exec_command::ExecSessionManager::default(),
                     agents: config.agents.clone(),
                     notify,
                     state: Mutex::new(state),
