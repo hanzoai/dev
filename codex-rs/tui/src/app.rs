@@ -803,7 +803,7 @@ impl App<'_> {
                                 // Replace widget with a new one bound to the forked conversation
                                 let session_conf = new_conv.session_configured.clone();
                                 let conv = new_conv.conversation.clone();
-                                let mut new_widget = ChatWidget::new_from_existing(
+                                let new_widget = ChatWidget::new_from_existing(
                                     cfg,
                                     conv,
                                     session_conf,
