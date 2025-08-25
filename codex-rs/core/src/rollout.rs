@@ -35,6 +35,9 @@ pub struct SessionMeta {
     /// with older rollout files that did not record this information.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Model identifier for the session.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -87,11 +90,7 @@ impl RolloutRecorder {
         uuid: Uuid,
         instructions: Option<String>,
     ) -> std::io::Result<Self> {
-        let LogFileInfo {
-            file,
-            session_id,
-            timestamp,
-        } = create_log_file(config, uuid)?;
+        let LogFileInfo { file, session_id, timestamp, path } = create_log_file(config, uuid)?;
 
         let timestamp_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
@@ -119,8 +118,11 @@ impl RolloutRecorder {
                 id: session_id,
                 instructions,
                 cwd: Some(config.cwd.to_string_lossy().to_string()),
+                model: Some(config.model.clone()),
             }),
             cwd,
+            config.codex_home.clone(),
+            path,
         ));
 
         Ok(Self { tx })
@@ -229,7 +231,9 @@ impl RolloutRecorder {
             tokio::fs::File::from_std(file),
             rx,
             None,
-            cwd,
+            cwd.clone(),
+            crate::config::find_codex_home().unwrap_or_else(|_| std::env::temp_dir()),
+            path.to_path_buf(),
         ));
         info!("Resumed rollout successfully from {path:?}");
         Ok((Self { tx }, saved))
@@ -260,6 +264,9 @@ struct LogFileInfo {
 
     /// Timestamp for the start of the session.
     timestamp: OffsetDateTime,
+
+    /// Absolute path to the rollout file on disk.
+    path: std::path::PathBuf,
 }
 
 fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFileInfo> {
@@ -293,6 +300,7 @@ fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFile
         file,
         session_id,
         timestamp,
+        path,
     })
 }
 
@@ -301,6 +309,8 @@ async fn rollout_writer(
     mut rx: mpsc::Receiver<RolloutCmd>,
     mut meta: Option<SessionMeta>,
     cwd: std::path::PathBuf,
+    codex_home: std::path::PathBuf,
+    rollout_path: std::path::PathBuf,
 ) -> std::io::Result<()> {
     let mut writer = JsonlWriter { file };
 
@@ -314,12 +324,27 @@ async fn rollout_writer(
 
         // Write the SessionMeta as the first item in the file
         writer.write_line(&session_meta_with_git).await?;
+
+        // Best-effort initial directory index update
+        if let Err(e) = append_dir_index_update(
+            &codex_home,
+            &cwd,
+            &session_meta_with_git,
+            &rollout_path,
+            0,
+            None,
+        ) {
+            warn!("failed to write dir index: {e}");
+        }
     }
 
     // Process rollout commands
     while let Some(cmd) = rx.recv().await {
         match cmd {
             RolloutCmd::AddItems(items) => {
+                // Track message count and last user snippet while writing
+                let mut msg_count_delta = 0usize;
+                let mut last_user_snippet: Option<String> = None;
                 for item in items {
                     match item {
                         ResponseItem::Message { .. }
@@ -329,10 +354,53 @@ async fn rollout_writer(
                         | ResponseItem::CustomToolCall { .. }
                         | ResponseItem::CustomToolCallOutput { .. }
                         | ResponseItem::Reasoning { .. } => {
+                            // Skip internal system status messages from persistence
+                            if let ResponseItem::Message { content, .. } = &item {
+                                let contains_system_status = content.iter().any(|ci| match ci {
+                                    codex_protocol::models::ContentItem::InputText { text }
+                                    | codex_protocol::models::ContentItem::OutputText { text } => text.contains("== System Status =="),
+                                    _ => false,
+                                });
+                                if contains_system_status {
+                                    continue;
+                                }
+                            }
                             writer.write_line(&item).await?;
+
+                            if let ResponseItem::Message { role, content, .. } = &item {
+                                if role == "user" {
+                                    // Synthesize a short snippet
+                                    let mut s = String::new();
+                                    for c in content {
+                                        if let codex_protocol::models::ContentItem::InputText { text } = c {
+                                            if !text.is_empty() {
+                                                s.push_str(text);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if s.is_empty() {
+                                        s = "(image/message)".to_string();
+                                    }
+                                    last_user_snippet = Some(s);
+                                }
+                                msg_count_delta = msg_count_delta.saturating_add(1);
+                            }
                         }
                         ResponseItem::Other => {}
                     }
+                }
+
+                // Best-effort index append after batch
+                if let Err(e) = append_dir_index_update(
+                    &codex_home,
+                    &cwd,
+                    &SessionMetaWithGit { meta: SessionMeta { id: Uuid::nil(), timestamp: String::new(), instructions: None, cwd: Some(cwd.to_string_lossy().to_string()), model: None }, git: None },
+                    &rollout_path,
+                    msg_count_delta,
+                    last_user_snippet,
+                ) {
+                    warn!("failed to write dir index: {e}");
                 }
             }
             RolloutCmd::UpdateState(state) => {
@@ -370,4 +438,78 @@ impl JsonlWriter {
         self.file.flush().await?;
         Ok(())
     }
+}
+
+#[derive(Serialize)]
+struct DirIndexLine<'a> {
+    record_type: &'static str,
+    cwd: &'a str,
+    session_file: &'a str,
+    session_id: String,
+    created_ts: Option<&'a str>,
+    modified_ts: String,
+    message_count_delta: usize,
+    model: Option<&'a str>,
+    branch: Option<&'a str>,
+    last_user_snippet: Option<String>,
+}
+
+fn dir_index_path(codex_home: &std::path::Path, cwd: &std::path::Path) -> std::path::PathBuf {
+    let mut name = cwd.to_string_lossy().to_string();
+    name = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if name.len() > 160 {
+        name.truncate(160);
+    }
+    let mut p = codex_home.to_path_buf();
+    p.push(SESSIONS_SUBDIR);
+    p.push("index");
+    p.push("by-dir");
+    let _ = fs::create_dir_all(&p);
+    p.push(format!("{}.jsonl", name));
+    p
+}
+
+fn append_dir_index_update(
+    codex_home: &std::path::Path,
+    cwd: &std::path::Path,
+    session_meta_with_git: &SessionMetaWithGit,
+    rollout_path: &std::path::Path,
+    message_count_delta: usize,
+    last_user_snippet: Option<String>,
+) -> std::io::Result<()> {
+    let path = dir_index_path(codex_home, cwd);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(&path)?;
+    let now = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "".to_string());
+    let meta = &session_meta_with_git.meta;
+    let branch = session_meta_with_git.git.as_ref().and_then(|g| g.branch.as_deref());
+    let sf_binding = rollout_path.to_string_lossy();
+    let line = DirIndexLine {
+        record_type: "dir_index",
+        cwd: meta.cwd.as_deref().unwrap_or("") ,
+        session_file: sf_binding.as_ref(),
+        session_id: meta.id.to_string(),
+        created_ts: Some(&meta.timestamp),
+        modified_ts: now,
+        message_count_delta,
+        model: meta.model.as_deref(),
+        branch,
+        last_user_snippet,
+    };
+    let s = serde_json::to_string(&line)
+        .map_err(|e| IoError::other(format!("failed to serialize dir index line: {e}")))?;
+    use std::io::Write as _;
+    f.write_all(s.as_bytes())?;
+    f.write_all(b"\n")
 }
