@@ -25,7 +25,8 @@ mod reasoning_selection_view;
 mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
-use list_selection_view::{ListSelectionView, SelectionItem, SelectionAction};
+pub mod resume_selection_view;
+// no direct use of list_selection_view or its items here
 mod textarea;
 mod theme_selection_view;
 mod verbosity_selection_view;
@@ -390,29 +391,15 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
-    /// Show the resume selection UI given a list of (rows, path) tuples.
+    /// Show the resume selection UI with structured rows
     pub fn show_resume_selection(
         &mut self,
         title: String,
         subtitle: Option<String>,
-        entries: Vec<(String, Option<String>, std::path::PathBuf)>,
+        rows: Vec<resume_selection_view::ResumeRow>,
     ) {
-        let items: Vec<SelectionItem> = entries
-            .into_iter()
-            .map(|(name, description, path)| SelectionItem {
-                name,
-                description,
-                is_current: false,
-                actions: vec![Box::new(move |tx: &AppEventSender| tx.send(AppEvent::ResumeFrom(path.clone()))) as SelectionAction],
-            })
-            .collect();
-        let view = ListSelectionView::new(
-            title,
-            subtitle,
-            Some("Enter: Select    Esc: Cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-        );
+        use resume_selection_view::ResumeSelectionView;
+        let view = ResumeSelectionView::new(title, subtitle.unwrap_or_default(), rows, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw()
