@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::AtomicU32;
 
@@ -22,8 +21,6 @@ use crate::exec_command::exec_command_params::WriteStdinParams;
 use crate::exec_command::exec_command_session::ExecCommandSession;
 use crate::exec_command::session_id::SessionId;
 use codex_protocol::models::FunctionCallOutputPayload;
-
-pub static SESSION_MANAGER: LazyLock<SessionManager> = LazyLock::new(SessionManager::default);
 
 #[derive(Debug, Default)]
 pub struct SessionManager {
