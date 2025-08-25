@@ -3702,18 +3702,6 @@ impl ChatWidget<'_> {
         self.bottom_pane.is_task_running()
     }
 
-    fn find_nth_last_user_cell_index(&self, nth: usize) -> Option<usize> {
-        if nth == 0 { return None; }
-        let mut count = 0usize;
-        for (idx, cell) in self.history_cells.iter().enumerate().rev() {
-            if cell.kind() == crate::history_cell::HistoryCellType::User {
-                count += 1;
-                if count == nth { return Some(idx); }
-            }
-        }
-        None
-    }
-
     // begin_jump_back no longer used: backend fork handles it.
 
     pub(crate) fn undo_jump_back(&mut self) {
