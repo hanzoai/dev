@@ -33,6 +33,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 /// Time window for debouncing redraw requests.
 ///
@@ -89,6 +90,9 @@ pub(crate) struct App<'a> {
     /// starts with our theme background. This avoids terminals that may show
     /// profile defaults until all cells are explicitly painted.
     clear_on_first_frame: bool,
+
+    // Double‑Esc timing for backtrack/edit‑previous
+    last_esc_time: Option<Instant>,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -224,6 +228,7 @@ impl App<'_> {
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
+            last_esc_time: None,
         }
     }
 
@@ -310,7 +315,47 @@ impl App<'_> {
                     }
                 }
                 AppEvent::KeyEvent(key_event) => {
+                    // Reset double‑Esc timer on any non‑Esc key
+                    if !matches!(key_event.code, KeyCode::Esc) {
+                        self.last_esc_time = None;
+                    }
+
                     match key_event {
+                        KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
+                            // Double‑Esc behavior only when composer is empty
+                            match &mut self.app_state {
+                                AppState::Chat { widget } => {
+                                    // 1) First Esc should stop any running task/stream immediately
+                                    if widget.is_task_running() {
+                                        let _ = widget.on_ctrl_c();
+                                        continue;
+                                    }
+
+                                    if widget.composer_is_empty() {
+                                        const THRESHOLD: Duration = Duration::from_millis(600);
+                                        let now = Instant::now();
+                                        if let Some(prev) = self.last_esc_time {
+                                            if now.duration_since(prev) <= THRESHOLD {
+                                                // second Esc: either undo jump-back, or open picker
+                                                self.last_esc_time = None;
+                                                if widget.has_pending_jump_back() {
+                                                    widget.undo_jump_back();
+                                                } else {
+                                                    widget.show_edit_previous_picker();
+                                                }
+                                                continue;
+                                            }
+                                        }
+                                        // first Esc: flash hint
+                                        self.last_esc_time = Some(now);
+                                        widget.show_esc_backtrack_hint();
+                                        continue;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            // Otherwise fall through to normal dispatch
+                        }
                         KeyEvent {
                             code: KeyCode::Char('m'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
@@ -742,6 +787,69 @@ impl App<'_> {
                 AppEvent::ChromeLaunchOptionSelected(option, port) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_chrome_launch_option(option, port);
+                    }
+                }
+                AppEvent::JumpBack { nth, prefill } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        // Build response items from current UI history
+                        let items = widget.export_response_items();
+                        let cfg = widget.config_ref().clone();
+                        // Fork conversation synchronously
+                        let result = tokio::runtime::Handle::current().block_on(async {
+                            self._server.fork_conversation(items.clone(), nth, cfg.clone()).await
+                        });
+                        match result {
+                            Ok(new_conv) => {
+                                // Replace widget with a new one bound to the forked conversation
+                                let session_conf = new_conv.session_configured.clone();
+                                let conv = new_conv.conversation.clone();
+                                let new_widget = ChatWidget::new_from_existing(
+                                    cfg,
+                                    conv,
+                                    session_conf,
+                                    self.app_event_tx.clone(),
+                                    self.enhanced_keys_supported,
+                                    self.terminal_info.clone(),
+                                );
+
+                                // Compute prefix up to selected user message: take items before the cut
+                                let prefix_items = {
+                                    // Find cut index: the header of the Nth last user message
+                                    let mut user_seen = 0usize;
+                                    let mut cut = items.len();
+                                    for (idx, it) in items.iter().enumerate().rev() {
+                                        if let codex_protocol::models::ResponseItem::Message { role, .. } = it {
+                                            if role == "user" {
+                                                user_seen += 1;
+                                                if user_seen == nth { cut = idx; break; }
+                                            }
+                                        }
+                                    }
+                                    items.into_iter().take(cut).collect::<Vec<_>>()
+                                };
+
+                                // Install new widget
+                                self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+
+                                // Replay prefix to the UI
+                                let ev = codex_core::protocol::Event {
+                                    id: "fork".to_string(),
+                                    msg: codex_core::protocol::EventMsg::ReplayHistory(
+                                        codex_core::protocol::ReplayHistoryEvent { items: prefix_items }
+                                    ),
+                                };
+                                self.app_event_tx.send(AppEvent::CodexEvent(ev));
+
+                                // Prefill composer with the edited text
+                                if let AppState::Chat { widget } = &mut self.app_state {
+                                    widget.insert_str(&prefill);
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Err(e) => {
+                                tracing::error!("error forking conversation: {e:#}");
+                            }
+                        }
                     }
                 }
                 AppEvent::ScheduleFrameIn(duration) => {
