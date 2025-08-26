@@ -911,6 +911,13 @@ impl HistoryCell for LoadingCell {
         true // This is a loading cell
     }
 }
+/// Return the emoji followed by a hair space (U+200A) and a normal space.
+/// This creates a reasonable gap across different terminals,
+/// in particular Terminal.app and iTerm, which render too tightly with just a single normal space.
+///
+/// Improvements here could be to condition this behavior on terminal,
+/// or possibly on emoji.
+// Removed unused helpers padded_emoji and padded_emoji_with.
 
 // ==================== ImageOutputCell ====================
 
