@@ -3,6 +3,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::layout::Margin;
 use ratatui::widgets::WidgetRef;
+use ratatui::prelude::Stylize;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
@@ -124,37 +125,36 @@ impl WidgetRef for &FileSearchPopup {
         // rows align with the text inside the composer (border + inner pad).
         let indented_area = area.inner(Margin::new(2, 0));
         // Convert matches to GenericDisplayRow, translating indices to usize at the UI boundary.
-        let rows_all: Vec<GenericDisplayRow> = if self.matches.is_empty() {
-            Vec::new()
-        } else {
-            self.matches
-                .iter()
-                .map(|m| GenericDisplayRow {
-                    name: m.path.clone(),
-                    match_indices: m
-                        .indices
-                        .as_ref()
-                        .map(|v| v.iter().map(|&i| i as usize).collect()),
-                    is_current: false,
-                    description: None,
-                    // Use default text color for file matches
-                    name_color: None,
-                })
-                .collect()
-        };
+        let rows_all: Vec<GenericDisplayRow> = self
+            .matches
+            .iter()
+            .map(|m| GenericDisplayRow {
+                name: m.path.clone(),
+                match_indices: m
+                    .indices
+                    .as_ref()
+                    .map(|v| v.iter().map(|&i| i as usize).collect()),
+                is_current: false,
+                description: None,
+                // Use default text color for file matches
+                name_color: None,
+            })
+            .collect();
 
         if self.waiting && rows_all.is_empty() {
-            // Render a minimal waiting stub using the shared renderer (no rows -> "no matches").
-            render_rows(indented_area, buf, &[], &self.state, MAX_POPUP_ROWS, false);
+            // Show a friendly "searching…" placeholder instead of "no matches" while waiting
+            let msg = "searching…";
+            // Draw centered within the first row of the hint area
+            let x = indented_area.x;
+            let y = indented_area.y;
+            let w = indented_area.width;
+            let start = x.saturating_add(w.saturating_sub(msg.len() as u16) / 2);
+            for xi in x..x + w {
+                buf[(xi, y)].set_char(' ');
+            }
+            buf.set_string(start, y, msg, ratatui::style::Style::default().dim());
         } else {
-            render_rows(
-                indented_area,
-                buf,
-                &rows_all,
-                &self.state,
-                MAX_POPUP_ROWS,
-                false,
-            );
+            render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS, false);
         }
     }
 }
