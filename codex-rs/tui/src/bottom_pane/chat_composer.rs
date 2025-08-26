@@ -1,6 +1,7 @@
 use codex_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -26,6 +27,8 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
+use crate::clipboard_paste::normalize_pasted_path;
+use crate::clipboard_paste::pasted_image_format;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -405,6 +408,8 @@ impl ChatComposer {
             let placeholder = format!("[Pasted Content {char_count} chars]");
             self.textarea.insert_str(&placeholder);
             self.pending_pastes.push((placeholder, pasted));
+        } else if self.handle_paste_image_path(pasted.clone()) {
+            self.textarea.insert_str(" ");
         } else {
             self.textarea.insert_str(&pasted);
         }
@@ -503,6 +508,11 @@ impl ChatComposer {
         result
     }
 
+    /// Return true if either the slash-command popup or the file-search popup is active.
+    pub(crate) fn popup_active(&self) -> bool {
+        !matches!(self.active_popup, ActivePopup::None)
+    }
+
     /// Handle key event when the slash-command popup is visible.
     fn handle_key_event_with_slash_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         let ActivePopup::Command(popup) = &mut self.active_popup else {
@@ -524,6 +534,13 @@ impl ChatComposer {
                     return self.handle_key_event_without_popup(key_event);
                 }
                 popup.move_down();
+                (InputResult::None, true)
+            }
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                // Dismiss the slash popup; keep the current input untouched.
+                self.active_popup = ActivePopup::None;
                 (InputResult::None, true)
             }
             KeyEvent {
@@ -880,6 +897,15 @@ impl ChatComposer {
     /// Handle key event when no popup is visible.
     fn handle_key_event_without_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         match key_event {
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: crossterm::event::KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } if self.is_empty() => {
+                self.app_event_tx.send(AppEvent::ExitRequest);
+                (InputResult::None, true)
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -1209,7 +1235,7 @@ impl ChatComposer {
     }
 }
 
-impl WidgetRef for &ChatComposer {
+impl WidgetRef for ChatComposer {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let popup_height = match &self.active_popup {
             ActivePopup::Command(popup) => popup.calculate_required_height(),
@@ -1733,7 +1759,7 @@ mod tests {
             }
 
             terminal
-                .draw(|f| f.render_widget_ref(&composer, f.area()))
+                .draw(|f| f.render_widget_ref(composer, f.area()))
                 .unwrap_or_else(|e| panic!("Failed to draw {name} composer: {e}"));
 
             assert_snapshot!(name, terminal.backend());

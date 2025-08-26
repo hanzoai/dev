@@ -40,6 +40,7 @@ pub(crate) enum CancellationEvent {
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 
+use crate::status_indicator_widget::StatusIndicatorWidget;
 use approval_modal_view::ApprovalModalView;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
@@ -164,6 +165,17 @@ impl BottomPane<'_> {
             self.request_immediate_redraw();
             InputResult::None
         } else {
+            // If a task is running and a status line is visible, allow Esc to
+            // send an interrupt even while the composer has focus.
+            if matches!(key_event.code, crossterm::event::KeyCode::Esc)
+                && self.is_task_running
+                && let Some(status) = &self.status
+            {
+                // Send Op::Interrupt
+                status.interrupt();
+                self.request_redraw();
+                return InputResult::None;
+            }
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
             if needs_redraw {
                 self.request_immediate_redraw();
@@ -325,6 +337,13 @@ impl BottomPane<'_> {
 
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
+    }
+
+    /// Return true when the pane is in the regular composer state without any
+    /// overlays or popups and not running a task. This is the safe context to
+    /// use Esc-Esc for backtracking from the main view.
+    pub(crate) fn is_normal_backtrack_mode(&self) -> bool {
+        !self.is_task_running && self.active_view.is_none() && !self.composer.popup_active()
     }
 
     /// Update the *context-window remaining* indicator in the composer. This
@@ -567,6 +586,7 @@ impl WidgetRef for &BottomPane<'_> {
             y_offset = y_offset.saturating_add(1);
         }
 
+        // When a modal view is active, it owns the whole content area.
         if let Some(view) = &self.active_view {
             if y_offset < area.height {
                 // Reserve bottom padding lines; keep at least 1 line for the view.
@@ -790,7 +810,7 @@ mod tests {
             enhanced_keys_supported: false,
         });
 
-        // Start a running task so the status indicator replaces the composer.
+        // Start a running task so the status indicator is active above the composer.
         pane.set_task_running(true);
         pane.update_status_text("waiting for model".to_string());
 
@@ -803,13 +823,12 @@ mod tests {
         use crossterm::event::KeyModifiers;
         pane.handle_key_event(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
 
-        // After denial, since the task is still running, the status indicator
-        // should be restored as the active view; the composer should NOT be visible.
+        // After denial, since the task is still running, the status indicator should be
+        // visible above the composer. The modal should be gone.
         assert!(
-            pane.status_view_active,
-            "status view should be active after denial"
+            pane.active_view.is_none(),
+            "no active modal view after denial"
         );
-        assert!(pane.active_view.is_some(), "active view should be present");
 
         // Render and ensure the top row includes the Coding header instead of the composer.
         // Give the animation thread a moment to tick.
@@ -824,6 +843,23 @@ mod tests {
         assert!(
             row0.contains("Coding"),
             "expected Coding header after denial: {row0:?}"
+        );
+
+        // Composer placeholder should be visible somewhere below.
+        let mut found_composer = false;
+        for y in 1..area.height.saturating_sub(2) {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
+            }
+            if row.contains("Ask Codex") {
+                found_composer = true;
+                break;
+            }
+        }
+        assert!(
+            found_composer,
+            "expected composer visible under status line"
         );
 
         // Drain the channel to avoid unused warnings.
@@ -899,20 +935,14 @@ mod tests {
             "expected Coding header on top row: {top:?}"
         );
 
-        // Bottom two rows are blank padding
+        // Last row should be blank padding; the row above should generally contain composer content.
         let mut r_last = String::new();
-        let mut r_last2 = String::new();
         for x in 0..area.width {
             r_last.push(buf[(x, height - 1)].symbol().chars().next().unwrap_or(' '));
-            r_last2.push(buf[(x, height - 2)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
             r_last.trim().is_empty(),
             "expected last row blank: {r_last:?}"
-        );
-        assert!(
-            r_last2.trim().is_empty(),
-            "expected second-to-last row blank: {r_last2:?}"
         );
     }
 
@@ -949,7 +979,7 @@ mod tests {
             "expected bottom padding on row 1: {row1:?}"
         );
 
-        // Height=1 → no padding; single row is the spinner.
+        // Height=1 → no padding; single row is the composer (status hidden).
         let area1 = Rect::new(0, 0, 20, 1);
         let mut buf1 = Buffer::empty(area1);
         (&pane).render_ref(area1, &mut buf1);

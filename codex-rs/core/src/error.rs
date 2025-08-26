@@ -128,6 +128,7 @@ pub enum CodexErr {
 #[derive(Debug)]
 pub struct UsageLimitReachedError {
     pub plan_type: Option<String>,
+    pub resets_in_seconds: Option<u64>,
 }
 
 impl std::fmt::Display for UsageLimitReachedError {
@@ -148,7 +149,38 @@ impl std::fmt::Display for UsageLimitReachedError {
                 "You've hit your usage limit. Limits reset every 5h and every week."
             )?;
         }
+
         Ok(())
+    }
+}
+
+fn format_reset_duration(total_secs: u64) -> String {
+    let days = total_secs / 86_400;
+    let hours = (total_secs % 86_400) / 3_600;
+    let minutes = (total_secs % 3_600) / 60;
+
+    let mut parts: Vec<String> = Vec::new();
+    if days > 0 {
+        let unit = if days == 1 { "day" } else { "days" };
+        parts.push(format!("{} {}", days, unit));
+    }
+    if hours > 0 {
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        parts.push(format!("{} {}", hours, unit));
+    }
+    if minutes > 0 {
+        let unit = if minutes == 1 { "minute" } else { "minutes" };
+        parts.push(format!("{} {}", minutes, unit));
+    }
+
+    if parts.is_empty() {
+        return "less than a minute".to_string();
+    }
+
+    match parts.len() {
+        1 => parts[0].clone(),
+        2 => format!("{} {}", parts[0], parts[1]),
+        _ => format!("{} {} {}", parts[0], parts[1], parts[2]),
     }
 }
 
@@ -184,6 +216,8 @@ impl CodexErr {
 pub fn get_error_message_ui(e: &CodexErr) -> String {
     match e {
         CodexErr::Sandbox(SandboxErr::Denied(_, _, stderr)) => stderr.to_string(),
+        // Timeouts are not sandbox errors from a UX perspective; present them plainly
+        CodexErr::Sandbox(SandboxErr::Timeout) => "error: command timed out".to_string(),
         _ => e.to_string(),
     }
 }
@@ -196,19 +230,23 @@ mod tests {
     fn usage_limit_reached_error_formats_plus_plan() {
         let err = UsageLimitReachedError {
             plan_type: Some("plus".to_string()),
+            resets_in_seconds: None,
         };
         assert_eq!(
             err.to_string(),
-            "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing), or wait for limits to reset (every 5h and every week.)."
+            "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again later."
         );
     }
 
     #[test]
     fn usage_limit_reached_error_formats_default_when_none() {
-        let err = UsageLimitReachedError { plan_type: None };
+        let err = UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: None,
+        };
         assert_eq!(
             err.to_string(),
-            "You've hit your usage limit. Limits reset every 5h and every week."
+            "You've hit your usage limit. Try again later."
         );
     }
 
@@ -216,10 +254,59 @@ mod tests {
     fn usage_limit_reached_error_formats_default_for_other_plans() {
         let err = UsageLimitReachedError {
             plan_type: Some("pro".to_string()),
+            resets_in_seconds: None,
         };
         assert_eq!(
             err.to_string(),
-            "You've hit your usage limit. Limits reset every 5h and every week."
+            "You've hit your usage limit. Try again later."
+        );
+    }
+
+    #[test]
+    fn usage_limit_reached_includes_minutes_when_available() {
+        let err = UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: Some(5 * 60),
+        };
+        assert_eq!(
+            err.to_string(),
+            "You've hit your usage limit. Try again in 5 minutes."
+        );
+    }
+
+    #[test]
+    fn usage_limit_reached_includes_hours_and_minutes() {
+        let err = UsageLimitReachedError {
+            plan_type: Some("plus".to_string()),
+            resets_in_seconds: Some(3 * 3600 + 32 * 60),
+        };
+        assert_eq!(
+            err.to_string(),
+            "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 3 hours 32 minutes."
+        );
+    }
+
+    #[test]
+    fn usage_limit_reached_includes_days_hours_minutes() {
+        let err = UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: Some(2 * 86_400 + 3 * 3600 + 5 * 60),
+        };
+        assert_eq!(
+            err.to_string(),
+            "You've hit your usage limit. Try again in 2 days 3 hours 5 minutes."
+        );
+    }
+
+    #[test]
+    fn usage_limit_reached_less_than_minute() {
+        let err = UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: Some(30),
+        };
+        assert_eq!(
+            err.to_string(),
+            "You've hit your usage limit. Try again in less than a minute."
         );
     }
 }
