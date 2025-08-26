@@ -322,39 +322,57 @@ impl App<'_> {
 
                     match key_event {
                         KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
-                            // Double‑Esc behavior only when composer is empty
-                            match &mut self.app_state {
-                                AppState::Chat { widget } => {
-                                    // 1) First Esc should stop any running task/stream immediately
-                                    if widget.is_task_running() {
-                                        let _ = widget.on_ctrl_c();
+                            // Unified Esc policy (highest confidence first):
+                            // 1) If there's text, clear it.
+                            // 2) Else if agent is running, stop it.
+                            // 3) Else double‑Esc engages backtrack/edit‑previous.
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                // If a file-search popup is visible, close it first
+                                // then continue with global Esc policy in the same keypress.
+                                let closed_file_popup = widget.close_file_popup_if_active();
+                                // If any other modal/overlay view is active, do NOT
+                                // run global Esc policy; the view will handle Esc itself.
+                                if !closed_file_popup && widget.has_active_modal_view() {
+                                    // Do nothing else; the view consumed Esc.
+                                } else {
+                                    let now = Instant::now();
+                                    const THRESHOLD: Duration = Duration::from_millis(600);
+
+                                    // Step 1: clear composer text if present.
+                                    if !widget.composer_is_empty() {
+                                        widget.clear_composer();
+                                        // Arm double‑Esc so a quick second Esc proceeds to steps 2/3.
+                                        self.last_esc_time = Some(now);
                                         continue;
                                     }
 
-                                    if widget.composer_is_empty() {
-                                        const THRESHOLD: Duration = Duration::from_millis(600);
-                                        let now = Instant::now();
-                                        if let Some(prev) = self.last_esc_time {
-                                            if now.duration_since(prev) <= THRESHOLD {
-                                                // second Esc: either undo jump-back, or open picker
-                                                self.last_esc_time = None;
-                                                if widget.has_pending_jump_back() {
-                                                    widget.undo_jump_back();
-                                                } else {
-                                                    widget.show_edit_previous_picker();
-                                                }
-                                                continue;
-                                            }
-                                        }
-                                        // first Esc: flash hint
+                                    // Step 2: stop agent if running.
+                                    if widget.is_task_running() {
+                                        let _ = widget.on_ctrl_c();
+                                        // Arm double‑Esc so next Esc can trigger backtrack.
                                         self.last_esc_time = Some(now);
-                                        widget.show_esc_backtrack_hint();
                                         continue;
                                     }
+
+                                    // Step 3: backtrack via double‑Esc.
+                                    if let Some(prev) = self.last_esc_time {
+                                        if now.duration_since(prev) <= THRESHOLD {
+                                            self.last_esc_time = None;
+                                            if widget.has_pending_jump_back() {
+                                                widget.undo_jump_back();
+                                            } else {
+                                                widget.show_edit_previous_picker();
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                    // First Esc in empty/idle state: show hint and arm timer.
+                                    self.last_esc_time = Some(now);
+                                    widget.show_esc_backtrack_hint();
+                                    continue;
                                 }
-                                _ => {}
                             }
-                            // Otherwise fall through to normal dispatch
+                            // Otherwise fall through
                         }
                         KeyEvent {
                             code: KeyCode::Char('m'),

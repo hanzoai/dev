@@ -164,8 +164,10 @@ impl FileSearchManager {
     ) {
         let compute_indices = true;
         std::thread::spawn(move || {
+            // Normalize the query: strip leading "./" so it matches repo-relative paths.
+            let search_query = query.strip_prefix("./").unwrap_or(&query).to_string();
             let matches = file_search::run(
-                &query,
+                &search_query,
                 MAX_FILE_SEARCH_RESULTS,
                 &search_dir,
                 Vec::new(),

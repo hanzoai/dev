@@ -96,7 +96,6 @@ pub(crate) struct ChatComposer {
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
     has_chat_history: bool,
-    last_esc_time: Option<std::time::Instant>,
     is_task_running: bool,
     // Current status message to display when task is running
     status_message: String,
@@ -146,7 +145,7 @@ impl ChatComposer {
             token_usage_info: None,
             has_focus: has_input_focus,
             has_chat_history: false,
-            last_esc_time: None,
+            // no double‑Esc handling here; App manages Esc policy
             is_task_running: false,
             status_message: String::from("coding"),
             animation_running: None,
@@ -297,11 +296,12 @@ impl ChatComposer {
             ActivePopup::File(c) => c.calculate_required_height(),
         };
 
-        // Calculate actual content height of textarea
-        // Width adjustments must mirror render exactly:
-        // In render, we allocate the input block, then compute its inner area (borders = 2),
-        // then apply a horizontal Margin of 1 on each side (padding = 2). Total = 4 columns.
-        let content_width = width.saturating_sub(4);
+        // IMPORTANT: `width` here is the full BottomPane width. When we render, the
+        // composer is first given an outer horizontal padding of 1 on each side by
+        // BottomPane (−2), then our input Block adds borders (−2), then we add inner
+        // horizontal padding via Margin::new(1, 0) (−2). Net: −6 columns.
+        // To match wrapping exactly, use width−6 for the TextArea content width.
+        let content_width = width.saturating_sub(6);
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
         // Total input height: content + border (2) only, no vertical padding
@@ -413,6 +413,15 @@ impl ChatComposer {
         true
     }
 
+
+    /// Clear all composer input and reset transient state like pending pastes
+    /// and history navigation.
+    pub(crate) fn clear_text(&mut self) {
+        self.textarea.set_text("");
+        self.pending_pastes.clear();
+        self.history.reset_navigation();
+    }
+
     /// Integrate results from an asynchronous file search.
     pub(crate) fn on_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
         // Handle one-off Tab-triggered case first: only open if matches exist.
@@ -458,6 +467,17 @@ impl ChatComposer {
         self.textarea.insert_str(text);
         self.sync_command_popup();
         self.sync_file_search_popup();
+    }
+
+    /// Close the file-search popup if it is currently active. Returns true if closed.
+    pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
+        match self.active_popup {
+            ActivePopup::File(_) => {
+                self.active_popup = ActivePopup::None;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Handle a key event coming from the main UI.
@@ -895,31 +915,10 @@ impl ChatComposer {
                 (InputResult::None, false)
             }
             // -------------------------------------------------------------
-            // Handle Esc key for double-press clearing
+            // Handle Esc key — leave to App-level policy (clear/stop/backtrack)
             // -------------------------------------------------------------
-            KeyEvent {
-                code: KeyCode::Esc, ..
-            } => {
-                // Check if this is a double-Esc press
-                const DOUBLE_ESC_THRESHOLD: std::time::Duration =
-                    std::time::Duration::from_millis(500);
-                let now = std::time::Instant::now();
-
-                if let Some(last_time) = self.last_esc_time {
-                    if now.duration_since(last_time) < DOUBLE_ESC_THRESHOLD
-                        && !self.textarea.is_empty()
-                    {
-                        // Double-Esc detected, clear the input field
-                        self.textarea.set_text("");
-                        self.pending_pastes.clear();
-                        self.last_esc_time = None;
-                        self.history.reset_navigation();
-                        return (InputResult::None, true);
-                    }
-                }
-
-                // Single Esc - just record the time
-                self.last_esc_time = Some(now);
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                // Do nothing here so App can implement global Esc ordering.
                 (InputResult::None, false)
             }
             // -------------------------------------------------------------
@@ -1137,9 +1136,9 @@ impl ChatComposer {
             return;
         }
 
-        // Only trigger file search when the token has at least 2 characters to
-        // reduce churn while typing the first character.
-        if query.chars().count() >= 2 {
+        // Trigger file search as soon as at least 1 character is typed.
+        // The popup shows an idle hint for an empty query handled above.
+        if query.chars().count() >= 1 {
             self.app_event_tx
                 .send(AppEvent::StartFileSearch(query.clone()));
         }

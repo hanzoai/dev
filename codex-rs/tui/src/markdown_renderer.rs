@@ -434,13 +434,64 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     let url_re = EXPL_URL_RE
         .get_or_init(|| Regex::new(r"(?i)\bhttps?://[^\s)]+").unwrap());
     let dom_re = DOMAIN_RE.get_or_init(|| {
-        // e.g., apps.shopify.com or foo.example.io/path?x=1
+        // Conservative bare-domain matcher (no scheme). Examples:
+        //   apps.shopify.com
+        //   foo.example.io/path?x=1
+        // It intentionally over-matches a bit; we further filter below.
         Regex::new(r"\b([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:/[\w\-./?%&=#]*)?)")
             .unwrap()
     });
 
+    // Trim common trailing punctuation from a detected URL/domain, returning
+    // (core, trailing). The trailing part will be emitted as normal text (not
+    // hyperlinked) so that tokens like "example.com." don’t include the period.
+    fn split_trailing_punct(s: &str) -> (&str, &str) {
+        let bytes = s.as_bytes();
+        let mut end = bytes.len();
+        while end > 0 {
+            let ch = bytes[end - 1] as char;
+            if ")]}>'\".,!?;:".contains(ch) { // common trailing punctuation
+                end -= 1;
+                continue;
+            }
+            break;
+        }
+        (&s[..end], &s[end..])
+    }
+
+    // Additional heuristic to avoid false positives like "e.g." or
+    // "filename.rs" by requiring a well-known TLD. Precision over recall.
+    fn is_probable_domain(dom: &str) -> bool {
+        if dom.contains('@') { return false; }
+        let dot_count = dom.matches('.').count();
+        if dot_count == 0 { return false; }
+
+        // Extract the final label (candidate TLD) and normalize.
+        let tld = dom
+            .rsplit_once('.')
+            .map(|(_, t)| t)
+            .unwrap_or("")
+            .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+            .to_ascii_lowercase();
+
+        // Small allowlist of popular TLDs. This intentionally excludes
+        // language/file extensions like `.rs`, `.ts`, `.php`, etc.
+        const ALLOWED_TLDS: &[&str] = &[
+            "com","org","net","edu","gov","io","ai","app","dev","co","us","uk","ca","de","fr","jp","cn","in","au"
+        ];
+
+        ALLOWED_TLDS.contains(&tld.as_str())
+    }
+
     let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len());
     for s in spans {
+        // Skip autolinking inside inline code spans (we style code with the
+        // theme's function color). This avoids linking snippets like
+        // `curl https://example.com` or code identifiers containing dots.
+        if s.style.fg == Some(crate::colors::function()) {
+            out.push(s);
+            continue;
+        }
         let text = s.content.clone();
         let mut cursor = 0usize;
         let mut changed = false;
@@ -478,9 +529,15 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                     span.content = text[cursor..start].to_string().into();
                     out.push(span);
                 }
-                let url = &text[start..end];
-                out.push(hyperlink_span(url, url, &s));
-                cursor = end;
+                let raw = &text[start..end];
+                let (core, trailing) = split_trailing_punct(raw);
+                out.push(hyperlink_span(core, core, &s));
+                if !trailing.is_empty() {
+                    let mut span = s.clone();
+                    span.content = trailing.to_string().into();
+                    out.push(span);
+                }
+                cursor = start + core.len() + trailing.len();
                 changed = true;
                 continue;
             }
@@ -494,15 +551,27 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                     span.content = text[cursor..start].to_string().into();
                     out.push(span);
                 }
-                let dom = &text[start..end];
-                // Skip if it obviously looks like an email or already in a link
-                if !dom.contains('@') {
-                    let target = format!("https://{dom}");
-                    out.push(hyperlink_span(dom, &target, &s));
-                    cursor = end;
+                let raw = &text[start..end];
+                let (core_dom, trailing) = split_trailing_punct(raw);
+                if is_probable_domain(core_dom) {
+                    let target = format!("https://{core_dom}");
+                    out.push(hyperlink_span(core_dom, &target, &s));
+                    if !trailing.is_empty() {
+                        let mut span = s.clone();
+                        span.content = trailing.to_string().into();
+                        out.push(span);
+                    }
+                    cursor = start + core_dom.len() + trailing.len();
                     changed = true;
                     continue;
                 }
+                // Not a probable domain; emit raw text
+                let mut span = s.clone();
+                span.content = raw.to_string().into();
+                out.push(span);
+                cursor = end;
+                changed = true;
+                continue;
             }
 
             // No more matches

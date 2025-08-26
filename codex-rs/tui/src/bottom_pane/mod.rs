@@ -230,6 +230,24 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    /// Clear the composer text and reset transient composer state.
+    pub(crate) fn clear_composer(&mut self) {
+        self.composer.clear_text();
+        self.request_redraw();
+    }
+
+    /// Attempt to close the file-search popup if visible. Returns true if closed.
+    pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
+        let closed = self.composer.close_file_popup_if_active();
+        if closed { self.request_redraw(); }
+        closed
+    }
+
+    /// True if a modal/overlay view is currently displayed (not the composer popup).
+    pub(crate) fn has_active_modal_view(&self) -> bool {
+        self.active_view.is_some()
+    }
+
     /// Enable or disable compact compose mode. When enabled, the spacer line
     /// above the input composer is removed so the history can scroll into that
     /// row. This is typically toggled when the user scrolls up.

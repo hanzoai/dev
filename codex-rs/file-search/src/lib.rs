@@ -144,6 +144,7 @@ pub fn run(
                 limit.get(),
                 pattern.clone(),
                 Matcher::new(nucleo_matcher::Config::DEFAULT),
+                pattern_text.to_string(),
             ))
         })
         .collect();
@@ -152,6 +153,9 @@ pub fn run(
     // that we can leverage the parallelism it provides.
     let mut walk_builder = WalkBuilder::new(search_directory);
     walk_builder.threads(num_walk_builder_threads);
+    // Include everything by default — do NOT honor .gitignore or global ignore files.
+    // The UI may de-prioritize commonly ignored paths, but completions should see all files.
+    walk_builder.ignore(false).git_ignore(false).git_global(false).git_exclude(false).hidden(false);
     if !exclude.is_empty() {
         let mut override_builder = OverrideBuilder::new(search_directory);
         for exclude in exclude {
@@ -297,10 +301,12 @@ struct BestMatchesList {
 
     /// Internal buffer for converting strings to UTF-32.
     utf32buf: Vec<char>,
+    /// Original pattern text (for basename substring/prefix bonuses)
+    needle: String,
 }
 
 impl BestMatchesList {
-    fn new(max_count: usize, pattern: Pattern, matcher: Matcher) -> Self {
+    fn new(max_count: usize, pattern: Pattern, matcher: Matcher, needle: String) -> Self {
         Self {
             max_count,
             num_matches: 0,
@@ -308,6 +314,7 @@ impl BestMatchesList {
             matcher,
             binary_heap: BinaryHeap::new(),
             utf32buf: Vec::<char>::new(),
+            needle,
         }
     }
 
@@ -318,12 +325,18 @@ impl BestMatchesList {
             // non-match, so we can categorically increment the count here.
             self.num_matches += 1;
 
+            // Apply light penalties to commonly ignored paths so they rank lower
+            // while still being available in results.
+            let penalty = path_penalty(line);
+            let bonus = basename_bonus(line, &self.needle);
+            let eff_score = score.saturating_add(bonus).saturating_sub(penalty);
+
             if self.binary_heap.len() < self.max_count {
-                self.binary_heap.push(Reverse((score, line.to_string())));
+                self.binary_heap.push(Reverse((eff_score, line.to_string())));
             } else if let Some(min_element) = self.binary_heap.peek() {
-                if score > min_element.0.0 {
+                if eff_score > min_element.0.0 {
                     self.binary_heap.pop();
-                    self.binary_heap.push(Reverse((score, line.to_string())));
+                    self.binary_heap.push(Reverse((eff_score, line.to_string())));
                 }
             }
         }
@@ -361,6 +374,29 @@ fn create_pattern(pattern: &str) -> Pattern {
         Normalization::Smart,
         AtomKind::Fuzzy,
     )
+}
+
+fn path_penalty(path: &str) -> u32 {
+    let mut p: u32 = 0;
+    // Penalize large deps/build dirs heavily
+    if path.contains("/node_modules/") { p = p.saturating_add(300); }
+    if path.contains("/target/") { p = p.saturating_add(240); }
+    if path.contains("/dist/") || path.contains("/build/") { p = p.saturating_add(120); }
+    // Penalize hidden segments a bit (except common VCS dirs kept low)
+    for seg in path.split('/') {
+        if seg.starts_with('.') && seg != "." && seg != ".." && seg != ".github" { p = p.saturating_add(40); }
+    }
+    p
+}
+
+fn basename_bonus(path: &str, needle: &str) -> u32 {
+    if needle.is_empty() { return 0; }
+    let file = match path.rsplit_once('/') { Some((_, f)) => f, None => path };
+    let file_l = file.to_lowercase();
+    let needle_l = needle.to_lowercase();
+    if file_l.starts_with(&needle_l) { return 400; }
+    if file_l.contains(&needle_l) { return 150; }
+    0
 }
 
 #[cfg(test)]
