@@ -231,7 +231,10 @@ impl ModelClient {
         let mut attempt = 0;
         let max_retries = self.provider.request_max_retries();
 
-        let endpoint = self.provider.get_full_url(&auth);
+        // Compute endpoint with the latest available auth (may be None at this point).
+        let endpoint = self
+            .provider
+            .get_full_url(&auth_manager.as_ref().and_then(|m| m.auth()));
         trace!("POST to {}: {}", endpoint, serde_json::to_string(&payload)?);
 
         // Start logging the request and get a request_id to track the response
@@ -788,39 +791,9 @@ async fn stream_from_fixture(
     Ok(ResponseStream { rx_event })
 }
 
-fn rate_limit_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-
-    #[expect(clippy::unwrap_used)]
-    RE.get_or_init(|| Regex::new(r"Please try again in (\d+(?:\.\d+)?)(s|ms)").unwrap())
-}
-
-fn try_parse_retry_after(err: &Error) -> Option<Duration> {
-    if err.code != Some("rate_limit_exceeded".to_string()) {
-        return None;
-    }
-
-    // parse the Please try again in 1.898s format using regex
-    let re = rate_limit_regex();
-    if let Some(message) = &err.message {
-        if let Some(captures) = re.captures(message) {
-            let seconds = captures.get(1);
-            let unit = captures.get(2);
-
-            if let (Some(value), Some(unit)) = (seconds, unit) {
-                let value = value.as_str().parse::<f64>().ok()?;
-                let unit = unit.as_str();
-
-                if unit == "s" {
-                    return Some(Duration::from_secs_f64(value));
-                } else if unit == "ms" {
-                    return Some(Duration::from_millis(value as u64));
-                }
-            }
-        }
-    }
-    None
-}
+// Note: legacy helpers for parsing Retry-After headers and rate-limit messages
+// were removed during merge cleanup. If needed in the future, pick them from
+// upstream and integrate with our error handling path.
 
 #[cfg(test)]
 mod tests {
