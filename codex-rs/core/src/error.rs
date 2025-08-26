@@ -133,21 +133,28 @@ pub struct UsageLimitReachedError {
 
 impl std::fmt::Display for UsageLimitReachedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Avoid unstable `let` chains by using nested checks.
-        if let Some(plan_type) = &self.plan_type {
-            if plan_type == "plus" {
-                write!(
-                    f,
-                    "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing), or wait for limits to reset (every 5h and every week.)."
-                )?;
-                return Ok(());
-            }
-        }
-        {
+        // Base message differs slightly for legacy ChatGPT Plus plan users.
+        let is_plus = matches!(&self.plan_type, Some(p) if p == "plus");
+        if is_plus {
             write!(
                 f,
-                "You've hit your usage limit. Limits reset every 5h and every week."
+                "You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again"
             )?;
+            if let Some(secs) = self.resets_in_seconds {
+                let reset_duration = format_reset_duration(secs);
+                write!(f, " in {reset_duration}.")?;
+            } else {
+                write!(f, " later.")?;
+            }
+        } else {
+            write!(f, "You've hit your usage limit.")?;
+
+            if let Some(secs) = self.resets_in_seconds {
+                let reset_duration = format_reset_duration(secs);
+                write!(f, " Try again in {reset_duration}.")?;
+            } else {
+                write!(f, " Try again later.")?;
+            }
         }
 
         Ok(())

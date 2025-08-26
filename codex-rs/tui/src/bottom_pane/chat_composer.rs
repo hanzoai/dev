@@ -28,7 +28,6 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
-use crate::clipboard_paste::pasted_image_format;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -418,6 +417,20 @@ impl ChatComposer {
         true
     }
 
+    /// Heuristic handling for pasted paths: if the pasted text looks like a
+    /// filesystem path (including file:// URLs and Windows paths), insert the
+    /// normalized path directly into the composer and return true. The caller
+    /// will add a trailing space to separate from subsequent input.
+    fn handle_paste_image_path(&mut self, pasted: String) -> bool {
+        if let Some(path) = normalize_pasted_path(&pasted) {
+            // Insert the normalized path verbatim. We don't attempt to load the
+            // file or special-case images here; higher layers handle attachments.
+            self.textarea.insert_str(&path.to_string_lossy());
+            return true;
+        }
+        false
+    }
+
 
     /// Clear all composer input and reset transient state like pending pastes
     /// and history navigation.
@@ -508,10 +521,7 @@ impl ChatComposer {
         result
     }
 
-    /// Return true if either the slash-command popup or the file-search popup is active.
-    pub(crate) fn popup_active(&self) -> bool {
-        !matches!(self.active_popup, ActivePopup::None)
-    }
+    // popup_active removed; callers use explicit state or rely on App policy.
 
     /// Handle key event when the slash-command popup is visible.
     fn handle_key_event_with_slash_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
