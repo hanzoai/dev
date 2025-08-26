@@ -3716,6 +3716,24 @@ impl ChatWidget<'_> {
 
     pub(crate) fn has_pending_jump_back(&self) -> bool { self.pending_jump_back.is_some() }
 
+    /// Clear the composer text and any pending paste placeholders/history cursors.
+    pub(crate) fn clear_composer(&mut self) {
+        self.bottom_pane.clear_composer();
+        // Mark a height change so layout adjusts immediately if the composer shrinks.
+        self.height_manager
+            .borrow_mut()
+            .record_event(crate::height_manager::HeightEvent::ComposerModeChange);
+        self.request_redraw();
+    }
+
+    pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
+        self.bottom_pane.close_file_popup_if_active()
+    }
+
+    pub(crate) fn has_active_modal_view(&self) -> bool {
+        self.bottom_pane.has_active_modal_view()
+    }
+
     /// Forward an `Op` directly to codex.
     pub(crate) fn submit_op(&self, op: Op) {
         if let Err(e) = self.codex_op_tx.send(op) {
