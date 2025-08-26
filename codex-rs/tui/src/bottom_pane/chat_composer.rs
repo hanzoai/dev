@@ -28,6 +28,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
+use crate::clipboard_paste::paste_image_to_temp_png;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -409,6 +410,23 @@ impl ChatComposer {
             self.pending_pastes.push((placeholder, pasted));
         } else if self.handle_paste_image_path(pasted.clone()) {
             self.textarea.insert_str(" ");
+        } else if pasted.trim().is_empty() {
+            // No textual content pasted — try reading an image directly from the OS clipboard.
+            match paste_image_to_temp_png() {
+                Ok((path, info)) => {
+                    let path_str = path.to_string_lossy();
+                    self.textarea.insert_str(&path_str);
+                    self.textarea.insert_str(" ");
+                    // Give a small visual confirmation in the footer.
+                    self.flash_footer_notice(format!(
+                        "Added image {}x{} (PNG)",
+                        info.width, info.height
+                    ));
+                }
+                Err(_) => {
+                    // Fall back to doing nothing special; keep composer unchanged.
+                }
+            }
         } else {
             self.textarea.insert_str(&pasted);
         }
