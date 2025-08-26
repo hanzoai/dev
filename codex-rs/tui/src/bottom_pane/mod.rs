@@ -40,7 +40,7 @@ pub(crate) enum CancellationEvent {
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 
-use crate::status_indicator_widget::StatusIndicatorWidget;
+use codex_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
@@ -167,12 +167,9 @@ impl BottomPane<'_> {
         } else {
             // If a task is running and a status line is visible, allow Esc to
             // send an interrupt even while the composer has focus.
-            if matches!(key_event.code, crossterm::event::KeyCode::Esc)
-                && self.is_task_running
-                && let Some(status) = &self.status
-            {
-                // Send Op::Interrupt
-                status.interrupt();
+            if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
+                // Send Op::Interrupt directly when a task is running so Esc can cancel.
+                self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
                 self.request_redraw();
                 return InputResult::None;
             }
@@ -339,12 +336,7 @@ impl BottomPane<'_> {
         self.is_task_running
     }
 
-    /// Return true when the pane is in the regular composer state without any
-    /// overlays or popups and not running a task. This is the safe context to
-    /// use Esc-Esc for backtracking from the main view.
-    pub(crate) fn is_normal_backtrack_mode(&self) -> bool {
-        !self.is_task_running && self.active_view.is_none() && !self.composer.popup_active()
-    }
+    // is_normal_backtrack_mode removed; App-level policy handles Esc behavior directly.
 
     /// Update the *context-window remaining* indicator in the composer. This
     /// is forwarded directly to the underlying `ChatComposer`.

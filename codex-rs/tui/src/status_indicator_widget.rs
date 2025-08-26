@@ -15,10 +15,10 @@ use ratatui::widgets::WidgetRef;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::shimmer::shimmer_spans;
-use crate::tui::FrameRequester;
 use textwrap::Options as TwOptions;
 use textwrap::WordSplitter;
 
+#[allow(dead_code)]
 pub(crate) struct StatusIndicatorWidget {
     /// Animated header text (defaults to "Working").
     header: String,
@@ -27,18 +27,18 @@ pub(crate) struct StatusIndicatorWidget {
 
     start_time: Instant,
     app_event_tx: AppEventSender,
-    frame_requester: FrameRequester,
+    // We schedule frames via AppEventSender; no direct frame requester.
 }
 
+#[allow(dead_code)]
 impl StatusIndicatorWidget {
-    pub(crate) fn new(app_event_tx: AppEventSender, frame_requester: FrameRequester) -> Self {
+    pub(crate) fn new(app_event_tx: AppEventSender) -> Self {
         Self {
             header: String::from("Working"),
             queued_messages: Vec::new(),
             start_time: Instant::now(),
 
             app_event_tx,
-            frame_requester,
         }
     }
 
@@ -85,7 +85,8 @@ impl StatusIndicatorWidget {
     pub(crate) fn set_queued_messages(&mut self, queued: Vec<String>) {
         self.queued_messages = queued;
         // Ensure a redraw so changes are visible.
-        self.frame_requester.schedule_frame();
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(16)));
     }
 }
 
@@ -96,8 +97,8 @@ impl WidgetRef for StatusIndicatorWidget {
         }
 
         // Schedule next animation frame.
-        self.frame_requester
-            .schedule_frame_in(Duration::from_millis(32));
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(32)));
         let elapsed = self.start_time.elapsed().as_secs();
 
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
@@ -152,7 +153,7 @@ mod tests {
     fn renders_with_working_header() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
+        let w = StatusIndicatorWidget::new(tx);
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(80, 2)).expect("terminal");
@@ -166,7 +167,7 @@ mod tests {
     fn renders_truncated() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
+        let w = StatusIndicatorWidget::new(tx);
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(20, 2)).expect("terminal");
@@ -180,7 +181,7 @@ mod tests {
     fn renders_with_queued_messages() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
+        let mut w = StatusIndicatorWidget::new(tx);
         w.set_queued_messages(vec!["first".to_string(), "second".to_string()]);
 
         // Render into a fixed-size test terminal and snapshot the backend.
