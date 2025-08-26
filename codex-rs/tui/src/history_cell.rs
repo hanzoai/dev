@@ -917,14 +917,7 @@ impl HistoryCell for LoadingCell {
 ///
 /// Improvements here could be to condition this behavior on terminal,
 /// or possibly on emoji.
-fn padded_emoji(emoji: &str) -> String {
-    format!("{emoji}\u{200A} ")
-}
-
-/// Convenience function over `padded_emoji()`.
-fn padded_emoji_with(emoji: &str, text: impl AsRef<str>) -> String {
-    format!("{}{}", padded_emoji(emoji), text.as_ref())
-}
+// Removed unused helpers padded_emoji and padded_emoji_with.
 
 // ==================== ImageOutputCell ====================
 
