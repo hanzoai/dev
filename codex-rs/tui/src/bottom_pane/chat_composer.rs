@@ -1,6 +1,7 @@
 use codex_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
@@ -26,6 +27,8 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
+use crate::clipboard_paste::normalize_pasted_path;
+use crate::clipboard_paste::paste_image_to_temp_png;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -405,12 +408,45 @@ impl ChatComposer {
             let placeholder = format!("[Pasted Content {char_count} chars]");
             self.textarea.insert_str(&placeholder);
             self.pending_pastes.push((placeholder, pasted));
+        } else if self.handle_paste_image_path(pasted.clone()) {
+            self.textarea.insert_str(" ");
+        } else if pasted.trim().is_empty() {
+            // No textual content pasted — try reading an image directly from the OS clipboard.
+            match paste_image_to_temp_png() {
+                Ok((path, info)) => {
+                    let path_str = path.to_string_lossy();
+                    self.textarea.insert_str(&path_str);
+                    self.textarea.insert_str(" ");
+                    // Give a small visual confirmation in the footer.
+                    self.flash_footer_notice(format!(
+                        "Added image {}x{} (PNG)",
+                        info.width, info.height
+                    ));
+                }
+                Err(_) => {
+                    // Fall back to doing nothing special; keep composer unchanged.
+                }
+            }
         } else {
             self.textarea.insert_str(&pasted);
         }
         self.sync_command_popup();
         self.sync_file_search_popup();
         true
+    }
+
+    /// Heuristic handling for pasted paths: if the pasted text looks like a
+    /// filesystem path (including file:// URLs and Windows paths), insert the
+    /// normalized path directly into the composer and return true. The caller
+    /// will add a trailing space to separate from subsequent input.
+    fn handle_paste_image_path(&mut self, pasted: String) -> bool {
+        if let Some(path) = normalize_pasted_path(&pasted) {
+            // Insert the normalized path verbatim. We don't attempt to load the
+            // file or special-case images here; higher layers handle attachments.
+            self.textarea.insert_str(&path.to_string_lossy());
+            return true;
+        }
+        false
     }
 
 
@@ -503,6 +539,8 @@ impl ChatComposer {
         result
     }
 
+    // popup_active removed; callers use explicit state or rely on App policy.
+
     /// Handle key event when the slash-command popup is visible.
     fn handle_key_event_with_slash_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         let ActivePopup::Command(popup) = &mut self.active_popup else {
@@ -524,6 +562,13 @@ impl ChatComposer {
                     return self.handle_key_event_without_popup(key_event);
                 }
                 popup.move_down();
+                (InputResult::None, true)
+            }
+            KeyEvent {
+                code: KeyCode::Esc, ..
+            } => {
+                // Dismiss the slash popup; keep the current input untouched.
+                self.active_popup = ActivePopup::None;
                 (InputResult::None, true)
             }
             KeyEvent {
@@ -880,6 +925,15 @@ impl ChatComposer {
     /// Handle key event when no popup is visible.
     fn handle_key_event_without_popup(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         match key_event {
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                modifiers: crossterm::event::KeyModifiers::CONTROL,
+                kind: KeyEventKind::Press,
+                ..
+            } if self.is_empty() => {
+                self.app_event_tx.send(AppEvent::ExitRequest);
+                (InputResult::None, true)
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -1209,7 +1263,7 @@ impl ChatComposer {
     }
 }
 
-impl WidgetRef for &ChatComposer {
+impl WidgetRef for ChatComposer {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let popup_height = match &self.active_popup {
             ActivePopup::Command(popup) => popup.calculate_required_height(),
@@ -1733,7 +1787,7 @@ mod tests {
             }
 
             terminal
-                .draw(|f| f.render_widget_ref(&composer, f.area()))
+                .draw(|f| f.render_widget_ref(composer, f.area()))
                 .unwrap_or_else(|e| panic!("Failed to draw {name} composer: {e}"));
 
             assert_snapshot!(name, terminal.backend());
