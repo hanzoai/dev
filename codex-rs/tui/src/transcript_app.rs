@@ -142,6 +142,17 @@ impl TranscriptApp {
         let content_area = self.scroll_area(area);
         let wrapped = insert_history::word_wrap_lines(&self.transcript_lines, content_area.width);
 
+        // Proactively clear the content area to avoid any stale glyphs when
+        // scrolling reveals shorter lines than in previous frames.
+        let clear_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        for y in content_area.y..content_area.y.saturating_add(content_area.height) {
+            for x in content_area.x..content_area.x.saturating_add(content_area.width) {
+                buf[(x, y)].set_char(' ').set_style(clear_style);
+            }
+        }
+
         // Clamp scroll offset to valid range
         self.scroll_offset = self
             .scroll_offset
@@ -149,7 +160,9 @@ impl TranscriptApp {
         let start = self.scroll_offset;
         let end = (start + content_area.height as usize).min(wrapped.len());
         let page = &wrapped[start..end];
-        Paragraph::new(page.to_vec()).render_ref(content_area, buf);
+        Paragraph::new(page.to_vec())
+            .style(clear_style)
+            .render_ref(content_area, buf);
 
         // Fill remaining visible lines (if any) with a leading '~' in the first column.
         let visible = (end - start) as u16;

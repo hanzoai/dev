@@ -128,8 +128,19 @@ pub(crate) trait HistoryCell {
         // Default path: render the full text and use Paragraph.scroll to skip
         // vertical rows AFTER wrapping. Slicing lines before wrapping causes
         // incorrect blank space when lines wrap across multiple rows.
+        // IMPORTANT: Explicitly clear the entire area first. While some containers
+        // clear broader regions, custom widgets that shrink or scroll can otherwise
+        // leave residual glyphs to the right of shorter lines or from prior frames.
+        // We paint spaces with the current theme background to guarantee a clean slate.
+        let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_char(' ').set_style(bg_style);
+            }
+        }
+
         // Ensure the entire allocated area is painted with the theme background
-        // by attaching a background-styled Block to the Paragraph.
+        // by attaching a background-styled Block to the Paragraph as well.
         let lines = self.display_lines_trimmed();
         let text = Text::from(lines);
 
@@ -399,6 +410,15 @@ impl HistoryCell for ExecCell {
         // leading "└ ": render at the left edge so the angle is visible.
         if pre_height > 0 {
             let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
+            // Hard clear: fill pre_area with spaces using theme background. This prevents
+            // artifacts when the preamble shrinks or when scrolling reveals previously
+            // longer content.
+            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
+                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
+                    buf[(x, y)].set_char(' ').set_style(bg_style);
+                }
+            }
             let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
                 .block(pre_block)
@@ -411,6 +431,13 @@ impl HistoryCell for ExecCell {
         // Render output (scrolled) with a left border block if any space
         if out_height > 0 {
             let out_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: out_height };
+            // Hard clear: fill out_area with spaces before drawing the bordered paragraph.
+            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim());
+            for y in out_area.y..out_area.y.saturating_add(out_area.height) {
+                for x in out_area.x..out_area.x.saturating_add(out_area.width) {
+                    buf[(x, y)].set_char(' ').set_style(bg_style);
+                }
+            }
             let block = Block::default()
                 .borders(Borders::LEFT)
                 .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
@@ -469,10 +496,12 @@ impl HistoryCell for DiffCell {
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
         // Render a two-column diff with a 1-col marker gutter and 1-col padding
         // so wrapped lines hang under their first content column.
+        // Hard clear the entire area: write spaces + background so any
+        // previously longer content does not bleed into shorter frames.
         let bg = Style::default().bg(crate::colors::background());
         for y in area.y..area.y.saturating_add(area.height) {
             for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_style(bg);
+                buf[(x, y)].set_char(' ').set_style(bg);
             }
         }
 
