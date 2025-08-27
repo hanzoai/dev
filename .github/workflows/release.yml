@@ -180,7 +180,6 @@ jobs:
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
-        if: steps.rust_cache.outputs.cache-hit != 'true'
         working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -198,7 +197,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          cargo build --release --locked --timings --target ${{ matrix.target }} --bin code
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
 
       - name: sccache stats
         shell: bash
