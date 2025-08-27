@@ -363,18 +363,8 @@ jobs:
             rawbin="$(decompress_to "$f" "$workdir/bin")"
             chmod +x "$rawbin" || true
             # package.json
-            cat > "$workdir/package.json" <<PKG
-{
-  "name": "$pkg",
-  "version": "$NEW_VERSION",
-  "license": "Apache-2.0",
-  "description": "Platform binary for @just-every/code ($t)",
-  "os": ["$os"],
-  "cpu": ["$cpu"],
-  "files": ["bin/"],
-  "private": false
-}
-PKG
+            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+              "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
           done
 
           ls -R "$stage_root"
