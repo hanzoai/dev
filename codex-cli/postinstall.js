@@ -186,7 +186,7 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Binary names to download (new naming is 'code*')
+  // Binary names to download (standardized 'code-*' naming)
   const binaries = ['code', 'code-tui', 'code-exec'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
@@ -211,11 +211,58 @@ async function main() {
       continue;
     }
     
-    const downloadUrl = `https://github.com/just-every/code/releases/download/v${version}/${binaryName}`;
-    
-    console.log(`Downloading ${binaryName}...`);
+    // Decide archive format per OS with fallback on macOS/Linux:
+    // - Windows: .zip
+    // - macOS/Linux: prefer .zst if `zstd` CLI is available; otherwise use .tar.gz
+    const isWin = isWindows;
+    let useZst = false;
+    if (!isWin) {
+      try {
+        execSync('zstd --version', { stdio: 'ignore', shell: true });
+        useZst = true;
+      } catch {
+        useZst = false;
+      }
+    }
+    const archiveName = isWin ? `${binaryName}.zip` : (useZst ? `${binaryName}.zst` : `${binaryName}.tar.gz`);
+    const downloadUrl = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
+
+    console.log(`Downloading ${archiveName}...`);
     try {
-      await downloadBinary(downloadUrl, localPath);
+      const tmpPath = join(binDir, `.${archiveName}.part`);
+      await downloadBinary(downloadUrl, tmpPath);
+
+      if (isWin) {
+        // Unzip the single-file archive using PowerShell (built-in)
+        try {
+          const psCmd = `powershell -NoProfile -NonInteractive -Command "Expand-Archive -Path '${tmpPath}' -DestinationPath '${binDir}' -Force"`;
+          execSync(psCmd, { stdio: 'ignore' });
+        } catch (e) {
+          throw new Error(`failed to unzip archive: ${e.message}`);
+        } finally {
+          try { unlinkSync(tmpPath); } catch {}
+        }
+      } else {
+        if (useZst) {
+          // Decompress .zst via system zstd
+          try {
+            execSync(`zstd -d '${tmpPath}' -o '${localPath}'`, { stdio: 'ignore', shell: true });
+          } catch (e) {
+            try { unlinkSync(tmpPath); } catch {}
+            throw new Error(`failed to decompress .zst (need zstd CLI): ${e.message}`);
+          }
+          try { unlinkSync(tmpPath); } catch {}
+        } else {
+          // Extract .tar.gz using system tar
+          try {
+            execSync(`tar -xzf '${tmpPath}' -C '${binDir}'`, { stdio: 'ignore', shell: true });
+          } catch (e) {
+            try { unlinkSync(tmpPath); } catch {}
+            throw new Error(`failed to extract .tar.gz: ${e.message}`);
+          }
+          try { unlinkSync(tmpPath); } catch {}
+        }
+      }
 
       // Validate header to avoid corrupt binaries causing spawn EFTYPE/ENOEXEC
       const valid = validateDownloadedBinary(localPath);
@@ -229,10 +276,10 @@ async function main() {
         chmodSync(localPath, 0o755);
       }
       
-      console.log(`✓ Downloaded ${binaryName}`);
+      console.log(`✓ Installed ${binaryName}`);
     } catch (error) {
-      console.error(`✗ Failed to download ${binaryName}: ${error.message}`);
-      console.error(`  URL: ${downloadUrl}`);
+      console.error(`✗ Failed to install ${binaryName}: ${error.message}`);
+      console.error(`  Downloaded from: ${downloadUrl}`);
       // Continue with other binaries even if one fails
     }
   }

@@ -61,6 +61,7 @@ inherits = "release"
 incremental = false  # Disable for production builds
 codegen-units = 1  # Single codegen unit for best optimization
 lto = "fat"  # Maximum link-time optimization
+strip = "debuginfo"  # Fully strip debug info in production artifacts
 
 [patch.crates-io]
 # ratatui = { path = "../../ratatui" }
