@@ -300,6 +300,97 @@ jobs:
           chmod +x release-assets/* || true
           ls -la release-assets/
 
+      - name: Build per-target npm binary packages
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage_root="npm-binaries"
+          rm -rf "$stage_root" && mkdir -p "$stage_root"
+
+          map_target() {
+            case "$1" in
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          decompress_to() {
+            local input="$1" outdir="$2" base
+            base="$(basename "$input")"
+            mkdir -p "$outdir"
+            case "$base" in
+              *.zst)
+                # decompress to raw binary
+                local raw="${outdir}/${base%.zst}"
+                zstd -d -q --force "$input" -o "$raw"
+                echo "$raw"
+                ;;
+              *.tar.gz)
+                tar -xzf "$input" -C "$outdir"
+                echo "$outdir/${base%.tar.gz}"
+                ;;
+              *.zip)
+                unzip -q -o "$input" -d "$outdir"
+                echo "$outdir/${base%.zip}"
+                ;;
+              *)
+                # already raw
+                cp "$input" "$outdir/"
+                echo "$outdir/$base"
+                ;;
+            esac
+          }
+
+          for f in release-assets/*; do
+            b="$(basename "$f")"
+            # Derive target triple from the filename: code-<triple>[.exe].*
+            t="${b#code-}"
+            t="${t%%.*}"
+            meta="$(map_target "$t")" || true
+            if [ -z "$meta" ]; then
+              echo "Skipping unrecognized artifact: $b"
+              continue
+            fi
+            eval "$meta" # sets os, cpu, pkg
+            workdir="$stage_root/${pkg##*/}"
+            rm -rf "$workdir" && mkdir -p "$workdir/bin"
+            rawbin="$(decompress_to "$f" "$workdir/bin")"
+            chmod +x "$rawbin" || true
+            # package.json
+            cat > "$workdir/package.json" <<PKG
+{
+  "name": "$pkg",
+  "version": "$NEW_VERSION",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @just-every/code ($t)",
+  "os": ["$os"],
+  "cpu": ["$cpu"],
+  "files": ["bin/"],
+  "private": false
+}
+PKG
+          done
+
+          ls -R "$stage_root"
+
+      - name: Publish per-target npm binary packages
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in npm-binaries/*; do
+            echo "Publishing $(basename "$dir")"
+            (cd "$dir" && npm publish --access public)
+          done
+
       - name: Sync README for npm
         shell: bash
         run: cp README.md codex-cli/README.md
@@ -314,6 +405,16 @@ jobs:
           NEW_VERSION="${{ needs.determine-version.outputs.version }}"
           npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          # Inject optionalDependencies pointing to per-target packages
+          # Note: These are platform-filtered in the target packages, so npm will fetch only one.
+          tmp=$(mktemp)
+          jq '.optionalDependencies = {
+            "@just-every/code-darwin-arm64": "'"$NEW_VERSION"'",
+            "@just-every/code-darwin-x64": "'"$NEW_VERSION"'",
+            "@just-every/code-linux-x64-musl": "'"$NEW_VERSION"'",
+            "@just-every/code-linux-arm64-musl": "'"$NEW_VERSION"'",
+            "@just-every/code-win32-x64": "'"$NEW_VERSION"'"
+          }' package.json > "$tmp" && mv "$tmp" package.json
           git add package.json
           if git diff --staged --quiet; then
             echo "skip_push=true" >> "$GITHUB_OUTPUT"
