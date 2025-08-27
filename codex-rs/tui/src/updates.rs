@@ -1,7 +1,6 @@
 #![cfg(any(not(debug_assertions), test))]
 
 use chrono::DateTime;
-use chrono::Duration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;

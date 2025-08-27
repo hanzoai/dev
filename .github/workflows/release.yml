@@ -60,15 +60,10 @@ jobs:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             artifact: code-x86_64-unknown-linux-musl
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            artifact: code-x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             artifact: code-aarch64-unknown-linux-musl
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            artifact: code-aarch64-unknown-linux-gnu
+          # (GNU variants omitted to reduce asset duplication; npm defaults to musl)
           # macOS builds
           - os: macos-14
             target: x86_64-apple-darwin
@@ -250,7 +245,44 @@ jobs:
             cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
           fi
 
-      - name: Upload binaries (no compression)
+      - name: Compress artifacts (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts -File | ForEach-Object {
+            $src = $_.FullName
+            $dst = "$src.zip"
+            Compress-Archive -Path $src -DestinationPath $dst -Force
+            Remove-Item $src -Force
+          }
+
+      - name: Compress artifacts (Linux dual-format)
+        if: contains(matrix.os, 'ubuntu')
+        shell: bash
+        run: |
+          for f in artifacts/*; do
+            base=$(basename "$f")
+            # .zst (size-optimized)
+            zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
+            # .tar.gz fallback for users without zstd
+            tar -C artifacts -czf "artifacts/${base}.tar.gz" "$base"
+            rm -f "$f"
+          done
+
+      - name: Compress artifacts (macOS dual-format)
+        if: startsWith(matrix.os, 'macos-')
+        shell: bash
+        run: |
+          for f in artifacts/*; do
+            base=$(basename "$f")
+            # .zst (size-optimized)
+            zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
+            # .tar.gz fallback for users without zstd
+            tar -C artifacts -czf "artifacts/${base}.tar.gz" "$base"
+            rm -f "$f"
+          done
+
+      - name: Upload binaries (compressed)
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
