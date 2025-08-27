@@ -186,8 +186,8 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Binary names to download (standardized 'code-*' naming)
-  const binaries = ['code', 'code-tui', 'code-exec'];
+  // Download only the primary binary; we'll create wrappers for legacy names.
+  const binaries = ['code'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
   
@@ -283,7 +283,7 @@ async function main() {
       // Continue with other binaries even if one fails
     }
   }
-  
+
   // Create platform-specific symlink/copy for main binary
   const mainBinary = `code-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
@@ -312,7 +312,7 @@ async function main() {
     console.warn('⚠ Main code binary not found. You may need to build from source.');
   }
 
-  // With bin name = 'code', handle collisions with existing 'code' (e.g., VS Code)
+  // With bin name = 'code', handle collisions (e.g., VS Code) and add legacy wrappers
   try {
     const isTTY = process.stdout && process.stdout.isTTY;
     const isWindows = platform() === 'win32';
@@ -338,6 +338,28 @@ async function main() {
 
     const codeResolved = resolveOnPath('code');
     const collision = codeResolved && ourShim && codeResolved !== ourShim;
+
+    const ensureWrapper = (name, args) => {
+      if (!globalBin) return;
+      try {
+        const wrapperPath = join(globalBin, isWindows ? `${name}.cmd` : name);
+        if (isWindows) {
+          const content = `@echo off\r\n"%~dp0${collision ? 'coder' : 'code'}" ${args} %*\r\n`;
+          writeFileSync(wrapperPath, content);
+        } else {
+          const content = `#!/bin/sh\nexec "$(dirname \"$0\")/${collision ? 'coder' : 'code'}" ${args} "$@"\n`;
+          writeFileSync(wrapperPath, content);
+          chmodSync(wrapperPath, 0o755);
+        }
+        console.log(`✓ Created wrapper '${name}' -> ${collision ? 'coder' : 'code'} ${args}`);
+      } catch (e) {
+        console.log(`⚠ Failed to create '${name}' wrapper: ${e.message}`);
+      }
+    };
+
+    // Always create legacy wrappers so existing scripts keep working
+    ensureWrapper('code-tui', '');
+    ensureWrapper('code-exec', 'exec');
 
     if (collision) {
       console.log('⚠ Detected an existing `code` command on your PATH (likely VS Code).');
