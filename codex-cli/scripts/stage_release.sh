@@ -104,9 +104,9 @@ jq --arg version "$VERSION" \
     '.version = $version' \
     package.json > "$TMPDIR/package.json"
 
-# 2. Native runtime deps (sandbox plus optional Rust binaries)
-
-./scripts/install_native_deps.sh --workflow-url "$WORKFLOW_URL" "$TMPDIR"
+# 2. Native runtime deps - SKIPPED
+# Binaries are now fetched on-demand via postinstall.js to reduce npm package size
+# ./scripts/install_native_deps.sh --workflow-url "$WORKFLOW_URL" "$TMPDIR"
 
 popd >/dev/null
 
