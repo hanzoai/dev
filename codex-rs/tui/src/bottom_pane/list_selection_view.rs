@@ -170,19 +170,26 @@ impl BottomPaneView<'_> for ListSelectionView {
         // Layout inside the block: optional subtitle header, rows, footer
         let mut next_y = inner.y;
         if let Some(sub) = &self.subtitle {
-            let subtitle_area = Rect { x: inner.x, y: next_y, width: inner.width, height: 1 };
+            // Left pad by one column inside the inner area
+            let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
             let subtitle_spans: Vec<Span<'static>> = vec![
                 Span::styled(sub.clone(), Style::default().fg(crate::colors::text_dim())),
             ];
             Paragraph::new(Line::from(subtitle_spans)).render(subtitle_area, buf);
             next_y = next_y.saturating_add(1);
+
+            // Render a visual spacer line between subtitle and the list
+            let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
+            Self::render_dim_prefix_line(spacer_area, buf);
+            next_y = next_y.saturating_add(1);
         }
 
         let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
         let rows_area = Rect {
-            x: inner.x,
+            // Left pad by one column
+            x: inner.x.saturating_add(1),
             y: next_y,
-            width: inner.width,
+            width: inner.width.saturating_sub(1),
             height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(footer_reserved),
         };
 
@@ -192,7 +199,8 @@ impl BottomPaneView<'_> for ListSelectionView {
             .enumerate()
             .map(|(i, it)| {
                 let is_selected = self.state.selected_idx == Some(i);
-                let prefix = if is_selected { '>' } else { ' ' };
+                // Use a nicer selector: '›' when selected, otherwise space
+                let prefix = if is_selected { '›' } else { ' ' };
                 let name_with_marker = if it.is_current {
                     format!("{} (current)", it.name)
                 } else {
@@ -213,7 +221,8 @@ impl BottomPaneView<'_> for ListSelectionView {
         }
 
         if self.footer_hint.is_some() {
-            let footer_area = Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 };
+            // Left pad footer by one column
+            let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
             let line = Line::from(vec![
                 Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
                 Span::raw(" Navigate  "),

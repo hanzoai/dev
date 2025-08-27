@@ -164,7 +164,7 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
             if is_selected {
                 // Highlighted option
                 lines.push(Line::from(vec![Span::styled(
-                    format!("▶ {}", label),
+                    format!("› {}", label),
                     Style::default()
                         .fg(crate::colors::success())
                         .add_modifier(Modifier::BOLD),
@@ -202,8 +202,14 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
             ),
         ]));
 
+        let padded = Rect {
+            x: inner.x.saturating_add(1),
+            y: inner.y,
+            width: inner.width.saturating_sub(1),
+            height: inner.height,
+        };
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
-        paragraph.render(inner, buf);
+        paragraph.render(padded, buf);
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
