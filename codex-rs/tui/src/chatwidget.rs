@@ -3683,15 +3683,15 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let view = ListSelectionView::new(
-            "Edit Previous Message".to_string(),
-            Some("Select a message to prefill".to_string()),
+        let view: ListSelectionView = ListSelectionView::new(
+            " Jump back to a previous message ".to_string(),
+            Some("This will return the conversation to an earlier state".to_string()),
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
         );
         self.bottom_pane.show_list_selection(
-            "Edit Previous Message".to_string(),
+            "Jump back to a previous message".to_string(),
             None,
             None,
             view,

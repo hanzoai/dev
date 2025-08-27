@@ -40,7 +40,10 @@ impl App {
                     kind: KeyEventKind::Press | KeyEventKind::Repeat,
                     ..
                 }) => {
-                    self.overlay_step_backtrack(tui, event)?;
+                    // Close the jump-back overlay on Esc instead of stepping selection.
+                    self.close_transcript_overlay(tui);
+                    // Backtrack state will be reset by close_transcript_overlay; ensure a redraw.
+                    tui.frame_requester().schedule_frame();
                     Ok(true)
                 }
                 TuiEvent::Key(KeyEvent {

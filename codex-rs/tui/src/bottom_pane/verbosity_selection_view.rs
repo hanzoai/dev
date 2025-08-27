@@ -169,7 +169,7 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
                 style = style.fg(crate::colors::warning());
             }
 
-            let prefix = if is_selected { "▶ " } else { "  " };
+            let prefix = if is_selected { "› " } else { "  " };
             let line = Line::from(vec![
                 Span::raw(prefix),
                 Span::styled(format!("{:<8}", name), style),
@@ -189,7 +189,13 @@ impl<'a> BottomPaneView<'a> for VerbositySelectionView {
             Span::raw(" Cancel"),
         ]));
 
+        let padded = Rect {
+            x: inner_area.x.saturating_add(1),
+            y: inner_area.y,
+            width: inner_area.width.saturating_sub(1),
+            height: inner_area.height,
+        };
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
-        paragraph.render(inner_area, buf);
+        paragraph.render(padded, buf);
     }
 }

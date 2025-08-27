@@ -98,16 +98,16 @@ impl BottomPaneView<'_> for ResumeSelectionView {
                 &self.subtitle,
                 Style::default().fg(crate::colors::text_dim()),
             )))
-            .render(Rect { x: inner.x, y: next_y, width: inner.width, height: 1 }, buf);
+            .render(Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 }, buf);
             next_y = next_y.saturating_add(1);
         }
 
         // Reserve one blank spacer line above the footer
         let footer_reserved: u16 = 2;
         let table_area = Rect {
-            x: inner.x,
+            x: inner.x.saturating_add(1),
             y: next_y,
-            width: inner.width,
+            width: inner.width.saturating_sub(1),
             height: inner
                 .height
                 .saturating_sub(footer_reserved + (next_y - inner.y)),
@@ -145,7 +145,7 @@ impl BottomPaneView<'_> for ResumeSelectionView {
 
         // Footer hints
         // Draw a spacer line above footer (implicit by not drawing into that row)
-        let footer = Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 };
+        let footer = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
         let footer_line = Line::from(vec![
             Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
             Span::raw(" Navigate  "),
