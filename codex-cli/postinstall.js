@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Non-functional change to trigger release workflow
 
-import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync, unlinkSync, statSync, openSync, closeSync } from 'fs';
+import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync, unlinkSync, statSync, openSync, closeSync, copyFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { get } from 'https';
 import { platform, arch } from 'os';
 import { execSync } from 'child_process';
+import { createRequire } from 'module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -211,6 +212,45 @@ async function main() {
       continue;
     }
     
+    // First try platform package via npm optionalDependencies (fast path on npm CDN).
+    const require = createRequire(import.meta.url);
+    const platformPkg = (() => {
+      const name = (() => {
+        if (isWindows) return '@just-every/code-win32-x64';
+        const plt = platform();
+        const cpu = arch();
+        if (plt === 'darwin' && cpu === 'arm64') return '@just-every/code-darwin-arm64';
+        if (plt === 'darwin' && cpu === 'x64') return '@just-every/code-darwin-x64';
+        if (plt === 'linux' && cpu === 'x64') return '@just-every/code-linux-x64-musl';
+        if (plt === 'linux' && cpu === 'arm64') return '@just-every/code-linux-arm64-musl';
+        return null;
+      })();
+      if (!name) return null;
+      try {
+        const pkgJsonPath = require.resolve(`${name}/package.json`);
+        const pkgDir = dirname(pkgJsonPath);
+        return { name, dir: pkgDir };
+      } catch {
+        return null;
+      }
+    })();
+
+    if (platformPkg) {
+      try {
+        // Expect binary inside platform package bin directory
+        const src = join(platformPkg.dir, 'bin', binaryName);
+        if (!existsSync(src)) {
+          throw new Error(`platform package missing binary: ${platformPkg.name}`);
+        }
+        copyFileSync(src, localPath);
+        if (!isWindows) chmodSync(localPath, 0o755);
+        console.log(`✓ Installed ${binaryName} from ${platformPkg.name}`);
+        continue; // next binary
+      } catch (e) {
+        console.warn(`⚠ Failed platform package install (${e.message}), falling back to GitHub download`);
+      }
+    }
+
     // Decide archive format per OS with fallback on macOS/Linux:
     // - Windows: .zip
     // - macOS/Linux: prefer .zst if `zstd` CLI is available; otherwise use .tar.gz
