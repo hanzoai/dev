@@ -54,6 +54,13 @@ impl TranscriptApp {
     fn handle_key_event(&mut self, _tui: &mut tui::Tui, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
+                code: KeyCode::Esc,
+                kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                ..
+            } => {
+                self.is_done = true;
+            }
+            KeyEvent {
                 code: KeyCode::Char('q'),
                 kind: KeyEventKind::Press,
                 ..
@@ -219,7 +226,13 @@ impl TranscriptApp {
             " jump".into(),
         ];
 
-        let hints2 = vec![" ".into(), "q".set_style(key_hint_style), " quit".into()];
+        let hints2 = vec![
+            " ".into(),
+            "Esc".set_style(key_hint_style),
+            "/".into(),
+            "q".set_style(key_hint_style),
+            " cancel".into(),
+        ];
         Paragraph::new(vec![Line::from(hints1).dim(), Line::from(hints2).dim()])
             .render_ref(hints_rect, buf);
     }

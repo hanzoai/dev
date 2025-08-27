@@ -232,13 +232,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
         // Create content
         let mut lines = vec![
-            Line::from(vec![Span::styled(
-                "Theme Selection",
-                Style::default()
-                    .fg(theme.text_bright)
-                    .add_modifier(Modifier::BOLD),
-            )]),
-            Line::from(""),
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "Theme Selection",
+                    Style::default()
+                        .fg(theme.text_bright)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(" "),
         ];
 
         // Add visible themes based on scroll offset
@@ -248,10 +251,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             let is_selected = i == self.selected_index;
             let is_original = *theme_enum == self.original_theme;
 
-            let prefix = if is_selected { "▶ " } else { "  " };
+            let prefix = if is_selected { "› " } else { "  " };
             let suffix = if is_original { " (original)" } else { "" };
 
-            let mut spans = vec![Span::raw(prefix)];
+            let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
 
             if is_selected {
                 spans.push(Span::styled(
@@ -282,14 +285,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
         // Add scroll indicators if needed
         if scroll_offset > 0 || visible_end < options.len() {
-            lines.push(Line::from(""));
+            lines.push(Line::from(" "));
             let scroll_info = format!("[{}/{}]", self.selected_index + 1, options.len());
-            lines.push(Line::from(vec![Span::styled(
+            lines.push(Line::from(vec![Span::raw(" "), Span::styled(
                 scroll_info,
                 Style::default().fg(theme.text_dim),
             )]));
         } else {
-            lines.push(Line::from(""));
+            lines.push(Line::from(" "));
         }
 
         lines.push(Line::from(vec![
