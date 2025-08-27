@@ -225,7 +225,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-tui --bin code-exec
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
 
       - name: sccache stats
         shell: bash
@@ -237,12 +237,8 @@ jobs:
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
-            cp codex-rs/target/${{ matrix.target }}/release/code-tui.exe artifacts/code-tui-${{ matrix.target }}.exe
-            cp codex-rs/target/${{ matrix.target }}/release/code-exec.exe artifacts/code-exec-${{ matrix.target }}.exe
           else
             cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
-            cp codex-rs/target/${{ matrix.target }}/release/code-tui artifacts/code-tui-${{ matrix.target }}
-            cp codex-rs/target/${{ matrix.target }}/release/code-exec artifacts/code-exec-${{ matrix.target }}
           fi
 
       - name: Compress artifacts (Windows)
