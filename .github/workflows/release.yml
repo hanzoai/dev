@@ -88,7 +88,8 @@ jobs:
           rustup default 1.89.0
 
       # Keep target/ across runs so Cargo can no-op when code hasn't changed
-      - name: Setup Rust Cache (target + registries)
+      - id: rust_cache
+        name: Setup Rust Cache (target + registries)
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v5-rust
@@ -159,36 +160,7 @@ jobs:
           echo 'CXX=sccache clang++' >> "$GITHUB_ENV"
           echo 'RUSTFLAGS=-Awarnings -C debuginfo=0 -C strip=symbols -C panic=abort' >> "$GITHUB_ENV"
 
-      # Windows: robust vcpkg with binary caching (x-gha)
-      - name: Cache vcpkg data (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~\vcpkg
-          key: vcpkg-root-${{ runner.os }}
-
-      - name: Prepare vcpkg (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $Root = Join-Path $env:USERPROFILE 'vcpkg'
-          if (-not (Test-Path $Root)) { New-Item -ItemType Directory -Path $Root | Out-Null }
-          if (-not (Test-Path (Join-Path $Root '.git'))) {
-            if (Test-Path (Join-Path $Root 'src')) { Remove-Item -Recurse -Force (Join-Path $Root 'src') }
-            git clone https://github.com/microsoft/vcpkg $Root
-          } else {
-            git -C $Root fetch --depth 1 origin
-            git -C $Root checkout -q FETCH_HEAD
-          }
-          if (-not (Test-Path (Join-Path $Root 'vcpkg.exe'))) {
-            & (Join-Path $Root 'bootstrap-vcpkg.bat')
-          }
-          "VCPKG_ROOT=$Root"                    >> $env:GITHUB_ENV
-          "VCPKG_DEFAULT_TRIPLET=x64-windows"   >> $env:GITHUB_ENV
-          # Enable true binary caching via GitHub Actions cache service
-          "VCPKG_FEATURE_FLAGS=manifests,binarycaching" >> $env:GITHUB_ENV
-          "VCPKG_BINARY_SOURCES=clear;x-gha,readwrite"  >> $env:GITHUB_ENV
+      # Windows: vcpkg not needed (rustls + pure Rust deps)
 
       # Windows: use SChannel (no OpenSSL) + fast linker flags
       - name: Windows TLS backend (SChannel) + linker flags
@@ -208,6 +180,7 @@ jobs:
 
       # Prefetch deps so --frozen works even with git deps
       - name: Prefetch dependencies (git + registry)
+        if: steps.rust_cache.outputs.cache-hit != 'true'
         working-directory: codex-rs
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
