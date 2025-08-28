@@ -130,7 +130,9 @@ fn default_viewport() -> ViewportConfig {
 }
 
 fn default_wait() -> WaitStrategy {
-    WaitStrategy::Event("networkidle".to_string())
+    // "load" is more reliable than a fixed 1s "networkidle" sleep in our
+    // navigation implementation and better matches SPA hydration delays.
+    WaitStrategy::Event("load".to_string())
 }
 
 fn default_segments_max() -> usize {

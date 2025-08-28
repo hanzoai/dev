@@ -46,3 +46,15 @@ pub fn is_blank_line_trim(line: &Line<'_>) -> bool {
     }
     line.spans.iter().all(|s| s.content.trim().is_empty())
 }
+
+/// Whether this line is painted with the code-block background color.
+/// Used to distinguish a truly blank paragraph separator (no background)
+/// from a blank line that is part of a code block (should not be dropped
+/// during streaming commit logic).
+pub fn is_code_block_painted(line: &Line<'_>) -> bool {
+    let code_bg = crate::colors::code_block_bg();
+    if line.style.bg == Some(code_bg) {
+        return true;
+    }
+    line.spans.iter().any(|s| s.style.bg == Some(code_bg))
+}

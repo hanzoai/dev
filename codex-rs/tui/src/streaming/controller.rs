@@ -10,8 +10,8 @@ use super::StreamState;
 /// Sink for history insertions and animation control.
 pub(crate) trait HistorySink {
     fn insert_history(&self, lines: Vec<Line<'static>>);
-    fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>);
-    fn insert_final_answer(&self, lines: Vec<Line<'static>>, full_markdown_source: String);
+    fn insert_history_with_kind(&self, id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>>);
+    fn insert_final_answer(&self, id: Option<String>, lines: Vec<Line<'static>>, full_markdown_source: String);
     fn start_commit_animation(&self);
     fn stop_commit_animation(&self);
 }
@@ -21,27 +21,19 @@ pub(crate) struct AppEventHistorySink(pub(crate) crate::app_event_sender::AppEve
 
 impl HistorySink for AppEventHistorySink {
     fn insert_history(&self, lines: Vec<Line<'static>>) {
-        tracing::debug!("insert_history called with {} lines:", lines.len());
-        for (i, line) in lines.iter().enumerate() {
-            let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-            if i < 3 || i >= lines.len() - 1 {
-                tracing::debug!("  Line {}: {:?}", i, text);
-            } else if i == 3 {
-                tracing::debug!("  ... ({} more lines) ...", lines.len() - 4);
-            }
-        }
+        tracing::debug!("sink.insert_history lines={}", lines.len());
         self.0
             .send(crate::app_event::AppEvent::InsertHistory(lines))
     }
-    fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>) {
-        tracing::debug!("insert_history_with_kind({:?}) {} lines", kind, lines.len());
+    fn insert_history_with_kind(&self, id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>>) {
+        tracing::debug!("sink.insert_history_with_kind kind={:?} id={:?} lines={}", kind, id, lines.len());
         self.0
-            .send(crate::app_event::AppEvent::InsertHistoryWithKind { kind, lines })
+            .send(crate::app_event::AppEvent::InsertHistoryWithKind { id, kind, lines })
     }
-    fn insert_final_answer(&self, lines: Vec<Line<'static>>, full_markdown_source: String) {
-        tracing::debug!("insert_final_answer {} lines ({} bytes source)", lines.len(), full_markdown_source.len());
+    fn insert_final_answer(&self, id: Option<String>, lines: Vec<Line<'static>>, full_markdown_source: String) {
+        tracing::debug!("sink.insert_final_answer id={:?} lines={} source_len={}", id, lines.len(), full_markdown_source.len());
         self.0
-            .send(crate::app_event::AppEvent::InsertFinalAnswer { lines, source: full_markdown_source })
+            .send(crate::app_event::AppEvent::InsertFinalAnswer { id, lines, source: full_markdown_source })
     }
     fn start_commit_animation(&self) {
         self.0
@@ -61,6 +53,7 @@ pub(crate) struct StreamController {
     header: HeaderEmitter,
     states: [StreamState; 2],
     current_stream: Option<StreamKind>,
+    current_stream_id: Option<String>,
     finishing_after_drain: bool,
     thinking_placeholder_shown: bool,
 }
@@ -72,6 +65,7 @@ impl StreamController {
             header: HeaderEmitter::new(),
             states: [StreamState::new_for_kind(StreamKind::Answer), StreamState::new_for_kind(StreamKind::Reasoning)],
             current_stream: None,
+            current_stream_id: None,
             finishing_after_drain: false,
             thinking_placeholder_shown: false,
         }
@@ -107,7 +101,11 @@ impl StreamController {
     }
 
     fn emit_header_if_needed(&mut self, kind: StreamKind, out_lines: &mut Lines) -> bool {
-        self.header.maybe_emit(kind, out_lines)
+        let emitted = self.header.maybe_emit(kind, out_lines);
+        if emitted {
+            tracing::debug!("stream: emitted header for {:?}", kind);
+        }
+        emitted
     }
 
     #[inline]
@@ -118,8 +116,14 @@ impl StreamController {
 
     /// Begin a stream, flushing previously completed lines from any other
     /// active stream to maintain ordering.
-    pub(crate) fn begin(&mut self, kind: StreamKind, sink: &impl HistorySink) {
-        tracing::debug!("begin called for {:?}, current_stream={:?}", kind, self.current_stream);
+    pub(crate) fn begin_with_id(&mut self, kind: StreamKind, id: Option<String>, sink: &impl HistorySink) {
+        tracing::debug!("stream.begin kind={:?} prev={:?} new_id={:?}", kind, self.current_stream, id);
+        // NOTE (dup‑guard): Historically we cleared `current_stream[_id]` even when
+        // `kind` did not change, which caused the active Answer stream to lose its id.
+        // Downstream, the UI could not find the streaming cell by id on finalization
+        // and appended a new Assistant cell (visible duplicate). Keep state when the
+        // kind is unchanged, and if the id changes mid‑stream, flush under the old id
+        // and adopt the new one so the final can match and replace in‑place.
         if let Some(current) = self.current_stream {
             if current != kind {
                 tracing::debug!("Switching from {:?} to {:?}, flushing previous", current, kind);
@@ -138,21 +142,53 @@ impl StreamController {
                     result
                 };
                 if !step.history.is_empty() {
-                    tracing::debug!("Flushing {} lines from {:?} stream", step.history.len(), current);
+                    tracing::debug!("stream.flush prev={:?} lines={}", current, step.history.len());
                     let mut lines: Lines = Vec::new();
                     self.emit_header_if_needed(current, &mut lines);
                     lines.extend(step.history);
                     // Don't add extra blank line - markdown renderer handles spacing
-                    sink.insert_history_with_kind(current, lines);
+                    sink.insert_history_with_kind(self.current_stream_id.clone(), current, lines);
                 }
+                // Only clear current stream tracking when actually switching kinds.
                 self.current_stream = None;
+                self.current_stream_id = None;
             }
-            self.current_stream = None;
+            // If the kind is unchanged, we may still need to handle id transitions.
+            // If the incoming id differs from our current id, flush any buffered
+            // content under the old id and then adopt the new id so downstream
+            // finalize uses a matching identifier.
+            if current == kind {
+                if let Some(ref new_id) = id {
+                    if self.current_stream_id.as_ref() != Some(new_id) {
+                        let cfg = self.config.clone();
+                        let step = {
+                            let prev_state = self.state_mut(current);
+                            let newly_completed = prev_state.collector.commit_complete_lines(&cfg);
+                            if !newly_completed.is_empty() { prev_state.enqueue(newly_completed); }
+                            let result = prev_state.drain_all();
+                            tracing::debug!("Flushing {:?} due to id change {:?} -> {:?}", current, self.current_stream_id, id);
+                            result
+                        };
+                        if !step.history.is_empty() {
+                            let mut lines: Lines = Vec::new();
+                            self.emit_header_if_needed(current, &mut lines);
+                            lines.extend(step.history);
+                            sink.insert_history_with_kind(self.current_stream_id.clone(), current, lines);
+                        }
+                        // Now adopt the new id; do not reset kind.
+                        self.current_stream_id = Some(new_id.clone());
+                    }
+                } else if self.current_stream_id.is_none() {
+                    // If we previously had no id and a None arrives again, keep as None.
+                }
+            }
         }
 
         if self.current_stream != Some(kind) {
             let prev = self.current_stream;
             self.current_stream = Some(kind);
+            // Always adopt the provided id when starting a new stream
+            self.current_stream_id = id;
             // Starting a new stream cancels any pending finish-from-previous-stream animation.
             self.finishing_after_drain = false;
             if prev.is_some() {
@@ -169,13 +205,18 @@ impl StreamController {
         }
     }
 
+    /// Backwards-compatible entry point without an id.
+    pub(crate) fn begin(&mut self, kind: StreamKind, sink: &impl HistorySink) {
+        self.begin_with_id(kind, None, sink);
+    }
+
     /// Push a delta; if it contains a newline, commit completed lines and start animation.
     pub(crate) fn push_and_maybe_commit(&mut self, delta: &str, sink: &impl HistorySink) {
         let Some(kind) = self.current_stream else {
             tracing::debug!("push_and_maybe_commit called but no current_stream");
             return;
         };
-        tracing::debug!("push_and_maybe_commit for {:?}, delta={:?}", kind, delta);
+        tracing::debug!("push_and_maybe_commit for {:?}, delta.len={} contains_nl={}", kind, delta.len(), delta.contains('\n'));
         let cfg = self.config.clone();
 
         // Check header flag before borrowing state (used only to avoid double headers)
@@ -216,6 +257,8 @@ impl StreamController {
                     // No per-span overrides needed for Answer: line FG is already bright.
                     styled.push(line);
                 }
+                let count = styled.len();
+                tracing::debug!("stream.commit {:?} newly_completed_lines={}", kind, count);
                 state.enqueue(styled);
                 sink.start_commit_animation();
             }
@@ -302,7 +345,7 @@ impl StreamController {
             // Build output regardless of whether out_lines is empty so we can still
             // replace the streaming cell with a re-renderable final cell.
             let mut lines_with_header: Lines = Vec::new();
-            let _emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
+            let emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
             // Reduce leading blanks to at most one
             let mut skip_count = 0;
             while skip_count < out_lines.len()
@@ -332,9 +375,22 @@ impl StreamController {
             if matches!(kind, StreamKind::Answer) {
                 // Use the source captured before draining so we don't lose content
                 // when the collector was cleared by finalize_and_drain.
-                sink.insert_final_answer(lines_with_header, full_source_before_drain);
+                tracing::debug!(
+                    "stream.finalize ANSWER id={:?} header={} out_lines={} source_len={}",
+                    self.current_stream_id,
+                    emitted_header,
+                    lines_with_header.len(),
+                    full_source_before_drain.len()
+                );
+                sink.insert_final_answer(self.current_stream_id.clone(), lines_with_header, full_source_before_drain);
             } else if !lines_with_header.is_empty() {
-                sink.insert_history_with_kind(kind, lines_with_header);
+                tracing::debug!(
+                    "stream.finalize REASONING id={:?} header={} out_lines={}",
+                    self.current_stream_id,
+                    emitted_header,
+                    lines_with_header.len()
+                );
+                sink.insert_history_with_kind(self.current_stream_id.clone(), kind, lines_with_header);
             }
 
             // Cleanup
@@ -344,7 +400,10 @@ impl StreamController {
             // Also clear the per-stream emitted flag so the header can render again.
             self.header.reset_for_stream(kind);
             self.current_stream = None;
+            self.current_stream_id = None;
             self.finishing_after_drain = false;
+            // Ensure any commit animation thread is stopped when we finalize immediately.
+            sink.stop_commit_animation();
             true
         } else {
             if !remaining.is_empty() {
@@ -400,7 +459,7 @@ impl StreamController {
                 })
                 .collect();
             out.extend(history);
-            sink.insert_history_with_kind(kind, out);
+            sink.insert_history_with_kind(self.current_stream_id.clone(), kind, out);
         }
 
         let is_idle = self.state(kind).is_idle();
@@ -414,6 +473,7 @@ impl StreamController {
                 // Also clear the per-stream emitted flag so the header can render again.
                 self.header.reset_for_stream(kind);
                 self.current_stream = None;
+                self.current_stream_id = None;
                 self.finishing_after_drain = false;
                 return true;
             }
@@ -463,8 +523,12 @@ impl StreamController {
             // Fall through to inject the message
         }
         
-        // This is a new section (no deltas received)
-        self.begin(kind, sink);
+        // If no stream is active for this kind, begin a new section now.
+        // Otherwise, preserve the existing stream context (including id)
+        // so finalization can correctly target the matching cell.
+        if self.current_stream != Some(kind) {
+            self.begin(kind, sink);
+        }
 
         {
             let state = self.state_mut(kind);

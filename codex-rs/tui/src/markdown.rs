@@ -64,7 +64,7 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                 };
                 lines.extend(rendered);
             }
-            Segment::Code { _lang, content } => {
+            Segment::Code { _lang, content, fenced } => {
                 // Use syntect-based syntax highlighting when available, preserving exact text.
                 let lang = _lang.as_deref();
                 // Apply a solid background and pad trailing spaces so the block forms
@@ -77,25 +77,46 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                     .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
                     .max()
                     .unwrap_or(0);
+                // Add 1 space of horizontal padding on both sides for fenced blocks
+                let left_right_pad = if fenced { 1 } else { 0 };
+                let target_w = max_w + (left_right_pad * 2);
+
+                // Optional: add a blank row above for fenced code blocks
+                if fenced {
+                    let top = Line::from(Span::styled(" ".repeat(target_w), Style::default().bg(code_bg)));
+                    lines.push(top);
+                }
+
                 for l in highlighted.iter_mut() {
-                    l.style = l.style.bg(code_bg);
+                    // Apply background to all existing spans instead of the line,
+                    // so the painted region matches our explicit padding width.
+                    for sp in l.spans.iter_mut() {
+                        sp.style = sp.style.bg(code_bg);
+                    }
+                    // Prepend left padding when requested
+                    if left_right_pad > 0 {
+                        l.spans.insert(0, Span::styled(" ", Style::default().bg(code_bg)));
+                    }
                     let w: usize = l
                         .spans
                         .iter()
                         .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
                         .sum();
-                    if max_w > w {
-                        let pad = " ".repeat(max_w - w);
+                    if target_w > w {
+                        let pad = " ".repeat(target_w - w);
                         l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
                     } else if w == 0 {
-                        // Defensive: if this code block segment happens to have
-                        // max_w == 0 (e.g., a split artifact), still paint the
-                        // row with at least one space so the code block
-                        // background shows consistently.
+                        // Defensive: paint at least one cell so background shows
                         l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
                     }
                 }
                 lines.extend(highlighted);
+
+                // Optional: add a blank row below for fenced code blocks
+                if fenced {
+                    let bottom = Line::from(Span::styled(" ".repeat(target_w), Style::default().bg(code_bg)));
+                    lines.push(bottom);
+                }
             }
         }
     }
@@ -160,6 +181,8 @@ enum Segment {
     Code {
         _lang: Option<String>,
         content: String,
+        // true when originated from ```/~~~ fenced block; false for indented
+        fenced: bool,
     },
 }
 
@@ -282,6 +305,7 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
                         segments.push(Segment::Code {
                             _lang: code_lang.take(),
                             content: code_content.clone(),
+                            fenced: true,
                         });
                         code_content.clear();
                         code_mode = CodeMode::None;
@@ -307,6 +331,7 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
                         segments.push(Segment::Code {
                             _lang: None,
                             content: code_content.clone(),
+                            fenced: false,
                         });
                         code_content.clear();
                         code_mode = CodeMode::None;
@@ -324,6 +349,7 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
         segments.push(Segment::Code {
             _lang: code_lang.take(),
             content: code_content.clone(),
+            fenced: matches!(code_mode, CodeMode::Fenced),
         });
     } else if !curr_text.is_empty() {
         segments.push(Segment::Text(curr_text.clone()));
@@ -409,14 +435,16 @@ mod tests {
                     .collect::<String>()
             })
             .collect();
-        assert_eq!(
-            rendered,
-            vec![
-                "  indented".to_string(),
-                "\t\twith tabs".to_string(),
-                "    four spaces".to_string()
-            ]
-        );
+        // Expect: top padding row, the 3 code lines (each with a leading space and optional trailing spaces), bottom padding row.
+        assert_eq!(rendered.len(), 5, "expected fenced padding rows added: {:?}", rendered);
+        // Helpers: identify padded blank line and strip left pad+trailing spaces
+        let is_padded_blank = |s: &str| !s.is_empty() && s.trim().is_empty();
+        let strip_line = |s: &str| s.strip_prefix(' ').unwrap_or(s).trim_end().to_string();
+        assert!(is_padded_blank(&rendered[0]));
+        assert_eq!(strip_line(&rendered[1]), "  indented");
+        assert_eq!(strip_line(&rendered[2]), "\t\twith tabs");
+        assert_eq!(strip_line(&rendered[3]), "    four spaces");
+        assert!(is_padded_blank(&rendered[4]));
     }
 
     #[test]
@@ -434,10 +462,12 @@ mod tests {
                     .collect::<String>()
             })
             .collect();
-        // Expect first and last lines rewritten, middle line unchanged.
-        assert!(rendered[0].contains("vscode://file"));
-        assert_eq!(rendered[1], "Inside 【F:/x.rs†L2】");
-        assert!(matches!(rendered.last(), Some(s) if s.contains("vscode://file")));
+        // Expect first and last lines rewritten, and the interior fenced code line
+        // unchanged (but wrapped with left/right padding rows).
+        let strip_line = |s: &str| s.strip_prefix(' ').unwrap_or(s).trim_end().to_string();
+        assert!(rendered.first().is_some_and(|s| s.contains("vscode://file")));
+        assert!(rendered.iter().any(|s| strip_line(s) == "Inside 【F:/x.rs†L2】"));
+        assert!(rendered.last().is_some_and(|s| s.contains("vscode://file")));
     }
 
     #[test]
@@ -532,15 +562,23 @@ mod tests {
             .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
             .collect();
 
-        // There should be at least 7 lines: comment, fn greet header, format!, closing },
-        // the internal blank (spaces), fn main header, println!, closing }.
-        assert!(rendered.len() >= 7, "unexpected line count: {:?}", rendered);
+        // There should be at least 9 lines including top/bottom padding.
+        assert!(rendered.len() >= 9, "unexpected line count: {:?}", rendered);
 
         // Find the internal blank: it should be a line consisting only of spaces
         // (inserted by padding logic inside code block), not an actually empty string
         // produced by the non-code renderer.
         assert!(rendered.iter().any(|s| !s.is_empty() && s.trim().is_empty()),
             "expected a space-padded blank line inside the code block, got: {:?}", rendered);
+
+        // Validate uniform rectangular width including padding rows
+        use unicode_width::UnicodeWidthStr;
+        let widths: Vec<usize> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum())
+            .collect();
+        let maxw = *widths.iter().max().unwrap_or(&0);
+        assert!(widths.iter().all(|w| *w == maxw), "all lines must be padded to same width: {:?}", widths);
     }
 
     #[test]

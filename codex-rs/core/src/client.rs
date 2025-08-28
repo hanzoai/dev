@@ -451,6 +451,9 @@ struct SseEvent {
     response: Option<Value>,
     item: Option<Value>,
     delta: Option<String>,
+    // Present on delta events from the Responses API; used to correlate
+    // streaming chunks with the final OutputItemDone.
+    item_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -650,33 +653,46 @@ async fn process_sse<S>(
             }
             "response.output_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::OutputTextDelta {
+                    // Prefer the explicit item_id from the SSE event; fall back to last seen.
+                    if let Some(ref id) = event.item_id {
+                        current_item_id = Some(id.clone());
+                    }
+                    tracing::debug!("sse.delta output_text id={:?} len={}", current_item_id, delta.len());
+                    let ev = ResponseEvent::OutputTextDelta {
                         delta,
-                        item_id: current_item_id.clone(),
+                        item_id: event.item_id.or_else(|| current_item_id.clone()),
                     };
-                    if tx_event.send(Ok(event)).await.is_err() {
+                    if tx_event.send(Ok(ev)).await.is_err() {
                         return;
                     }
                 }
             }
             "response.reasoning_summary_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningSummaryDelta {
+                    if let Some(ref id) = event.item_id {
+                        current_item_id = Some(id.clone());
+                    }
+                    tracing::debug!("sse.delta reasoning_summary id={:?} len={}", current_item_id, delta.len());
+                    let ev = ResponseEvent::ReasoningSummaryDelta {
                         delta,
-                        item_id: current_item_id.clone(),
+                        item_id: event.item_id.or_else(|| current_item_id.clone()),
                     };
-                    if tx_event.send(Ok(event)).await.is_err() {
+                    if tx_event.send(Ok(ev)).await.is_err() {
                         return;
                     }
                 }
             }
             "response.reasoning_text.delta" => {
                 if let Some(delta) = event.delta {
-                    let event = ResponseEvent::ReasoningContentDelta {
+                    if let Some(ref id) = event.item_id {
+                        current_item_id = Some(id.clone());
+                    }
+                    tracing::debug!("sse.delta reasoning_content id={:?} len={}", current_item_id, delta.len());
+                    let ev = ResponseEvent::ReasoningContentDelta {
                         delta,
-                        item_id: current_item_id.clone(),
+                        item_id: event.item_id.or_else(|| current_item_id.clone()),
                     };
-                    if tx_event.send(Ok(event)).await.is_err() {
+                    if tx_event.send(Ok(ev)).await.is_err() {
                         return;
                     }
                 }
