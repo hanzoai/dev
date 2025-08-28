@@ -86,6 +86,8 @@ pub(crate) enum AppEvent {
 
     InsertHistory(Vec<Line<'static>>),
     InsertHistoryWithKind { kind: StreamKind, lines: Vec<Line<'static>> },
+    /// Finalized assistant answer with raw markdown for re-rendering under theme changes.
+    InsertFinalAnswer { lines: Vec<Line<'static>>, source: String },
 
     #[allow(dead_code)]
     StartCommitAnimation,
