@@ -8,6 +8,7 @@ pub struct MarkdownRenderer {
     current_line: Vec<Span<'static>>,
     in_code_block: bool,
     code_block_lang: Option<String>,
+    code_block_buf: String,
     #[allow(dead_code)]
     list_depth: usize,
     bold_first_sentence: bool,
@@ -21,6 +22,7 @@ impl MarkdownRenderer {
             current_line: Vec::new(),
             in_code_block: false,
             code_block_lang: None,
+            code_block_buf: String::new(),
             list_depth: 0,
             bold_first_sentence: false,
             first_sentence_done: false,
@@ -56,6 +58,14 @@ impl MarkdownRenderer {
                 continue;
             }
             
+            // Handle tables EARLY to avoid printing the pipe header as plain text
+            if let Some((consumed, table_lines)) = parse_markdown_table(&lines[i..]) {
+                self.flush_current_line();
+                self.lines.extend(table_lines);
+                i += consumed;
+                continue;
+            }
+
             if self.in_code_block {
                 self.add_code_line(line);
                 i += 1;
@@ -69,6 +79,14 @@ impl MarkdownRenderer {
                 // assistant returned. Only explicit blank lines in the source should render.
                 self.lines.push(heading);
                 i += 1;
+                continue;
+            }
+            
+            // Blockquotes / callouts (supports nesting and [!NOTE]/[!TIP]/[!WARNING]/[!IMPORTANT])
+            if let Some((consumed, quote_lines)) = parse_blockquotes(&lines[i..]) {
+                self.flush_current_line();
+                self.lines.extend(quote_lines);
+                i += consumed;
                 continue;
             }
             
@@ -101,6 +119,35 @@ impl MarkdownRenderer {
         let trimmed = line.trim_start();
         if self.in_code_block {
             // Closing fence
+            // Render accumulated buffer with syntax highlighting
+            let lang = self.code_block_lang.as_deref();
+            let code_bg = crate::colors::code_block_bg();
+            let mut highlighted = crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
+            use ratatui::style::Style;
+            use ratatui::text::Span;
+            use unicode_width::UnicodeWidthStr;
+            let max_w: usize = highlighted
+                .iter()
+                .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                .max()
+                .unwrap_or(0);
+            for l in highlighted.iter_mut() {
+                l.style = l.style.bg(code_bg);
+                let w: usize = l
+                    .spans
+                    .iter()
+                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                    .sum();
+                if max_w > w {
+                    let pad = " ".repeat(max_w - w);
+                    l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                } else if w == 0 {
+                    // Ensure at least one painted cell so the background shows
+                    l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                }
+            }
+            self.lines.extend(highlighted);
+            self.code_block_buf.clear();
             self.in_code_block = false;
             self.code_block_lang = None;
         } else {
@@ -114,16 +161,14 @@ impl MarkdownRenderer {
             } else {
                 Some(lang.to_string())
             };
+            self.code_block_buf.clear();
         }
     }
     
     fn add_code_line(&mut self, line: &str) {
-        // Preserve exact indentation in code blocks
-        let code_style = Style::default().fg(crate::colors::function());
-        self.lines.push(Line::from(Span::styled(
-            line.to_string(),
-            code_style,
-        )));
+        // Accumulate; add a newline that was lost by `lines()` iteration
+        self.code_block_buf.push_str(line);
+        self.code_block_buf.push('\n');
     }
     
     fn parse_heading(&self, line: &str) -> Option<Line<'static>> {
@@ -150,23 +195,9 @@ impl MarkdownRenderer {
         
         let heading_text = trimmed[level..].trim();
         
-        // Style based on heading level
-        let style = match level {
-            1 => Style::default()
-                .fg(crate::colors::primary())
-                .add_modifier(Modifier::BOLD),
-            2 => Style::default().fg(crate::colors::primary()),
-            3 => Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-            4 => Style::default().fg(crate::colors::text_bright()),
-            5 => Style::default().fg(crate::colors::text_dim()),
-            _ => Style::default().fg(crate::colors::text_dim()),
-        };
-        
-        // Include the # symbols in the output for clarity
-        let full_heading = format!("{} {}", "#".repeat(level), heading_text);
-        Some(Line::from(Span::styled(full_heading, style)))
+        // Headings: strip the leading #'s and render in bold (no special color).
+        let style = Style::default().add_modifier(Modifier::BOLD);
+        Some(Line::from(Span::styled(heading_text.to_string(), style)))
     }
     
     fn parse_list_item(&mut self, line: &str) -> Option<Line<'static>> {
@@ -175,8 +206,29 @@ impl MarkdownRenderer {
         // Check for unordered list markers
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
             let indent = line.len() - trimmed.len();
-            let content = &trimmed[2..];
-            let styled_content = self.process_inline_spans(content);
+            let mut content = &trimmed[2..];
+
+            // Task list checkbox support: - [ ] / - [x]
+            let mut checkbox_spans: Vec<Span<'static>> = Vec::new();
+            if let Some(rest) = content.strip_prefix("[ ] ") {
+                content = rest;
+                checkbox_spans.push(Span::raw("☐ "));
+            } else if let Some(rest) = content.strip_prefix("[x] ").or_else(|| content.strip_prefix("[X] ")) {
+                content = rest;
+                checkbox_spans.push(Span::styled("✔ ", Style::default().fg(crate::colors::success())));
+            }
+
+            let mut styled_content = self.process_inline_spans(content);
+            // Run autolink on list content so links in bullets convert properly.
+            styled_content = autolink_spans(styled_content);
+            let has_checkbox = !checkbox_spans.is_empty();
+            if has_checkbox {
+                // Prepend checkbox to content; do NOT render a bullet for task list items.
+                let mut tmp = Vec::with_capacity(checkbox_spans.len() + styled_content.len());
+                tmp.extend(checkbox_spans);
+                tmp.append(&mut styled_content);
+                styled_content = tmp;
+            }
             // Determine nesting level from indent (2 spaces per level approximation)
             let level = (indent / 2) + 1;
             let bullet = match level {
@@ -185,14 +237,33 @@ impl MarkdownRenderer {
                 3 => "∘",
                 _ => "⋅",
             };
+            // Color by nesting level:
+            // 1 → text, 2 → midpoint between text and text_dim, 3+ → text_dim
+            let content_fg = match level {
+                1 => crate::colors::text(),
+                2 => crate::colors::text_mid(),
+                _ => crate::colors::text_dim(),
+            };
 
-            let mut spans = vec![
-                Span::raw(" ".repeat(indent)),
-                // Render bullet using standard text color for consistency
-                Span::styled(bullet, Style::default().fg(crate::colors::text())),
-                Span::raw(" "),
-            ];
-            spans.extend(styled_content);
+            let mut spans = vec![Span::raw(" ".repeat(indent))];
+            if !has_checkbox {
+                // Render bullet to match content color
+                spans.push(Span::styled(bullet, Style::default().fg(content_fg)));
+                spans.push(Span::raw(" "));
+            }
+            // Recolor content to desired level color while preserving modifiers and any
+            // spans that already carry a specific foreground color (e.g., inline code, checkmarks).
+            let recolored: Vec<Span<'static>> = styled_content
+                .into_iter()
+                .map(|s| {
+                    if s.style.fg.is_some() { s } else {
+                        let mut st = s.style;
+                        st.fg = Some(content_fg);
+                        Span::styled(s.content, st)
+                    }
+                })
+                .collect();
+            spans.extend(recolored);
             
             return Some(Line::from(spans));
         }
@@ -204,16 +275,31 @@ impl MarkdownRenderer {
                 let indent = line.len() - trimmed.len();
                 let content = &trimmed[dot_pos + 2..];
                 let styled_content = self.process_inline_spans(content);
+                let depth = indent / 2 + 1;
+                let content_fg = match depth {
+                    1 => crate::colors::text(),
+                    2 => crate::colors::text_mid(),
+                    _ => crate::colors::text_dim(),
+                };
                 
                 let mut spans = vec![
                     Span::raw(" ".repeat(indent)),
-                    Span::styled(
-                        format!("{}.", number_part),
-                        Style::default().fg(crate::colors::primary()),
-                    ),
+                    // Make the number bold (no primary color)
+                    Span::styled(format!("{}.", number_part), Style::default().add_modifier(Modifier::BOLD).fg(content_fg)),
                     Span::raw(" "),
                 ];
-                spans.extend(styled_content);
+                // Recolor content preserving modifiers and pre-set foreground colors
+                let recolored: Vec<Span<'static>> = styled_content
+                    .into_iter()
+                    .map(|s| {
+                        if s.style.fg.is_some() { s } else {
+                            let mut st = s.style;
+                            st.fg = Some(content_fg);
+                            Span::styled(s.content, st)
+                        }
+                    })
+                    .collect();
+                spans.extend(recolored);
                 
                 return Some(Line::from(spans));
             }
@@ -225,11 +311,6 @@ impl MarkdownRenderer {
     fn process_inline_text(&mut self, text: &str) {
         let spans = self.process_inline_spans(text);
         self.current_line.extend(spans);
-        // If bold-first is enabled, restrict bolding to the first rendered line.
-        // Even when no sentence terminator is present, only the first line should be bold.
-        if self.bold_first_sentence && !self.first_sentence_done {
-            self.first_sentence_done = true;
-        }
         self.flush_current_line();
     }
     
@@ -240,6 +321,124 @@ impl MarkdownRenderer {
         let mut current_text = String::new();
         
         while i < chars.len() {
+            // Markdown image ![alt](url "title")
+            if chars[i] == '!' {
+                let rest: String = chars[i..].iter().collect();
+                if let Some((consumed, label, target)) = find_markdown_image(&rest) {
+                    if !current_text.is_empty() {
+                        spans.push(Span::raw(current_text.clone()));
+                        current_text.clear();
+                    }
+                    // Render as a hyperlink span with a friendly label
+                    let lbl = if label.is_empty() { "Image".to_string() } else { label };
+                    let link = hyperlink_span(&lbl, &target, &Span::raw(""));
+                    spans.push(link);
+                    i += consumed;
+                    continue;
+                }
+            }
+            // Bold+Italic ***text*** or ___text___
+            if i + 2 < chars.len()
+                && ((chars[i] == '*' && chars[i + 1] == '*' && chars[i + 2] == '*')
+                    || (chars[i] == '_' && chars[i + 1] == '_' && chars[i + 2] == '_'))
+            {
+                // Flush current text
+                if !current_text.is_empty() {
+                    spans.push(Span::raw(current_text.clone()));
+                    current_text.clear();
+                }
+                let marker = chars[i];
+                // Find closing triple marker
+                let mut j = i + 3;
+                let mut content = String::new();
+                while j + 2 < chars.len() {
+                    if chars[j] == marker && chars[j + 1] == marker && chars[j + 2] == marker {
+                        let st = Style::default()
+                            .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+                            .fg(crate::colors::text_bright());
+                        spans.push(Span::styled(content, st));
+                        i = j + 3;
+                        break;
+                    }
+                    content.push(chars[j]);
+                    j += 1;
+                }
+                if j + 2 >= chars.len() {
+                    // No closing marker; treat as literal
+                    current_text.push(marker);
+                    current_text.push(marker);
+                    current_text.push(marker);
+                    i += 3;
+                }
+                continue;
+            }
+
+            // Strikethrough ~~text~~
+            if i + 1 < chars.len() && chars[i] == '~' && chars[i + 1] == '~' {
+                if !current_text.is_empty() {
+                    spans.push(Span::raw(current_text.clone()));
+                    current_text.clear();
+                }
+                let mut j = i + 2;
+                let mut content = String::new();
+                while j + 1 < chars.len() {
+                    if chars[j] == '~' && chars[j + 1] == '~' {
+                        let st = Style::default().add_modifier(Modifier::CROSSED_OUT);
+                        spans.push(Span::styled(content, st));
+                        i = j + 2;
+                        break;
+                    }
+                    content.push(chars[j]);
+                    j += 1;
+                }
+                if j + 1 >= chars.len() {
+                    current_text.push('~');
+                    current_text.push('~');
+                    i += 2;
+                }
+                continue;
+            }
+
+            // Simple HTML underline <u>text</u>
+            if chars[i] == '<' {
+                // Try <u>, <sub>, <sup>
+                let rest: String = chars[i..].iter().collect();
+                if let Some(inner) = rest.strip_prefix("<u>") {
+                    if let Some(end) = inner.find("</u>") {
+                        if !current_text.is_empty() {
+                            spans.push(Span::raw(current_text.clone()));
+                            current_text.clear();
+                        }
+                        let content = inner[..end].to_string();
+                        spans.push(Span::styled(content, Style::default().add_modifier(Modifier::UNDERLINED)));
+                        i += 3 + end + 4; // len("<u>") + content + len("</u>")
+                        continue;
+                    }
+                } else if let Some(inner) = rest.strip_prefix("<sub>") {
+                    if let Some(end) = inner.find("</sub>") {
+                        if !current_text.is_empty() {
+                            spans.push(Span::raw(current_text.clone()));
+                            current_text.clear();
+                        }
+                        let content = inner[..end].to_string();
+                        spans.push(Span::raw(to_subscript(&content)));
+                        i += 5 + end + 6; // <sub> + content + </sub>
+                        continue;
+                    }
+                } else if let Some(inner) = rest.strip_prefix("<sup>") {
+                    if let Some(end) = inner.find("</sup>") {
+                        if !current_text.is_empty() {
+                            spans.push(Span::raw(current_text.clone()));
+                            current_text.clear();
+                        }
+                        let content = inner[..end].to_string();
+                        spans.push(Span::raw(to_superscript(&content)));
+                        i += 5 + end + 6; // <sup> + content + </sup>
+                        continue;
+                    }
+                }
+            }
+
             // Check for inline code
             if chars[i] == '`' {
                 // Flush current text
@@ -288,12 +487,8 @@ impl MarkdownRenderer {
                 while j + 1 < chars.len() {
                     if chars[j] == marker && chars[j + 1] == marker {
                         // Found closing markers
-                        // Assistant messages render with bright bold; others stay dim
-                        let bold_color = if self.bold_first_sentence {
-                            crate::colors::text_bright()
-                        } else {
-                            crate::colors::text_dim()
-                        };
+                        // Bold text uses bright color consistently
+                        let bold_color = crate::colors::text_bright();
                         spans.push(Span::styled(
                             bold_content,
                             Style::default()
@@ -358,39 +553,9 @@ impl MarkdownRenderer {
             i += 1;
         }
         
-        // Flush any remaining text
+        // Flush any remaining plain text as-is; first-sentence bolding is handled elsewhere
         if !current_text.is_empty() {
-            // Apply first sentence bolding if enabled
-            if self.bold_first_sentence && !self.first_sentence_done {
-                let sentence_end = current_text.find(|c: char| c == '.' || c == '!' || c == '?' || c == ':');
-                if let Some(end) = sentence_end {
-                    // Split at sentence end (including punctuation)
-                    let end_with_punct = end + 1;
-                    let first_sentence = &current_text[..end_with_punct];
-                    spans.push(Span::styled(
-                        first_sentence.to_string(),
-                        Style::default()
-                            .fg(crate::colors::text_bright())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    self.first_sentence_done = true;
-                    
-                    // Add the rest without bold
-                    if end_with_punct < current_text.len() {
-                        spans.push(Span::raw(current_text[end_with_punct..].to_string()));
-                    }
-                } else {
-                    // No sentence end found, bold the entire text
-                    spans.push(Span::styled(
-                        current_text,
-                        Style::default()
-                            .fg(crate::colors::text_bright())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-            } else {
-                spans.push(Span::raw(current_text));
-            }
+            spans.push(Span::raw(current_text));
         }
         
         spans
@@ -399,7 +564,13 @@ impl MarkdownRenderer {
     fn flush_current_line(&mut self) {
         if !self.current_line.is_empty() {
             // Autolink URLs and markdown links inside the accumulated spans.
-            let linked = autolink_spans(std::mem::take(&mut self.current_line));
+            let mut linked = autolink_spans(std::mem::take(&mut self.current_line));
+            // Apply first-sentence styling to the first rendered line.
+            if self.bold_first_sentence && !self.first_sentence_done {
+                if apply_first_sentence_style(&mut linked) {
+                    self.first_sentence_done = true;
+                }
+            }
             self.lines.push(Line::from(linked));
             self.current_line.clear();
         }
@@ -416,21 +587,385 @@ impl MarkdownRenderer {
     
     fn finish(&mut self) {
         self.flush_current_line();
+        // If an unterminated fence was left open, render its buffer.
+        if self.in_code_block {
+            let lang = self.code_block_lang.as_deref();
+            let code_bg = crate::colors::code_block_bg();
+            let mut highlighted = crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
+            use ratatui::style::Style;
+            use ratatui::text::Span;
+            use unicode_width::UnicodeWidthStr;
+            let max_w: usize = highlighted
+                .iter()
+                .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                .max()
+                .unwrap_or(0);
+            for l in highlighted.iter_mut() {
+                l.style = l.style.bg(code_bg);
+                let w: usize = l
+                    .spans
+                    .iter()
+                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                    .sum();
+                if max_w > w {
+                    let pad = " ".repeat(max_w - w);
+                    l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                } else if w == 0 {
+                    l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                }
+            }
+            self.lines.extend(highlighted);
+            self.code_block_buf.clear();
+            self.in_code_block = false;
+            self.code_block_lang = None;
+        }
     }
+}
+
+// Parse a markdown pipe table starting at `lines[0]`.
+// Returns (consumed_line_count, rendered_lines) on success.
+// We keep it simple and robust for TUI: left-align columns and pad with spaces.
+fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
+    if lines.len() < 2 { return None; }
+    let header_line = lines[0].trim();
+    let sep_line = lines[1].trim();
+    if !header_line.contains('|') { return None; }
+
+    // Split a row by '|' and trim spaces; drop empty edge cells from leading/trailing '|'
+    fn split_row(s: &str) -> Vec<String> {
+        let mut parts: Vec<String> = s.split('|').map(|x| x.trim().to_string()).collect();
+        // Trim empty edge cells introduced by leading/trailing '|'
+        if parts.first().is_some_and(|x| x.is_empty()) { parts.remove(0); }
+        if parts.last().is_some_and(|x| x.is_empty()) { parts.pop(); }
+        parts
+    }
+
+    let header_cells = split_row(header_line);
+    if header_cells.is_empty() { return None; }
+
+    // Validate separator: must have at least the same number of segments and each segment is --- with optional : for alignment
+    // Parse separator: either pipe-based or dashed segments separated by 2+ spaces
+    let (sep_segments, has_pipe_sep) = if sep_line.contains('|') {
+        (split_row(sep_line), true)
+    } else {
+        // Split on runs of 2+ spaces
+        let mut segs: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut space_run = 0;
+        for ch in sep_line.chars() {
+            if ch == ' ' { space_run += 1; } else { space_run = 0; }
+            if space_run >= 2 {
+                if !cur.trim().is_empty() { segs.push(cur.trim().to_string()); }
+                cur.clear();
+                space_run = 0;
+            } else {
+                cur.push(ch);
+            }
+        }
+        if !cur.trim().is_empty() { segs.push(cur.trim().to_string()); }
+        (segs, false)
+    };
+    if sep_segments.len() < header_cells.len() { return None; }
+    let valid_sep = sep_segments.iter().take(header_cells.len()).all(|c| {
+        let core = c.replace(':', "");
+        !core.is_empty() && core.chars().all(|ch| ch == '-')
+    });
+    if !valid_sep { return None; }
+
+    // Collect body rows until a non-table line
+    let mut body: Vec<Vec<String>> = Vec::new();
+    let mut idx = 2usize;
+    while idx < lines.len() {
+        let raw = lines[idx];
+        if !raw.contains('|') { break; }
+        let row = split_row(raw);
+        if row.is_empty() { break; }
+        body.push(row);
+        idx += 1;
+    }
+
+    let cols = header_cells.len().max(body.iter().map(|r| r.len()).max().unwrap_or(0));
+    // Column alignment: from pipe separators with colons if present; otherwise
+    // infer right alignment for numeric-only columns, left otherwise.
+    #[derive(Copy, Clone)]
+    enum Align { Left, Right }
+    let mut aligns = vec![Align::Left; cols];
+    if has_pipe_sep {
+        for i in 0..cols {
+            let seg = sep_segments.get(i).map(|s| s.as_str()).unwrap_or("");
+            let left_colon = seg.starts_with(':');
+            let right_colon = seg.ends_with(':');
+            aligns[i] = if right_colon && !left_colon { Align::Right } else { Align::Left };
+        }
+    }
+    // Compute widths per column
+    let mut widths = vec![0usize; cols];
+    for (i, cell) in header_cells.iter().enumerate() {
+        widths[i] = widths[i].max(cell.chars().count());
+    }
+    for row in &body {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.chars().count());
+        }
+    }
+    // Infer alignment for numeric columns if not specified by pipes
+    if !has_pipe_sep {
+        for i in 0..cols {
+            let numeric = body.iter().all(|r| r.get(i).map(|c| is_numeric(c)).unwrap_or(true));
+            if numeric { aligns[i] = Align::Right; }
+        }
+    }
+
+    fn pad_cell(s: &str, w: usize, align: Align) -> String {
+        let len = s.chars().count();
+        if len >= w { return s.to_string(); }
+        let pad = w - len;
+        match align { Align::Left => format!("{}{}", s, " ".repeat(pad)), Align::Right => format!("{}{}", " ".repeat(pad), s) }
+    }
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    // Header (bold)
+    {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for i in 0..cols {
+            if i > 0 { spans.push(Span::raw("  ")); }
+            let text = pad_cell(header_cells.get(i).map(String::as_str).unwrap_or(""), widths[i], aligns[i]);
+            spans.push(Span::styled(text, Style::default().add_modifier(Modifier::BOLD)));
+        }
+        out.push(Line::from(spans));
+    }
+    // Separator row using box-drawing to avoid being mistaken for a horizontal rule
+    {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for i in 0..cols {
+            if i > 0 { spans.push(Span::raw("  ")); }
+            spans.push(Span::raw("─".repeat(widths[i]).to_string()));
+        }
+        out.push(Line::from(spans));
+    }
+    // Body
+    for row in body {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for i in 0..cols {
+            if i > 0 { spans.push(Span::raw("  ")); }
+            let text = pad_cell(row.get(i).map(String::as_str).unwrap_or(""), widths[i], aligns[i]);
+            spans.push(Span::raw(text));
+        }
+        out.push(Line::from(spans));
+    }
+
+    Some((idx, out))
+}
+
+fn is_numeric(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() { return true; }
+    let mut has_digit = false;
+    for ch in t.chars() {
+        if ch.is_ascii_digit() { has_digit = true; continue; }
+        if matches!(ch, '+' | '-' | '.' | ',') { continue; }
+        return false;
+    }
+    has_digit
+}
+
+// Parse consecutive blockquote lines, supporting nesting with multiple '>' markers
+// and callouts: [!NOTE], [!TIP], [!WARNING], [!IMPORTANT]
+fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
+    if lines.is_empty() { return None; }
+    // Must start with '>'
+    if !lines[0].trim_start().starts_with('>') { return None; }
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut i = 0usize;
+    let mut callout_kind: Option<String> = None;
+    let mut callout_color = crate::colors::info();
+    let mut first_content_seen = false;
+    while i < lines.len() {
+        let raw = lines[i];
+        let t = raw.trim_start();
+        if !t.starts_with('>') { break; }
+        // Count nesting depth (allow spaces between >)
+        let mut idx = 0usize;
+        let bytes = t.as_bytes();
+        let mut depth = 0usize;
+        while idx < bytes.len() {
+            if bytes[idx] == b'>' {
+                depth += 1; idx += 1; while idx < bytes.len() && bytes[idx] == b' ' { idx += 1; }
+            } else { break; }
+        }
+        let content = t[idx..].to_string();
+        if !first_content_seen {
+            let trimmed = content.trim();
+            if let Some(inner) = trimmed.strip_prefix("[!") {
+                if let Some(end) = inner.find(']') {
+                    let kind = inner[..end].to_ascii_uppercase();
+                    match kind.as_str() {
+                        "NOTE" => { callout_kind = Some("NOTE".into()); callout_color = crate::colors::info(); }
+                        "TIP" => { callout_kind = Some("TIP".into()); callout_color = crate::colors::success(); }
+                        "WARNING" => { callout_kind = Some("WARNING".into()); callout_color = crate::colors::warning(); }
+                        "IMPORTANT" => { callout_kind = Some("IMPORTANT".into()); callout_color = crate::colors::info(); }
+                        _ => {}
+                    }
+                    if let Some(ref k) = callout_kind {
+                        // Eagerly emit the label so the block never returns None
+                        // even if there are no subsequent quoted lines.
+                        if out.is_empty() {
+                            let label = format!("{}", k);
+                            out.push(Line::from(vec![
+                                Span::styled(label, Style::default().fg(callout_color).add_modifier(Modifier::BOLD)),
+                            ]));
+                        }
+                        i += 1; // consume marker line and continue scanning quoted content
+                        continue;
+                    }
+                }
+            }
+            first_content_seen = true;
+        }
+
+        // For callouts, render a label line once
+        if let Some(ref kind) = callout_kind {
+            if out.is_empty() {
+                let label = format!("{}", kind);
+                out.push(Line::from(vec![
+                    Span::styled(label, Style::default().fg(callout_color).add_modifier(Modifier::BOLD)),
+                ]));
+            }
+        }
+
+        // Render the quote content using a nested MarkdownRenderer so lists/code inside
+        // the quote are fully supported.
+        let mut inner = MarkdownRenderer::new();
+        inner.process_text(&content);
+        inner.finish();
+        let lines_to_render = if inner.lines.is_empty() { vec![Line::from("")] } else { inner.lines };
+
+        let bar_style = if callout_kind.is_some() { Style::default().fg(callout_color) } else { Style::default().fg(crate::colors::text_dim()) };
+        let content_fg = if callout_kind.is_some() { crate::colors::text() } else { crate::colors::text_dim() };
+
+        for inner_line in lines_to_render {
+            // Prefix depth bars (│ ) once per nesting level
+            let mut prefixed: Vec<Span<'static>> = Vec::new();
+            for _ in 0..depth.max(1) {
+                prefixed.push(Span::styled("│ ", bar_style));
+            }
+            // Recolor inner content spans only if they don't already have a specific FG
+            let recolored: Vec<Span<'static>> = inner_line
+                .spans
+                .into_iter()
+                .map(|s| {
+                    if s.style.fg.is_some() { s } else {
+                        let mut st = s.style;
+                        st.fg = Some(content_fg);
+                        Span::styled(s.content, st)
+                    }
+                })
+                .collect();
+            prefixed.extend(recolored);
+            out.push(Line::from(prefixed));
+        }
+        i += 1;
+    }
+    if out.is_empty() { None } else { Some((i, out)) }
+}
+
+// Apply bold + text_bright to the first sentence in a span list (first line only),
+// preserving any existing bold spans and other inline styles.
+fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
+    use ratatui::style::Modifier;
+    // Concatenate text to find terminator
+    let full: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let trimmed = full.trim_start();
+    // Skip if line begins with a markdown bullet glyph
+    if trimmed.starts_with('•') || trimmed.starts_with('◦') || trimmed.starts_with('·') || trimmed.starts_with('∘') || trimmed.starts_with('⋅') {
+        return false;
+    }
+    // Find a sensible terminator index with simple heuristics
+    let chars: Vec<char> = full.chars().collect();
+    let mut term: Option<usize> = None;
+    for i in 0..chars.len() {
+        let ch = chars[i];
+        if ch == '.' || ch == '!' || ch == '?' || ch == ':' {
+            let next = chars.get(i + 1).copied();
+            // Skip filename-like or abbreviation endings
+            if matches!(next, Some(c) if c.is_ascii_alphanumeric()) { continue; }
+            if i >= 3 {
+                let tail: String = chars[i - 3..=i].iter().collect::<String>().to_lowercase();
+                if tail == "e.g." || tail == "i.e." { continue; }
+            }
+            // Accept if eol/space or quote then space/eol
+            let ok = match next {
+                None => true,
+                Some(c) if c.is_whitespace() => true,
+                Some('"') | Some('\'') => {
+                    let n2 = chars.get(i + 2).copied();
+                    n2.is_none() || n2.map(|c| c.is_whitespace()).unwrap_or(false)
+                }
+                _ => false,
+            };
+            if ok { term = Some(i + 1); break; }
+        }
+    }
+    let Some(limit) = term else { return false };
+    // If no non-space content after limit, consider single-sentence → no bold
+    if !chars.iter().skip(limit).any(|c| !c.is_whitespace()) { return false; }
+
+    // Walk spans and apply style up to limit (build a new vec to avoid borrow conflicts)
+    let original = std::mem::take(spans);
+    let mut out: Vec<Span<'static>> = Vec::with_capacity(original.len() + 2);
+    let mut consumed = 0usize; // chars consumed across spans
+    for sp in original.into_iter() {
+        if consumed >= limit {
+            out.push(sp);
+            continue;
+        }
+        let text = sp.content.into_owned();
+        let len = text.chars().count();
+        let end_here = (limit - consumed).min(len);
+        if end_here == len {
+            // Entire span within bold range
+            let mut st = sp.style;
+            if !st.add_modifier.contains(Modifier::BOLD) {
+                st.add_modifier.insert(Modifier::BOLD);
+                st.fg = Some(crate::colors::text_bright());
+            }
+            out.push(Span::styled(text, st));
+        } else if end_here == 0 {
+            out.push(Span::styled(text, sp.style));
+        } else {
+            // Split span
+            let mut iter = text.chars();
+            let left: String = iter.by_ref().take(end_here).collect();
+            let right: String = iter.collect();
+            let mut left_style = sp.style;
+            if !left_style.add_modifier.contains(Modifier::BOLD) {
+                left_style.add_modifier.insert(Modifier::BOLD);
+                left_style.fg = Some(crate::colors::text_bright());
+            }
+            out.push(Span::styled(left, left_style));
+            out.push(Span::styled(right, sp.style));
+        }
+        consumed += end_here;
+    }
+    *spans = out;
+    true
 }
 
 // Turn inline markdown links and bare URLs into OSC 8 hyperlinks.
 // This runs late, on the already-styled spans for a line, so it preserves
 // bold/italic styling while adding underlines for links and embedding the
 // hyperlink escape sequences in the text.
+// Mixed mode hyperlinking:
+// - Only Markdown links are wrapped with OSC 8 (to keep labeled links clickable).
+// - Explicit http(s) URLs and bare domains are left as plain text so the
+//   terminal's native URL detection handles them. This avoids width/underline
+//   glitches reported in some terminals (e.g., iTerm2) when OSC 8 is pervasive.
 fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     // Patterns: markdown [label](target), explicit http(s) URLs, and plain domains.
     // Keep conservative to avoid false positives.
-    static MD_LINK_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
     static EXPL_URL_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
     static DOMAIN_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
-    let md_re = MD_LINK_RE
-        .get_or_init(|| Regex::new(r"\[([^\]]+)\]\(([^)\s]+)\)").unwrap());
+    // We will parse Markdown links manually to support URLs with parentheses.
     let url_re = EXPL_URL_RE
         .get_or_init(|| Regex::new(r"(?i)\bhttps?://[^\s)]+").unwrap());
     let dom_re = DOMAIN_RE.get_or_init(|| {
@@ -488,7 +1023,9 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
         // Skip autolinking inside inline code spans (we style code with the
         // theme's function color). This avoids linking snippets like
         // `curl https://example.com` or code identifiers containing dots.
-        if s.style.fg == Some(crate::colors::function()) {
+        // Also skip when span already contains OSC8 sequences to avoid corrupting
+        // hyperlinks with additional parsing or wrapping.
+        if s.style.fg == Some(crate::colors::function()) || s.content.contains('\u{1b}') {
             out.push(s);
             continue;
         }
@@ -501,26 +1038,22 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
         while cursor < text.len() {
             let after = &text[cursor..];
 
-            // 1) markdown links
-            if let Some(m) = md_re.find(after) {
-                let start = cursor + m.start();
-                let end = cursor + m.end();
-                // Push any plain prefix
-                if cursor < start {
+            // 1) markdown links [label](target) with balanced parentheses in target
+            if let Some((start, end, label, target)) = find_markdown_link(after) {
+                let abs_start = cursor + start;
+                let abs_end = cursor + end;
+                if cursor < abs_start {
                     let mut span = s.clone();
-                    span.content = text[cursor..start].to_string().into();
+                    span.content = text[cursor..abs_start].to_string().into();
                     out.push(span);
                 }
-                let caps = md_re.captures(&text[start..end]).unwrap();
-                let label = caps.get(1).unwrap().as_str();
-                let target = caps.get(2).unwrap().as_str();
-                out.push(hyperlink_span(label, target, &s));
-                cursor = end;
+                out.push(hyperlink_span(&label, &target, &s));
+                cursor = abs_end;
                 changed = true;
                 continue;
             }
 
-            // 2) explicit http(s) URLs
+            // 2) explicit http(s) URLs (Mixed mode: do NOT wrap; let terminal detect)
             if let Some(m) = url_re.find(after) {
                 let start = cursor + m.start();
                 let end = cursor + m.end();
@@ -531,7 +1064,10 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 }
                 let raw = &text[start..end];
                 let (core, trailing) = split_trailing_punct(raw);
-                out.push(hyperlink_span(core, core, &s));
+                // Emit URL text verbatim; terminal will make it clickable.
+                let mut core_span = s.clone();
+                core_span.content = core.to_string().into();
+                out.push(core_span);
                 if !trailing.is_empty() {
                     let mut span = s.clone();
                     span.content = trailing.to_string().into();
@@ -542,7 +1078,7 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 continue;
             }
 
-            // 3) bare domain (assume https)
+            // 3) bare domain (Mixed mode: no OSC 8; emit as text)
             if let Some(m) = dom_re.find(after) {
                 let start = cursor + m.start();
                 let end = cursor + m.end();
@@ -554,8 +1090,9 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 let raw = &text[start..end];
                 let (core_dom, trailing) = split_trailing_punct(raw);
                 if is_probable_domain(core_dom) {
-                    let target = format!("https://{core_dom}");
-                    out.push(hyperlink_span(core_dom, &target, &s));
+                    let mut core_span = s.clone();
+                    core_span.content = core_dom.to_string().into();
+                    out.push(core_span);
                     if !trailing.is_empty() {
                         let mut span = s.clone();
                         span.content = trailing.to_string().into();
@@ -593,13 +1130,114 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
 }
 
 fn hyperlink_span(label: &str, target: &str, base: &Span<'static>) -> Span<'static> {
-    // Use OSC 8 with BEL terminators (widely supported; matches existing code).
-    let content = format!(
-        "\u{1b}]8;;{target}\u{7}{label}\u{1b}]8;;\u{7}"
-    );
-    let mut style = base.style;
-    style.add_modifier.insert(Modifier::UNDERLINED);
-    Span::styled(content, style)
+    // OSC 8 wrapper (Markdown links only in Mixed mode). Avoid adding our own
+    // underline to prevent double/dotted underline when terminals decorate
+    // hyperlinks themselves.
+    let content = format!("\u{1b}]8;;{target}\u{7}{label}\u{1b}]8;;\u{7}");
+    Span::styled(content, base.style)
+}
+
+// Return (start, end, label, target) for the first markdown link found in `s`.
+fn find_markdown_link(s: &str) -> Option<(usize, usize, String, String)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            // find closing ']'
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b']' { j += 1; }
+            if j >= bytes.len() { return None; }
+            // next must be '('
+            let mut k = j + 1;
+            if k >= bytes.len() || bytes[k] != b'(' { i += 1; continue; }
+            k += 1; // position after '('
+            // parse target allowing balanced parentheses
+            let mut depth = 1usize;
+            let targ_start = k;
+            while k < bytes.len() {
+                match bytes[k] {
+                    b'(' => depth += 1,
+                    b')' => { depth -= 1; if depth == 0 { break; } },
+                    _ => {}
+                }
+                k += 1;
+            }
+            if k >= bytes.len() || depth != 0 { return None; }
+            let label = &s[i+1..j];
+            let target = &s[targ_start..k];
+            // Full match is from i ..= k
+            return Some((i, k+1, label.to_string(), target.to_string()));
+        }
+        i += 1;
+    }
+    None
+}
+
+// Return (consumed_chars, label, target) for the first image starting at s (which begins with '!').
+fn find_markdown_image(s: &str) -> Option<(usize, String, String)> {
+    let bytes = s.as_bytes();
+    if !bytes.starts_with(b"![") { return None; }
+    // Parse label
+    let mut i = 2; // after ![
+    while i < bytes.len() && bytes[i] != b']' { i += 1; }
+    if i >= bytes.len() { return None; }
+    let label = &s[2..i];
+    // Next must be '('
+    let mut k = i + 1;
+    if k >= bytes.len() || bytes[k] != b'(' { return None; }
+    k += 1;
+    // Parse target allowing balanced parentheses and optional title
+    let mut depth = 1usize;
+    let targ_start = k;
+    while k < bytes.len() {
+        match bytes[k] {
+            b'(' => depth += 1,
+            b')' => { depth -= 1; if depth == 0 { break; } },
+            _ => {}
+        }
+        k += 1;
+    }
+    if k >= bytes.len() || depth != 0 { return None; }
+    let mut target = s[targ_start..k].trim().to_string();
+    // Strip optional quoted title at end: url "title"
+    if let Some(space_idx) = target.rfind(' ') {
+        let (left, right) = target.split_at(space_idx);
+        let t = right.trim();
+        if (t.starts_with('\"') && t.ends_with('\"')) || (t.starts_with('\'') && t.ends_with('\'')) {
+            target = left.trim().to_string();
+        }
+    }
+    Some((k + 1, label.to_string(), target)) // consumed up to and including ')'
+}
+
+// Map ASCII to Unicode subscript/superscript for a small useful subset.
+fn to_subscript(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
+            '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
+            '+' => '₊', '-' => '₋', '=' => '₌', '(' => '₍', ')' => '₎',
+            'a' => 'ₐ', 'e' => 'ₑ', 'h' => 'ₕ', 'i' => 'ᵢ', 'j' => 'ⱼ', 'k' => 'ₖ',
+            'l' => 'ₗ', 'm' => 'ₘ', 'n' => 'ₙ', 'o' => 'ₒ', 'p' => 'ₚ', 'r' => 'ᵣ',
+            's' => 'ₛ', 't' => 'ₜ', 'u' => 'ᵤ', 'v' => 'ᵥ', 'x' => 'ₓ',
+            _ => c,
+        })
+        .collect()
+}
+
+fn to_superscript(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
+            '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
+            '+' => '⁺', '-' => '⁻', '=' => '⁼', '(' => '⁽', ')' => '⁾',
+            'a' => 'ᵃ', 'b' => 'ᵇ', 'c' => 'ᶜ', 'd' => 'ᵈ', 'e' => 'ᵉ', 'f' => 'ᶠ', 'g' => 'ᵍ',
+            'h' => 'ʰ', 'i' => 'ᶦ', 'j' => 'ʲ', 'k' => 'ᵏ', 'l' => 'ˡ', 'm' => 'ᵐ', 'n' => 'ⁿ',
+            'o' => 'ᵒ', 'p' => 'ᵖ', 'r' => 'ʳ', 's' => 'ˢ', 't' => 'ᵗ', 'u' => 'ᵘ', 'v' => 'ᵛ',
+            'w' => 'ʷ', 'x' => 'ˣ', 'y' => 'ʸ', 'z' => 'ᶻ',
+            _ => c,
+        })
+        .collect()
 }
 
 #[cfg(test)]

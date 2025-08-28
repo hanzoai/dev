@@ -211,6 +211,7 @@ fn render_patch_details_with_width(
         full.saturating_sub(20).max(40)
     };
 
+    let total_files = changes.len();
     for (index, (path, change)) in changes.iter().enumerate() {
         let is_first_file = index == 0;
         // Add separator only between files (not at the very start)
@@ -303,7 +304,11 @@ fn render_patch_details_with_width(
             }
         }
 
-        out.push(RtLine::from(RtSpan::raw("")));
+        // Avoid trailing blank line at the very end; only add spacing
+        // when there are more files following.
+        if index + 1 < total_files {
+            out.push(RtLine::from(RtSpan::raw("")));
+        }
     }
 
     out
