@@ -1,5 +1,8 @@
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use regex_lite::Regex;
 
 /// Custom markdown renderer with full control over spacing and styling
@@ -13,6 +16,11 @@ pub struct MarkdownRenderer {
     list_depth: usize,
     bold_first_sentence: bool,
     first_sentence_done: bool,
+    // When set, inline code spans (created from single-backticks) are tinted
+    // 30% toward this target text color. This lets inline code harmonize with
+    // the surrounding context (e.g., different list nesting levels) while
+    // still reading as code.
+    inline_code_tint_target: Option<Color>,
 }
 
 impl MarkdownRenderer {
@@ -26,19 +34,24 @@ impl MarkdownRenderer {
             list_depth: 0,
             bold_first_sentence: false,
             first_sentence_done: false,
+            inline_code_tint_target: None,
         }
     }
 
     pub fn render(text: &str) -> Vec<Line<'static>> {
         let mut renderer = Self::new();
+        // Top-level assistant text uses the theme's primary text color as the
+        // base for tinting inline code spans.
+        renderer.inline_code_tint_target = Some(crate::colors::text());
         renderer.process_text(text);
         renderer.finish();
         renderer.lines
     }
-    
+
     pub fn render_with_bold_first_sentence(text: &str) -> Vec<Line<'static>> {
         let mut renderer = Self::new();
         renderer.bold_first_sentence = true;
+        renderer.inline_code_tint_target = Some(crate::colors::text());
         renderer.process_text(text);
         renderer.finish();
         renderer.lines
@@ -47,17 +60,17 @@ impl MarkdownRenderer {
     fn process_text(&mut self, text: &str) {
         let lines: Vec<&str> = text.lines().collect();
         let mut i = 0;
-        
+
         while i < lines.len() {
             let line = lines[i];
-            
+
             // Handle code blocks
             if line.trim_start().starts_with("```") {
                 self.handle_code_fence(line);
                 i += 1;
                 continue;
             }
-            
+
             // Handle tables EARLY to avoid printing the pipe header as plain text
             if let Some((consumed, table_lines)) = parse_markdown_table(&lines[i..]) {
                 self.flush_current_line();
@@ -71,7 +84,7 @@ impl MarkdownRenderer {
                 i += 1;
                 continue;
             }
-            
+
             // Handle headings
             if let Some(heading) = self.parse_heading(line) {
                 self.flush_current_line();
@@ -81,7 +94,7 @@ impl MarkdownRenderer {
                 i += 1;
                 continue;
             }
-            
+
             // Blockquotes / callouts (supports nesting and [!NOTE]/[!TIP]/[!WARNING]/[!IMPORTANT])
             if let Some((consumed, quote_lines)) = parse_blockquotes(&lines[i..]) {
                 self.flush_current_line();
@@ -89,7 +102,7 @@ impl MarkdownRenderer {
                 i += consumed;
                 continue;
             }
-            
+
             // Handle lists
             if let Some(list_item) = self.parse_list_item(line) {
                 self.flush_current_line();
@@ -97,7 +110,7 @@ impl MarkdownRenderer {
                 i += 1;
                 continue;
             }
-            
+
             // Handle blank lines
             if line.trim().is_empty() {
                 self.flush_current_line();
@@ -108,13 +121,13 @@ impl MarkdownRenderer {
                 i += 1;
                 continue;
             }
-            
+
             // Regular text with inline formatting
             self.process_inline_text(line);
             i += 1;
         }
     }
-    
+
     fn handle_code_fence(&mut self, line: &str) {
         let trimmed = line.trim_start();
         if self.in_code_block {
@@ -122,31 +135,59 @@ impl MarkdownRenderer {
             // Render accumulated buffer with syntax highlighting
             let lang = self.code_block_lang.as_deref();
             let code_bg = crate::colors::code_block_bg();
-            let mut highlighted = crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
+            let mut highlighted =
+                crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
             use ratatui::style::Style;
             use ratatui::text::Span;
             use unicode_width::UnicodeWidthStr;
             let max_w: usize = highlighted
                 .iter()
-                .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                        .sum::<usize>()
+                })
                 .max()
                 .unwrap_or(0);
+            let target_w = max_w + 2; // left + right space
+
+            // Add top blank row
+            self.lines.push(Line::from(Span::styled(
+                " ".repeat(target_w),
+                Style::default().bg(code_bg),
+            )));
+
             for l in highlighted.iter_mut() {
-                l.style = l.style.bg(code_bg);
+                // Paint background on each span, not the whole line, so width
+                // matches our explicit padding rectangle.
+                for sp in l.spans.iter_mut() {
+                    sp.style = sp.style.bg(code_bg);
+                }
+                // left pad
+                l.spans
+                    .insert(0, Span::styled(" ", Style::default().bg(code_bg)));
                 let w: usize = l
                     .spans
                     .iter()
                     .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
                     .sum();
-                if max_w > w {
-                    let pad = " ".repeat(max_w - w);
-                    l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                if target_w > w {
+                    let pad = " ".repeat(target_w - w);
+                    l.spans
+                        .push(Span::styled(pad, Style::default().bg(code_bg)));
                 } else if w == 0 {
                     // Ensure at least one painted cell so the background shows
-                    l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                    l.spans
+                        .push(Span::styled(" ", Style::default().bg(code_bg)));
                 }
             }
             self.lines.extend(highlighted);
+            // Add bottom blank row
+            self.lines.push(Line::from(Span::styled(
+                " ".repeat(target_w),
+                Style::default().bg(code_bg),
+            )));
             self.code_block_buf.clear();
             self.in_code_block = false;
             self.code_block_lang = None;
@@ -164,16 +205,16 @@ impl MarkdownRenderer {
             self.code_block_buf.clear();
         }
     }
-    
+
     fn add_code_line(&mut self, line: &str) {
         // Accumulate; add a newline that was lost by `lines()` iteration
         self.code_block_buf.push_str(line);
         self.code_block_buf.push('\n');
     }
-    
+
     fn parse_heading(&self, line: &str) -> Option<Line<'static>> {
         let trimmed = line.trim_start();
-        
+
         // Count heading level
         let mut level = 0;
         for ch in trimmed.chars() {
@@ -183,26 +224,26 @@ impl MarkdownRenderer {
                 break;
             }
         }
-        
+
         if level == 0 || level > 6 {
             return None;
         }
-        
+
         // Must have space after #
         if !trimmed.chars().nth(level).map_or(false, |c| c == ' ') {
             return None;
         }
-        
+
         let heading_text = trimmed[level..].trim();
-        
+
         // Headings: strip the leading #'s and render in bold (no special color).
         let style = Style::default().add_modifier(Modifier::BOLD);
         Some(Line::from(Span::styled(heading_text.to_string(), style)))
     }
-    
+
     fn parse_list_item(&mut self, line: &str) -> Option<Line<'static>> {
         let trimmed = line.trim_start();
-        
+
         // Check for unordered list markers
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
             let indent = line.len() - trimmed.len();
@@ -213,9 +254,15 @@ impl MarkdownRenderer {
             if let Some(rest) = content.strip_prefix("[ ] ") {
                 content = rest;
                 checkbox_spans.push(Span::raw("☐ "));
-            } else if let Some(rest) = content.strip_prefix("[x] ").or_else(|| content.strip_prefix("[X] ")) {
+            } else if let Some(rest) = content
+                .strip_prefix("[x] ")
+                .or_else(|| content.strip_prefix("[X] "))
+            {
                 content = rest;
-                checkbox_spans.push(Span::styled("✔ ", Style::default().fg(crate::colors::success())));
+                checkbox_spans.push(Span::styled(
+                    "✔ ",
+                    Style::default().fg(crate::colors::success()),
+                ));
             }
 
             let mut styled_content = self.process_inline_spans(content);
@@ -232,9 +279,9 @@ impl MarkdownRenderer {
             // Determine nesting level from indent (2 spaces per level approximation)
             let level = (indent / 2) + 1;
             let bullet = match level {
-                1 => "◦",
+                1 => "-",
                 2 => "·",
-                3 => "∘",
+                3 => "-",
                 _ => "⋅",
             };
             // Color by nesting level:
@@ -253,21 +300,29 @@ impl MarkdownRenderer {
             }
             // Recolor content to desired level color while preserving modifiers and any
             // spans that already carry a specific foreground color (e.g., inline code, checkmarks).
+            // For inline code, blend its base color 30% toward the bullet's text color.
             let recolored: Vec<Span<'static>> = styled_content
                 .into_iter()
                 .map(|s| {
-                    if s.style.fg.is_some() { s } else {
+                    if let Some(fg) = s.style.fg {
+                        if fg == crate::colors::function() {
+                            let mut st = s.style;
+                            st.fg = Some(crate::colors::mix_toward(fg, content_fg, 0.30));
+                            return Span::styled(s.content, st);
+                        }
+                        return s;
+                    } else {
                         let mut st = s.style;
                         st.fg = Some(content_fg);
-                        Span::styled(s.content, st)
+                        return Span::styled(s.content, st);
                     }
                 })
                 .collect();
             spans.extend(recolored);
-            
+
             return Some(Line::from(spans));
         }
-        
+
         // Check for ordered list markers (1. 2. etc)
         if let Some(dot_pos) = trimmed.find(". ") {
             let number_part = &trimmed[..dot_pos];
@@ -281,45 +336,56 @@ impl MarkdownRenderer {
                     2 => crate::colors::text_mid(),
                     _ => crate::colors::text_dim(),
                 };
-                
+
                 let mut spans = vec![
                     Span::raw(" ".repeat(indent)),
                     // Make the number bold (no primary color)
-                    Span::styled(format!("{}.", number_part), Style::default().add_modifier(Modifier::BOLD).fg(content_fg)),
+                    Span::styled(
+                        format!("{}.", number_part),
+                        Style::default().add_modifier(Modifier::BOLD).fg(content_fg),
+                    ),
                     Span::raw(" "),
                 ];
-                // Recolor content preserving modifiers and pre-set foreground colors
+                // Recolor content preserving modifiers and pre-set foreground colors.
+                // For inline code, blend base code color 30% toward the list text color.
                 let recolored: Vec<Span<'static>> = styled_content
                     .into_iter()
                     .map(|s| {
-                        if s.style.fg.is_some() { s } else {
+                        if let Some(fg) = s.style.fg {
+                            if fg == crate::colors::function() {
+                                let mut st = s.style;
+                                st.fg = Some(crate::colors::mix_toward(fg, content_fg, 0.30));
+                                return Span::styled(s.content, st);
+                            }
+                            return s;
+                        } else {
                             let mut st = s.style;
                             st.fg = Some(content_fg);
-                            Span::styled(s.content, st)
+                            return Span::styled(s.content, st);
                         }
                     })
                     .collect();
                 spans.extend(recolored);
-                
+
                 return Some(Line::from(spans));
             }
         }
-        
+
         None
     }
-    
+
     fn process_inline_text(&mut self, text: &str) {
         let spans = self.process_inline_spans(text);
         self.current_line.extend(spans);
         self.flush_current_line();
     }
-    
+
     fn process_inline_spans(&mut self, text: &str) -> Vec<Span<'static>> {
         let mut spans = Vec::new();
         let chars: Vec<char> = text.chars().collect();
         let mut i = 0;
         let mut current_text = String::new();
-        
+
         while i < chars.len() {
             // Markdown image ![alt](url "title")
             if chars[i] == '!' {
@@ -330,7 +396,11 @@ impl MarkdownRenderer {
                         current_text.clear();
                     }
                     // Render as a hyperlink span with a friendly label
-                    let lbl = if label.is_empty() { "Image".to_string() } else { label };
+                    let lbl = if label.is_empty() {
+                        "Image".to_string()
+                    } else {
+                        label
+                    };
                     let link = hyperlink_span(&lbl, &target, &Span::raw(""));
                     spans.push(link);
                     i += consumed;
@@ -410,7 +480,10 @@ impl MarkdownRenderer {
                             current_text.clear();
                         }
                         let content = inner[..end].to_string();
-                        spans.push(Span::styled(content, Style::default().add_modifier(Modifier::UNDERLINED)));
+                        spans.push(Span::styled(
+                            content,
+                            Style::default().add_modifier(Modifier::UNDERLINED),
+                        ));
                         i += 3 + end + 4; // len("<u>") + content + len("</u>")
                         continue;
                     }
@@ -446,7 +519,7 @@ impl MarkdownRenderer {
                     spans.push(Span::raw(current_text.clone()));
                     current_text.clear();
                 }
-                
+
                 // Find closing backtick
                 let mut j = i + 1;
                 let mut code_content = String::new();
@@ -454,9 +527,11 @@ impl MarkdownRenderer {
                     code_content.push(chars[j]);
                     j += 1;
                 }
-                
+
                 if j < chars.len() {
                     // Found closing backtick — render code without surrounding backticks
+                    // Use the base code color here; context-specific tinting is
+                    // applied at line flush or by list/blockquote handlers.
                     spans.push(Span::styled(
                         code_content,
                         Style::default().fg(crate::colors::function()),
@@ -469,17 +544,18 @@ impl MarkdownRenderer {
                 }
                 continue;
             }
-            
+
             // Check for bold (**text** or __text__)
-            if i + 1 < chars.len() && 
-               ((chars[i] == '*' && chars[i + 1] == '*') || 
-                (chars[i] == '_' && chars[i + 1] == '_')) {
+            if i + 1 < chars.len()
+                && ((chars[i] == '*' && chars[i + 1] == '*')
+                    || (chars[i] == '_' && chars[i + 1] == '_'))
+            {
                 // Flush current text
                 if !current_text.is_empty() {
                     spans.push(Span::raw(current_text.clone()));
                     current_text.clear();
                 }
-                
+
                 let marker = chars[i];
                 // Find closing markers
                 let mut j = i + 2;
@@ -491,9 +567,7 @@ impl MarkdownRenderer {
                         let bold_color = crate::colors::text_bright();
                         spans.push(Span::styled(
                             bold_content,
-                            Style::default()
-                                .fg(bold_color)
-                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(bold_color).add_modifier(Modifier::BOLD),
                         ));
                         i = j + 2;
                         break;
@@ -501,7 +575,7 @@ impl MarkdownRenderer {
                     bold_content.push(chars[j]);
                     j += 1;
                 }
-                
+
                 if j + 1 >= chars.len() {
                     // No closing markers, treat as regular text
                     current_text.push(marker);
@@ -510,24 +584,26 @@ impl MarkdownRenderer {
                 }
                 continue;
             }
-            
+
             // Check for italic (*text* or _text_)
-            if (chars[i] == '*' || chars[i] == '_') &&
-               (i == 0 || !chars[i - 1].is_alphanumeric()) &&
-               (i + 1 < chars.len() && chars[i + 1] != ' ' && chars[i + 1] != chars[i]) {
+            if (chars[i] == '*' || chars[i] == '_')
+                && (i == 0 || !chars[i - 1].is_alphanumeric())
+                && (i + 1 < chars.len() && chars[i + 1] != ' ' && chars[i + 1] != chars[i])
+            {
                 // Flush current text
                 if !current_text.is_empty() {
                     spans.push(Span::raw(current_text.clone()));
                     current_text.clear();
                 }
-                
+
                 let marker = chars[i];
                 // Find closing marker
                 let mut j = i + 1;
                 let mut italic_content = String::new();
                 while j < chars.len() {
-                    if chars[j] == marker &&
-                       (j + 1 >= chars.len() || !chars[j + 1].is_alphanumeric()) {
+                    if chars[j] == marker
+                        && (j + 1 >= chars.len() || !chars[j + 1].is_alphanumeric())
+                    {
                         // Found closing marker
                         spans.push(Span::styled(
                             italic_content,
@@ -539,7 +615,7 @@ impl MarkdownRenderer {
                     italic_content.push(chars[j]);
                     j += 1;
                 }
-                
+
                 if j >= chars.len() {
                     // No closing marker, treat as regular text
                     current_text.push(marker);
@@ -547,20 +623,20 @@ impl MarkdownRenderer {
                 }
                 continue;
             }
-            
+
             // Regular character
             current_text.push(chars[i]);
             i += 1;
         }
-        
+
         // Flush any remaining plain text as-is; first-sentence bolding is handled elsewhere
         if !current_text.is_empty() {
             spans.push(Span::raw(current_text));
         }
-        
+
         spans
     }
-    
+
     fn flush_current_line(&mut self) {
         if !self.current_line.is_empty() {
             // Autolink URLs and markdown links inside the accumulated spans.
@@ -571,50 +647,87 @@ impl MarkdownRenderer {
                     self.first_sentence_done = true;
                 }
             }
+            // If requested, gently tint inline code spans toward the provided
+            // context text color so they blend better with the surrounding text.
+            if let Some(target) = self.inline_code_tint_target {
+                let base = crate::colors::function();
+                let tint = crate::colors::mix_toward(base, target, 0.30);
+                for sp in &mut linked {
+                    if sp.style.fg == Some(base) {
+                        let mut st = sp.style;
+                        st.fg = Some(tint);
+                        *sp = Span::styled(sp.content.clone(), st);
+                    }
+                }
+            }
             self.lines.push(Line::from(linked));
             self.current_line.clear();
         }
     }
-    
+
     fn is_last_line_blank(&self) -> bool {
         if let Some(last) = self.lines.last() {
-            last.spans.is_empty() || 
-            last.spans.iter().all(|s| s.content.trim().is_empty())
+            last.spans.is_empty() || last.spans.iter().all(|s| s.content.trim().is_empty())
         } else {
             false
         }
     }
-    
+
     fn finish(&mut self) {
         self.flush_current_line();
         // If an unterminated fence was left open, render its buffer.
         if self.in_code_block {
             let lang = self.code_block_lang.as_deref();
             let code_bg = crate::colors::code_block_bg();
-            let mut highlighted = crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
+            let mut highlighted =
+                crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
             use ratatui::style::Style;
             use ratatui::text::Span;
             use unicode_width::UnicodeWidthStr;
             let max_w: usize = highlighted
                 .iter()
-                .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                .map(|l| {
+                    l.spans
+                        .iter()
+                        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                        .sum::<usize>()
+                })
                 .max()
                 .unwrap_or(0);
+            let target_w = max_w + 2; // left + right space
+            // Add top blank row
+            self.lines.push(Line::from(Span::styled(
+                " ".repeat(target_w),
+                Style::default().bg(code_bg),
+            )));
+
             for l in highlighted.iter_mut() {
-                l.style = l.style.bg(code_bg);
+                for sp in l.spans.iter_mut() {
+                    sp.style = sp.style.bg(code_bg);
+                }
+                // left pad
+                l.spans
+                    .insert(0, Span::styled(" ", Style::default().bg(code_bg)));
                 let w: usize = l
                     .spans
                     .iter()
                     .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
                     .sum();
-                if max_w > w {
-                    let pad = " ".repeat(max_w - w);
-                    l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                if target_w > w {
+                    let pad = " ".repeat(target_w - w);
+                    l.spans
+                        .push(Span::styled(pad, Style::default().bg(code_bg)));
                 } else if w == 0 {
-                    l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                    l.spans
+                        .push(Span::styled(" ", Style::default().bg(code_bg)));
                 }
             }
             self.lines.extend(highlighted);
+            // Add bottom blank row
+            self.lines.push(Line::from(Span::styled(
+                " ".repeat(target_w),
+                Style::default().bg(code_bg),
+            )));
             self.code_block_buf.clear();
             self.in_code_block = false;
             self.code_block_lang = None;
@@ -626,22 +739,32 @@ impl MarkdownRenderer {
 // Returns (consumed_line_count, rendered_lines) on success.
 // We keep it simple and robust for TUI: left-align columns and pad with spaces.
 fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
-    if lines.len() < 2 { return None; }
+    if lines.len() < 2 {
+        return None;
+    }
     let header_line = lines[0].trim();
     let sep_line = lines[1].trim();
-    if !header_line.contains('|') { return None; }
+    if !header_line.contains('|') {
+        return None;
+    }
 
     // Split a row by '|' and trim spaces; drop empty edge cells from leading/trailing '|'
     fn split_row(s: &str) -> Vec<String> {
         let mut parts: Vec<String> = s.split('|').map(|x| x.trim().to_string()).collect();
         // Trim empty edge cells introduced by leading/trailing '|'
-        if parts.first().is_some_and(|x| x.is_empty()) { parts.remove(0); }
-        if parts.last().is_some_and(|x| x.is_empty()) { parts.pop(); }
+        if parts.first().is_some_and(|x| x.is_empty()) {
+            parts.remove(0);
+        }
+        if parts.last().is_some_and(|x| x.is_empty()) {
+            parts.pop();
+        }
         parts
     }
 
     let header_cells = split_row(header_line);
-    if header_cells.is_empty() { return None; }
+    if header_cells.is_empty() {
+        return None;
+    }
 
     // Validate separator: must have at least the same number of segments and each segment is --- with optional : for alignment
     // Parse separator: either pipe-based or dashed segments separated by 2+ spaces
@@ -653,49 +776,74 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
         let mut cur = String::new();
         let mut space_run = 0;
         for ch in sep_line.chars() {
-            if ch == ' ' { space_run += 1; } else { space_run = 0; }
+            if ch == ' ' {
+                space_run += 1;
+            } else {
+                space_run = 0;
+            }
             if space_run >= 2 {
-                if !cur.trim().is_empty() { segs.push(cur.trim().to_string()); }
+                if !cur.trim().is_empty() {
+                    segs.push(cur.trim().to_string());
+                }
                 cur.clear();
                 space_run = 0;
             } else {
                 cur.push(ch);
             }
         }
-        if !cur.trim().is_empty() { segs.push(cur.trim().to_string()); }
+        if !cur.trim().is_empty() {
+            segs.push(cur.trim().to_string());
+        }
         (segs, false)
     };
-    if sep_segments.len() < header_cells.len() { return None; }
+    if sep_segments.len() < header_cells.len() {
+        return None;
+    }
     let valid_sep = sep_segments.iter().take(header_cells.len()).all(|c| {
         let core = c.replace(':', "");
         !core.is_empty() && core.chars().all(|ch| ch == '-')
     });
-    if !valid_sep { return None; }
+    if !valid_sep {
+        return None;
+    }
 
     // Collect body rows until a non-table line
     let mut body: Vec<Vec<String>> = Vec::new();
     let mut idx = 2usize;
     while idx < lines.len() {
         let raw = lines[idx];
-        if !raw.contains('|') { break; }
+        if !raw.contains('|') {
+            break;
+        }
         let row = split_row(raw);
-        if row.is_empty() { break; }
+        if row.is_empty() {
+            break;
+        }
         body.push(row);
         idx += 1;
     }
 
-    let cols = header_cells.len().max(body.iter().map(|r| r.len()).max().unwrap_or(0));
+    let cols = header_cells
+        .len()
+        .max(body.iter().map(|r| r.len()).max().unwrap_or(0));
     // Column alignment: from pipe separators with colons if present; otherwise
     // infer right alignment for numeric-only columns, left otherwise.
     #[derive(Copy, Clone)]
-    enum Align { Left, Right }
+    enum Align {
+        Left,
+        Right,
+    }
     let mut aligns = vec![Align::Left; cols];
     if has_pipe_sep {
         for i in 0..cols {
             let seg = sep_segments.get(i).map(|s| s.as_str()).unwrap_or("");
             let left_colon = seg.starts_with(':');
             let right_colon = seg.ends_with(':');
-            aligns[i] = if right_colon && !left_colon { Align::Right } else { Align::Left };
+            aligns[i] = if right_colon && !left_colon {
+                Align::Right
+            } else {
+                Align::Left
+            };
         }
     }
     // Compute widths per column
@@ -711,16 +859,25 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
     // Infer alignment for numeric columns if not specified by pipes
     if !has_pipe_sep {
         for i in 0..cols {
-            let numeric = body.iter().all(|r| r.get(i).map(|c| is_numeric(c)).unwrap_or(true));
-            if numeric { aligns[i] = Align::Right; }
+            let numeric = body
+                .iter()
+                .all(|r| r.get(i).map(|c| is_numeric(c)).unwrap_or(true));
+            if numeric {
+                aligns[i] = Align::Right;
+            }
         }
     }
 
     fn pad_cell(s: &str, w: usize, align: Align) -> String {
         let len = s.chars().count();
-        if len >= w { return s.to_string(); }
+        if len >= w {
+            return s.to_string();
+        }
         let pad = w - len;
-        match align { Align::Left => format!("{}{}", s, " ".repeat(pad)), Align::Right => format!("{}{}", " ".repeat(pad), s) }
+        match align {
+            Align::Left => format!("{}{}", s, " ".repeat(pad)),
+            Align::Right => format!("{}{}", " ".repeat(pad), s),
+        }
     }
 
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -728,9 +885,18 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
     {
         let mut spans: Vec<Span<'static>> = Vec::new();
         for i in 0..cols {
-            if i > 0 { spans.push(Span::raw("  ")); }
-            let text = pad_cell(header_cells.get(i).map(String::as_str).unwrap_or(""), widths[i], aligns[i]);
-            spans.push(Span::styled(text, Style::default().add_modifier(Modifier::BOLD)));
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let text = pad_cell(
+                header_cells.get(i).map(String::as_str).unwrap_or(""),
+                widths[i],
+                aligns[i],
+            );
+            spans.push(Span::styled(
+                text,
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
         }
         out.push(Line::from(spans));
     }
@@ -738,7 +904,9 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
     {
         let mut spans: Vec<Span<'static>> = Vec::new();
         for i in 0..cols {
-            if i > 0 { spans.push(Span::raw("  ")); }
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
             spans.push(Span::raw("─".repeat(widths[i]).to_string()));
         }
         out.push(Line::from(spans));
@@ -747,8 +915,14 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
     for row in body {
         let mut spans: Vec<Span<'static>> = Vec::new();
         for i in 0..cols {
-            if i > 0 { spans.push(Span::raw("  ")); }
-            let text = pad_cell(row.get(i).map(String::as_str).unwrap_or(""), widths[i], aligns[i]);
+            if i > 0 {
+                spans.push(Span::raw("  "));
+            }
+            let text = pad_cell(
+                row.get(i).map(String::as_str).unwrap_or(""),
+                widths[i],
+                aligns[i],
+            );
             spans.push(Span::raw(text));
         }
         out.push(Line::from(spans));
@@ -759,11 +933,18 @@ fn parse_markdown_table(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
 
 fn is_numeric(s: &str) -> bool {
     let t = s.trim();
-    if t.is_empty() { return true; }
+    if t.is_empty() {
+        return true;
+    }
     let mut has_digit = false;
     for ch in t.chars() {
-        if ch.is_ascii_digit() { has_digit = true; continue; }
-        if matches!(ch, '+' | '-' | '.' | ',') { continue; }
+        if ch.is_ascii_digit() {
+            has_digit = true;
+            continue;
+        }
+        if matches!(ch, '+' | '-' | '.' | ',') {
+            continue;
+        }
         return false;
     }
     has_digit
@@ -772,9 +953,13 @@ fn is_numeric(s: &str) -> bool {
 // Parse consecutive blockquote lines, supporting nesting with multiple '>' markers
 // and callouts: [!NOTE], [!TIP], [!WARNING], [!IMPORTANT]
 fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
-    if lines.is_empty() { return None; }
+    if lines.is_empty() {
+        return None;
+    }
     // Must start with '>'
-    if !lines[0].trim_start().starts_with('>') { return None; }
+    if !lines[0].trim_start().starts_with('>') {
+        return None;
+    }
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut i = 0usize;
     let mut callout_kind: Option<String> = None;
@@ -783,15 +968,23 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
     while i < lines.len() {
         let raw = lines[i];
         let t = raw.trim_start();
-        if !t.starts_with('>') { break; }
+        if !t.starts_with('>') {
+            break;
+        }
         // Count nesting depth (allow spaces between >)
         let mut idx = 0usize;
         let bytes = t.as_bytes();
         let mut depth = 0usize;
         while idx < bytes.len() {
             if bytes[idx] == b'>' {
-                depth += 1; idx += 1; while idx < bytes.len() && bytes[idx] == b' ' { idx += 1; }
-            } else { break; }
+                depth += 1;
+                idx += 1;
+                while idx < bytes.len() && bytes[idx] == b' ' {
+                    idx += 1;
+                }
+            } else {
+                break;
+            }
         }
         let content = t[idx..].to_string();
         if !first_content_seen {
@@ -800,10 +993,22 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
                 if let Some(end) = inner.find(']') {
                     let kind = inner[..end].to_ascii_uppercase();
                     match kind.as_str() {
-                        "NOTE" => { callout_kind = Some("NOTE".into()); callout_color = crate::colors::info(); }
-                        "TIP" => { callout_kind = Some("TIP".into()); callout_color = crate::colors::success(); }
-                        "WARNING" => { callout_kind = Some("WARNING".into()); callout_color = crate::colors::warning(); }
-                        "IMPORTANT" => { callout_kind = Some("IMPORTANT".into()); callout_color = crate::colors::info(); }
+                        "NOTE" => {
+                            callout_kind = Some("NOTE".into());
+                            callout_color = crate::colors::info();
+                        }
+                        "TIP" => {
+                            callout_kind = Some("TIP".into());
+                            callout_color = crate::colors::success();
+                        }
+                        "WARNING" => {
+                            callout_kind = Some("WARNING".into());
+                            callout_color = crate::colors::warning();
+                        }
+                        "IMPORTANT" => {
+                            callout_kind = Some("IMPORTANT".into());
+                            callout_color = crate::colors::info();
+                        }
                         _ => {}
                     }
                     if let Some(ref k) = callout_kind {
@@ -811,9 +1016,12 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
                         // even if there are no subsequent quoted lines.
                         if out.is_empty() {
                             let label = format!("{}", k);
-                            out.push(Line::from(vec![
-                                Span::styled(label, Style::default().fg(callout_color).add_modifier(Modifier::BOLD)),
-                            ]));
+                            out.push(Line::from(vec![Span::styled(
+                                label,
+                                Style::default()
+                                    .fg(callout_color)
+                                    .add_modifier(Modifier::BOLD),
+                            )]));
                         }
                         i += 1; // consume marker line and continue scanning quoted content
                         continue;
@@ -827,9 +1035,12 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
         if let Some(ref kind) = callout_kind {
             if out.is_empty() {
                 let label = format!("{}", kind);
-                out.push(Line::from(vec![
-                    Span::styled(label, Style::default().fg(callout_color).add_modifier(Modifier::BOLD)),
-                ]));
+                out.push(Line::from(vec![Span::styled(
+                    label,
+                    Style::default()
+                        .fg(callout_color)
+                        .add_modifier(Modifier::BOLD),
+                )]));
             }
         }
 
@@ -838,10 +1049,22 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
         let mut inner = MarkdownRenderer::new();
         inner.process_text(&content);
         inner.finish();
-        let lines_to_render = if inner.lines.is_empty() { vec![Line::from("")] } else { inner.lines };
+        let lines_to_render = if inner.lines.is_empty() {
+            vec![Line::from("")]
+        } else {
+            inner.lines
+        };
 
-        let bar_style = if callout_kind.is_some() { Style::default().fg(callout_color) } else { Style::default().fg(crate::colors::text_dim()) };
-        let content_fg = if callout_kind.is_some() { crate::colors::text() } else { crate::colors::text_dim() };
+        let bar_style = if callout_kind.is_some() {
+            Style::default().fg(callout_color)
+        } else {
+            Style::default().fg(crate::colors::text_dim())
+        };
+        let content_fg = if callout_kind.is_some() {
+            crate::colors::text()
+        } else {
+            crate::colors::text_dim()
+        };
 
         for inner_line in lines_to_render {
             // Prefix depth bars (│ ) once per nesting level
@@ -854,7 +1077,14 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
                 .spans
                 .into_iter()
                 .map(|s| {
-                    if s.style.fg.is_some() { s } else {
+                    if let Some(fg) = s.style.fg {
+                        if fg == crate::colors::function() {
+                            let mut st = s.style;
+                            st.fg = Some(crate::colors::mix_toward(fg, content_fg, 0.30));
+                            return Span::styled(s.content, st);
+                        }
+                        return s;
+                    } else {
                         let mut st = s.style;
                         st.fg = Some(content_fg);
                         Span::styled(s.content, st)
@@ -877,7 +1107,13 @@ fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
     let full: String = spans.iter().map(|s| s.content.as_ref()).collect();
     let trimmed = full.trim_start();
     // Skip if line begins with a markdown bullet glyph
-    if trimmed.starts_with('•') || trimmed.starts_with('◦') || trimmed.starts_with('·') || trimmed.starts_with('∘') || trimmed.starts_with('⋅') {
+    if trimmed.starts_with('-')
+        || trimmed.starts_with('•')
+        || trimmed.starts_with('◦')
+        || trimmed.starts_with('·')
+        || trimmed.starts_with('∘')
+        || trimmed.starts_with('⋅')
+    {
         return false;
     }
     // Find a sensible terminator index with simple heuristics
@@ -888,10 +1124,14 @@ fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
         if ch == '.' || ch == '!' || ch == '?' || ch == ':' {
             let next = chars.get(i + 1).copied();
             // Skip filename-like or abbreviation endings
-            if matches!(next, Some(c) if c.is_ascii_alphanumeric()) { continue; }
+            if matches!(next, Some(c) if c.is_ascii_alphanumeric()) {
+                continue;
+            }
             if i >= 3 {
                 let tail: String = chars[i - 3..=i].iter().collect::<String>().to_lowercase();
-                if tail == "e.g." || tail == "i.e." { continue; }
+                if tail == "e.g." || tail == "i.e." {
+                    continue;
+                }
             }
             // Accept if eol/space or quote then space/eol
             let ok = match next {
@@ -903,12 +1143,17 @@ fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
                 }
                 _ => false,
             };
-            if ok { term = Some(i + 1); break; }
+            if ok {
+                term = Some(i + 1);
+                break;
+            }
         }
     }
     let Some(limit) = term else { return false };
     // If no non-space content after limit, consider single-sentence → no bold
-    if !chars.iter().skip(limit).any(|c| !c.is_whitespace()) { return false; }
+    if !chars.iter().skip(limit).any(|c| !c.is_whitespace()) {
+        return false;
+    }
 
     // Walk spans and apply style up to limit (build a new vec to avoid borrow conflicts)
     let original = std::mem::take(spans);
@@ -966,8 +1211,7 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     static EXPL_URL_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
     static DOMAIN_RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
     // We will parse Markdown links manually to support URLs with parentheses.
-    let url_re = EXPL_URL_RE
-        .get_or_init(|| Regex::new(r"(?i)\bhttps?://[^\s)]+").unwrap());
+    let url_re = EXPL_URL_RE.get_or_init(|| Regex::new(r"(?i)\bhttps?://[^\s)]+").unwrap());
     let dom_re = DOMAIN_RE.get_or_init(|| {
         // Conservative bare-domain matcher (no scheme). Examples:
         //   apps.shopify.com
@@ -985,7 +1229,8 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
         let mut end = bytes.len();
         while end > 0 {
             let ch = bytes[end - 1] as char;
-            if ")]}>'\".,!?;:".contains(ch) { // common trailing punctuation
+            if ")]}>'\".,!?;:".contains(ch) {
+                // common trailing punctuation
                 end -= 1;
                 continue;
             }
@@ -997,9 +1242,13 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     // Additional heuristic to avoid false positives like "e.g." or
     // "filename.rs" by requiring a well-known TLD. Precision over recall.
     fn is_probable_domain(dom: &str) -> bool {
-        if dom.contains('@') { return false; }
+        if dom.contains('@') {
+            return false;
+        }
         let dot_count = dom.matches('.').count();
-        if dot_count == 0 { return false; }
+        if dot_count == 0 {
+            return false;
+        }
 
         // Extract the final label (candidate TLD) and normalize.
         let tld = dom
@@ -1012,7 +1261,8 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
         // Small allowlist of popular TLDs. This intentionally excludes
         // language/file extensions like `.rs`, `.ts`, `.php`, etc.
         const ALLOWED_TLDS: &[&str] = &[
-            "com","org","net","edu","gov","io","ai","app","dev","co","us","uk","ca","de","fr","jp","cn","in","au"
+            "com", "org", "net", "edu", "gov", "io", "ai", "app", "dev", "co", "us", "uk", "ca",
+            "de", "fr", "jp", "cn", "in", "au",
         ];
 
         ALLOWED_TLDS.contains(&tld.as_str())
@@ -1145,11 +1395,18 @@ fn find_markdown_link(s: &str) -> Option<(usize, usize, String, String)> {
         if bytes[i] == b'[' {
             // find closing ']'
             let mut j = i + 1;
-            while j < bytes.len() && bytes[j] != b']' { j += 1; }
-            if j >= bytes.len() { return None; }
+            while j < bytes.len() && bytes[j] != b']' {
+                j += 1;
+            }
+            if j >= bytes.len() {
+                return None;
+            }
             // next must be '('
             let mut k = j + 1;
-            if k >= bytes.len() || bytes[k] != b'(' { i += 1; continue; }
+            if k >= bytes.len() || bytes[k] != b'(' {
+                i += 1;
+                continue;
+            }
             k += 1; // position after '('
             // parse target allowing balanced parentheses
             let mut depth = 1usize;
@@ -1157,16 +1414,23 @@ fn find_markdown_link(s: &str) -> Option<(usize, usize, String, String)> {
             while k < bytes.len() {
                 match bytes[k] {
                     b'(' => depth += 1,
-                    b')' => { depth -= 1; if depth == 0 { break; } },
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
                     _ => {}
                 }
                 k += 1;
             }
-            if k >= bytes.len() || depth != 0 { return None; }
-            let label = &s[i+1..j];
+            if k >= bytes.len() || depth != 0 {
+                return None;
+            }
+            let label = &s[i + 1..j];
             let target = &s[targ_start..k];
             // Full match is from i ..= k
-            return Some((i, k+1, label.to_string(), target.to_string()));
+            return Some((i, k + 1, label.to_string(), target.to_string()));
         }
         i += 1;
     }
@@ -1176,15 +1440,23 @@ fn find_markdown_link(s: &str) -> Option<(usize, usize, String, String)> {
 // Return (consumed_chars, label, target) for the first image starting at s (which begins with '!').
 fn find_markdown_image(s: &str) -> Option<(usize, String, String)> {
     let bytes = s.as_bytes();
-    if !bytes.starts_with(b"![") { return None; }
+    if !bytes.starts_with(b"![") {
+        return None;
+    }
     // Parse label
     let mut i = 2; // after ![
-    while i < bytes.len() && bytes[i] != b']' { i += 1; }
-    if i >= bytes.len() { return None; }
+    while i < bytes.len() && bytes[i] != b']' {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return None;
+    }
     let label = &s[2..i];
     // Next must be '('
     let mut k = i + 1;
-    if k >= bytes.len() || bytes[k] != b'(' { return None; }
+    if k >= bytes.len() || bytes[k] != b'(' {
+        return None;
+    }
     k += 1;
     // Parse target allowing balanced parentheses and optional title
     let mut depth = 1usize;
@@ -1192,18 +1464,26 @@ fn find_markdown_image(s: &str) -> Option<(usize, String, String)> {
     while k < bytes.len() {
         match bytes[k] {
             b'(' => depth += 1,
-            b')' => { depth -= 1; if depth == 0 { break; } },
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
             _ => {}
         }
         k += 1;
     }
-    if k >= bytes.len() || depth != 0 { return None; }
+    if k >= bytes.len() || depth != 0 {
+        return None;
+    }
     let mut target = s[targ_start..k].trim().to_string();
     // Strip optional quoted title at end: url "title"
     if let Some(space_idx) = target.rfind(' ') {
         let (left, right) = target.split_at(space_idx);
         let t = right.trim();
-        if (t.starts_with('\"') && t.ends_with('\"')) || (t.starts_with('\'') && t.ends_with('\'')) {
+        if (t.starts_with('\"') && t.ends_with('\"')) || (t.starts_with('\'') && t.ends_with('\''))
+        {
             target = left.trim().to_string();
         }
     }
@@ -1214,12 +1494,38 @@ fn find_markdown_image(s: &str) -> Option<(usize, String, String)> {
 fn to_subscript(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
-            '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
-            '+' => '₊', '-' => '₋', '=' => '₌', '(' => '₍', ')' => '₎',
-            'a' => 'ₐ', 'e' => 'ₑ', 'h' => 'ₕ', 'i' => 'ᵢ', 'j' => 'ⱼ', 'k' => 'ₖ',
-            'l' => 'ₗ', 'm' => 'ₘ', 'n' => 'ₙ', 'o' => 'ₒ', 'p' => 'ₚ', 'r' => 'ᵣ',
-            's' => 'ₛ', 't' => 'ₜ', 'u' => 'ᵤ', 'v' => 'ᵥ', 'x' => 'ₓ',
+            '0' => '₀',
+            '1' => '₁',
+            '2' => '₂',
+            '3' => '₃',
+            '4' => '₄',
+            '5' => '₅',
+            '6' => '₆',
+            '7' => '₇',
+            '8' => '₈',
+            '9' => '₉',
+            '+' => '₊',
+            '-' => '₋',
+            '=' => '₌',
+            '(' => '₍',
+            ')' => '₎',
+            'a' => 'ₐ',
+            'e' => 'ₑ',
+            'h' => 'ₕ',
+            'i' => 'ᵢ',
+            'j' => 'ⱼ',
+            'k' => 'ₖ',
+            'l' => 'ₗ',
+            'm' => 'ₘ',
+            'n' => 'ₙ',
+            'o' => 'ₒ',
+            'p' => 'ₚ',
+            'r' => 'ᵣ',
+            's' => 'ₛ',
+            't' => 'ₜ',
+            'u' => 'ᵤ',
+            'v' => 'ᵥ',
+            'x' => 'ₓ',
             _ => c,
         })
         .collect()
@@ -1228,13 +1534,46 @@ fn to_subscript(s: &str) -> String {
 fn to_superscript(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
-            '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
-            '+' => '⁺', '-' => '⁻', '=' => '⁼', '(' => '⁽', ')' => '⁾',
-            'a' => 'ᵃ', 'b' => 'ᵇ', 'c' => 'ᶜ', 'd' => 'ᵈ', 'e' => 'ᵉ', 'f' => 'ᶠ', 'g' => 'ᵍ',
-            'h' => 'ʰ', 'i' => 'ᶦ', 'j' => 'ʲ', 'k' => 'ᵏ', 'l' => 'ˡ', 'm' => 'ᵐ', 'n' => 'ⁿ',
-            'o' => 'ᵒ', 'p' => 'ᵖ', 'r' => 'ʳ', 's' => 'ˢ', 't' => 'ᵗ', 'u' => 'ᵘ', 'v' => 'ᵛ',
-            'w' => 'ʷ', 'x' => 'ˣ', 'y' => 'ʸ', 'z' => 'ᶻ',
+            '0' => '⁰',
+            '1' => '¹',
+            '2' => '²',
+            '3' => '³',
+            '4' => '⁴',
+            '5' => '⁵',
+            '6' => '⁶',
+            '7' => '⁷',
+            '8' => '⁸',
+            '9' => '⁹',
+            '+' => '⁺',
+            '-' => '⁻',
+            '=' => '⁼',
+            '(' => '⁽',
+            ')' => '⁾',
+            'a' => 'ᵃ',
+            'b' => 'ᵇ',
+            'c' => 'ᶜ',
+            'd' => 'ᵈ',
+            'e' => 'ᵉ',
+            'f' => 'ᶠ',
+            'g' => 'ᵍ',
+            'h' => 'ʰ',
+            'i' => 'ᶦ',
+            'j' => 'ʲ',
+            'k' => 'ᵏ',
+            'l' => 'ˡ',
+            'm' => 'ᵐ',
+            'n' => 'ⁿ',
+            'o' => 'ᵒ',
+            'p' => 'ᵖ',
+            'r' => 'ʳ',
+            's' => 'ˢ',
+            't' => 'ᵗ',
+            'u' => 'ᵘ',
+            'v' => 'ᵛ',
+            'w' => 'ʷ',
+            'x' => 'ˣ',
+            'y' => 'ʸ',
+            'z' => 'ᶻ',
             _ => c,
         })
         .collect()
@@ -1244,47 +1583,75 @@ fn to_superscript(s: &str) -> String {
 mod tests {
     use super::*;
     use ratatui::style::Modifier;
-    
+    use unicode_width::UnicodeWidthStr;
+
     #[test]
     fn test_bold_first_sentence() {
-        let text = "This is the first sentence. Here is the second sentence. And this is the third.";
+        let text =
+            "This is the first sentence. Here is the second sentence. And this is the third.";
         let lines = MarkdownRenderer::render_with_bold_first_sentence(text);
-        
+
         assert!(!lines.is_empty(), "Should have rendered lines");
-        
+
         // Check first line contains bold text
         let first_line = &lines[0];
         let mut found_bold = false;
         let mut bold_text = String::new();
-        
+
         for span in &first_line.spans {
             if span.style.add_modifier.contains(Modifier::BOLD) {
                 found_bold = true;
                 bold_text.push_str(&span.content);
             }
         }
-        
+
         assert!(found_bold, "Should have found bold text");
-        assert_eq!(bold_text, "This is the first sentence.", "First sentence should be bold");
+        assert_eq!(
+            bold_text, "This is the first sentence.",
+            "First sentence should be bold"
+        );
     }
-    
+
     #[test]
     fn test_no_bold_without_flag() {
         let text = "This is the first sentence. Here is the second sentence.";
         let lines = MarkdownRenderer::render(text);
-        
+
         assert!(!lines.is_empty(), "Should have rendered lines");
-        
+
         // Check no bold text
         let first_line = &lines[0];
         let mut found_bold = false;
-        
+
         for span in &first_line.spans {
             if span.style.add_modifier.contains(Modifier::BOLD) {
                 found_bold = true;
             }
         }
-        
-        assert!(!found_bold, "Should not have bold text when flag is not set");
+
+        assert!(
+            !found_bold,
+            "Should not have bold text when flag is not set"
+        );
+    }
+}
+
+#[cfg(test)]
+mod fenced_padding_tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn fenced_blocks_have_uniform_padding_in_renderer() {
+        let text = "```rust\nfn a() {}\n\nfn bbbbb() { println!(\"hi\"); }\n```";
+        let lines = MarkdownRenderer::render(text);
+        // Expect at least top pad, 3 content lines, bottom pad
+        assert!(lines.len() >= 5);
+        let widths: Vec<usize> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum())
+            .collect();
+        let maxw = *widths.iter().max().unwrap_or(&0);
+        assert!(widths.iter().all(|w| *w == maxw), "all lines must match target width: {:?}", widths);
     }
 }

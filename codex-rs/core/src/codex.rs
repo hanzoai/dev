@@ -25,6 +25,7 @@ use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
 use serde_json;
+use serde_json::json;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
 use tracing::debug;
@@ -2007,6 +2008,9 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                     last_task_message = get_last_assistant_message_from_turn(
                         &items_to_record_in_conversation_history,
                     );
+                    if let Some(m) = last_task_message.as_ref() {
+                        tracing::info!("core.turn completed: last_assistant_message.len={}", m.len());
+                    }
                     sess.maybe_notify(UserNotification::AgentTurnComplete {
                         turn_id: sub_id.clone(),
                         input_messages: turn_input_messages,
@@ -2036,6 +2040,12 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             last_agent_message: last_task_message,
         }),
     };
+    match &event.msg {
+        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: Some(m) }) => {
+            tracing::info!("core.emit TaskComplete last_agent_message.len={}", m.len());
+        }
+        _ => {}
+    }
     sess.tx_event.send(event).await.ok();
 }
 
@@ -2744,7 +2754,7 @@ async fn handle_browser_cleanup(
     call_id: String,
 ) -> ResponseInputItem {
     let call_id_clone = call_id.clone();
-    let sess_clone = sess;
+    let _sess_clone = sess;
     execute_custom_tool(
         sess,
         &sub_id,
@@ -2752,7 +2762,7 @@ async fn handle_browser_cleanup(
         "browser_cleanup".to_string(),
         Some(serde_json::json!({})),
         || async move {
-            if let Some(browser_manager) = get_browser_manager_for_session(sess_clone).await {
+            if let Some(browser_manager) = get_browser_manager_for_session(_sess_clone).await {
                 match browser_manager.cleanup().await {
                     Ok(_) => ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
@@ -2796,6 +2806,8 @@ async fn handle_web_fetch(
                 url: String,
                 #[serde(default)]
                 timeout_ms: Option<u64>,
+                #[serde(default)]
+                mode: Option<String>, // "auto" (default), "browser", or "http"
             }
 
             let parsed: Result<WebFetchParams, _> = serde_json::from_str(&arguments_clone);
@@ -2812,86 +2824,434 @@ async fn handle_web_fetch(
                 }
             };
 
-            let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
-            let user_agent = crate::user_agent::get_codex_user_agent(Some("web_fetch"));
-            let client = match reqwest::Client::builder()
-                .user_agent(user_agent)
-                .timeout(timeout)
-                .build()
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: format!("Failed to build HTTP client: {e}"),
-                            success: Some(false),
-                        },
-                    };
+            // Helper: build a client with a specific UA and common headers.
+            async fn do_request(
+                url: &str,
+                ua: &str,
+                timeout: Duration,
+                extra_headers: Option<&[(reqwest::header::HeaderName, &'static str)]>,
+            ) -> Result<reqwest::Response, reqwest::Error> {
+                let client = reqwest::Client::builder()
+                    .timeout(timeout)
+                    .user_agent(ua)
+                    .build()?;
+                let mut req = client.get(url)
+                    // Add a few browser-like headers to reduce blocks
+                    .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9");
+                if let Some(pairs) = extra_headers {
+                    for (k, v) in pairs.iter() {
+                        req = req.header(k, *v);
+                    }
                 }
-            };
+                req.send().await
+            }
 
-            let resp = match client.get(&params.url).send().await {
+            // Helper: remove obvious noisy blocks before markdown conversion.
+            fn strip_noisy_tags(mut html: String) -> String {
+                // Basic, case-insensitive removal of <script>, <style>, and <noscript> blocks.
+                // Avoids dumping challenge JS into markdown on blocked pages.
+                let patterns = [("script", "</script>"), ("style", "</style>"), ("noscript", "</noscript>")];
+                for (open, close) in patterns {
+                    // Iterate until none remain (with a safety cap on iterations)
+                    let mut guard = 0;
+                    loop {
+                        if guard > 64 { break; }
+                        let start = html.to_lowercase().find(&format!("<{open}"));
+                        let Some(s) = start else { break; };
+                        let end_search_from = s + 1;
+                        let lower = html.to_lowercase();
+                        let end = lower[end_search_from..].find(&close).map(|i| end_search_from + i + close.len());
+                        if let Some(e) = end {
+                            html.replace_range(s..e, "");
+                        } else {
+                            // No close tag found; remove from open to end
+                            html.truncate(s);
+                            break;
+                        }
+                        guard += 1;
+                    }
+                }
+                html
+            }
+
+            // Helper: convert HTML to markdown and truncate if too large.
+            fn convert_html_to_markdown_trimmed(html: String, max_chars: usize) -> crate::error::Result<(String, bool)> {
+                let options = htmd::options::Options {
+                    heading_style: htmd::options::HeadingStyle::Atx,
+                    code_block_style: htmd::options::CodeBlockStyle::Fenced,
+                    link_style: htmd::options::LinkStyle::Inlined,
+                    ..Default::default()
+                };
+                let converter = htmd::HtmlToMarkdown::builder().options(options).build();
+                let sanitized = strip_noisy_tags(html);
+                let markdown = converter.convert(&sanitized)?;
+                let mut truncated = false;
+                let rendered = if markdown.len() > max_chars {
+                    truncated = true;
+                    let mut s = markdown;
+                    s.truncate(max_chars);
+                    s.push_str("\n\n… (truncated)\n");
+                    s
+                } else {
+                    markdown
+                };
+                Ok((rendered, truncated))
+            }
+
+            // Helper: detect WAF/challenge pages to avoid dumping challenge content.
+            fn detect_block_vendor(_status: reqwest::StatusCode, body: &str) -> Option<&'static str> {
+                // Identify common bot-challenge pages regardless of HTTP status.
+                // Cloudflare often returns 200 with a challenge that requires JS/cookies.
+                let lower = body.to_lowercase();
+                if lower.contains("cloudflare")
+                    || lower.contains("cf-ray")
+                    || lower.contains("_cf_chl_opt")
+                    || lower.contains("challenge-platform")
+                    || lower.contains("checking if the site connection is secure")
+                    || lower.contains("waiting for")
+                    || lower.contains("just a moment")
+                {
+                    return Some("cloudflare");
+                }
+                None
+            }
+
+            fn headers_indicate_block(headers: &reqwest::header::HeaderMap) -> bool {
+                let h = headers;
+                let has_cf_ray = h.get("cf-ray").is_some();
+                let has_cf_mitigated = h.get("cf-mitigated").is_some();
+                let has_cf_bm = h.get("set-cookie").and_then(|v| v.to_str().ok()).map(|s| s.contains("__cf_bm=")).unwrap_or(false);
+                let has_chlray = h.get("server-timing").and_then(|v| v.to_str().ok()).map(|s| s.to_lowercase().contains("chlray")).unwrap_or(false);
+                has_cf_ray || has_cf_mitigated || has_cf_bm || has_chlray
+            }
+
+            fn looks_like_challenge_markdown(md: &str) -> bool {
+                let l = md.to_lowercase();
+                l.contains("just a moment") || l.contains("enable javascript and cookies") || l.contains("waiting for ")
+            }
+
+            let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
+            let codex_ua = crate::user_agent::get_codex_user_agent(Some("web_fetch"));
+
+            // If explicit browser mode requested, try the internal browser first.
+            if matches!(params.mode.as_deref(), Some("browser")) {
+                {
+                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
+                    if let Ok(res) = browser_manager.goto(&params.url).await {
+                        // Allow a few short settles for JS/cookie challenges to auto-resolve
+                        let mut html: Option<String> = None;
+                        for _ in 0..4 {
+                            if let Ok(val) = browser_manager.execute_javascript("(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()").await {
+                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
+                                    break;
+                                }
+                            }
+                            tokio::time::sleep(Duration::from_millis(1200)).await;
+                        }
+                        if let Some(html) = html {
+                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput {
+                                        call_id: call_id_clone,
+                                        output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                                    };
+                                }
+                            };
+                            let body = serde_json::json!({
+                                "url": params.url,
+                                "status": 200,
+                                "final_url": res.url,
+                                "content_type": "text/html",
+                                "used_browser_ua": true,
+                                "via_browser": true,
+                                "truncated": truncated,
+                                "markdown": markdown,
+                            });
+                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                        }
+                    }
+                }
+            }
+            // Attempt 1: Codex UA + polite headers
+            let resp = match do_request(&params.url, &codex_ua, timeout, None).await {
                 Ok(r) => r,
                 Err(e) => {
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: format!("Request failed: {e}"),
-                            success: Some(false),
-                        },
+                        output: FunctionCallOutputPayload { content: format!("Request failed: {e}"), success: Some(false) },
                     };
                 }
             };
 
-            let status = resp.status();
-            let text = match resp.text().await {
+            // Capture metadata before consuming the response body.
+            let mut status = resp.status();
+            let mut final_url = resp.url().to_string();
+            let mut headers = resp.headers().clone();
+            // Read body
+            let mut body_text = match resp.text().await {
                 Ok(t) => t,
                 Err(e) => {
                     return ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: format!("Failed to read response body: {e}"),
-                            success: Some(false),
-                        },
+                        output: FunctionCallOutputPayload { content: format!("Failed to read response body: {e}"), success: Some(false) },
+                    };
+                }
+            };
+            let mut used_browser_ua = false;
+            let browser_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+            if !matches!(params.mode.as_deref(), Some("http")) && (detect_block_vendor(status, &body_text).is_some() || headers_indicate_block(&headers)) {
+                // Simple retry with a browser UA and extra headers
+                let extra = [
+                    (reqwest::header::HeaderName::from_static("upgrade-insecure-requests"), "1"),
+                ];
+                if let Ok(r2) = do_request(&params.url, browser_ua, timeout, Some(&extra)).await {
+                    let status2 = r2.status();
+                    let final_url2 = r2.url().to_string();
+                    let headers2 = r2.headers().clone();
+                    if let Ok(t2) = r2.text().await {
+                        used_browser_ua = true;
+                        status = status2;
+                        final_url = final_url2;
+                        headers = headers2;
+                        body_text = t2;
+                    }
+                }
+            }
+
+            // Response metadata
+            let content_type = headers
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            // Provide structured diagnostics if blocked by WAF (even if HTTP 200)
+            if !matches!(params.mode.as_deref(), Some("http")) && (detect_block_vendor(status, &body_text).is_some() || headers_indicate_block(&headers)) {
+                let vendor = "cloudflare";
+                let retry_after = headers
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let cf_ray = headers
+                    .get("cf-ray")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let mut diag = serde_json::json!({
+                    "final_url": final_url,
+                    "content_type": content_type,
+                    "used_browser_ua": used_browser_ua,
+                    "blocked_by_waf": true,
+                    "vendor": vendor,
+                });
+                if let Some(ra) = retry_after { diag["retry_after"] = serde_json::json!(ra); }
+                if let Some(ray) = cf_ray { diag["cf_ray"] = serde_json::json!(ray); }
+
+                // Attempt a last-resort browser-based fetch if the live browser is available.
+                {
+                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
+                    browser_manager.set_enabled_sync(true);
+                    // Try navigate and extract outerHTML via JS (after SPA settles per manager config)
+                    if browser_manager.goto(&params.url).await.is_ok() {
+                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+                        if let Ok(val) = browser_manager.execute_javascript(js).await {
+                            let html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let title = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("");
+                            if !html.is_empty() && title.to_lowercase() != "just a moment..." {
+                                let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
+                                    Ok(t) => t,
+                                    Err(e) => {
+                                        return ResponseInputItem::FunctionCallOutput {
+                                            call_id: call_id_clone,
+                                            output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                                        };
+                                    }
+                                };
+                                diag["via_browser"] = serde_json::json!(true);
+                                let body = serde_json::json!({
+                                    "url": params.url,
+                                    "status": 200,
+                                    "final_url": final_url,
+                                    "content_type": content_type,
+                                    "used_browser_ua": used_browser_ua,
+                                    "truncated": truncated,
+                                    "markdown": markdown,
+                                });
+                                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                            }
+                        }
+                
+                        // If JS extraction failed, try a CDP outerHTML of root
+                        let root = browser_manager.execute_cdp("DOM.getDocument", json!({"depth": 1})).await.ok();
+                        if let Some(root) = root {
+                            if let Some(node_id) = root.get("root").and_then(|r| r.get("nodeId")).and_then(|n| n.as_u64()) {
+                                if let Ok(outer) = browser_manager.execute_cdp("DOM.getOuterHTML", json!({"nodeId": node_id})).await {
+                                    if let Some(html) = outer.get("outerHTML").and_then(|v| v.as_str()) {
+                                        let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
+                                            Ok(t) => t,
+                                            Err(e) => {
+                                                return ResponseInputItem::FunctionCallOutput {
+                                                    call_id: call_id_clone,
+                                                    output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                                                };
+                                            }
+                                        };
+                                        diag["via_browser"] = serde_json::json!(true);
+                                        let body = serde_json::json!({
+                                            "url": params.url,
+                                            "status": 200,
+                                            "final_url": final_url,
+                                            "content_type": content_type,
+                                            "used_browser_ua": used_browser_ua,
+                                            "truncated": truncated,
+                                            "markdown": markdown,
+                                        });
+                                        return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let (md_preview, _trunc) = match convert_html_to_markdown_trimmed(body_text, 2000) {
+                    Ok(t) => t,
+                    Err(_) => ("".to_string(), false),
+                };
+
+                let body = serde_json::json!({
+                    "url": params.url,
+                    "status": status.as_u16(),
+                    "error": "Blocked by site challenge",
+                    "diagnostics": diag,
+                    "markdown": md_preview,
+                });
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload { content: body.to_string(), success: Some(false) },
+                };
+            }
+
+            // If not success, provide structured, minimal diagnostics without dumping content.
+            if !status.is_success() {
+                let waf_vendor = detect_block_vendor(status, &body_text);
+                let retry_after = headers
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                let cf_ray = headers
+                    .get("cf-ray")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let mut diag = serde_json::json!({
+                    "final_url": final_url,
+                    "content_type": content_type,
+                    "used_browser_ua": used_browser_ua,
+                });
+                if let Some(vendor) = waf_vendor { diag["blocked_by_waf"] = serde_json::json!(true); diag["vendor"] = serde_json::json!(vendor); }
+                if let Some(ra) = retry_after { diag["retry_after"] = serde_json::json!(ra); }
+                if let Some(ray) = cf_ray { diag["cf_ray"] = serde_json::json!(ray); }
+
+                // Provide a tiny, safe preview of visible text only (converted and truncated).
+                let (md_preview, _trunc) = match convert_html_to_markdown_trimmed(body_text, 2000) {
+                    Ok(t) => t,
+                    Err(_) => ("".to_string(), false),
+                };
+
+                let body = serde_json::json!({
+                    "url": params.url,
+                    "status": status.as_u16(),
+                    "error": format!("HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or("")),
+                    "diagnostics": diag,
+                    // Keep a short, human-friendly preview; avoid dumping raw HTML or long JS.
+                    "markdown": md_preview,
+                });
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload { content: body.to_string(), success: Some(false) },
+                };
+            }
+
+            // Success: convert to markdown (sanitized and size-limited)
+            let (markdown, truncated) = match convert_html_to_markdown_trimmed(body_text, 120_000) {
+                Ok(t) => t,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                     };
                 }
             };
 
-            // Configure htmd with conservative, GFM‑like defaults
-            let options = htmd::options::Options {
-                heading_style: htmd::options::HeadingStyle::Atx,
-                code_block_style: htmd::options::CodeBlockStyle::Fenced,
-                link_style: htmd::options::LinkStyle::Inlined,
-                ..Default::default()
-            };
-            let converter = htmd::HtmlToMarkdown::builder().options(options).build();
-            let markdown = match converter.convert(&text) {
-                Ok(m) => m,
-                Err(e) => {
-                    return ResponseInputItem::FunctionCallOutput {
-                        call_id: call_id_clone,
-                        output: FunctionCallOutputPayload {
-                            content: format!("Markdown conversion failed: {e}"),
-                            success: Some(false),
-                        },
-                    };
+            // If the rendered markdown still looks like a challenge page, attempt browser fallback (unless http-only).
+            if !matches!(params.mode.as_deref(), Some("http")) && looks_like_challenge_markdown(&markdown) {
+                {
+                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
+                    browser_manager.set_enabled_sync(true);
+                    if browser_manager.goto(&params.url).await.is_ok() {
+                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+                        let mut html: Option<String> = None;
+                        for _ in 0..3 {
+                            if let Ok(val) = browser_manager.execute_javascript(js).await {
+                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
+                                    break;
+                                }
+                            }
+                            tokio::time::sleep(Duration::from_millis(1200)).await;
+                        }
+                        if let Some(html) = html {
+                            let (md2, truncated2) = match convert_html_to_markdown_trimmed(html, 120_000) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
+                                }
+                            };
+                            let body = serde_json::json!({
+                                "url": params.url,
+                                "status": 200,
+                                "final_url": final_url,
+                                "content_type": content_type,
+                                "used_browser_ua": true,
+                                "via_browser": true,
+                                "truncated": truncated2,
+                                "markdown": md2,
+                            });
+                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                        }
+                    }
                 }
-            };
+
+                // If fallback not possible, return structured error rather than a useless challenge page
+                let body = serde_json::json!({
+                    "url": params.url,
+                    "status": 200,
+                    "error": "Blocked by site challenge",
+                    "diagnostics": { "final_url": final_url, "content_type": content_type, "used_browser_ua": used_browser_ua, "blocked_by_waf": true, "vendor": "cloudflare", "detected_via": "markdown" },
+                    "markdown": markdown.chars().take(2000).collect::<String>(),
+                });
+                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(false) } };
+            }
 
             let body = serde_json::json!({
                 "url": params.url,
                 "status": status.as_u16(),
+                "final_url": final_url,
+                "content_type": content_type,
+                "used_browser_ua": used_browser_ua,
+                "truncated": truncated,
                 "markdown": markdown,
             });
 
-            ResponseInputItem::FunctionCallOutput {
-                call_id: call_id_clone,
-                output: FunctionCallOutputPayload {
-                    content: body.to_string(),
-                    success: Some(status.is_success()),
-                },
-            }
+            ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } }
         },
     ).await
 }
@@ -3911,7 +4271,7 @@ async fn handle_container_exec_with_params(
             let ExecToolCallOutput { exit_code, .. } = &output;
 
             let is_success = *exit_code == 0;
-            let content = format_exec_output(&output);
+            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &output);
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload {
@@ -4042,7 +4402,7 @@ async fn handle_sandbox_error(
                     let ExecToolCallOutput { exit_code, .. } = &retry_output;
 
                     let is_success = *exit_code == 0;
-                    let content = format_exec_output(&retry_output);
+                    let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &retry_output);
 
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id.clone(),
@@ -4074,6 +4434,51 @@ async fn handle_sandbox_error(
     }
 }
 
+// Limit extremely large tool outputs before sending to the model to avoid
+// context overflows. Keep this conservative because multiple tool outputs
+// can appear in a single turn. The limit is in bytes (on the UTF‑8 string).
+const MAX_TOOL_OUTPUT_BYTES_FOR_MODEL: usize = 32 * 1024; // 32 KiB
+
+fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool) {
+    if s.len() <= max_bytes {
+        return (s.to_string(), false);
+    }
+    if max_bytes == 0 {
+        return ("…truncated…".to_string(), true);
+    }
+
+    // Try to keep some head/tail, favoring newline boundaries when possible.
+    let keep = max_bytes.saturating_sub("…truncated…\n".len());
+    let left_budget = keep / 2;
+    let right_budget = keep - left_budget;
+
+    // Safe prefix end on a char boundary, prefer last newline within budget.
+    let prefix_end = {
+        let mut end = left_budget.min(s.len());
+        if let Some(head) = s.get(..end) {
+            if let Some(i) = head.rfind('\n') { end = i + 1; }
+        }
+        while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+        end
+    };
+
+    // Safe suffix start on a char boundary, prefer first newline within budget.
+    let suffix_start = {
+        let mut start = s.len().saturating_sub(right_budget);
+        if let Some(tail) = s.get(start..) {
+            if let Some(i) = tail.find('\n') { start += i + 1; }
+        }
+        while start < s.len() && !s.is_char_boundary(start) { start += 1; }
+        start
+    };
+
+    let mut out = String::with_capacity(max_bytes);
+    out.push_str(&s[..prefix_end]);
+    out.push_str("…truncated…\n");
+    out.push_str(&s[suffix_start..]);
+    (out, true)
+}
+
 fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     let ExecToolCallOutput {
         exit_code,
@@ -4095,8 +4500,14 @@ fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     formatted_output
 }
 
-/// Exec output is a pre-serialized JSON payload
-fn format_exec_output(exec_output: &ExecToolCallOutput) -> String {
+/// Exec output serialized for the model. If the payload is too large,
+/// write the full output to a file and include a truncated preview here.
+fn format_exec_output_with_limit(
+    sess: &Session,
+    sub_id: &str,
+    call_id: &str,
+    exec_output: &ExecToolCallOutput,
+) -> String {
     let ExecToolCallOutput {
         exit_code,
         duration,
@@ -4110,18 +4521,34 @@ fn format_exec_output(exec_output: &ExecToolCallOutput) -> String {
     }
 
     #[derive(Serialize)]
-    struct ExecOutput<'a> {
-        output: &'a str,
-        metadata: ExecMetadata,
-    }
+    struct ExecOutput<'a> { output: &'a str, metadata: ExecMetadata }
 
     // round to 1 decimal place
     let duration_seconds = ((duration.as_secs_f32()) * 10.0).round() / 10.0;
 
-    let formatted_output = format_exec_output_str(exec_output);
+    let full = format_exec_output_str(exec_output);
+    let (maybe_truncated, was_truncated) =
+        truncate_middle_bytes(&full, MAX_TOOL_OUTPUT_BYTES_FOR_MODEL);
+
+    // If truncated, persist the full output under .code/agents/<agent>/exec-<call_id>.txt
+    // so users can inspect it and the model can refer to a short, stable path.
+    let final_output = if was_truncated {
+        let cwd = sess.get_cwd().to_path_buf();
+        let file_note = match ensure_agent_dir(&cwd, sub_id)
+            .and_then(|dir| write_agent_file(&dir, &format!("exec-{call_id}.txt"), &full))
+        {
+            Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
+            Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
+        };
+        let mut s = maybe_truncated;
+        s.push_str(&file_note);
+        s
+    } else {
+        maybe_truncated
+    };
 
     let payload = ExecOutput {
-        output: &formatted_output,
+        output: &final_output,
         metadata: ExecMetadata {
             exit_code: *exit_code,
             duration_seconds,
@@ -4444,13 +4871,13 @@ async fn handle_browser_open(
                             tracing::info!("Creating new browser manager");
                             let new_manager =
                                 codex_browser::global::get_or_create_browser_manager().await;
-                            // Enable the browser
-                            new_manager.set_enabled_sync(true);
                             Some(new_manager)
                         }
                     };
 
                     if let Some(browser_manager) = browser_manager {
+                        // Ensure the browser manager is marked enabled so status reflects reality
+                        browser_manager.set_enabled_sync(true);
                         // Clear any lingering node highlight from previous commands
                         let _ = browser_manager
                             .execute_cdp("Overlay.hideHighlight", serde_json::json!({}))

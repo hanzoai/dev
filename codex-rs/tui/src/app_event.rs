@@ -85,9 +85,9 @@ pub(crate) enum AppEvent {
     DiffResult(String),
 
     InsertHistory(Vec<Line<'static>>),
-    InsertHistoryWithKind { kind: StreamKind, lines: Vec<Line<'static>> },
+    InsertHistoryWithKind { id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>> },
     /// Finalized assistant answer with raw markdown for re-rendering under theme changes.
-    InsertFinalAnswer { lines: Vec<Line<'static>>, source: String },
+    InsertFinalAnswer { id: Option<String>, lines: Vec<Line<'static>>, source: String },
 
     #[allow(dead_code)]
     StartCommitAnimation,
