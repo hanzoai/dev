@@ -434,7 +434,7 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             info: Color::Rgb(9, 105, 218),          // #0969DA
             text: Color::Rgb(79, 91, 106),          // #4f5b6a
             text_dim: Color::Rgb(171, 180, 199),    // #abb4c7
-            text_bright: Color::Black,              // #000000
+            text_bright: Color::Rgb(0, 0, 20),      // #000014
             keyword: Color::Rgb(110, 89, 203),      // #6E59CB
             string: Color::Rgb(11, 125, 105),       // #0B7D69
             comment: Color::Rgb(100, 115, 132),     // #647384

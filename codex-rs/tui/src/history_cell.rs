@@ -132,7 +132,13 @@ pub(crate) trait HistoryCell {
         // clear broader regions, custom widgets that shrink or scroll can otherwise
         // leave residual glyphs to the right of shorter lines or from prior frames.
         // We paint spaces with the current theme background to guarantee a clean slate.
-        let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        // Assistant messages use a subtly tinted background: theme background
+        // moved 5% toward the theme info color for a gentle distinction.
+        let cell_bg = match self.kind() {
+            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
         for y in area.y..area.y.saturating_add(area.height) {
             for x in area.x..area.x.saturating_add(area.width) {
                 buf[(x, y)].set_char(' ').set_style(bg_style);
@@ -144,12 +150,12 @@ pub(crate) trait HistoryCell {
         let lines = self.display_lines_trimmed();
         let text = Text::from(lines);
 
-        let bg_block = Block::default().style(Style::default().bg(crate::colors::background()));
+        let bg_block = Block::default().style(Style::default().bg(cell_bg));
         Paragraph::new(text)
             .block(bg_block)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .style(Style::default().bg(crate::colors::background()))
+            .style(Style::default().bg(cell_bg))
             .render(area, buf);
     }
     
@@ -203,6 +209,7 @@ pub(crate) trait HistoryCell {
         match self.kind() {
             HistoryCellType::Plain => None,
             HistoryCellType::User => Some("›"),
+            // Restore assistant gutter icon
             HistoryCellType::Assistant => Some("•"),
             HistoryCellType::Reasoning => None,
             HistoryCellType::Error => Some("✖"),
@@ -212,10 +219,10 @@ pub(crate) trait HistoryCell {
                 ToolStatus::Failed => "✖",
             }),
             HistoryCellType::Exec { kind, status } => {
-                // Show ➤ only for Run executions; hide for read/search/list summaries
+                // Show ❯ only for Run executions; hide for read/search/list summaries
                 match (kind, status) {
                     (ExecKind::Run, ExecStatus::Error) => Some("✖"),
-                    (ExecKind::Run, _) => Some("➤"),
+                    (ExecKind::Run, _) => Some("❯"),
                     _ => None,
                 }
             }
@@ -334,6 +341,43 @@ pub(crate) struct ExecCell {
     cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+}
+
+// ==================== AssistantMarkdownCell ====================
+// Stores raw assistant markdown and rebuilds on demand (e.g., theme/syntax changes)
+
+pub(crate) struct AssistantMarkdownCell {
+    pub(crate) raw: String,
+    pub(crate) lines: Vec<Line<'static>>, // includes hidden header "codex"
+}
+
+impl AssistantMarkdownCell {
+    pub(crate) fn new(raw: String, cfg: &codex_core::config::Config) -> Self {
+        let mut me = Self { raw, lines: Vec::new() };
+        me.rebuild(cfg);
+        me
+    }
+    pub(crate) fn rebuild(&mut self, cfg: &codex_core::config::Config) {
+        let mut out: Vec<Line<'static>> = Vec::new();
+        out.push(Line::from("codex"));
+        crate::markdown::append_markdown_with_bold_first(&self.raw, &mut out, cfg);
+        // Apply bright text to body like streaming finalize
+        let bright = crate::colors::text_bright();
+        for line in out.iter_mut().skip(1) {
+            line.style = line.style.patch(Style::default().fg(bright));
+        }
+        self.lines = out;
+    }
+}
+
+impl HistoryCell for AssistantMarkdownCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Assistant }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        // Hide the header line, mirroring PlainHistoryCell behavior for Assistant
+        if self.lines.len() > 1 { self.lines[1..].to_vec() } else { Vec::new() }
+    }
 }
 
 impl HistoryCell for ExecCell {
@@ -594,7 +638,7 @@ fn exec_render_parts_generic(
     let header_line = match output {
         None => {
             let duration_str = if let Some(start) = start_time { let elapsed = start.elapsed(); format!(" ({})", format_duration(elapsed)) } else { String::new() };
-            Line::styled("Running...".to_string() + &duration_str, Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))
+            Line::styled("Running...".to_string() + &duration_str, Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD))
         }
         Some(o) if o.exit_code == 0 => Line::styled("Ran", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
         Some(_) => Line::styled("Ran", Style::default().fg(crate::colors::text_bright()).add_modifier(Modifier::BOLD)),
@@ -633,9 +677,9 @@ fn exec_render_parts_parsed(
                 _ => match &ctx_path { Some(p) => format!("Running... in {}", p), None => "Running...".to_string() },
             };
             if matches!(action, "read" | "search" | "list") {
-                Line::styled(header + &duration_str, Style::default().fg(crate::colors::primary()))
+                Line::styled(header + &duration_str, Style::default().fg(crate::colors::info()))
             } else {
-                Line::styled(header + &duration_str, Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD))
+                Line::styled(header + &duration_str, Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD))
             }
         }
         Some(o) if o.exit_code == 0 => {
@@ -993,7 +1037,7 @@ impl HistoryCell for RunningToolCallCell {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::styled(
             format!("{} ({})", self.title, format_duration(elapsed)),
-            Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
+            Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD),
         ));
         lines.extend(self.arg_lines.clone());
         lines.push(Line::from(""));
@@ -1264,6 +1308,100 @@ pub(crate) struct StreamingContentCell {
 impl HistoryCell for StreamingContentCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn kind(&self) -> HistoryCellType { HistoryCellType::Assistant }
+    fn has_custom_render(&self) -> bool { true }
+    fn desired_height(&self, width: u16) -> u16 {
+        // Reserve one row of padding above and below the assistant content.
+        // Also reserve 1 col of left padding and 2 cols of right padding.
+        let content = Text::from(self.display_lines_trimmed());
+        let content_rows: u16 = Paragraph::new(content)
+            .wrap(Wrap { trim: false })
+            .line_count(width.saturating_sub(2))
+            .try_into()
+            .unwrap_or(0);
+        content_rows.saturating_add(2)
+    }
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        // Render with a 1-row top and bottom padding, all using the assistant bg tint.
+        let cell_bg = crate::colors::assistant_bg();
+        // Do not set a widget-level FG here; it can mask per-span modifiers like BOLD on some terminals.
+        // Keep only BG tint so span-level styles remain authoritative.
+        // (A debug flag still exists, but this is now the default behavior.)
+        let bg_style = Style::default().bg(cell_bg);
+
+        // Hard clear area with assistant background
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_char(' ').set_style(bg_style);
+            }
+        }
+
+        // Prepare lines with bullet hanging-indents (first-sentence styling is now handled in the markdown renderer).
+        let mut content_lines = self.display_lines_trimmed();
+        let wrap_width = area.width.saturating_sub(2); // keep 2-col right padding in layout
+        if wrap_width > 4 {
+            let mut transformed: Vec<Line<'static>> = Vec::new();
+            for line in content_lines.into_iter() {
+                // Horizontal rule: lines of only --- *** or ___ -> draw across width
+                if is_horizontal_rule_line(&line) {
+                    let hr = Line::from(Span::styled(
+                        std::iter::repeat('─').take(wrap_width as usize).collect::<String>(),
+                        Style::default().fg(crate::colors::assistant_hr()),
+                    ));
+                    transformed.push(hr);
+                    continue;
+                }
+                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
+                    transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, wrap_width));
+                } else {
+                    transformed.push(line);
+                }
+            }
+            content_lines = transformed;
+        }
+        let content_text = Text::from(content_lines);
+        let content_total: u16 = Paragraph::new(content_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(area.width.saturating_sub(2))
+            .try_into()
+            .unwrap_or(0);
+
+        let mut remaining_skip = skip_rows;
+        let mut cur_y = area.y;
+        let end_y = area.y.saturating_add(area.height);
+
+        // Top padding (1 row)
+        if remaining_skip == 0 && cur_y < end_y {
+            // already cleared with bg; nothing else to draw
+            cur_y = cur_y.saturating_add(1);
+        }
+        remaining_skip = remaining_skip.saturating_sub(1);
+
+        // Content block
+        if cur_y < end_y {
+            let content_skip = remaining_skip.min(content_total);
+            let avail = end_y.saturating_sub(cur_y);
+            let draw_h = (content_total.saturating_sub(content_skip)).min(avail);
+            if draw_h > 0 {
+                // Render content flush to the gutter (no extra left pad) and keep 2 cols right pad
+                let content_area = Rect { x: area.x, y: cur_y, width: area.width.saturating_sub(2), height: draw_h };
+                let block = Block::default().style(bg_style);
+                Paragraph::new(content_text)
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((content_skip, 0))
+                    .style(bg_style)
+                    .render(content_area, buf);
+                cur_y = cur_y.saturating_add(draw_h);
+            }
+        }
+
+        // Bottom padding (1 row)
+        if cur_y < end_y {
+            // one row already cleared with bg; nothing else to draw
+            // when remaining_skip > 0, the single bottom pad row is entirely skipped.
+            // if remaining_skip > 0, the single bottom pad row is entirely skipped
+        }
+    }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Hide the header line (e.g., "codex") when using a gutter symbol
         if self.gutter_symbol().is_some() {
@@ -1279,6 +1417,290 @@ impl HistoryCell for StreamingContentCell {
         }
     }
 }
+
+// Detect lines that start with a markdown bullet produced by our renderer and return (indent, bullet)
+fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String)> {
+    let bullets = ["•", "◦", "·", "∘", "⋅"];
+    let spans = &line.spans;
+    if spans.is_empty() { return None; }
+    // First span may be leading spaces
+    let mut idx = 0;
+    let mut indent = 0usize;
+    if let Some(s) = spans.get(0) {
+        let t = s.content.as_ref();
+        if !t.is_empty() && t.chars().all(|c| c == ' ') {
+            indent = t.chars().count();
+            idx = 1;
+        }
+    }
+    // Next must be bullet glyph
+    let bullet_span = spans.get(idx)?;
+    let bullet = bullet_span.content.as_ref();
+    if !bullets.contains(&bullet) { return None; }
+    // Next must be a single space span (renderer adds one)
+    let space_ok = spans.get(idx + 1).map(|s| s.content.as_ref() == " ").unwrap_or(false);
+    if !space_ok { return None; }
+    Some((indent, bullet.to_string()))
+}
+
+// Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
+fn wrap_bullet_line(mut line: ratatui::text::Line<'static>, indent_spaces: usize, bullet: &str, width: u16) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::style::Style;
+    use ratatui::text::Span;
+
+    let width = width as usize;
+    let mut spans = std::mem::take(&mut line.spans);
+    // If the line contains OSC 8 hyperlinks (ESC ]8), avoid character-level
+    // rewrapping to prevent breaking escape sequences. Fall back to default
+    // Paragraph wrapping for this line by returning it unchanged.
+    if spans.iter().any(|s| s.content.as_ref().contains('\u{1b}')) {
+        line.spans = spans;
+        return vec![line];
+    }
+    let mut i = 0usize;
+    // Consume leading spaces span
+    if i < spans.len() {
+        let t = spans[i].content.as_ref();
+        if t.chars().all(|c| c == ' ') { i += 1; }
+    }
+    // Consume bullet span and following single-space span
+    let bullet_style = if i < spans.len() { spans[i].style } else { Style::default() };
+    i += 1; // bullet
+    i += 1; // space after bullet
+
+    // Remaining spans comprise the content
+    let rest_spans = spans.drain(i..).collect::<Vec<_>>();
+    let mut chars: Vec<(char, Style)> = Vec::new();
+    for sp in &rest_spans {
+        let st = sp.style;
+        for ch in sp.content.as_ref().chars() { chars.push((ch, st)); }
+    }
+
+    // Prefix widths
+    let first_prefix = indent_spaces + 1 /*bullet*/ + 1 /*space*/;
+    let cont_prefix = indent_spaces + 2; // spaces equal to bullet+space
+
+    let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
+    let mut pos = 0usize;
+    let mut first = true;
+    while pos < chars.len() {
+        let avail = if first { width.saturating_sub(first_prefix) } else { width.saturating_sub(cont_prefix) };
+        let avail = avail.max(1);
+        let mut take = 0usize;
+        let mut col = 0usize;
+        while pos + take < chars.len() && col < avail {
+            col += 1;
+            take += 1;
+        }
+        let slice = &chars[pos..pos + take];
+        let mut seg_spans: Vec<Span<'static>> = Vec::new();
+        // Build prefix spans
+        if first {
+            if indent_spaces > 0 { seg_spans.push(Span::raw(" ".repeat(indent_spaces))); }
+            seg_spans.push(Span::styled(bullet.to_string(), bullet_style));
+            seg_spans.push(Span::raw(" "));
+        } else {
+            seg_spans.push(Span::raw(" ".repeat(cont_prefix)));
+        }
+        // Build content spans coalescing same-style runs
+        let mut cur_style = None::<Style>;
+        let mut buf = String::new();
+        for (ch, st) in slice.iter().copied() {
+            if cur_style.map(|cs| cs == st).unwrap_or(false) {
+                buf.push(ch);
+            } else {
+                if !buf.is_empty() {
+                    seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap()));
+                }
+                cur_style = Some(st);
+                buf.push(ch);
+            }
+        }
+        if !buf.is_empty() {
+            seg_spans.push(Span::styled(buf, cur_style.unwrap()));
+        }
+        out.push(ratatui::text::Line::from(seg_spans));
+        pos += take;
+        first = false;
+    }
+
+    if out.is_empty() {
+        // Ensure at least prefix-only line (edge case empty content)
+        let mut seg_spans: Vec<Span<'static>> = Vec::new();
+        if indent_spaces > 0 { seg_spans.push(Span::raw(" ".repeat(indent_spaces))); }
+        seg_spans.push(Span::styled(bullet.to_string(), bullet_style));
+        out.push(ratatui::text::Line::from(seg_spans));
+    }
+
+    out
+}
+
+fn is_horizontal_rule_line(line: &ratatui::text::Line<'_>) -> bool {
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let t = text.trim();
+    if t.is_empty() { return false; }
+    let chars: Vec<char> = t.chars().collect();
+    // Allow optional spaces between characters
+    let only = |ch: char| chars.iter().all(|c| *c == ch || c.is_whitespace());
+    (only('-') && chars.iter().filter(|c| **c=='-').count()>=3)
+        || (only('*') && chars.iter().filter(|c| **c=='*').count()>=3)
+        || (only('_') && chars.iter().filter(|c| **c=='_').count()>=3)
+}
+
+// Bold the first sentence (up to the first '.', '!' or '?' in the first non-empty line),
+// or the entire first non-empty line if no terminator is present. Newlines already split lines.
+// removed bold_first_sentence; renderer handles first sentence styling
+/*
+fn bold_first_sentence(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    use ratatui::text::Span;
+    use ratatui::style::Modifier;
+
+    // Find the first non-empty line index
+    let first_idx = match lines.iter().position(|l| {
+        let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        !s.trim().is_empty()
+    }) {
+        Some(i) => i,
+        None => return lines,
+    };
+
+    // Build the plain text of that line
+    let line_text: String = lines[first_idx]
+        .spans
+        .iter()
+        .map(|sp| sp.content.as_ref())
+        .collect();
+
+    // If the first non-space character is a bullet (•), do not bold.
+    if line_text.chars().skip_while(|c| c.is_whitespace()).next() == Some('•') {
+        return lines;
+    }
+
+    // Heuristic: pick first sentence terminator that is not part of a filename or common
+    // abbreviation (e.g., "e.g.", "i.e."). Treat '.', '!' or '?' as terminators when
+    // followed by whitespace/end or a closing quote then whitespace/end. Skip when the
+    // next character is a letter/number (e.g., within filenames like example.sh).
+    let mut boundary: Option<usize> = None; // char index inclusive
+    let chars: Vec<char> = line_text.chars().collect();
+    let len_chars = chars.len();
+    for i in 0..len_chars {
+        let ch = chars[i];
+        if ch == '.' || ch == '!' || ch == '?' || ch == ':' {
+            let next = chars.get(i + 1).copied();
+            // Skip if next is alphanumeric (likely filename/identifier like example.sh)
+            if matches!(next, Some(c) if c.is_ascii_alphanumeric()) { continue; }
+            // Skip common abbreviation endings like "e.g." or "i.e." (match last 4 chars)
+            if i >= 3 {
+                let tail: String = chars[i - 3..=i].iter().collect::<String>().to_lowercase();
+                if tail == "e.g." || tail == "i.e." { continue; }
+            }
+            // Accept if end of line,
+            // or next is whitespace,
+            // or next is quote then whitespace/end
+            let ok = match next {
+                None => true,
+                Some(c) if c.is_whitespace() => true,
+                Some('"') | Some('\'') => {
+                    let n2 = chars.get(i + 2).copied();
+                    n2.is_none() || n2.map(|c| c.is_whitespace()).unwrap_or(false)
+                }
+                _ => false,
+            };
+            if ok { boundary = Some(i); break; }
+        }
+    }
+
+    // Bold up to and including the terminator.
+    let bold_upto = boundary.map(|i| i + 1);
+
+    // If there's no terminator or there's no additional content after it in the message,
+    // do not bold (single-sentence message).
+    if let Some(limit) = bold_upto {
+        let mut has_more_in_line = false;
+        // allow trailing quote right after terminator
+        let mut idx = limit;
+        if let Some('"') | Some('\'') = chars.get(idx) { idx += 1; }
+        if idx < len_chars {
+            has_more_in_line = chars[idx..].iter().any(|c| !c.is_whitespace());
+        }
+        let has_more_below = if !has_more_in_line {
+            lines.iter().skip(first_idx + 1).any(|l| {
+                let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
+                !s.trim().is_empty()
+            })
+        } else { true };
+        if !has_more_below {
+            return lines; // single-sentence message: leave as-is
+        }
+    } else {
+        // No terminator at all → treat as single sentence; leave as-is
+        return lines;
+    }
+
+    // Rebuild spans for the line with bold applied up to bold_upto (in chars)
+    let mut new_spans: Vec<Span<'static>> = Vec::new();
+    let mut consumed_chars: usize = 0;
+    for sp in lines[first_idx].spans.drain(..) {
+        let content = sp.content.into_owned();
+        let len = content.chars().count();
+        if bold_upto.is_none() {
+            // Entire line bold
+            let mut st = sp.style;
+            st.add_modifier.insert(Modifier::BOLD);
+            st.fg = Some(crate::colors::text_bright());
+            new_spans.push(Span::styled(content, st));
+            consumed_chars += len;
+            continue;
+        }
+        let limit = bold_upto.unwrap();
+        if consumed_chars >= limit {
+            // After bold range, preserve original styling (do not strip bold)
+            new_spans.push(Span::styled(content, sp.style));
+            consumed_chars += len;
+        } else if consumed_chars + len <= limit {
+            // Entire span within bold range
+            let mut st = sp.style;
+            st.add_modifier.insert(Modifier::BOLD);
+            st.fg = Some(crate::colors::text_bright());
+            new_spans.push(Span::styled(content, st));
+            consumed_chars += len;
+        } else {
+            // Split this span at the boundary
+            let split_at = limit - consumed_chars; // chars into this span
+            let mut iter = content.chars();
+            let bold_part: String = iter.by_ref().take(split_at).collect();
+            let rest_part: String = iter.collect();
+            let mut bold_style = sp.style;
+            bold_style.add_modifier.insert(Modifier::BOLD);
+            bold_style.fg = Some(crate::colors::text_bright());
+            if !bold_part.is_empty() { new_spans.push(Span::styled(bold_part, bold_style)); }
+            if !rest_part.is_empty() { new_spans.push(Span::styled(rest_part, sp.style)); }
+            consumed_chars += len;
+        }
+    }
+    lines[first_idx].spans = new_spans;
+
+    // Recolor markdown bullet glyphs inside assistant content to text_dim.
+    // Applies to common unordered bullets produced by our renderer: •, ◦, ·, ∘, ⋅
+    let bullet_set: [&str; 5] = ["•", "◦", "·", "∘", "⋅"];
+    for line in lines.iter_mut() {
+        let mut updated: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+        for sp in line.spans.drain(..) {
+            let content_ref = sp.content.as_ref();
+            if bullet_set.contains(&content_ref) {
+                let mut st = sp.style;
+                st.fg = Some(crate::colors::text_dim());
+                updated.push(Span::styled(sp.content, st));
+            } else {
+                updated.push(sp);
+            }
+        }
+        line.spans = updated;
+    }
+
+    lines
+}
+*/
 
 // ==================== Helper Functions ====================
 
@@ -1535,6 +1957,11 @@ pub(crate) fn new_session_info(
                 Span::from(" - "),
                 Span::from(SlashCommand::Reasoning.description()).style(Style::default().add_modifier(Modifier::DIM)),
             ]),
+            Line::from(vec![
+                Span::styled("/resume", Style::default().fg(crate::colors::primary())),
+                Span::from(" - "),
+                Span::from(SlashCommand::Resume.description()).style(Style::default().add_modifier(Modifier::DIM)),
+            ]),
         ];
         PlainHistoryCell { lines, kind: HistoryCellType::Notice }
     } else if config.model == model {
@@ -1740,17 +2167,17 @@ fn new_parsed_command(
                     None => "Running...".to_string(),
                 },
             };
-            // Use non-bold styling for informational actions; keep primary color
+            // Use non-bold styling for informational actions; use info color
             if matches!(action, "read" | "search" | "list") {
                 Line::styled(
-                    format!("{}{}", header, duration_str),
-                    Style::default().fg(crate::colors::primary()),
+                    format!("{header}{duration_str}"),
+                    Style::default().fg(crate::colors::info()),
                 )
             } else {
                 Line::styled(
-                    format!("{}{}", header, duration_str),
+                    format!("{header}{duration_str}"),
                     Style::default()
-                        .fg(crate::colors::primary())
+                        .fg(crate::colors::info())
                         .add_modifier(Modifier::BOLD),
                 )
             }
@@ -2013,8 +2440,8 @@ fn new_exec_command_generic(
                 String::new()
             };
             Line::styled(
-                format!("Running...{}", duration_str),
-                Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD),
+                format!("Running...{duration_str}"),
+                Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD),
             )
         }
         Some(o) if o.exit_code == 0 => Line::styled(
@@ -2062,7 +2489,7 @@ fn new_exec_command_generic(
 
 #[allow(dead_code)]
 pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCell {
-    let title_line = Line::styled("Working", Style::default().fg(crate::colors::primary()));
+    let title_line = Line::styled("Working", Style::default().fg(crate::colors::info()));
     let lines: Vec<Line> = vec![
         title_line,
         format_mcp_invocation(invocation),
@@ -2073,7 +2500,7 @@ pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCel
 
 #[allow(dead_code)]
 pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String>) -> ToolCallCell {
-    let title_line = Line::styled("Working", Style::default().fg(crate::colors::primary()));
+    let title_line = Line::styled("Working", Style::default().fg(crate::colors::info()));
     let invocation_str = if let Some(args) = args {
         format!("{}({})", tool_name, args)
     } else {
