@@ -3,10 +3,11 @@
 use crate::citation_regex::CITATION_REGEX;
 use crate::markdown_renderer::MarkdownRenderer;
 use codex_core::config::Config;
-use codex_core::config_types::UriBasedFileOpener;
 use ratatui::style::Style;
-use ratatui::text::Line;
 use ratatui::text::Span;
+use unicode_width::UnicodeWidthStr;
+use codex_core::config_types::UriBasedFileOpener;
+use ratatui::text::Line;
 use std::borrow::Cow;
 use std::path::Path;
 
@@ -63,22 +64,38 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                 };
                 lines.extend(rendered);
             }
-            Segment::Code { content, .. } => {
-                // Emit the code content exactly as-is, line by line.
-                // We don't attempt syntax highlighting to avoid whitespace bugs.
-                for line in content.split_inclusive('\n') {
-                    // split_inclusive keeps the trailing \n; we want lines without it.
-                    let line = if let Some(stripped) = line.strip_suffix('\n') {
-                        stripped
-                    } else {
-                        line
-                    };
-                    // Style code blocks using the theme's function color for visibility.
-                    let code_style = Style::default().fg(crate::colors::function());
-                    let owned_line: Line<'static> =
-                        Line::from(Span::styled(line.to_string(), code_style));
-                    lines.push(owned_line);
+            Segment::Code { _lang, content } => {
+                // Use syntect-based syntax highlighting when available, preserving exact text.
+                let lang = _lang.as_deref();
+                // Apply a solid background and pad trailing spaces so the block forms
+                // a rectangle up to the longest line in this code section.
+                let code_bg = crate::colors::code_block_bg();
+                let mut highlighted = crate::syntax_highlight::highlight_code_block(&content, lang);
+                // Compute max display width (in terminal cells) across lines
+                let max_w: usize = highlighted
+                    .iter()
+                    .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
+                    .max()
+                    .unwrap_or(0);
+                for l in highlighted.iter_mut() {
+                    l.style = l.style.bg(code_bg);
+                    let w: usize = l
+                        .spans
+                        .iter()
+                        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                        .sum();
+                    if max_w > w {
+                        let pad = " ".repeat(max_w - w);
+                        l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                    } else if w == 0 {
+                        // Defensive: if this code block segment happens to have
+                        // max_w == 0 (e.g., a split artifact), still paint the
+                        // row with at least one space so the code block
+                        // background shows consistently.
+                        l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                    }
                 }
+                lines.extend(highlighted);
             }
         }
     }
@@ -207,7 +224,37 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
             // Consider any line that begins with >=4 spaces or a tab to start an
             // indented code block. This favors preserving indentation even when a
             // preceding blank line is omitted (common in streamed model output).
-            let starts_indented_code = (leading_spaces >= 4) || starts_with_tab;
+            //
+            // However, do NOT treat indented list items as code. Nested markdown lists
+            // are commonly indented by 2+ spaces, and third-level bullets often cross
+            // the 4‑space threshold. If the text after the indentation begins with a
+            // list marker ("- ", "* ", "+ ", or an ordered list like "1. "), we
+            // should render it as a list, not as an indented code block.
+            let after_indent = if starts_with_tab {
+                &raw_line[1..]
+            } else {
+                &raw_line[leading_spaces..]
+            };
+            let is_ordered_list = {
+                // digits+". " or digits+") " are common ordered list markers
+                let mut chars = after_indent.chars();
+                let mut saw_digit = false;
+                while let Some(c) = chars.next() {
+                    if c.is_ascii_digit() { saw_digit = true; continue; }
+                    if (c == '.' || c == ')') && chars.next().is_some_and(|n| n == ' ') {
+                        break;
+                    }
+                    // Not an ordered list pattern
+                    saw_digit = false; // ensure false when we break early
+                    break;
+                }
+                saw_digit
+            };
+            let is_unordered_list = after_indent.starts_with("- ")
+                || after_indent.starts_with("* ")
+                || after_indent.starts_with("+ ");
+            let looks_like_list = is_unordered_list || is_ordered_list;
+            let starts_indented_code = ((leading_spaces >= 4) || starts_with_tab) && !looks_like_list;
             if starts_indented_code {
                 // Flush pending text and begin an indented code block.
                 if !curr_text.is_empty() {
@@ -465,5 +512,60 @@ mod tests {
             rendered,
             "Hi! How can I help with codex-rs today? Want me to explore the repo, run tests, or work on a specific change?"
         );
+    }
+
+    #[test]
+    fn fenced_code_block_with_internal_blank_line_is_one_contiguous_block() {
+        // Repro from user: single fenced block with a blank line between two functions.
+        // The blank line must render as part of the code block (with spaces), not as
+        // a separate plain-text gap that would visually split the block.
+        let src = "   ```rust\n   // Rust example\n   fn greet(name: &str) -> String {\n       format!(\"Hello, {}!\", name)\n   }\n\n   fn main() {\n       println!(\"{}\", greet(\"Codex\"));\n   }\n   ```\n";
+        let cwd = Path::new("/");
+        let mut out = Vec::new();
+        append_markdown_with_opener_and_cwd(src, &mut out, UriBasedFileOpener::None, cwd);
+
+        // Expect the lines to be exactly the code lines (no fence markers), including
+        // one line that contains only spaces for the internal blank.
+        // Extract plain strings for inspection.
+        let rendered: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
+            .collect();
+
+        // There should be at least 7 lines: comment, fn greet header, format!, closing },
+        // the internal blank (spaces), fn main header, println!, closing }.
+        assert!(rendered.len() >= 7, "unexpected line count: {:?}", rendered);
+
+        // Find the internal blank: it should be a line consisting only of spaces
+        // (inserted by padding logic inside code block), not an actually empty string
+        // produced by the non-code renderer.
+        assert!(rendered.iter().any(|s| !s.is_empty() && s.trim().is_empty()),
+            "expected a space-padded blank line inside the code block, got: {:?}", rendered);
+    }
+
+    #[test]
+    fn nested_list_items_not_treated_as_code_blocks() {
+        // Repro: deeply indented third-level bullets starting with "- " should render
+        // as list items, not as indented code blocks with a background.
+        let src = "- What I changed\n  - data/model_data.ts\n      - Added model id gemini-2.5\n      - input_per_million: 0.30\n";
+        let cwd = Path::new("/");
+        let mut out = Vec::new();
+        append_markdown_with_opener_and_cwd(src, &mut out, UriBasedFileOpener::None, cwd);
+
+        // Convert to plain strings for inspection
+        let rendered: Vec<String> = out
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
+            .collect();
+
+        // Expect at least three lines rendered
+        assert!(rendered.len() >= 3, "unexpected rendered lines: {:?}", rendered);
+
+        // The third-level bullets (indented by 6 spaces before "- ") should render
+        // with a bullet glyph (level 4 uses '⋅') rather than the literal "- ".
+        assert!(rendered.iter().any(|s| s.contains('⋅') && s.contains("Added model id")),
+            "expected a rendered bullet glyph for third-level list item: {:?}", rendered);
+        assert!(rendered.iter().any(|s| s.contains('⋅') && s.contains("input_per_million")),
+            "expected a rendered bullet glyph for third-level list item: {:?}", rendered);
     }
 }
