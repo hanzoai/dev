@@ -1105,6 +1105,110 @@ fn multiple_agent_messages_in_single_turn_emit_multiple_headers() {
 }
 
 #[test]
+fn two_final_answers_append_not_overwrite_when_no_deltas() {
+    // Directly exercise ChatWidget::insert_final_answer to validate we do not
+    // overwrite a prior finalized assistant message when a new final arrives
+    // without any streaming deltas (regression guard for overwrite bug).
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // First finalized assistant message (no streaming cell exists yet)
+    chat.insert_final_answer_with_id(None, Vec::new(), "First message".to_string());
+    // Second finalized assistant message (also without streaming)
+    chat.insert_final_answer_with_id(None, Vec::new(), "Second message".to_string());
+
+    // Drain any history insert side-effects (not strictly required here)
+    let _ = drain_insert_history(&rx);
+
+    // Verify via exported ResponseItems so we don't reach into private fields
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    codex_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    codex_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 2, "expected two assistant messages, got {}", assistants.len());
+    assert!(assistants.iter().any(|s| s.contains("First message")), "missing first message");
+    assert!(assistants.iter().any(|s| s.contains("Second message")), "missing second message");
+}
+
+#[test]
+fn second_final_that_is_superset_replaces_first() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let base = "• Behavior\n  ◦ One\n\nNotes\n  ◦ Alpha\n".to_string();
+    let extended = format!("{}  ◦ Beta\n", base);
+
+    chat.insert_final_answer_with_id(None, Vec::new(), base);
+    chat.insert_final_answer_with_id(None, Vec::new(), extended.clone());
+
+    // Drain history events
+    let _ = drain_insert_history(&rx);
+
+    // Expect exactly one assistant message containing the extended text
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    codex_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    codex_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "expected single assistant after superset replace");
+    assert!(assistants[0].contains("Beta"), "expected extended content present");
+}
+
+#[test]
+fn identical_content_with_unicode_bullets_dedupes() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let a = "• Behavior\n  ◦ One\n\nNotes\n  ◦ Alpha".to_string();
+    let b = "- Behavior\n  - One\n\nNotes\n  - Alpha".to_string();
+
+    // Two finals that only differ in bullet glyphs should dedupe into one cell
+    chat.insert_final_answer_with_id(None, Vec::new(), a);
+    chat.insert_final_answer_with_id(None, Vec::new(), b);
+
+    // Drain history events
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    codex_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    codex_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "expected deduped single assistant cell");
+}
+
+#[test]
 fn final_reasoning_then_message_without_deltas_are_rendered() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 
@@ -1190,6 +1294,62 @@ fn deltas_then_same_final_message_are_rendered_snapshot() {
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
     assert_snapshot!(combined);
+}
+
+#[test]
+fn late_final_does_not_duplicate_when_stream_finalized_early() {
+    use codex_core::protocol::*;
+
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Stream some answer deltas for id "s1"
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "What I Can Do\n".into(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- Explore/Modify Code\n".into(),
+        }),
+    });
+
+    // Simulate a side event that forces finalization (e.g., tool start)
+    chat.finalize_active_stream();
+
+    // Now a late final AgentMessage arrives with the full text
+    let final_text = "What I Can Do\n- Explore/Modify Code\n".to_string();
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: final_text.clone(),
+        }),
+    });
+
+    // Drain any history insert side-effects (not strictly required here)
+    let _ = drain_insert_history(&rx);
+
+    // Export and assert that only a single assistant message exists
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    codex_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    codex_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "late final should replace, not duplicate");
+    assert!(assistants[0].contains("Explore/Modify Code"));
 }
 
 #[test]

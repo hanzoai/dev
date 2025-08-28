@@ -95,12 +95,17 @@ impl MarkdownStreamCollector {
         }
 
         let mut complete_line_count = rendered.len();
-        if complete_line_count > 0
-            && crate::render::line_utils::is_blank_line_spaces_only(
-                &rendered[complete_line_count - 1],
-            )
-        {
-            complete_line_count -= 1;
+        if complete_line_count > 0 {
+            let last = &rendered[complete_line_count - 1];
+            // Do not drop a trailing blank when it is part of a code block; that
+            // would cause the blank to be emitted later next to a previously
+            // committed plain blank separator, producing a visible double-gap
+            // (one painted, one unpainted).
+            let is_blank = crate::render::line_utils::is_blank_line_spaces_only(last);
+            let is_code_bg = crate::render::line_utils::is_code_block_painted(last);
+            if is_blank && !is_code_bg {
+                complete_line_count -= 1;
+            }
         }
         if !self.buffer.ends_with('\n') {
             complete_line_count = complete_line_count.saturating_sub(1);

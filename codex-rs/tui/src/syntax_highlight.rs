@@ -72,13 +72,16 @@ fn default_theme<'a>() -> &'a Theme {
         .unwrap_or_else(|| ts.themes.values().next().expect("at least one syntect theme"))
 }
 
-fn syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> &'a SyntaxReference {
-    // Try token, then extension, then name; fall back to plain text.
+fn try_syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> Option<&'a SyntaxReference> {
+    // Try token, then extension, then name; return None if not found.
     let lang = normalize_lang(lang);
     ps.find_syntax_by_token(lang)
         .or_else(|| ps.find_syntax_by_extension(lang))
         .or_else(|| ps.find_syntax_by_name(lang))
-        .unwrap_or_else(|| ps.find_syntax_plain_text())
+}
+
+fn syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> &'a SyntaxReference {
+    try_syntax_for_lang(ps, lang).unwrap_or_else(|| ps.find_syntax_plain_text())
 }
 
 fn span_from_syn((SynStyle { foreground, font_style, .. }, text): (SynStyle, &str)) -> Span<'static> {
@@ -104,10 +107,26 @@ fn span_from_syn((SynStyle { foreground, font_style, .. }, text): (SynStyle, &st
 pub(crate) fn highlight_code_block(content: &str, lang: Option<&str>) -> Vec<Line<'static>> {
     let ps = syntax_set();
     let theme = default_theme();
-    // Resolve language if provided
-    let syntax = lang
-        .map(|l| syntax_for_lang(ps, l))
-        .unwrap_or_else(|| ps.find_syntax_plain_text());
+    // Resolve language
+    let syntax = {
+        // Prefer the provided language when it maps to a known syntax.
+        if let Some(l) = lang.and_then(|l| if l.trim().is_empty() { None } else { Some(l) }) {
+            if let Some(s) = try_syntax_for_lang(ps, l) {
+                s
+            } else {
+                // Unknown language label: try a best-effort auto-detect before
+                // falling back to plain text.
+                autodetect_lang(content)
+                    .map(|dl| syntax_for_lang(ps, dl))
+                    .unwrap_or_else(|| ps.find_syntax_plain_text())
+            }
+        } else {
+            // No label provided: attempt auto-detection, otherwise plain text.
+            autodetect_lang(content)
+                .map(|dl| syntax_for_lang(ps, dl))
+                .unwrap_or_else(|| ps.find_syntax_plain_text())
+        }
+    };
 
     let mut highlighter = HighlightLines::new(syntax, theme);
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -245,3 +264,123 @@ fn normalize_lang(lang: &str) -> &str {
 }
 
 // Theme cycling removed; we always use Solarized matching UI brightness.
+
+// --- Lightweight language auto-detection ---
+// Heuristics only; must be fast and avoid extra deps.
+fn autodetect_lang(content: &str) -> Option<&'static str> {
+    let s = content.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+
+    // 1) Shebang on first line
+    if let Some(first) = s.lines().next() {
+        if let Some(rest) = first.strip_prefix("#!") {
+            let l = rest.to_ascii_lowercase();
+            if l.contains("bash") || l.contains("sh") || l.contains("zsh") {
+                return Some("bash");
+            }
+            if l.contains("python") {
+                return Some("python");
+            }
+            if l.contains("node") || l.contains("deno") {
+                return Some("javascript");
+            }
+            if l.contains("ruby") {
+                return Some("ruby");
+            }
+        }
+    }
+
+    // Narrow to a small sample for sniffing
+    let sample: String = s.lines().take(24).collect::<Vec<_>>().join("\n");
+    let lower = sample.to_ascii_lowercase();
+    let trimmed_all = s.trim();
+
+    // 2) Diff/patch
+    if trimmed_all.starts_with("diff --git ")
+        || sample.lines().take(6).any(|l| l.starts_with("--- "))
+            && sample.lines().take(6).any(|l| l.starts_with("+++ "))
+    {
+        return Some("diff");
+    }
+
+    // 3) JSON (parse to be certain when it looks like JSON)
+    if (trimmed_all.starts_with('{') && trimmed_all.ends_with('}'))
+        || (trimmed_all.starts_with('[') && trimmed_all.ends_with(']'))
+    {
+        if serde_json::from_str::<serde_json::Value>(trimmed_all).is_ok() {
+            return Some("json");
+        }
+    }
+
+    // 4) HTML/XML
+    if trimmed_all.starts_with('<') && trimmed_all.contains('>') {
+        let l = lower.trim_start();
+        if l.starts_with("<!doctype html") || l.starts_with("<html") || l.starts_with("<head") || l.starts_with("<body") {
+            return Some("html");
+        }
+        if l.starts_with("<?xml") || l.starts_with("<svg") {
+            return Some("xml");
+        }
+    }
+
+    // 5) Rust (common keywords + braces)
+    let rust_hits = ["fn ", "let ", "mod ", "impl ", "use ", "pub "]
+        .iter()
+        .filter(|k| lower.contains(**k))
+        .count();
+    if rust_hits >= 2 && sample.contains('{') {
+        return Some("rust");
+    }
+
+    // 6) Python (def/class/import and minimal punctuation typical of Python)
+    if (lower.contains("def ") || lower.contains("class ") || lower.contains("import "))
+        && !sample.contains(";")
+    {
+        return Some("python");
+    }
+
+    // 7) Shell-ish commands (very loose; prefer only when signals are clear)
+    if sample.lines().take(8).any(|l| l.trim_start().starts_with("$ "))
+        || sample.contains(" && ")
+        || sample.contains(" | ")
+        || sample.lines().take(8).any(|l| l.trim_start().starts_with("echo "))
+    {
+        return Some("bash");
+    }
+
+    // 8) SQL
+    if ["select ", "insert ", "update ", "delete ", "create ", "alter ", "drop "]
+        .iter()
+        .any(|kw| lower.contains(*kw))
+        && sample.contains(';')
+    {
+        return Some("sql");
+    }
+
+    // 9) INI / TOML / YAML (rough heuristics)
+    if let Some(first_line) = s.lines().find(|l| !l.trim().is_empty()) {
+        let fl = first_line.trim();
+        if fl.starts_with('[') && fl.ends_with(']') {
+            if s.contains("[[") || s.contains("]]") || s.contains("=\"") {
+                return Some("toml");
+            }
+            if s.lines().any(|l| l.contains('=')) && !s.contains(": ") {
+                return Some("ini");
+            }
+        }
+    }
+    let yaml_signals = sample
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .take(20)
+        .filter(|l| l.starts_with("- ") || (l.contains(':') && !l.contains("://") && !l.contains("::") && !l.contains(":=")))
+        .count();
+    if yaml_signals >= 3 {
+        return Some("yaml");
+    }
+
+    None
+}
