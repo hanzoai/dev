@@ -1486,6 +1486,14 @@ fn create_web_fetch_tool() -> OpenAiTool {
         },
     );
 
+    // Optional mode: auto (default), browser (use internal browser/CDP), http (raw HTTP only)
+    properties.insert(
+        "mode".to_string(),
+        JsonSchema::String {
+            description: Some("Optional: 'auto' (default) falls back to the internal browser on challenges; 'browser' forces CDP-based fetch; 'http' disables browser fallback.".to_string()),
+        },
+    );
+
     OpenAiTool::Function(ResponsesApiTool {
         name: "web_fetch".to_string(),
         description: "Fetches a webpage over HTTP(S) and converts the HTML to Markdown using htmd.".to_string(),

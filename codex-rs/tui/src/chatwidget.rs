@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use once_cell::sync::Lazy;
@@ -185,6 +185,12 @@ pub(crate) struct ChatWidget<'a> {
     current_stream_kind: Option<StreamKind>,
     // Interrupt manager for handling cancellations
     interrupts: interrupts::InterruptManager,
+
+    // Track ids that have produced a finalized Answer/Reasoning in the current turn.
+    // Any further deltas for these ids should be ignored to avoid post-final updates.
+    closed_answer_ids: HashSet<String>,
+    closed_reasoning_ids: HashSet<String>,
+
 
     // Accumulated patch change sets for this session (latest last)
     session_patch_sets: Vec<HashMap<PathBuf, codex_core::protocol::FileChange>>,
@@ -630,7 +636,7 @@ impl ChatWidget<'_> {
     }
     
     /// Handle streaming delta for both answer and reasoning
-    fn handle_streaming_delta(&mut self, kind: StreamKind, delta: String) {
+    fn handle_streaming_delta(&mut self, kind: StreamKind, id: String, delta: String) {
         tracing::debug!("handle_streaming_delta kind={:?}, delta={:?}", kind, delta);
         // Remember which stream is currently active so we can group inserts
         self.current_stream_kind = Some(kind);
@@ -638,7 +644,7 @@ impl ChatWidget<'_> {
         
         // Always begin the correct stream for this delta's kind
         // This will switch streams if needed or no-op if already active
-        self.stream.begin(kind, &sink);
+        self.stream.begin_with_id(kind, Some(id), &sink);
         
         // Append delta to the stream
         self.stream.push_and_maybe_commit(&delta, &sink);
@@ -1393,6 +1399,8 @@ impl ChatWidget<'_> {
             stream: crate::streaming::controller::StreamController::new(config.clone()),
             current_stream_kind: None,
             interrupts: interrupts::InterruptManager::new(),
+            closed_answer_ids: HashSet::new(),
+            closed_reasoning_ids: HashSet::new(),
             session_patch_sets: Vec::new(),
             baseline_file_contents: HashMap::new(),
             diff_overlay: None,
@@ -1499,6 +1507,8 @@ impl ChatWidget<'_> {
             stream: crate::streaming::controller::StreamController::new(config.clone()),
             current_stream_kind: None,
             interrupts: interrupts::InterruptManager::new(),
+            closed_answer_ids: HashSet::new(),
+            closed_reasoning_ids: HashSet::new(),
             session_patch_sets: Vec::new(),
             baseline_file_contents: HashMap::new(),
             diff_overlay: None,
@@ -2487,7 +2497,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
-        tracing::info!(
+        tracing::debug!(
             "handle_codex_event({})",
             serde_json::to_string_pretty(&event).unwrap_or_default()
         );
@@ -2534,13 +2544,22 @@ impl ChatWidget<'_> {
                 self.mark_needs_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                tracing::debug!("AgentMessage event with message: {:?}...", message.chars().take(100).collect::<String>());
+                tracing::debug!(
+                    "AgentMessage final id={} bytes={} preview={:?}",
+                    id,
+                    message.len(),
+                    message.chars().take(80).collect::<String>()
+                );
                 // Use StreamController for final answer
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Answer);
+                // Seed the controller with this id so finalize targets the right streaming cell
+                self.stream.begin_with_id(StreamKind::Answer, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_answer(&message, &sink);
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
+                // Mark this id closed for further answer deltas in this turn
+                self.closed_answer_ids.insert(id.clone());
                 self.mark_needs_redraw();
             }
             EventMsg::ReplayHistory(ev) => {
@@ -2640,8 +2659,13 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
+                // Ignore late deltas for ids that have already finalized in this turn
+                if self.closed_answer_ids.contains(&id) {
+                    tracing::debug!("Ignoring Answer delta for closed id={}", id);
+                    return;
+                }
                 // Stream answer delta through StreamController
-                self.handle_streaming_delta(StreamKind::Answer, delta);
+                self.handle_streaming_delta(StreamKind::Answer, id.clone(), delta);
                 // Show responding state while assistant streams
                 self.bottom_pane.update_status_text("responding".to_string());
             }
@@ -2650,17 +2674,25 @@ impl ChatWidget<'_> {
                 // Use StreamController for final reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Reasoning);
+                self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 
                 // The StreamController now properly handles duplicate detection and prevents
                 // re-injecting content when we're already finishing a stream
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
+                // Mark this id closed for further reasoning deltas in this turn
+                self.closed_reasoning_ids.insert(id.clone());
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
+                // Ignore late deltas for ids that have already finalized in this turn
+                if self.closed_reasoning_ids.contains(&id) {
+                    tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
+                    return;
+                }
                 // Stream reasoning delta through StreamController
-                self.handle_streaming_delta(StreamKind::Reasoning, delta);
+                self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
                 // Show thinking state while reasoning streams
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
@@ -2673,6 +2705,9 @@ impl ChatWidget<'_> {
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.current_stream_kind = None;
+                // New turn: clear closed id guards
+                self.closed_answer_ids.clear();
+                self.closed_reasoning_ids.clear();
                 self.bottom_pane.clear_ctrl_c_quit_hint();
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane.update_status_text("waiting for model".to_string());
@@ -2749,13 +2784,14 @@ impl ChatWidget<'_> {
                 delta,
             }) => {
                 // Treat raw reasoning content the same as summarized reasoning
-                self.handle_streaming_delta(StreamKind::Reasoning, delta);
+                self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 tracing::debug!("AgentReasoningRawContent event with text: {:?}...", text.chars().take(100).collect::<String>());
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Reasoning);
+                self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
                 self.mark_needs_redraw();
@@ -3756,12 +3792,13 @@ impl ChatWidget<'_> {
 
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
         let kind = self.current_stream_kind.unwrap_or(StreamKind::Answer);
-        self.insert_history_lines_with_kind(kind, lines);
+        self.insert_history_lines_with_kind(kind, None, lines);
     }
 
     pub(crate) fn insert_history_lines_with_kind(
         &mut self,
         kind: StreamKind,
+        id: Option<String>,
         mut lines: Vec<ratatui::text::Line<'static>>,
     ) {
         // No debug logging: we rely on preserving span modifiers end-to-end.
@@ -3814,6 +3851,11 @@ impl ChatWidget<'_> {
                 self.history_cells.push(Box::new(cell));
             }
             StreamKind::Answer => {
+                tracing::debug!(
+                    "history.insert Answer id={:?} incoming_lines={}",
+                    id,
+                    lines.len()
+                );
                 // Any incoming Answer means reasoning is no longer bottom-most
                 self.clear_reasoning_in_progress();
                 // Keep a single StreamingContentCell and append to it
@@ -3822,29 +3864,78 @@ impl ChatWidget<'_> {
                         .as_any_mut()
                         .downcast_mut::<history_cell::StreamingContentCell>()
                     {
-                        
-                        // Guard against stray header sneaking into a later chunk
-                        if lines.first().map(|l| {
-                            l.spans
-                                .iter()
-                                .map(|s| s.content.as_ref())
-                                .collect::<String>()
-                                .trim()
-                                .eq_ignore_ascii_case("codex")
-                        }).unwrap_or(false) {
-                            if lines.len() == 1 {
-                                return;
+                        // If id is specified, only append when ids match
+                        if let Some(ref want) = id {
+                            if stream_cell.id.as_ref() != Some(want) {
+                                // fall through to create/find matching cell below
                             } else {
-                                lines.remove(0);
+                                tracing::debug!("history.append -> last StreamingContentCell (id match) lines+={}", lines.len());
+                                // Guard against stray header sneaking into a later chunk
+                                if lines.first().map(|l| {
+                                    l.spans
+                                        .iter()
+                                        .map(|s| s.content.as_ref())
+                                        .collect::<String>()
+                                        .trim()
+                                        .eq_ignore_ascii_case("codex")
+                                }).unwrap_or(false) {
+                                    if lines.len() == 1 {
+                                        return;
+                                    } else {
+                                        lines.remove(0);
+                                    }
+                                }
+                                stream_cell.lines.extend(lines);
+                                self.invalidate_height_cache();
+                                self.autoscroll_if_near_bottom();
+                                self.request_redraw();
+                                return;
                             }
+                        } else {
+                            // No id — legacy: append to last
+                            tracing::debug!("history.append -> last StreamingContentCell (no id provided) lines+={}", lines.len());
+                            if lines.first().map(|l| {
+                                l.spans
+                                    .iter()
+                                    .map(|s| s.content.as_ref())
+                                    .collect::<String>()
+                                    .trim()
+                                    .eq_ignore_ascii_case("codex")
+                            }).unwrap_or(false) {
+                                if lines.len() == 1 { return; } else { lines.remove(0); }
+                            }
+                            stream_cell.lines.extend(lines);
+                            self.invalidate_height_cache();
+                            self.autoscroll_if_near_bottom();
+                            self.request_redraw();
+                            return;
                         }
-                        // No debug logging in steady-state.
-                        stream_cell.lines.extend(lines);
-                        // Content height changed; clear memoized heights
-                        self.invalidate_height_cache();
-                        self.autoscroll_if_near_bottom();
-                        self.request_redraw();
-                        return;
+                    }
+                }
+
+                // If id is specified, try to locate an existing streaming cell with that id
+                if let Some(ref want) = id {
+                    if let Some(idx) = self.history_cells.iter().rposition(|c| c
+                        .as_any()
+                        .downcast_ref::<history_cell::StreamingContentCell>()
+                        .map(|sc| sc.id.as_ref() == Some(want)).unwrap_or(false))
+                    {
+                        if let Some(stream_cell) = self.history_cells[idx]
+                            .as_any_mut()
+                            .downcast_mut::<history_cell::StreamingContentCell>()
+                        {
+                            tracing::debug!("history.append -> StreamingContentCell by id at idx={} lines+={}", idx, lines.len());
+                            if lines.first().map(|l| {
+                                l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim().eq_ignore_ascii_case("codex")
+                            }).unwrap_or(false) {
+                                if lines.len() == 1 { return; } else { lines.remove(0); }
+                            }
+                            stream_cell.lines.extend(lines);
+                            self.invalidate_height_cache();
+                            self.autoscroll_if_near_bottom();
+                            self.request_redraw();
+                            return;
+                        }
                     }
                 }
                 
@@ -3864,7 +3955,9 @@ impl ChatWidget<'_> {
                     with_header.extend(lines);
                     lines = with_header;
                 }
-                self.history_cells.push(Box::new(history_cell::new_streaming_content(lines)));
+                let new_idx = self.history_cells.len();
+                self.history_cells.push(Box::new(history_cell::new_streaming_content_with_id(id.clone(), lines)));
+                tracing::debug!("history.new StreamingContentCell at idx={} id={:?}", new_idx, id);
             }
         }
 
@@ -3875,11 +3968,70 @@ impl ChatWidget<'_> {
 
     /// Replace the in-progress streaming assistant cell with a final markdown cell that
     /// stores raw markdown for future re-rendering.
-    pub(crate) fn insert_final_answer(
+    pub(crate) fn insert_final_answer_with_id(
         &mut self,
+        id: Option<String>,
         lines: Vec<ratatui::text::Line<'static>>,
         source: String,
     ) {
+        tracing::debug!("insert_final_answer_with_id id={:?} source_len={} lines={}", id, source.len(), lines.len());
+        // Debug: list last few history cell kinds so we can see what's present
+        let tail_kinds: String = self
+            .history_cells
+            .iter()
+            .rev()
+            .take(5)
+            .map(|c| {
+                if c.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some() {
+                    "Streaming".to_string()
+                } else if c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>().is_some() {
+                    "AssistantFinal".to_string()
+                } else if c.as_any().downcast_ref::<history_cell::CollapsibleReasoningCell>().is_some() {
+                    "Reasoning".to_string()
+                } else {
+                    format!("{:?}", c.kind())
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        tracing::debug!("history.tail kinds(last5) = [{}]", tail_kinds);
+
+        // When we have an id but could not find a streaming cell by id, dump ids
+        if id.is_some() {
+            let ids: Vec<String> = self.history_cells.iter().enumerate().filter_map(|(i,c)| {
+                c.as_any().downcast_ref::<history_cell::StreamingContentCell>().and_then(|sc| {
+                    sc.id.as_ref().map(|s| format!("{}:{}", i, s))
+                })
+            }).collect();
+            tracing::debug!("history.streaming ids={}", ids.join(" | "));
+        }
+        // If we already finalized this id in the current turn with identical content,
+        // drop this event to avoid duplicates (belt-and-suspenders against upstream repeats).
+        if let Some(ref want) = id {
+            if self.closed_answer_ids.contains(want) {
+                if let Some(existing_idx) = self
+                    .history_cells
+                    .iter()
+                    .rposition(|c| c
+                        .as_any()
+                        .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                        .map(|amc| amc.id.as_ref() == Some(want))
+                        .unwrap_or(false))
+                {
+                    if let Some(amc) = self.history_cells[existing_idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                    {
+                        let prev = Self::normalize_text(&amc.raw);
+                        let newn = Self::normalize_text(&source);
+                        if prev == newn {
+                            tracing::debug!("InsertFinalAnswer: dropping duplicate final for id={}", want);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
         // Ensure a hidden 'codex' header is present
         let has_header = lines.first().map(|l| {
             l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim().eq_ignore_ascii_case("codex")
@@ -3888,19 +4040,138 @@ impl ChatWidget<'_> {
             // No need to mutate `lines` further since we rebuild from `source` below.
         }
 
-        // If the last cell is a StreamingContentCell, replace it; else append
-        if let Some(last) = self.history_cells.last_mut() {
-            if last.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some() {
-                let cell = history_cell::AssistantMarkdownCell::new(source, &self.config);
-                *last = Box::new(cell);
+        // Replace the matching StreamingContentCell if one exists for this id; else fallback to most recent.
+        // NOTE (dup‑guard): This relies on `StreamingContentCell::as_any()` returning `self`.
+        // If that impl is removed, downcast_ref will fail and we won't find the streaming cell,
+        // causing the final to append a new Assistant cell (duplicate).
+        let streaming_idx = if let Some(ref want) = id {
+            // Prefer an exact id match
+            let by_id = self
+                .history_cells
+                .iter()
+                .rposition(|c| {
+                    if let Some(sc) = c.as_any().downcast_ref::<history_cell::StreamingContentCell>() {
+                        sc.id.as_ref() == Some(want)
+                    } else {
+                        false
+                    }
+                });
+            // Fallback: use the latest streaming cell regardless of id if no exact match
+            by_id.or_else(|| {
+                self.history_cells
+                    .iter()
+                    .rposition(|c| c.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some())
+            })
+        } else {
+            self.history_cells
+                .iter()
+                .rposition(|c| c.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some())
+        };
+        if let Some(idx) = streaming_idx {
+            tracing::debug!("final-answer: replacing StreamingContentCell at idx={} by id match", idx);
+            // Replace the matching streaming cell in-place, preserving the id
+            let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+            self.history_cells[idx] = Box::new(cell);
+            self.invalidate_height_cache();
+            self.autoscroll_if_near_bottom();
+            self.request_redraw();
+            return;
+        }
+
+        // No streaming cell found. First, try to replace a finalized assistant cell
+        // that was created for the same stream id (e.g., we already finalized due to
+        // a lifecycle event and this InsertFinalAnswer arrived slightly later).
+        if let Some(ref want) = id {
+            if let Some(idx) = self
+                .history_cells
+                .iter()
+                .rposition(|c| {
+                    if let Some(amc) = c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>() {
+                        amc.id.as_ref() == Some(want)
+                    } else {
+                        false
+                    }
+                })
+            {
+                tracing::debug!("final-answer: replacing existing AssistantMarkdownCell at idx={} by id match", idx);
+                let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+                self.history_cells[idx] = Box::new(cell);
                 self.invalidate_height_cache();
                 self.autoscroll_if_near_bottom();
                 self.request_redraw();
                 return;
             }
         }
-        let cell = history_cell::AssistantMarkdownCell::new(source, &self.config);
+
+        // Otherwise, if a finalized assistant cell exists at the tail,
+        // replace it in place to avoid duplicate assistant messages when a second
+        // InsertFinalAnswer (e.g., from an AgentMessage event) arrives after we already
+        // finalized due to a side event.
+        if let Some(idx) = self
+            .history_cells
+            .iter()
+            .rposition(|c| c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>().is_some())
+        {
+            // Replace the tail finalized assistant cell if the new content is identical OR
+            // a superset revision of the previous content (common provider behavior where
+            // a later final slightly extends the earlier one). Otherwise append a new
+            // assistant message so distinct messages remain separate.
+            let (should_replace, _prev_len, _new_len) = self.history_cells[idx]
+                .as_any()
+                .downcast_ref::<history_cell::AssistantMarkdownCell>()
+                .map(|amc| {
+                    let prev = Self::normalize_text(&amc.raw);
+                    let newn = Self::normalize_text(&source);
+                    let identical = prev == newn;
+                    let is_superset = !identical && newn.contains(&prev);
+                    // Heuristic: treat as revision when previous is reasonably long to
+                    // avoid collapsing very short replies unintentionally.
+                    let long_enough = prev.len() >= 80;
+                    (identical || (is_superset && long_enough), prev.len(), newn.len())
+                })
+                .unwrap_or((false, 0, 0));
+            if should_replace {
+                tracing::debug!("final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset");
+                let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+                self.history_cells[idx] = Box::new(cell);
+                self.invalidate_height_cache();
+                self.autoscroll_if_near_bottom();
+                self.request_redraw();
+                return;
+            }
+        }
+
+        // Fallback: no prior assistant cell found; append as new.
+        tracing::debug!("final-answer: append new AssistantMarkdownCell (no prior cell) id={:?}", id);
+        let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
         self.add_to_history(cell);
+    }
+
+    /// Normalize text for duplicate detection (trim trailing whitespace and normalize newlines)
+    fn normalize_text(s: &str) -> String {
+        // 1) Normalize newlines
+        let s = s.replace("\r\n", "\n");
+        // 2) Trim trailing whitespace per line; collapse repeated blank lines
+        let mut out: Vec<String> = Vec::new();
+        let mut saw_blank = false;
+        for line in s.lines() {
+            // Replace common Unicode bullets with ASCII to stabilize equality checks
+            let line = line
+                .replace('\u{2022}', "-") // •
+                .replace('\u{25E6}', "-") // ◦
+                .replace('\u{2219}', "-"); // ∙
+            let trimmed = line.trim_end();
+            if trimmed.chars().all(|c| c.is_whitespace()) {
+                if !saw_blank { out.push(String::new()); }
+                saw_blank = true;
+            } else {
+                out.push(trimmed.to_string());
+                saw_blank = false;
+            }
+        }
+        // 3) Remove trailing blank lines
+        while out.last().is_some_and(|l| l.is_empty()) { out.pop(); }
+        out.join("\n")
     }
 
     pub(crate) fn toggle_reasoning_visibility(&mut self) {
@@ -6434,18 +6705,27 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     };
 
-                    // Draw the symbol aligned with the first visible content row.
-                    // Assistant cells render with 1-row top padding; if not scrolled past it,
-                    // place the dot on the second row to align with the text.
+                    // Draw the symbol anchored to the top of the message (not the viewport).
+                    // "Top of the message" accounts for any intentional top padding per cell type.
+                    // As you scroll past that anchor, the icon scrolls away with the message.
                     if gutter_area.width >= 2 {
-                        let pad_adjust: u16 = match item.kind() {
-                            crate::history_cell::HistoryCellType::Assistant => if skip_top == 0 { 1 } else { 0 },
+                        // Anchor offset counted from the very start of the item's painted area
+                        // to the first line of its content that the icon should align with.
+                        let anchor_offset: u16 = match item.kind() {
+                            // Assistant messages render with one row of top padding so that
+                            // the content visually aligns; anchor to that second row.
+                            crate::history_cell::HistoryCellType::Assistant => 1,
                             _ => 0,
                         };
-                        let symbol_y = gutter_area.y.saturating_add(pad_adjust);
-                        if symbol_y < gutter_area.y.saturating_add(gutter_area.height) {
-                            let symbol_style = Style::default().fg(color).bg(gutter_bg);
-                            buf.set_string(gutter_area.x, symbol_y, symbol, symbol_style);
+
+                        // If we've scrolled past the anchor line, don't render the icon.
+                        if skip_top <= anchor_offset {
+                            let rel = anchor_offset - skip_top; // rows from current viewport top
+                            let symbol_y = gutter_area.y.saturating_add(rel);
+                            if symbol_y < gutter_area.y.saturating_add(gutter_area.height) {
+                                let symbol_style = Style::default().fg(color).bg(gutter_bg);
+                                buf.set_string(gutter_area.x, symbol_y, symbol, symbol_style);
+                            }
                         }
                     }
                 }

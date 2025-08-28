@@ -272,15 +272,24 @@ impl App<'_> {
         while let Ok(event) = self.app_event_rx.recv() {
             match event {
                 AppEvent::InsertHistory(lines) => match &mut self.app_state {
-                    AppState::Chat { widget } => widget.insert_history_lines(lines),
+                    AppState::Chat { widget } => {
+                        tracing::debug!("app: InsertHistory lines={}", lines.len());
+                        widget.insert_history_lines(lines)
+                    },
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertHistoryWithKind { kind, lines } => match &mut self.app_state {
-                    AppState::Chat { widget } => widget.insert_history_lines_with_kind(kind, lines),
+                AppEvent::InsertHistoryWithKind { id, kind, lines } => match &mut self.app_state {
+                    AppState::Chat { widget } => {
+                        tracing::debug!("app: InsertHistoryWithKind kind={:?} id={:?} lines={}", kind, id, lines.len());
+                        widget.insert_history_lines_with_kind(kind, id, lines)
+                    },
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertFinalAnswer { lines, source } => match &mut self.app_state {
-                    AppState::Chat { widget } => widget.insert_final_answer(lines, source),
+                AppEvent::InsertFinalAnswer { id, lines, source } => match &mut self.app_state {
+                    AppState::Chat { widget } => {
+                        tracing::debug!("app: InsertFinalAnswer id={:?} lines={} source_len={}", id, lines.len(), source.len());
+                        widget.insert_final_answer_with_id(id, lines, source)
+                    },
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::RequestRedraw => {
