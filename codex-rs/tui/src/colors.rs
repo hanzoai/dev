@@ -69,6 +69,13 @@ pub(crate) fn text_bright() -> Color {
     current_theme().text_bright
 }
 
+/// Midpoint color between `text` and `text_dim` for secondary list levels.
+pub(crate) fn text_mid() -> Color {
+    let a = current_theme().text;
+    let b = current_theme().text_dim;
+    mix_toward(a, b, 0.5)
+}
+
 pub(crate) fn info() -> Color {
     current_theme().info
 }
@@ -121,6 +128,23 @@ fn color_to_rgb(c: Color) -> (u8, u8, u8) {
     }
 }
 
+fn blend_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    let inv = 1.0 - t;
+    let r = (a.0 as f32 * inv + b.0 as f32 * t).round() as u8;
+    let g = (a.1 as f32 * inv + b.1 as f32 * t).round() as u8;
+    let bl = (a.2 as f32 * inv + b.2 as f32 * t).round() as u8;
+    (r, g, bl)
+}
+
+/// Blend `from` toward `to` by fraction `t` (0.0..=1.0) in RGB space.
+#[allow(dead_code)]
+pub(crate) fn mix_toward(from: Color, to: Color, t: f32) -> Color {
+    let a = color_to_rgb(from);
+    let b = color_to_rgb(to);
+    let (r, g, b) = blend_rgb(a, b, t.clamp(0.0, 1.0));
+    Color::Rgb(r, g, b)
+}
+
 fn blend_with_black(rgb: (u8, u8, u8), alpha: f32) -> (u8, u8, u8) {
     // target = bg*(1-alpha) + black*alpha => bg*(1-alpha)
     let inv = 1.0 - alpha;
@@ -135,6 +159,10 @@ fn is_light(rgb: (u8, u8, u8)) -> bool {
     l >= 0.6
 }
 
+fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
+    (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
+}
+
 pub(crate) fn overlay_scrim() -> Color {
     let bg = current_theme().background;
     let rgb = color_to_rgb(bg);
@@ -142,4 +170,53 @@ pub(crate) fn overlay_scrim() -> Color {
     let alpha = if is_light(rgb) { 0.18 } else { 0.10 };
     let (r, g, b) = blend_with_black(rgb, alpha);
     Color::Rgb(r, g, b)
+}
+
+/// Background for assistant messages: theme background moved 5% toward theme info.
+pub(crate) fn assistant_bg() -> Color {
+    let bg = current_theme().background;
+    let info = current_theme().info;
+    mix_toward(bg, info, 0.05)
+}
+
+/// Background for multiline code blocks rendered in assistant markdown.
+///
+/// Requirements:
+/// - Light themes: use plain white to create a crisp, paper-like block.
+/// - Dark themes: use a plain dark background (near-black) for high contrast.
+///
+/// We intentionally avoid theme tints here to keep code blocks visually
+/// distinct and consistent across themes, per request.
+pub(crate) fn code_block_bg() -> Color {
+    let bg = current_theme().background;
+    let rgb = color_to_rgb(bg);
+    if is_light(rgb) {
+        Color::White
+    } else {
+        // Plain dark; choose true black for consistent appearance.
+        Color::Black
+    }
+}
+
+/// Color for horizontal rules inside assistant messages.
+/// Defined as halfway from the theme background toward the assistant background tint.
+/// This makes the rule more pronounced than the cell background while staying subtle.
+pub(crate) fn assistant_hr() -> Color {
+    let bg = current_theme().background;
+    let info = current_theme().info;
+    let cell = assistant_bg();
+    // Start with a stronger mix toward the theme's info color than the cell bg.
+    // Cell is bg→info at 5%; pick ~15% as a baseline so it is darker than cell on light themes.
+    let candidate = mix_toward(bg, info, 0.15);
+    let cand_l = relative_luminance(color_to_rgb(candidate));
+    let cell_l = relative_luminance(color_to_rgb(cell));
+    if cand_l < cell_l {
+        // Already darker than the cell background.
+        candidate
+    } else {
+        // Ensure the rule is darker than the cell even on dark themes where info is brighter.
+        // Darken the cell bg by ~12% for a subtle, theme-respecting separator.
+        let (r, g, b) = blend_with_black(color_to_rgb(cell), 0.12);
+        Color::Rgb(r, g, b)
+    }
 }

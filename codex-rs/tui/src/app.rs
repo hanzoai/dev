@@ -279,6 +279,10 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.insert_history_lines_with_kind(kind, lines),
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::InsertFinalAnswer { lines, source } => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.insert_final_answer(lines, source),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
@@ -455,6 +459,7 @@ impl App<'_> {
                                 widget.toggle_diffs_popup();
                             }
                         }
+                        // (Ctrl+Y disabled): Previously cycled syntax themes; now intentionally no-op
                         KeyEvent {
                             kind: KeyEventKind::Press | KeyEventKind::Repeat,
                             ..
