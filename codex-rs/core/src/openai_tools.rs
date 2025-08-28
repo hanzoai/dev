@@ -578,6 +578,9 @@ pub(crate) fn get_openai_tools(
         tools.push(OpenAiTool::WebSearch {});
     }
 
+    // Always include web_fetch tool
+    tools.push(create_web_fetch_tool());
+
     if let Some(mcp_tools) = mcp_tools {
         // Ensure deterministic ordering to maximize prompt cache hits.
         // HashMap iteration order is non-deterministic, so sort by fully-qualified tool name.
@@ -660,6 +663,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
             ],
         );
     }
@@ -693,6 +697,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
             ],
         );
     }
@@ -762,6 +767,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
                 "test_server/do_something_cool",
             ],
         );
@@ -875,6 +881,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
                 "dash/search",
             ],
         );
@@ -948,6 +955,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
                 "dash/paginate",
             ],
         );
@@ -1018,6 +1026,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
                 "dash/tags",
             ],
         );
@@ -1091,6 +1100,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "web_search",
+                "web_fetch",
                 "dash/value",
             ],
         );
@@ -1456,6 +1466,33 @@ fn create_browser_cdp_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["method".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
+fn create_web_fetch_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "url".to_string(),
+        JsonSchema::String {
+            description: Some("The URL to fetch (e.g., https://example.com)".to_string()),
+        },
+    );
+    properties.insert(
+        "timeout_ms".to_string(),
+        JsonSchema::Number {
+            description: Some("Optional timeout in milliseconds for the HTTP request".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "web_fetch".to_string(),
+        description: "Fetches a webpage over HTTP(S) and converts the HTML to Markdown using htmd.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["url".to_string()]),
             additional_properties: Some(false),
         },
     })

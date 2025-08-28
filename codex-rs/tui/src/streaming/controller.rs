@@ -11,6 +11,7 @@ use super::StreamState;
 pub(crate) trait HistorySink {
     fn insert_history(&self, lines: Vec<Line<'static>>);
     fn insert_history_with_kind(&self, kind: StreamKind, lines: Vec<Line<'static>>);
+    fn insert_final_answer(&self, lines: Vec<Line<'static>>, full_markdown_source: String);
     fn start_commit_animation(&self);
     fn stop_commit_animation(&self);
 }
@@ -36,6 +37,11 @@ impl HistorySink for AppEventHistorySink {
         tracing::debug!("insert_history_with_kind({:?}) {} lines", kind, lines.len());
         self.0
             .send(crate::app_event::AppEvent::InsertHistoryWithKind { kind, lines })
+    }
+    fn insert_final_answer(&self, lines: Vec<Line<'static>>, full_markdown_source: String) {
+        tracing::debug!("insert_final_answer {} lines ({} bytes source)", lines.len(), full_markdown_source.len());
+        self.0
+            .send(crate::app_event::AppEvent::InsertFinalAnswer { lines, source: full_markdown_source })
     }
     fn start_commit_animation(&self) {
         self.0
@@ -197,31 +203,17 @@ impl StreamController {
                 }
             }
             if !newly_completed.is_empty() {
-                // Color reasoning as text_dim and answers as text_bright, preserving span modifiers
+                // IMPORTANT: Do not recolor entire Answer lines. We only dim Reasoning lines.
+                // Recoloring the whole Answer line can mask per-span BOLD styling on some
+                // terminals. See regression: inline bold appeared normal due to line FG.
                 let color = match kind {
-                    StreamKind::Reasoning => crate::colors::text_dim(),
-                    StreamKind::Answer => crate::colors::text_bright(),
+                    StreamKind::Reasoning => Some(crate::colors::text_dim()),
+                    StreamKind::Answer => Some(crate::colors::text_bright()),
                 };
                 let mut styled: Vec<Line<'static>> = Vec::with_capacity(newly_completed.len());
                 for mut line in newly_completed {
-                    line.style = line
-                        .style
-                        .patch(ratatui::style::Style::default().fg(color));
-                    if matches!(kind, StreamKind::Answer) {
-                        // Force bold spans in assistant output to use bright text
-                        let spans: Vec<ratatui::text::Span<'static>> = line
-                            .spans
-                            .into_iter()
-                            .map(|s| {
-                                if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
-                                    s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
-                                } else {
-                                    s
-                                }
-                            })
-                            .collect();
-                        line.spans = spans;
-                    }
+                    if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
+                    // No per-span overrides needed for Answer: line FG is already bright.
                     styled.push(line);
                 }
                 state.enqueue(styled);
@@ -285,7 +277,13 @@ impl StreamController {
             return false;
         }
         let cfg = self.config.clone();
-        // Finalize collector first.
+        // Capture the full render source BEFORE draining/clearing the collector so
+        // we can rebuild the final Assistant cell without losing any content.
+        let full_source_before_drain = {
+            let state = self.state(kind);
+            state.collector.full_render_source_preview()
+        };
+        // Finalize collector (this clears internal buffers).
         let remaining = {
             let state = self.state_mut(kind);
             state.collector.finalize_and_drain(&cfg)
@@ -301,51 +299,41 @@ impl StreamController {
                 let step = state.drain_all();
                 out_lines.extend(step.history);
             }
-            if !out_lines.is_empty() {
-                let mut lines_with_header: Lines = Vec::new();
-                let _emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
-                // Reduce leading blanks to at most one
-                let mut skip_count = 0;
-                while skip_count < out_lines.len()
-                    && crate::render::line_utils::is_blank_line_trim(&out_lines[skip_count]) {
-                    skip_count += 1;
+            // Build output regardless of whether out_lines is empty so we can still
+            // replace the streaming cell with a re-renderable final cell.
+            let mut lines_with_header: Lines = Vec::new();
+            let _emitted_header = self.emit_header_if_needed(kind, &mut lines_with_header);
+            // Reduce leading blanks to at most one
+            let mut skip_count = 0;
+            while skip_count < out_lines.len()
+                && crate::render::line_utils::is_blank_line_trim(&out_lines[skip_count]) {
+                skip_count += 1;
+            }
+            if skip_count > 1 {
+                for _ in 0..(skip_count - 1) {
+                    out_lines.remove(0);
                 }
-                if skip_count > 1 {
-                    for _ in 0..(skip_count - 1) {
-                        out_lines.remove(0);
-                    }
-                }
-                // Apply stream-specific color to body lines
-                let color = match kind {
-                    StreamKind::Reasoning => crate::colors::text_dim(),
-                    StreamKind::Answer => crate::colors::text_bright(),
-                };
-                let out_lines: Vec<Line<'static>> = out_lines
-                    .into_iter()
-                    .map(|mut line| {
-                        line.style = line
-                            .style
-                            .patch(ratatui::style::Style::default().fg(color));
-                        if matches!(kind, StreamKind::Answer) {
-                            let spans: Vec<ratatui::text::Span<'static>> = line
-                                .spans
-                                .into_iter()
-                                .map(|s| {
-                                    if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
-                                        s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
-                                    } else {
-                                        s
-                                    }
-                                })
-                                .collect();
-                            line.spans = spans;
-                        }
-                        line
-                    })
-                    .collect();
+            }
+            // Apply stream-specific color to body lines
+            let color = match kind {
+                StreamKind::Reasoning => Some(crate::colors::text_dim()),
+                StreamKind::Answer => Some(crate::colors::text_bright()),
+            };
+            let out_lines: Vec<Line<'static>> = out_lines
+                .into_iter()
+                .map(|mut line| {
+                    if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
+                    line
+                })
+                .collect();
 
-                lines_with_header.extend(out_lines);
-                // Don't add extra blank line - markdown renderer handles spacing
+            lines_with_header.extend(out_lines);
+            // Don't add extra blank line - markdown renderer handles spacing
+            if matches!(kind, StreamKind::Answer) {
+                // Use the source captured before draining so we don't lose content
+                // when the collector was cleared by finalize_and_drain.
+                sink.insert_final_answer(lines_with_header, full_source_before_drain);
+            } else if !lines_with_header.is_empty() {
                 sink.insert_history_with_kind(kind, lines_with_header);
             }
 
@@ -401,29 +389,13 @@ impl StreamController {
             }
             // Apply stream-specific color to body lines while preserving modifiers
             let color = match kind {
-                StreamKind::Reasoning => crate::colors::text_dim(),
-                StreamKind::Answer => crate::colors::text_bright(),
+                StreamKind::Reasoning => Some(crate::colors::text_dim()),
+                StreamKind::Answer => Some(crate::colors::text_bright()),
             };
             let history: Vec<Line<'static>> = history
                 .into_iter()
                 .map(|mut line| {
-                    line.style = line
-                        .style
-                        .patch(ratatui::style::Style::default().fg(color));
-                    if matches!(kind, StreamKind::Answer) {
-                        let spans: Vec<ratatui::text::Span<'static>> = line
-                            .spans
-                            .into_iter()
-                            .map(|s| {
-                                if s.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
-                                    s.style(ratatui::style::Style::default().fg(crate::colors::text_bright()))
-                                } else {
-                                    s
-                                }
-                            })
-                            .collect();
-                        line.spans = spans;
-                    }
+                    if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
                     line
                 })
                 .collect();

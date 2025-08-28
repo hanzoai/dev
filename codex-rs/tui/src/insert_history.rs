@@ -330,6 +330,30 @@ fn word_wrap_line(line: &Line, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![to_owned_line(line)];
     }
+    // Horizontal rule detection: lines consisting of --- *** or ___ (3+)
+    let flat_trim: String = line
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if !flat_trim.is_empty() {
+        let chars: Vec<char> = flat_trim.chars().collect();
+        let only = |ch: char| chars.iter().all(|c| *c == ch || c.is_whitespace());
+        let count = |ch: char| chars.iter().filter(|c| **c == ch).count();
+        if (only('-') && count('-') >= 3)
+            || (only('*') && count('*') >= 3)
+            || (only('_') && count('_') >= 3)
+        {
+            let hr = Line::from(Span::styled(
+                std::iter::repeat('─').take(width).collect::<String>(),
+                ratatui::style::Style::default().fg(crate::colors::assistant_hr()),
+            ));
+            return vec![hr];
+        }
+    }
+
     // Concatenate content and keep span boundaries for later re-slicing.
     let mut flat = String::new();
     let mut span_bounds = Vec::new(); // (start_byte, end_byte, style)

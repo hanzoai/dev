@@ -157,6 +157,17 @@ impl MarkdownStreamCollector {
         self.clear();
         out
     }
+
+    /// Return the full source that would be rendered at finalize time without mutating state.
+    pub fn full_render_source_preview(&self) -> String {
+        let mut source: String = self.buffer.clone();
+        if !source.ends_with('\n') {
+            source.push('\n');
+        }
+        let source = unwrap_markdown_language_fence_if_enabled(source);
+        let source = strip_empty_fenced_code_blocks(&source);
+        source
+    }
 }
 
 /// fence helpers are provided by `crate::render::markdown_utils`

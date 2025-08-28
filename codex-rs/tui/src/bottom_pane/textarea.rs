@@ -690,9 +690,15 @@ impl TextArea {
             };
             if needs_recalc {
                 let mut lines: Vec<Range<usize>> = Vec::new();
+                // Wrap one column earlier to avoid the caret visually overlapping
+                // the right border before a newline is committed. This makes the
+                // input feel more natural: when the cursor reaches the last
+                // visible column, the next character starts on the next line.
+                let effective_width = width.saturating_sub(1);
                 for line in textwrap::wrap(
                     &self.text,
-                    Options::new(width as usize).wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
+                    Options::new(effective_width as usize)
+                        .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
                 )
                 .iter()
                 {

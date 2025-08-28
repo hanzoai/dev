@@ -42,6 +42,7 @@ pub mod live_wrap;
 mod markdown;
 mod markdown_renderer;
 mod markdown_stream;
+mod syntax_highlight;
 pub mod onboarding;
 mod render;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration

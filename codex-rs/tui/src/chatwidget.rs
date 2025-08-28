@@ -544,8 +544,16 @@ impl ChatWidget<'_> {
                         _ => {}
                     }
                 }
-                // Skip internal system status messages
+                // Show internal system status messages (rendered with markdown) so
+                // code blocks and formatting are consistent with assistant output.
                 if text.contains("== System Status ==") {
+                    use ratatui::text::Line as RLine;
+                    let mut lines: Vec<RLine<'static>> = Vec::new();
+                    crate::markdown::append_markdown(&text, &mut lines, &self.config);
+                    self.add_to_history(crate::history_cell::PlainHistoryCell {
+                        lines,
+                        kind: crate::history_cell::HistoryCellType::Notice,
+                    });
                     return;
                 }
                 if role == "user" {
@@ -1059,23 +1067,35 @@ impl ChatWidget<'_> {
             // Update the most recent patch cell header from "Updating..." to "Updated"
             // without creating a new history section.
             if let Some(last) = self.history_cells.iter_mut().rev().find(|c| {
-                matches!(c.kind(), crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplyBegin } | crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::Proposed })
+                matches!(
+                    c.kind(),
+                    crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplyBegin }
+                        | crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::Proposed }
+                )
             }) {
-                // Downcast to PlainHistoryCell to mutate its lines
+                // Case 1: Patch summary cell – update title/kind in-place
+                if let Some(summary) = last.as_any_mut().downcast_mut::<history_cell::PatchSummaryCell>() {
+                    summary.title = "Updated".to_string();
+                    summary.kind = history_cell::PatchKind::ApplySuccess;
+                    self.request_redraw();
+                    return;
+                }
+                // Case 2: Plain history cell fallback – adjust first span and kind
                 if let Some(plain) = last.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
                     if let Some(first_line) = plain.lines.first_mut() {
-                        // Replace the title span content with "Updated" and apply success style
                         if let Some(first_span) = first_line.spans.get_mut(0) {
                             first_span.content = "Updated".into();
-                            first_span.style = Style::default().fg(crate::colors::success()).add_modifier(Modifier::BOLD);
+                            first_span.style = Style::default()
+                                .fg(crate::colors::success())
+                                .add_modifier(Modifier::BOLD);
                         }
                     }
-                    // Update the kind so gutter color reflects success
-                    plain.kind = history_cell::HistoryCellType::Patch { kind: history_cell::PatchKind::ApplySuccess };
+                    plain.kind = history_cell::HistoryCellType::Patch {
+                        kind: history_cell::PatchKind::ApplySuccess,
+                    };
+                    self.request_redraw();
+                    return;
                 }
-                // Don't surface stdout on success – keep UI concise
-                self.request_redraw();
-                return;
             }
             // Fallback: if no prior cell found, do nothing (avoid extra section)
         } else {
@@ -1323,26 +1343,7 @@ impl ChatWidget<'_> {
         // add AnimatedWelcomeCell silently
         history_cells.push(welcome_cell);
 
-        // Startup hint: show /resume tip if a recent session exists for this cwd (within 72h)
-        {
-            let cwd = config.cwd.clone();
-            let codex_home = config.codex_home.clone();
-            let recent = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home).into_iter().next();
-            if let Some(rec) = recent {
-                if let Some(ts) = rec.modified_ts.as_ref() {
-                    use chrono::{DateTime, Utc};
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-                        let now = Utc::now();
-                        let age = now.signed_duration_since(dt.with_timezone(&Utc));
-                        if age.num_hours() <= 72 {
-                            history_cells.push(Box::new(history_cell::new_background_event(
-                                "Tip: /resume to continue your last session".to_string(),
-                            )));
-                        }
-                    }
-                }
-            }
-        }
+        // Removed startup tip for /resume; /resume is now shown under "Popular commands".
 
         // Initialize image protocol for rendering screenshots
 
@@ -3510,6 +3511,15 @@ impl ChatWidget<'_> {
             .show_theme_selection(self.config.tui.theme.name);
     }
 
+    // Ctrl+Y syntax cycling disabled intentionally.
+
+    /// Show a brief debug notice in the footer.
+    #[allow(dead_code)]
+    pub(crate) fn debug_notice(&mut self, text: String) {
+        self.bottom_pane.flash_footer_notice(text);
+        self.request_redraw();
+    }
+
     pub(crate) fn set_theme(&mut self, new_theme: codex_core::config_types::ThemeName) {
         // Update the config
         self.config.tui.theme.name = new_theme;
@@ -3559,6 +3569,9 @@ impl ChatWidget<'_> {
                 history_cell::retint_lines_in_place(&mut reason.lines, &old, &new);
             } else if let Some(stream) = cell.as_any_mut().downcast_mut::<history_cell::StreamingContentCell>() {
                 history_cell::retint_lines_in_place(&mut stream.lines, &old, &new);
+            } else if let Some(assist) = cell.as_any_mut().downcast_mut::<history_cell::AssistantMarkdownCell>() {
+                // Fully rebuild from raw to apply new theme + syntax highlight
+                assist.rebuild(&self.config);
             }
         }
 
@@ -3751,6 +3764,7 @@ impl ChatWidget<'_> {
         kind: StreamKind,
         mut lines: Vec<ratatui::text::Line<'static>>,
     ) {
+        // No debug logging: we rely on preserving span modifiers end-to-end.
         // Insert all lines as a single streaming content cell to preserve spacing
         if lines.is_empty() { return; }
 
@@ -3824,6 +3838,7 @@ impl ChatWidget<'_> {
                                 lines.remove(0);
                             }
                         }
+                        // No debug logging in steady-state.
                         stream_cell.lines.extend(lines);
                         // Content height changed; clear memoized heights
                         self.invalidate_height_cache();
@@ -3856,6 +3871,36 @@ impl ChatWidget<'_> {
         // Auto-follow if near bottom so new inserts are visible
         self.autoscroll_if_near_bottom();
         self.request_redraw();
+    }
+
+    /// Replace the in-progress streaming assistant cell with a final markdown cell that
+    /// stores raw markdown for future re-rendering.
+    pub(crate) fn insert_final_answer(
+        &mut self,
+        lines: Vec<ratatui::text::Line<'static>>,
+        source: String,
+    ) {
+        // Ensure a hidden 'codex' header is present
+        let has_header = lines.first().map(|l| {
+            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim().eq_ignore_ascii_case("codex")
+        }).unwrap_or(false);
+        if !has_header {
+            // No need to mutate `lines` further since we rebuild from `source` below.
+        }
+
+        // If the last cell is a StreamingContentCell, replace it; else append
+        if let Some(last) = self.history_cells.last_mut() {
+            if last.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some() {
+                let cell = history_cell::AssistantMarkdownCell::new(source, &self.config);
+                *last = Box::new(cell);
+                self.invalidate_height_cache();
+                self.autoscroll_if_near_bottom();
+                self.request_redraw();
+                return;
+            }
+        }
+        let cell = history_cell::AssistantMarkdownCell::new(source, &self.config);
+        self.add_to_history(cell);
     }
 
     pub(crate) fn toggle_reasoning_visibility(&mut self) {
@@ -6328,24 +6373,52 @@ impl WidgetRef for &ChatWidget<'_> {
                     height: visible_height,
                 };
 
-                // Render gutter symbol
+                // Paint gutter background. For Assistant, extend the assistant tint under the
+                // gutter and also one extra column to the left (so the • has color on both sides),
+                // without changing layout or symbol positions.
+                let is_assistant = matches!(item.kind(), crate::history_cell::HistoryCellType::Assistant);
+                let gutter_bg = if is_assistant {
+                    crate::colors::assistant_bg()
+                } else {
+                    crate::colors::background()
+                };
+
+                let gutter_bg_style = Style::default().bg(gutter_bg);
+                for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
+                    // Gutter’s two columns (symbol + space)
+                    if gutter_area.width > 0 {
+                        buf[(gutter_area.x, y)].set_char(' ').set_style(gutter_bg_style);
+                    }
+                    if gutter_area.width > 1 {
+                        buf[(gutter_area.x + 1, y)].set_char(' ').set_style(gutter_bg_style);
+                    }
+                    // One extra column to the left for Assistant only (no layout change)
+                    if is_assistant && gutter_area.x > 0 {
+                        buf[(gutter_area.x - 1, y)].set_char(' ').set_style(gutter_bg_style);
+                    }
+                }
+
+                // Render gutter symbol if present
                 if let Some(symbol) = item.gutter_symbol() {
                     // Choose color based on symbol/type
-                    let color = if symbol == "➤" {
+                    let color = if symbol == "❯" {
                         // Executed arrow – color reflects exec state
                         if let Some(exec) = item.as_any().downcast_ref::<crate::history_cell::ExecCell>() {
                             match &exec.output {
-                                None => crate::colors::primary(),          // Running...
+                                None => crate::colors::info(),             // Running...
                                 Some(o) if o.exit_code == 0 => crate::colors::text_bright(), // Ran
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
-                            crate::colors::primary()
+                            crate::colors::info()
                         }
                     } else if symbol == "↯" {
-                        // Patch/Updated arrow color from explicit type
+                        // Patch/Updated arrow color – match the header text color
                         match item.kind() {
                             crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplySuccess } => crate::colors::success(),
+                            crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplyBegin } => crate::colors::success(),
+                            crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::Proposed } => crate::colors::primary(),
+                            crate::history_cell::HistoryCellType::Patch { kind: crate::history_cell::PatchKind::ApplyFailure } => crate::colors::error(),
                             _ => crate::colors::primary(),
                         }
                     } else {
@@ -6353,7 +6426,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             "›" => crate::colors::text(),        // user
                             "⋮" => crate::colors::primary(),     // thinking
                             "•" => crate::colors::text_bright(),  // codex/agent
-                            "⚙" => crate::colors::primary(),      // tool working
+                            "⚙" => crate::colors::info(),         // tool working
                             "✔" => crate::colors::success(),      // tool complete
                             "✖" => crate::colors::error(),        // error
                             "★" => crate::colors::text_bright(),  // notice/popular
@@ -6361,14 +6434,19 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     };
 
-                    // Draw the symbol at the top of the visible portion of this cell
-                    // so the gutter icon remains present even when scrolled.
+                    // Draw the symbol aligned with the first visible content row.
+                    // Assistant cells render with 1-row top padding; if not scrolled past it,
+                    // place the dot on the second row to align with the text.
                     if gutter_area.width >= 2 {
-                        // Choose color based on symbol/type
-                        let symbol_style = Style::default()
-                            .fg(color)
-                            .bg(crate::colors::background());
-                        buf.set_string(gutter_area.x, gutter_area.y, symbol, symbol_style);
+                        let pad_adjust: u16 = match item.kind() {
+                            crate::history_cell::HistoryCellType::Assistant => if skip_top == 0 { 1 } else { 0 },
+                            _ => 0,
+                        };
+                        let symbol_y = gutter_area.y.saturating_add(pad_adjust);
+                        if symbol_y < gutter_area.y.saturating_add(gutter_area.height) {
+                            let symbol_style = Style::default().fg(color).bg(gutter_bg);
+                            buf.set_string(gutter_area.x, symbol_y, symbol, symbol_style);
+                        }
                     }
                 }
 

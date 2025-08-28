@@ -534,6 +534,24 @@ struct State {
     /// model for a given batch when using `agent_wait` without `return_all`.
     /// This enables sequential waiting behavior across multiple calls.
     seen_completed_agents_by_batch: HashMap<String, HashSet<String>>,
+    /// Scratchpad that buffers streamed items/deltas for the current HTTP attempt
+    /// so we can seed retries without losing progress.
+    turn_scratchpad: Option<TurnScratchpad>,
+}
+
+/// Buffers partial turn progress produced during a single HTTP streaming attempt.
+/// This is not recorded to persistent history. It is only used to seed retries
+/// when the SSE stream disconnects mid‑turn.
+#[derive(Default, Clone, Debug)]
+struct TurnScratchpad {
+    /// Output items that reached `response.output_item.done` during this attempt
+    items: Vec<ResponseItem>,
+    /// Tool outputs we produced locally in reaction to output items
+    responses: Vec<ResponseInputItem>,
+    /// Last assistant text fragment received via deltas (not yet finalized)
+    partial_assistant_text: String,
+    /// Last reasoning summary fragment received via deltas (not yet finalized)
+    partial_reasoning_summary: String,
 }
 
 /// Context for an initialized model agent
@@ -606,6 +624,70 @@ impl Session {
         path.as_ref()
             .map(PathBuf::from)
             .map_or_else(|| self.cwd.clone(), |p| self.cwd.join(p))
+    }
+
+    // ────────────────────────────
+    // Scratchpad helpers
+    // ────────────────────────────
+    fn begin_attempt_scratchpad(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.turn_scratchpad = Some(TurnScratchpad::default());
+    }
+
+    fn scratchpad_push(&self, item: &ResponseItem, response: &Option<ResponseInputItem>) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(sp) = &mut state.turn_scratchpad {
+            sp.items.push(item.clone());
+            if let Some(r) = response {
+                sp.responses.push(r.clone());
+            }
+        }
+    }
+
+    fn scratchpad_add_text_delta(&self, delta: &str) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(sp) = &mut state.turn_scratchpad {
+            sp.partial_assistant_text.push_str(delta);
+            // Keep memory bounded (ensure UTF-8 char boundary when trimming)
+            if sp.partial_assistant_text.len() > 4000 {
+                let mut drain_up_to = sp.partial_assistant_text.len() - 4000;
+                while !sp.partial_assistant_text.is_char_boundary(drain_up_to) {
+                    drain_up_to -= 1;
+                }
+                sp.partial_assistant_text.drain(..drain_up_to);
+            }
+        }
+    }
+
+    fn scratchpad_add_reasoning_delta(&self, delta: &str) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(sp) = &mut state.turn_scratchpad {
+            sp.partial_reasoning_summary.push_str(delta);
+            if sp.partial_reasoning_summary.len() > 4000 {
+                let mut drain_up_to = sp.partial_reasoning_summary.len() - 4000;
+                while !sp.partial_reasoning_summary.is_char_boundary(drain_up_to) {
+                    drain_up_to -= 1;
+                }
+                sp.partial_reasoning_summary.drain(..drain_up_to);
+            }
+        }
+    }
+
+    fn scratchpad_clear_partial_message(&self) {
+        let mut state = self.state.lock().unwrap();
+        if let Some(sp) = &mut state.turn_scratchpad {
+            sp.partial_assistant_text.clear();
+        }
+    }
+
+    fn take_scratchpad(&self) -> Option<TurnScratchpad> {
+        let mut state = self.state.lock().unwrap();
+        state.turn_scratchpad.take()
+    }
+
+    fn clear_scratchpad(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.turn_scratchpad = None;
     }
 }
 
@@ -1182,6 +1264,7 @@ impl Session {
         let mut state = self.state.lock().unwrap();
         state.pending_approvals.clear();
         state.pending_input.clear();
+        state.turn_scratchpad = None;
         if let Some(agent) = state.current_agent.take() {
             agent.abort(TurnAbortReason::Interrupted);
         }
@@ -1972,12 +2055,15 @@ async fn run_turn(
     );
 
     let mut retries = 0;
+    // Attempt input starts as the provided input, and may be augmented with
+    // items from a previous dropped stream attempt so we don't lose progress.
+    let mut attempt_input: Vec<ResponseItem> = input.clone();
     loop {
         // Build status items (screenshots, system status) fresh for each attempt
         let status_items = build_turn_status_items(sess).await;
 
         let prompt = Prompt {
-            input: input.clone(),
+            input: attempt_input.clone(),
             user_instructions: sess.user_instructions.clone(),
             store: !sess.disable_response_storage,
             tools: tools.clone(),
@@ -1991,6 +2077,9 @@ async fn run_turn(
             status_items, // Include status items with this request
         };
 
+        // Start a new scratchpad for this HTTP attempt
+        sess.begin_attempt_scratchpad();
+
         match try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt).await {
             Ok(output) => {
                 // Record status items to conversation history after successful turn
@@ -1998,6 +2087,8 @@ async fn run_turn(
                 if !prompt.status_items.is_empty() {
                     sess.record_conversation_items(&prompt.status_items).await;
                 }
+                // Commit successful attempt – scratchpad is no longer needed.
+                sess.clear_scratchpad();
                 return Ok(output);
             }
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
@@ -2028,6 +2119,67 @@ async fn run_turn(
                         ),
                     )
                     .await;
+                    // Pull any partial progress from this attempt and append to
+                    // the next request's input so we do not lose tool progress
+                    // or already-finalized items.
+                    if let Some(sp) = sess.take_scratchpad() {
+                        // Build a set of call_ids we have already included to avoid duplicate calls
+                        let mut seen_calls: std::collections::HashSet<String> = attempt_input
+                            .iter()
+                            .filter_map(|ri| match ri {
+                                ResponseItem::FunctionCall { call_id, .. } => Some(call_id.clone()),
+                                ResponseItem::LocalShellCall { call_id: Some(c), .. } => Some(c.clone()),
+                                _ => None,
+                            })
+                            .collect();
+
+                        // Append finalized function/local shell calls from the dropped attempt
+                        for item in sp.items {
+                            match &item {
+                                ResponseItem::FunctionCall { call_id, .. } => {
+                                    if seen_calls.insert(call_id.clone()) {
+                                        attempt_input.push(item.clone());
+                                    }
+                                }
+                                ResponseItem::LocalShellCall { call_id: Some(c), .. } => {
+                                    if seen_calls.insert(c.clone()) {
+                                        attempt_input.push(item.clone());
+                                    }
+                                }
+                                _ => {
+                                    // Avoid injecting assistant/Reasoning messages on retry to reduce duplication.
+                                }
+                            }
+                        }
+
+                        // Append tool outputs produced during the dropped attempt
+                        for resp in sp.responses {
+                            attempt_input.push(ResponseItem::from(resp));
+                        }
+
+                        // If we have partial deltas, include a short ephemeral hint so the model can resume.
+                        if !sp.partial_assistant_text.is_empty() || !sp.partial_reasoning_summary.is_empty() {
+                            use codex_protocol::models::ContentItem;
+                            let mut hint = String::from(
+                                "[EPHEMERAL:RETRY_HINT]\nPrevious attempt aborted mid-stream. Continue without repeating.\n",
+                            );
+                            if !sp.partial_reasoning_summary.is_empty() {
+                                let preview = &sp.partial_reasoning_summary;
+                                let preview = if preview.len() > 800 { &preview[preview.len()-800..] } else { preview };
+                                hint.push_str(&format!("Last reasoning summary fragment:\n{}\n\n", preview));
+                            }
+                            if !sp.partial_assistant_text.is_empty() {
+                                let preview = &sp.partial_assistant_text;
+                                let preview = if preview.len() > 800 { &preview[preview.len()-800..] } else { preview };
+                                hint.push_str(&format!("Last assistant text fragment:\n{}\n", preview));
+                            }
+                            attempt_input.push(ResponseItem::Message {
+                                id: None,
+                                role: "user".to_string(),
+                                content: vec![ContentItem::InputText { text: hint }],
+                            });
+                        }
+                    }
 
                     tokio::time::sleep(delay).await;
                 } else {
@@ -2141,6 +2293,14 @@ async fn try_run_turn(
                 let response =
                     handle_response_item(sess, turn_diff_tracker, sub_id, item.clone()).await?;
 
+                // Save into scratchpad so we can seed a retry if the stream drops later.
+                sess.scratchpad_push(&item, &response);
+
+                // If this was a finalized assistant message, clear partial text buffer
+                if let ResponseItem::Message { .. } = &item {
+                    sess.scratchpad_clear_partial_message();
+                }
+
                 output.push(ProcessedResponseItem { item, response });
             }
             ResponseEvent::WebSearchCallBegin { call_id, query } => {
@@ -2197,18 +2357,26 @@ async fn try_run_turn(
                 let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 let event = Event {
                     id: event_id,
-                    msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }),
+                    msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta: delta.clone() }),
                 };
                 sess.tx_event.send(event).await.ok();
+
+                // Track partial assistant text in the scratchpad to help resume on retry.
+                // Only accumulate when we have an item context or a single active stream.
+                // We deliberately do not scope by item_id to keep implementation simple.
+                sess.scratchpad_add_text_delta(&delta);
             }
             ResponseEvent::ReasoningSummaryDelta { delta, item_id } => {
                 // Use the item_id if present, otherwise fall back to sub_id
                 let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 let event = Event {
                     id: event_id,
-                    msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }),
+                    msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta: delta.clone() }),
                 };
                 sess.tx_event.send(event).await.ok();
+
+                // Buffer reasoning summary so we can include a hint on retry.
+                sess.scratchpad_add_reasoning_delta(&delta);
             }
             ResponseEvent::ReasoningSummaryPartAdded => {
                 let event = Event {
@@ -2230,6 +2398,7 @@ async fn try_run_turn(
                     sess.tx_event.send(event).await.ok();
                 }
             }
+            // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
     }
 }
@@ -2543,6 +2712,7 @@ async fn handle_function_call(
         "browser_inspect" => handle_browser_inspect(sess, arguments, sub_id, call_id).await,
         "browser_cdp" => handle_browser_cdp(sess, arguments, sub_id, call_id).await,
         "browser_cleanup" => handle_browser_cleanup(sess, sub_id, call_id).await,
+        "web_fetch" => handle_web_fetch(sess, arguments, sub_id, call_id).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -2600,6 +2770,129 @@ async fn handle_browser_cleanup(
                 }
             }
         }
+    ).await
+}
+
+async fn handle_web_fetch(
+    sess: &Session,
+    arguments: String,
+    sub_id: String,
+    call_id: String,
+) -> ResponseInputItem {
+    // Include raw params in begin event for observability
+    let params_for_event = serde_json::from_str(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let call_id_clone = call_id.clone();
+
+    execute_custom_tool(
+        sess,
+        &sub_id,
+        call_id,
+        "web_fetch".to_string(),
+        params_for_event,
+        || async move {
+            #[derive(serde::Deserialize)]
+            struct WebFetchParams {
+                url: String,
+                #[serde(default)]
+                timeout_ms: Option<u64>,
+            }
+
+            let parsed: Result<WebFetchParams, _> = serde_json::from_str(&arguments_clone);
+            let params = match parsed {
+                Ok(p) => p,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Invalid web_fetch arguments: {e}"),
+                            success: None,
+                        },
+                    };
+                }
+            };
+
+            let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
+            let user_agent = crate::user_agent::get_codex_user_agent(Some("web_fetch"));
+            let client = match reqwest::Client::builder()
+                .user_agent(user_agent)
+                .timeout(timeout)
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to build HTTP client: {e}"),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
+            let resp = match client.get(&params.url).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Request failed: {e}"),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
+            let status = resp.status();
+            let text = match resp.text().await {
+                Ok(t) => t,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Failed to read response body: {e}"),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
+            // Configure htmd with conservative, GFM‑like defaults
+            let options = htmd::options::Options {
+                heading_style: htmd::options::HeadingStyle::Atx,
+                code_block_style: htmd::options::CodeBlockStyle::Fenced,
+                link_style: htmd::options::LinkStyle::Inlined,
+                ..Default::default()
+            };
+            let converter = htmd::HtmlToMarkdown::builder().options(options).build();
+            let markdown = match converter.convert(&text) {
+                Ok(m) => m,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: format!("Markdown conversion failed: {e}"),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
+            let body = serde_json::json!({
+                "url": params.url,
+                "status": status.as_u16(),
+                "markdown": markdown,
+            });
+
+            ResponseInputItem::FunctionCallOutput {
+                call_id: call_id_clone,
+                output: FunctionCallOutputPayload {
+                    content: body.to_string(),
+                    success: Some(status.is_success()),
+                },
+            }
+        },
     ).await
 }
 
