@@ -1191,3 +1191,49 @@ fn deltas_then_same_final_message_are_rendered_snapshot() {
         .collect::<String>();
     assert_snapshot!(combined);
 }
+
+#[test]
+fn streaming_answer_then_finalize_does_not_truncate() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Stream an assistant message in chunks, without sending a final AgentMessage.
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Files changed\n".into(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- codex-rs/tui/src/markdown.rs: Guard against list markers...\n".into(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "\nWhat to expect\n".into(),
+        }),
+    });
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- Third-level bullets render correctly now.\n".into(),
+        }),
+    });
+
+    // Simulate lifecycle location that finalizes active stream (e.g., new event)
+    chat.finalize_active_stream();
+
+    // Drain and combine visible content
+    let cells = drain_insert_history(&rx);
+    let combined = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+
+    assert!(combined.contains("Files changed"), "missing header: {combined}");
+    assert!(combined.contains("What to expect"), "missing section header: {combined}");
+    assert!(combined.contains("Third-level bullets render correctly now"),
+        "missing tail content after finalize: {combined}");
+}
