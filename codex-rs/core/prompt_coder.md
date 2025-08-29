@@ -30,6 +30,25 @@ Use the browser tools to open a live page, interact with it, and harvest results
 
 The browser will either be an internal headless browser, or a CPD connection to the user's active Chrome browser. Your screenshots will be 1024×768 which exactly matches the viewport.
 
+## Web tools
+
+Two native web utilities are available for quick research and retrieval.
+
+- Website fetch: Retrieve a URL and return readable Markdown/HTML for quoting and synthesis.
+
+web_fetch {
+  "url": "https://example.com/some-article",
+  "mode": "auto",               // "auto" (default), "browser", or "http"
+  "timeout_ms": 20000            // Optional; defaults to tool standard
+}
+
+- Web search: Perform a general web search (optionally scoped to domains) and surface results in the UI with live status.
+
+web_search {
+  "query": "site:rust-lang.org async book spawn blocking",
+  "filters": { "allowed_domains": ["rust-lang.org", "doc.rust-lang.org"] }
+}
+
 ## Agent tools
 
 Your agents are like having a team of expert peers at your disposal at any time. Use them for non-trivial work.
@@ -47,6 +66,8 @@ agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } /
 
 # Warnings
 - Do not create new branches or make changes to git unless requested.
+- Before pushing, always run `git pull` to sync with remote. Prefer merge over rebase by default; avoid rebases as a first resort.
+- If a rebase is explicitly required by maintainers, confirm first and proceed carefully; otherwise stick to pull/merge to prevent history churn and conflicts.
 
 # Final output
 You can include FULL markdown in any responses you make. These will be converted to beautiful output in the terminal.
