@@ -1431,22 +1431,30 @@ impl HistoryCell for MergedExecCell {
             return total;
         }
 
+        let mut added_corner = false;
         for (pre_raw, out_raw) in &self.segments {
             // Build preamble like the renderer: trim, drop first header line, ensure prefix
             let mut pre = trim_empty_lines(pre_raw.clone());
             if !pre.is_empty() {
                 pre.remove(0);
             }
-            if let Some(first) = pre.first_mut() {
-                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                let already =
-                    flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
-                if !already {
-                    first.spans.insert(
-                        0,
-                        Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
-                    );
+            if !added_corner {
+                if let Some(first) = pre.first_mut() {
+                    let flat: String =
+                        first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let already = flat.trim_start().starts_with("└ ")
+                        || flat.trim_start().starts_with("  └ ");
+                    if !already {
+                        first.spans.insert(
+                            0,
+                            Span::styled(
+                                "└ ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        );
+                    }
                 }
+                added_corner = true;
             }
             let out = trim_empty_lines(out_raw.clone());
             let pre_rows: u16 = Paragraph::new(Text::from(pre))
@@ -1533,8 +1541,12 @@ impl HistoryCell for MergedExecCell {
             skip_rows = skip_rows.saturating_sub(1);
         }
 
-        // Helper: ensure the first visible line of `lines` begins with a dim "└ "
-        let ensure_prefix = |lines: &mut Vec<Line<'static>>| {
+        // Helper: ensure only the very first preamble line across all segments gets the corner
+        let mut added_corner: bool = false;
+        let mut ensure_prefix = |lines: &mut Vec<Line<'static>>| {
+            if added_corner {
+                return; // do not add on subsequent segments
+            }
             if let Some(first) = lines.first_mut() {
                 let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                 let already =
@@ -1545,6 +1557,7 @@ impl HistoryCell for MergedExecCell {
                         Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
                     );
                 }
+                added_corner = true;
             }
         };
 
@@ -1678,7 +1691,7 @@ impl HistoryCell for MergedExecCell {
             if !pre.is_empty() {
                 pre.remove(0);
             }
-            // Normalize command prefix for generic execs
+            // Normalize command prefix for generic execs (only on the first segment)
             ensure_prefix(&mut pre);
 
             let out = trim_empty_lines(out_raw.clone());
@@ -4743,11 +4756,23 @@ fn new_parsed_command(
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
-                        spans.extend(first.spans.drain(..));
+                        // If the exec has completed ("Ran"), render command in a unified
+                        // completed color to make the state change clear; otherwise keep
+                        // full syntax highlighting while running.
+                        if output.is_some() {
+                            for s in first.spans.drain(..) {
+                                spans.push(Span::styled(
+                                    s.content.to_string(),
+                                    Style::default().fg(crate::colors::text_bright()),
+                                ));
+                            }
+                        } else {
+                            spans.extend(first.spans.drain(..));
+                        }
                     } else {
                         spans.push(Span::styled(
                             line_text.to_string(),
-                            Style::default().fg(crate::colors::text()),
+                            Style::default().fg(if output.is_some() { crate::colors::text_bright() } else { crate::colors::text() }),
                         ));
                     }
                 }
