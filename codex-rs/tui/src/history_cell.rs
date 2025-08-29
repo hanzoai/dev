@@ -1139,7 +1139,10 @@ fn exec_render_parts_generic(
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let mut pre: Vec<Line<'static>> = Vec::new();
     let command_escaped = strip_bash_lc_and_escape(command);
-    let mut cmd_lines = command_escaped.lines();
+    // Highlight the full command as a bash snippet; we will append
+    // the running duration (when applicable) to the first visual line.
+    let mut highlighted_cmd: Vec<Line<'static>> =
+        crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
 
     let header_line = match output {
         None => {
@@ -1170,30 +1173,18 @@ fn exec_render_parts_generic(
         ),
     };
 
-    if let Some(first) = cmd_lines.next() {
-        let duration_str = if output.is_none() && start_time.is_some() {
+    pre.push(header_line.clone());
+    if let Some(first) = highlighted_cmd.first_mut() {
+        // Append duration (dim) to the first highlighted line when running
+        if output.is_none() && start_time.is_some() {
             let elapsed = start_time.unwrap().elapsed();
-            format!(" ({})", format_duration(elapsed))
-        } else {
-            String::new()
-        };
-        pre.push(header_line.clone());
-        pre.push(Line::from(vec![
-            Span::styled(
-                first.to_string(),
-                Style::default().fg(crate::colors::text()),
-            ),
-            duration_str.dim(),
-        ]));
-    } else {
-        pre.push(header_line);
+            let duration_str = format!(" ({})", format_duration(elapsed));
+            first
+                .spans
+                .push(Span::styled(duration_str, Style::default().fg(crate::colors::text_dim())));
+        }
     }
-    for cont in cmd_lines {
-        pre.push(Line::styled(
-            cont.to_string(),
-            Style::default().fg(crate::colors::text()),
-        ));
-    }
+    pre.extend(highlighted_cmd);
 
     // Output: always include for generic exec
     let out = output_lines(output, false, false);
@@ -1503,10 +1494,20 @@ fn exec_render_parts_parsed(
                     ));
                 }
                 _ => {
-                    spans.push(Span::styled(
-                        line_text.to_string(),
-                        Style::default().fg(crate::colors::text()),
-                    ));
+                    // Apply shell syntax highlighting to executed command lines.
+                    // We highlight the single logical line as bash and append its spans inline.
+                    let mut hl = crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    if let Some(mut first) = hl.pop() {
+                        // `highlight_code_block` returns exactly one line for single-line input.
+                        // Append the highlighted spans inline after the prefix.
+                        spans.extend(first.spans.drain(..));
+                    } else {
+                        // Fallback: plain text if highlighting yields nothing.
+                        spans.push(Span::styled(
+                            line_text.to_string(),
+                            Style::default().fg(crate::colors::text()),
+                        ));
+                    }
                 }
             }
             pre.push(Line::from(spans));
@@ -3736,12 +3737,16 @@ fn new_parsed_command(
                     ));
                 }
                 _ => {
-                    // For executed commands (Run/Test/Lint/etc.), show the command text
-                    // in normal text color rather than dimmed.
-                    spans.push(Span::styled(
-                        line_text.to_string(),
-                        Style::default().fg(crate::colors::text()),
-                    ));
+                    // For executed commands (Run/Test/Lint/etc.), use shell syntax highlighting.
+                    let mut hl = crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    if let Some(mut first) = hl.pop() {
+                        spans.extend(first.spans.drain(..));
+                    } else {
+                        spans.push(Span::styled(
+                            line_text.to_string(),
+                            Style::default().fg(crate::colors::text()),
+                        ));
+                    }
                 }
             }
 
@@ -3765,7 +3770,9 @@ fn new_exec_command_generic(
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let command_escaped = strip_bash_lc_and_escape(command);
-    let mut cmd_lines = command_escaped.lines();
+    // Highlight the command as bash and then append a dimmed duration to the
+    // first visual line while running.
+    let mut highlighted_cmd = crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
 
     let header_line = match output {
         None => {
@@ -3800,33 +3807,17 @@ fn new_exec_command_generic(
         }
     };
 
-    if let Some(first) = cmd_lines.next() {
-        let duration_str = if output.is_none() && start_time.is_some() {
+    lines.push(header_line.clone());
+    if let Some(first) = highlighted_cmd.first_mut() {
+        if output.is_none() && start_time.is_some() {
             let elapsed = start_time.unwrap().elapsed();
-            format!(" ({})", format_duration(elapsed))
-        } else {
-            String::new()
-        };
-
-        lines.push(header_line.clone());
-        // Show the command itself in standard text color; keep the duration dimmed
-        lines.push(Line::from(vec![
-            Span::styled(
-                first.to_string(),
-                Style::default().fg(crate::colors::text()),
-            ),
-            duration_str.dim(),
-        ]));
-    } else {
-        lines.push(header_line);
+            let duration_str = format!(" ({})", format_duration(elapsed));
+            first
+                .spans
+                .push(Span::styled(duration_str, Style::default().fg(crate::colors::text_dim())));
+        }
     }
-
-    for cont in cmd_lines {
-        lines.push(Line::styled(
-            cont.to_string(),
-            Style::default().fg(crate::colors::text()),
-        ));
-    }
+    lines.extend(highlighted_cmd);
 
     lines.extend(output_lines(output, false, true));
     lines
