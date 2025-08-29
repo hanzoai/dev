@@ -542,6 +542,51 @@ async fn execute_model_with_permissions(
     working_dir: Option<PathBuf>,
     config: Option<AgentConfig>,
 ) -> Result<String, String> {
+    // Helper: cross‑platform check whether an executable is available in PATH.
+    fn command_exists(cmd: &str) -> bool {
+        // Absolute/relative path with separators: check directly.
+        if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
+            return std::fs::metadata(cmd).is_ok();
+        }
+
+        let path = std::env::var_os("PATH");
+        if path.is_none() {
+            return false;
+        }
+        let pathext: Vec<String> = if cfg!(windows) {
+            // Default Windows PATHEXT set; also respect env if provided.
+            let env_ext = std::env::var("PATHEXT").unwrap_or(".COM;.EXE;.BAT;.CMD;.MSI;.PS1".to_string());
+            env_ext.split(';').filter_map(|e| {
+                let e = e.trim();
+                if e.is_empty() { None } else { Some(e.to_string()) }
+            }).collect()
+        } else {
+            Vec::new()
+        };
+
+        for dir in std::env::split_paths(&path.unwrap()) {
+            if dir.as_os_str().is_empty() {
+                continue;
+            }
+            let base = dir.join(cmd);
+            if cfg!(windows) {
+                // Try with PATHEXT variants
+                if std::fs::metadata(&base).is_ok() {
+                    return true;
+                }
+                for ext in &pathext {
+                    let candidate = base.with_extension(ext.trim_start_matches('.'));
+                    if std::fs::metadata(&candidate).is_ok() {
+                        return true;
+                    }
+                }
+            } else if std::fs::metadata(&base).is_ok() {
+                return true;
+            }
+        }
+        false
+    }
+
     // Use config command if provided, otherwise use model name
     let command = if let Some(ref cfg) = config {
         cfg.command.clone()
@@ -549,7 +594,19 @@ async fn execute_model_with_permissions(
         model.to_lowercase()
     };
 
-    let mut cmd = Command::new(command.clone());
+    // Special case: for the built‑in Codex agent, prefer invoking the currently
+    // running executable with the `exec` subcommand rather than relying on a
+    // `codex` binary to be present on PATH. This improves portability,
+    // especially on Windows where global shims may be missing.
+    let model_lower = model.to_lowercase();
+    let mut cmd = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+        match std::env::current_exe() {
+            Ok(path) => Command::new(path),
+            Err(e) => return Err(format!("Failed to resolve current executable: {}", e)),
+        }
+    } else {
+        Command::new(command.clone())
+    };
 
     // Set working directory if provided
     if let Some(dir) = working_dir {
@@ -572,12 +629,7 @@ async fn execute_model_with_permissions(
 
     // Build command based on model and permissions
     // Use command instead of model for matching if config provided
-    let model_lower = model.to_lowercase();
-    let model_name = if config.is_some() {
-        command.as_str()
-    } else {
-        model_lower.as_str()
-    };
+    let model_name = if config.is_some() { command.as_str() } else { model_lower.as_str() };
 
     match model_name {
         "claude" => {
@@ -599,7 +651,7 @@ async fn execute_model_with_permissions(
                 cmd.args(&["-m", "gemini-2.5-pro", "-y", "-p", prompt]);
             }
         }
-        "codex" => {
+        "codex" | "code" => {
             if read_only {
                 cmd.args(&["-s", "read-only", "-a", "never", "exec", prompt]);
             } else {
@@ -611,10 +663,14 @@ async fn execute_model_with_permissions(
         }
     }
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute {}: {}", model, e))?;
+    // Proactively check for presence of external command before spawn when not
+    // using the current executable fallback. This avoids confusing OS errors
+    // like "program not found" and lets us surface a cleaner message.
+    if model_name != "codex" && model_name != "code" && !command_exists(&command) {
+        return Err(format!("Required agent '{}' is not installed or not in PATH", command));
+    }
+
+    let output = cmd.output().await.map_err(|e| format!("Failed to execute {}: {}", model, e))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -639,7 +695,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
         "model".to_string(),
         JsonSchema::String {
             description: Some(
-                "Model: 'claude', 'gemini', or 'codex' (or array of models for batch execution)"
+                "Model: 'claude', 'gemini', or 'code' (or array of models for batch execution)"
                     .to_string(),
             ),
         },

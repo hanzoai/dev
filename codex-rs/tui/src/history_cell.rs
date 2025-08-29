@@ -401,9 +401,12 @@ impl HistoryCell for PlainHistoryCell {
         let text = Text::from(lines);
 
         // Add Block with padding: reserve 2 columns on the right.
-        let block = Block::default()
-            .style(bg_style)
-            .padding(Padding { left: 0, right: 2, top: 0, bottom: 0 });
+        let block = Block::default().style(bg_style).padding(Padding {
+            left: 0,
+            right: 2,
+            top: 0,
+            bottom: 0,
+        });
 
         Paragraph::new(text)
             .block(block)
@@ -504,30 +507,40 @@ impl HistoryCell for AssistantMarkdownCell {
         if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
-            for mut line in all_lines.into_iter() {
+            for line in all_lines.into_iter() {
                 if crate::render::line_utils::is_code_block_painted(&line) {
                     transformed.push(line);
                     continue;
                 }
                 if is_horizontal_rule_line(&line) {
                     transformed.push(Line::from(Span::styled(
-                        std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
+                        std::iter::repeat('─')
+                            .take(text_wrap_width as usize)
+                            .collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     )));
                     continue;
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
                     if is_first_output_line && bullet_char == "-" {
-                        use ratatui::text::Span;
-                        let mut spans = std::mem::take(&mut line.spans);
-                        let mut i = 0usize;
-                        let mut out_spans: Vec<Span<'static>> = Vec::new();
-                        if indent_spaces > 0 { out_spans.push(Span::raw(" ".repeat(indent_spaces))); i = 1; }
-                        i = i.saturating_add(2);
-                        out_spans.extend(spans.drain(i..));
-                        transformed.push(ratatui::text::Line::from(out_spans));
+                        // Suppress the visible '-' on the very first output line but keep a
+                        // hanging indent equal to the bullet width + two-space gap so wrapped
+                        // lines align under the content start.
+                        let hang_cols =
+                            unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        transformed.extend(wrap_hanging_line(
+                            line,
+                            indent_spaces,
+                            hang_cols,
+                            text_wrap_width,
+                        ));
                     } else {
-                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, text_wrap_width));
+                        transformed.extend(wrap_bullet_line(
+                            line,
+                            indent_spaces,
+                            &bullet_char,
+                            text_wrap_width,
+                        ));
                     }
                 } else {
                     transformed.push(line);
@@ -541,16 +554,33 @@ impl HistoryCell for AssistantMarkdownCell {
         let mut i = 0usize;
         while i < all_lines.len() {
             let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
-            let start = i; i += 1;
-            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            let start = i;
+            i += 1;
+            while i < all_lines.len()
+                && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code
+            {
+                i += 1;
+            }
             if is_code {
                 let mut chunk: Vec<Line<'static>> = all_lines[start..i].to_vec();
                 if let Some(first) = chunk.first() {
                     let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    if flat.contains("⟦LANG:") { chunk.remove(0); }
+                    if flat.contains("⟦LANG:") {
+                        chunk.remove(0);
+                    }
                 }
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
+                while chunk
+                    .first()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    chunk.remove(0);
+                }
+                while chunk
+                    .last()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    chunk.pop();
+                }
                 total = total.saturating_add(chunk.len() as u16 + 4);
             } else {
                 let text = Text::from(all_lines[start..i].to_vec());
@@ -586,7 +616,7 @@ impl HistoryCell for AssistantMarkdownCell {
         if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
-            for mut line in all_lines.into_iter() {
+            for line in all_lines.into_iter() {
                 if crate::render::line_utils::is_code_block_painted(&line) {
                     transformed.push(line);
                     continue;
@@ -602,30 +632,24 @@ impl HistoryCell for AssistantMarkdownCell {
                     continue;
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    // Special case: If this is the very first output line and the bullet
-                    // is a plain hyphen ("-"), drop the bullet itself and keep the content.
+                    // Special case: first output line with '-' — suppress the glyph but
+                    // preserve a hanging indent so wrapped lines align under content.
                     if is_first_output_line && bullet_char == "-" {
-                        use ratatui::text::Span;
-                        let mut spans = std::mem::take(&mut line.spans);
-                        let mut i = 0usize;
-                        // Optional leading indent
-                        let mut out_spans: Vec<Span<'static>> = Vec::new();
-                        if indent_spaces > 0 {
-                            out_spans.push(Span::raw(" ".repeat(indent_spaces)));
-                            i = 1; // skip the indent span we expect
-                        }
-                        // Skip bullet span and the following single-space span
-                        i = i.saturating_add(2);
-                        // Append the rest of the content as-is
-                        out_spans.extend(spans.drain(i..));
-                        transformed.push(ratatui::text::Line::from(out_spans));
+                        let hang_cols =
+                            unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        transformed.extend(wrap_hanging_line(
+                            line,
+                            indent_spaces,
+                            hang_cols,
+                            text_wrap_width,
+                        ));
                     } else {
-                    transformed.extend(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        text_wrap_width,
-                    ));
+                        transformed.extend(wrap_bullet_line(
+                            line,
+                            indent_spaces,
+                            &bullet_char,
+                            text_wrap_width,
+                        ));
                     }
                 } else {
                     transformed.push(line);
@@ -655,10 +679,16 @@ impl HistoryCell for AssistantMarkdownCell {
             let mut chunk: Vec<Line<'static>> = all_lines[start..i].to_vec();
             if is_code {
                 // Trim leading/trailing fully blank lines (these were our padding rows).
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) {
+                while chunk
+                    .first()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
                     chunk.remove(0);
                 }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) {
+                while chunk
+                    .last()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
                     chunk.pop();
                 }
                 segs.push(Seg::Code(chunk));
@@ -678,11 +708,12 @@ impl HistoryCell for AssistantMarkdownCell {
 
         // Helpers
         use unicode_width::UnicodeWidthStr as UW;
-        let measure_line = |l: &Line<'_>| -> usize {
-            l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum()
-        };
+        let measure_line =
+            |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
         let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
-            if *y >= end_y { return; }
+            if *y >= end_y {
+                return;
+            }
             match seg {
                 Seg::Text(lines) => {
                     // Measure height with wrap
@@ -693,13 +724,21 @@ impl HistoryCell for AssistantMarkdownCell {
                         .try_into()
                         .unwrap_or(0);
                     if *skip >= total {
-                        *skip -= total; return;
+                        *skip -= total;
+                        return;
                     }
                     // Visible height in remaining space
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
+                    if draw_h == 0 {
+                        return;
+                    }
+                    let rect = Rect {
+                        x: area.x,
+                        y: *y,
+                        width: area.width,
+                        height: draw_h,
+                    };
                     Paragraph::new(txt)
                         .block(Block::default().style(bg_style))
                         .wrap(Wrap { trim: false })
@@ -710,36 +749,73 @@ impl HistoryCell for AssistantMarkdownCell {
                     *skip = 0;
                 }
                 Seg::Code(lines_in) => {
-                    if lines_in.is_empty() { return; }
+                    if lines_in.is_empty() {
+                        return;
+                    }
                     // Extract language sentinel and drop it from visible lines
                     let mut lang_label: Option<String> = None;
                     let mut lines = lines_in.clone();
                     if let Some(first) = lines.first() {
                         let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                         if let Some(s) = flat.strip_prefix("⟦LANG:") {
-                            if let Some(end) = s.find('⟧') { lang_label = Some(s[..end].to_string()); lines.remove(0); }
+                            if let Some(end) = s.find('⟧') {
+                                lang_label = Some(s[..end].to_string());
+                                lines.remove(0);
+                            }
                         }
                     }
-                    if lines.is_empty() { return; }
+                    if lines.is_empty() {
+                        return;
+                    }
                     // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
                     let card_w = inner_w.saturating_add(4).min(area.width.max(4));
                     let total = lines.len() as u16 + 4; // top/bottom border + inner padding rows
-                    if *skip >= total { *skip -= total; return; }
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
-                    if avail == 0 { return; }
+                    if avail == 0 {
+                        return;
+                    }
                     // Compute visible slice (accounting for top/bottom border + inner padding rows)
                     let mut local_skip = *skip;
-                    let mut top_border = 1u16; if local_skip > 0 { let drop = local_skip.min(top_border); top_border -= drop; local_skip -= drop; }
-                    let mut top_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(top_pad); top_pad -= drop; local_skip -= drop; }
-                    let code_skip = local_skip.min(lines.len() as u16); local_skip -= code_skip;
-                    let mut bottom_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_pad); bottom_pad -= drop; }
-                    let mut bottom_border = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_border); bottom_border -= drop; }
+                    let mut top_border = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(top_border);
+                        top_border -= drop;
+                        local_skip -= drop;
+                    }
+                    let mut top_pad = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(top_pad);
+                        top_pad -= drop;
+                        local_skip -= drop;
+                    }
+                    let code_skip = local_skip.min(lines.len() as u16);
+                    local_skip -= code_skip;
+                    let mut bottom_pad = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(bottom_pad);
+                        bottom_pad -= drop;
+                    }
+                    let mut bottom_border = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(bottom_border);
+                        bottom_border -= drop;
+                    }
                     // Compute drawable height in this pass
-                    let visible = top_border + top_pad + (lines.len() as u16 - code_skip) + bottom_pad + bottom_border;
+                    let visible = top_border
+                        + top_pad
+                        + (lines.len() as u16 - code_skip)
+                        + bottom_pad
+                        + bottom_border;
                     let draw_h = visible.min(avail);
-                    if draw_h == 0 { return; }
+                    if draw_h == 0 {
+                        return;
+                    }
                     // Compute optional outer horizontal padding (1 col left/right) inside content area
                     let content_x = area.x;
                     let content_w = area.width;
@@ -751,15 +827,28 @@ impl HistoryCell for AssistantMarkdownCell {
                         (content_x, false, rp)
                     };
                     // Draw bordered block for visible rows
-                    let rect = Rect { x: rect_x, y: *y, width: card_w, height: draw_h };
+                    let rect = Rect {
+                        x: rect_x,
+                        y: *y,
+                        width: card_w,
+                        height: draw_h,
+                    };
                     let code_bg = crate::colors::code_block_bg();
                     let mut blk = Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 1, right: 1, top: 1, bottom: 1 });
+                        .padding(Padding {
+                            left: 1,
+                            right: 1,
+                            top: 1,
+                            bottom: 1,
+                        });
                     if let Some(lang) = &lang_label {
-                        blk = blk.title(Span::styled(format!(" {} ", lang), Style::default().fg(crate::colors::text_dim())));
+                        blk = blk.title(Span::styled(
+                            format!(" {} ", lang),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
                     }
                     // Clone before render so we can compute inner rect after drawing borders
                     let blk_for_inner = blk.clone();
@@ -780,14 +869,18 @@ impl HistoryCell for AssistantMarkdownCell {
                     if left_pad {
                         let px = rect.x.saturating_sub(1);
                         for yy in rect.y..rect.y.saturating_add(rect.height) {
-                            buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                            buf[(px, yy)]
+                                .set_char(' ')
+                                .set_style(Style::default().bg(code_bg));
                         }
                     }
                     if right_pad {
                         let px = rect.x.saturating_add(rect.width);
                         if px < content_x.saturating_add(content_w) {
                             for yy in rect.y..rect.y.saturating_add(rect.height) {
-                                buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                                buf[(px, yy)]
+                                    .set_char(' ')
+                                    .set_style(Style::default().bg(code_bg));
                             }
                         }
                     }
@@ -798,7 +891,9 @@ impl HistoryCell for AssistantMarkdownCell {
         };
 
         for seg in &segs {
-            if cur_y >= end_y { break; }
+            if cur_y >= end_y {
+                break;
+            }
             draw_segment(seg, &mut cur_y, &mut remaining_skip);
         }
         // Bottom padding row (blank): area is already cleared to bg
@@ -1165,7 +1260,9 @@ pub(crate) struct MergedExecCell {
 }
 
 impl MergedExecCell {
-    pub(crate) fn exec_kind(&self) -> ExecKind { self.kind }
+    pub(crate) fn exec_kind(&self) -> ExecKind {
+        self.kind
+    }
     pub(crate) fn from_exec(exec: &ExecCell) -> Self {
         let (pre, out) = exec.exec_render_parts();
         let kind = match action_from_parsed(&exec.parsed) {
@@ -1174,7 +1271,10 @@ impl MergedExecCell {
             "list" => ExecKind::List,
             _ => ExecKind::Run,
         };
-        Self { segments: vec![(pre, out)], kind }
+        Self {
+            segments: vec![(pre, out)],
+            kind,
+        }
     }
     pub(crate) fn push_exec(&mut self, exec: &ExecCell) {
         let (pre, out) = exec.exec_render_parts();
@@ -1191,16 +1291,25 @@ impl MergedExecCell {
         use ratatui::text::Span;
         // Concatenate per-segment preambles (without their headers), but KEEP ONLY
         // read-like entries. Then normalize the connector so only the very first
-        // visible line uses "└ ", and subsequent lines use two spaces.
+        // visible line uses a corner marker and subsequent lines use two spaces.
         // Finally, coalesce contiguous ranges for the same file.
 
         // Local helper: parse a read range line of the form
         // "└ <file> (lines A to B)" or "  <file> (lines A to B)".
         fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32)> {
-            if line.spans.is_empty() { return None; }
+            if line.spans.is_empty() {
+                return None;
+            }
             let first = line.spans[0].content.as_ref();
-            if !(first == "└ " || first == "  ") { return None; }
-            let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+            if !(first == "└ " || first == "  ") {
+                return None;
+            }
+            let rest: String = line
+                .spans
+                .iter()
+                .skip(1)
+                .map(|s| s.content.as_ref())
+                .collect();
             if let Some(idx) = rest.rfind(" (lines ") {
                 let fname = rest[..idx].to_string();
                 let tail = &rest[idx + 1..];
@@ -1221,33 +1330,45 @@ impl MergedExecCell {
         fn is_search_like(line: &Line<'_>) -> bool {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let t = text.trim();
-            t.contains(" (in ") || t.rsplit_once(" in ").map(|(_, rhs)| rhs.trim_end().ends_with('/')).unwrap_or(false)
+            t.contains(" (in ")
+                || t.rsplit_once(" in ")
+                    .map(|(_, rhs)| rhs.trim_end().ends_with('/'))
+                    .unwrap_or(false)
         }
 
         let mut kept: Vec<Line<'static>> = Vec::new();
         for (seg_idx, (pre_raw, _)) in self.segments.iter().enumerate() {
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() { pre.remove(0); } // drop per-exec header
+            if !pre.is_empty() {
+                pre.remove(0);
+            } // drop per-exec header
             // Filter: keep definite read-range lines; drop obvious search-like lines.
             for l in pre.into_iter() {
-                if is_search_like(&l) { continue; }
+                if is_search_like(&l) {
+                    continue;
+                }
                 // Prefer lines that parse as read ranges; otherwise allow if they are not search-like.
                 let keep = parse_read_line(&l).is_some() || seg_idx == 0; // be permissive for first segment
-                if !keep { continue; }
+                if !keep {
+                    continue;
+                }
                 kept.push(l);
             }
         }
 
-        if kept.is_empty() { return Some(kept); }
+        if kept.is_empty() {
+            return Some(kept);
+        }
 
         // Normalize connector: first visible line uses "└ ", later lines use "  ".
         if let Some(first) = kept.first_mut() {
             let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
             let has_connector = flat.trim_start().starts_with("└ ");
             if !has_connector {
-                first
-                    .spans
-                    .insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                first.spans.insert(
+                    0,
+                    Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
+                );
             }
         }
         for l in kept.iter_mut().skip(1) {
@@ -1267,10 +1388,17 @@ impl MergedExecCell {
 }
 
 impl HistoryCell for MergedExecCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
     fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Exec { kind: self.kind, status: ExecStatus::Success }
+        HistoryCellType::Exec {
+            kind: self.kind,
+            status: ExecStatus::Success,
+        }
     }
     fn desired_height(&self, width: u16) -> u16 {
         // Match custom_render_with_skip exactly:
@@ -1306,12 +1434,18 @@ impl HistoryCell for MergedExecCell {
         for (pre_raw, out_raw) in &self.segments {
             // Build preamble like the renderer: trim, drop first header line, ensure prefix
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() { pre.remove(0); }
+            if !pre.is_empty() {
+                pre.remove(0);
+            }
             if let Some(first) = pre.first_mut() {
                 let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                let already =
+                    flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
                 if !already {
-                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                    first.spans.insert(
+                        0,
+                        Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
+                    );
                 }
             }
             let out = trim_empty_lines(out_raw.clone());
@@ -1334,16 +1468,22 @@ impl HistoryCell for MergedExecCell {
         // Fallback textual form: concatenate all preambles + outputs with blank separators.
         let mut out: Vec<Line<'static>> = Vec::new();
         for (i, (pre, body)) in self.segments.iter().enumerate() {
-            if i > 0 { out.push(Line::from("")); }
+            if i > 0 {
+                out.push(Line::from(""));
+            }
             out.extend(trim_empty_lines(pre.clone()));
             out.extend(trim_empty_lines(body.clone()));
         }
         out
     }
-    fn has_custom_render(&self) -> bool { true }
+    fn has_custom_render(&self) -> bool {
+        true
+    }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
         // Single shared header (e.g., "Ran") then each segment's command + output.
-        let bg = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        let bg = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
         // Hard clear area first
         for y in area.y..area.y.saturating_add(area.height) {
             for x in area.x..area.x.saturating_add(area.width) {
@@ -1354,8 +1494,12 @@ impl HistoryCell for MergedExecCell {
         // Build one header line based on exec kind
         let header_line = match self.kind {
             ExecKind::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-            ExecKind::Search => Line::styled("Searched", Style::default().fg(crate::colors::text())),
-            ExecKind::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
+            ExecKind::Search => {
+                Line::styled("Searched", Style::default().fg(crate::colors::text()))
+            }
+            ExecKind::List => {
+                Line::styled("List Files", Style::default().fg(crate::colors::text()))
+            }
             ExecKind::Run => Line::styled(
                 "Ran",
                 Style::default()
@@ -1374,7 +1518,15 @@ impl HistoryCell for MergedExecCell {
                 Paragraph::new(txt)
                     .block(Block::default().style(bg))
                     .wrap(Wrap { trim: false })
-                    .render(Rect { x: area.x, y: cur_y, width: area.width, height: 1 }, buf);
+                    .render(
+                        Rect {
+                            x: area.x,
+                            y: cur_y,
+                            width: area.width,
+                            height: 1,
+                        },
+                        buf,
+                    );
                 cur_y = cur_y.saturating_add(1);
             }
         } else {
@@ -1385,9 +1537,13 @@ impl HistoryCell for MergedExecCell {
         let ensure_prefix = |lines: &mut Vec<Line<'static>>| {
             if let Some(first) = lines.first_mut() {
                 let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                let already =
+                    flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
                 if !already {
-                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                    first.spans.insert(
+                        0,
+                        Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
+                    );
                 }
             }
         };
@@ -1395,28 +1551,36 @@ impl HistoryCell for MergedExecCell {
         // Special aggregated rendering for Read: collapse file ranges
         if self.kind == ExecKind::Read {
             // Build aggregated preamble once
-            let agg_pre = self
-                .aggregated_read_preamble_lines()
-                .unwrap_or_else(|| {
-                    // Fallback: concatenate per-segment preambles
-                    let mut all: Vec<Line<'static>> = Vec::new();
-                    for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
-                        let mut pre = trim_empty_lines(pre_raw.clone());
-                        if !pre.is_empty() { pre.remove(0); }
-                        if i == 0 {
-                            // ensure leading prefix
-                            if let Some(first) = pre.first_mut() {
-                                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
-                                if !already {
-                                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
-                                }
+            let agg_pre = self.aggregated_read_preamble_lines().unwrap_or_else(|| {
+                // Fallback: concatenate per-segment preambles
+                let mut all: Vec<Line<'static>> = Vec::new();
+                for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
+                    let mut pre = trim_empty_lines(pre_raw.clone());
+                    if !pre.is_empty() {
+                        pre.remove(0);
+                    }
+                    if i == 0 {
+                        // ensure leading corner (legacy for Read aggregation)
+                        if let Some(first) = pre.first_mut() {
+                            let flat: String =
+                                first.spans.iter().map(|s| s.content.as_ref()).collect();
+                            let already = flat.trim_start().starts_with("└ ")
+                                || flat.trim_start().starts_with("  └ ");
+                            if !already {
+                                first.spans.insert(
+                                    0,
+                                    Span::styled(
+                                        "└ ",
+                                        Style::default().fg(crate::colors::text_dim()),
+                                    ),
+                                );
                             }
                         }
-                        all.extend(pre);
                     }
-                    all
-                });
+                    all.extend(pre);
+                }
+                all
+            });
 
             // Header was already handled above (including skip accounting).
             // Render aggregated preamble next using the current skip_rows.
@@ -1437,7 +1601,15 @@ impl HistoryCell for MergedExecCell {
                         .wrap(Wrap { trim: false })
                         .scroll((pre_skip, 0))
                         .style(bg)
-                        .render(Rect { x: area.x, y: cur_y, width: area.width, height: pre_height }, buf);
+                        .render(
+                            Rect {
+                                x: area.x,
+                                y: cur_y,
+                                width: area.width,
+                                height: pre_height,
+                            },
+                            buf,
+                        );
                     cur_y = cur_y.saturating_add(pre_height);
                 }
                 skip_rows = skip_rows.saturating_sub(pre_skip);
@@ -1446,7 +1618,9 @@ impl HistoryCell for MergedExecCell {
             // Render each segment's output only
             let out_wrap_width = area.width.saturating_sub(2);
             for (_pre_raw, out_raw) in self.segments.iter() {
-                if cur_y >= end_y { break; }
+                if cur_y >= end_y {
+                    break;
+                }
                 let out = trim_empty_lines(out_raw.clone());
                 let out_text = Text::from(out.clone());
                 let out_total: u16 = Paragraph::new(out_text.clone())
@@ -1458,17 +1632,35 @@ impl HistoryCell for MergedExecCell {
                 let out_remaining = out_total.saturating_sub(out_skip);
                 let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
                 if out_height > 0 {
-                    let out_area = Rect { x: area.x, y: cur_y, width: area.width, height: out_height };
+                    let out_area = Rect {
+                        x: area.x,
+                        y: cur_y,
+                        width: area.width,
+                        height: out_height,
+                    };
                     let block = Block::default()
                         .borders(Borders::LEFT)
-                        .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                        .border_style(
+                            Style::default()
+                                .fg(crate::colors::border_dim())
+                                .bg(crate::colors::background()),
+                        )
                         .style(Style::default().bg(crate::colors::background()))
-                        .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                        .padding(Padding {
+                            left: 1,
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                        });
                     Paragraph::new(out_text)
                         .block(block)
                         .wrap(Wrap { trim: false })
                         .scroll((out_skip, 0))
-                        .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                        .style(
+                            Style::default()
+                                .bg(crate::colors::background())
+                                .fg(crate::colors::text_dim()),
+                        )
                         .render(out_area, buf);
                     cur_y = cur_y.saturating_add(out_height);
                 }
@@ -1478,10 +1670,14 @@ impl HistoryCell for MergedExecCell {
         }
 
         for (pre_raw, out_raw) in self.segments.iter() {
-            if cur_y >= end_y { break; }
+            if cur_y >= end_y {
+                break;
+            }
             // Drop the per-segment header line (first element)
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() { pre.remove(0); }
+            if !pre.is_empty() {
+                pre.remove(0);
+            }
             // Normalize command prefix for generic execs
             ensure_prefix(&mut pre);
 
@@ -1516,26 +1712,54 @@ impl HistoryCell for MergedExecCell {
                     .wrap(Wrap { trim: false })
                     .scroll((pre_skip, 0))
                     .style(bg)
-                    .render(Rect { x: area.x, y: cur_y, width: area.width, height: pre_height }, buf);
+                    .render(
+                        Rect {
+                            x: area.x,
+                            y: cur_y,
+                            width: area.width,
+                            height: pre_height,
+                        },
+                        buf,
+                    );
                 cur_y = cur_y.saturating_add(pre_height);
             }
 
-            if cur_y >= end_y { break; }
+            if cur_y >= end_y {
+                break;
+            }
             // Render out as bordered, dim block
             let out_remaining = out_total.saturating_sub(out_skip);
             let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
             if out_height > 0 {
-                let out_area = Rect { x: area.x, y: cur_y, width: area.width, height: out_height };
+                let out_area = Rect {
+                    x: area.x,
+                    y: cur_y,
+                    width: area.width,
+                    height: out_height,
+                };
                 let block = Block::default()
                     .borders(Borders::LEFT)
-                    .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                    .border_style(
+                        Style::default()
+                            .fg(crate::colors::border_dim())
+                            .bg(crate::colors::background()),
+                    )
                     .style(Style::default().bg(crate::colors::background()))
-                    .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                    .padding(Padding {
+                        left: 1,
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                    });
                 Paragraph::new(out_text)
                     .block(block)
                     .wrap(Wrap { trim: false })
                     .scroll((out_skip, 0))
-                    .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                    .style(
+                        Style::default()
+                            .bg(crate::colors::background())
+                            .fg(crate::colors::text_dim()),
+                    )
                     .render(out_area, buf);
                 cur_y = cur_y.saturating_add(out_height);
             }
@@ -1588,21 +1812,33 @@ fn exec_render_parts_generic(
         ),
     };
 
+    // Compute output first so we know whether to draw a downward corner on the command.
+    let out = output_lines(output, false, false);
+    let has_output = !trim_empty_lines(out.clone()).is_empty();
+
     pre.push(header_line.clone());
     if let Some(first) = highlighted_cmd.first_mut() {
         // Append duration (dim) to the first highlighted line when running
         if output.is_none() && start_time.is_some() {
             let elapsed = start_time.unwrap().elapsed();
             let duration_str = format!(" ({})", format_duration(elapsed));
-            first
-                .spans
-                .push(Span::styled(duration_str, Style::default().fg(crate::colors::text_dim())));
+            first.spans.push(Span::styled(
+                duration_str,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+        }
+        // Corner is added on the last command line, not the first
+    }
+    if has_output {
+        if let Some(last) = highlighted_cmd.last_mut() {
+            last.spans.insert(
+                0,
+                Span::styled("┌ ", Style::default().fg(crate::colors::text_dim())),
+            );
         }
     }
     pre.extend(highlighted_cmd);
-
-    // Output: always include for generic exec
-    let out = output_lines(output, false, false);
+    // Output: already computed above
     (pre, out)
 }
 
@@ -1695,6 +1931,9 @@ fn exec_render_parts_parsed(
             search_paths.insert(p.to_string());
         }
     }
+    // Compute output preview first to know whether to draw the downward corner.
+    let show_stdout = action == "run";
+    let out = output_lines(output, !show_stdout, false);
     let mut any_content_emitted = false;
     for parsed in parsed_commands.iter() {
         let (label, content) = match parsed {
@@ -1811,7 +2050,7 @@ fn exec_render_parts_parsed(
                 } else {
                     ("Run".to_string(), cmd.clone())
                 }
-            },
+            }
             ParsedCommand::Noop { .. } => continue,
         };
         if label.is_empty() && content.is_empty() {
@@ -1921,7 +2160,8 @@ fn exec_render_parts_parsed(
                 _ => {
                     // Apply shell syntax highlighting to executed command lines.
                     // We highlight the single logical line as bash and append its spans inline.
-                    let mut hl = crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    let mut hl =
+                        crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
                         // `highlight_code_block` returns exactly one line for single-line input.
                         // Append the highlighted spans inline after the prefix.
@@ -1944,20 +2184,29 @@ fn exec_render_parts_parsed(
     coalesce_read_ranges_in_lines_local(&mut pre);
 
     // Output: show stdout only for real run commands; errors always included
-    let show_stdout = action == "run";
-    let out = output_lines(output, !show_stdout, false);
     (pre, out)
 }
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
     use ratatui::text::Span;
-    if lines.len() <= 1 { return; }
+    if lines.len() <= 1 {
+        return;
+    }
     fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32, String)> {
-        if line.spans.is_empty() { return None; }
+        if line.spans.is_empty() {
+            return None;
+        }
         let prefix = line.spans[0].content.to_string();
-        if !(prefix == "└ " || prefix == "  ") { return None; }
-        let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+        if !(prefix == "└ " || prefix == "  ") {
+            return None;
+        }
+        let rest: String = line
+            .spans
+            .iter()
+            .skip(1)
+            .map(|s| s.content.as_ref())
+            .collect();
         if let Some(idx) = rest.rfind(" (lines ") {
             let fname = rest[..idx].to_string();
             let tail = &rest[idx + 1..];
@@ -1975,7 +2224,10 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
     // Merge overlapping or touching ranges for the same file, regardless of adjacency.
     let mut i: usize = 0;
     while i < lines.len() {
-        let Some((fname_a, mut a1, mut a2, prefix_a)) = parse_read_line(&lines[i]) else { i += 1; continue; };
+        let Some((fname_a, mut a1, mut a2, prefix_a)) = parse_read_line(&lines[i]) else {
+            i += 1;
+            continue;
+        };
         let mut k = i + 1;
         while k < lines.len() {
             if let Some((fname_b, b1, b2, _prefix_b)) = parse_read_line(&lines[k]) {
@@ -1986,9 +2238,18 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
                         a1 = a1.min(b1);
                         a2 = a2.max(b2);
                         let new_spans: Vec<Span<'static>> = vec![
-                            Span::styled(prefix_a.clone(), Style::default().add_modifier(Modifier::DIM)),
-                            Span::styled(fname_a.clone(), Style::default().fg(crate::colors::text())),
-                            Span::styled(format!(" (lines {} to {})", a1, a2), Style::default().fg(crate::colors::text_dim())),
+                            Span::styled(
+                                prefix_a.clone(),
+                                Style::default().add_modifier(Modifier::DIM),
+                            ),
+                            Span::styled(
+                                fname_a.clone(),
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                            Span::styled(
+                                format!(" (lines {} to {})", a1, a2),
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
                         ];
                         lines[i] = Line::from(new_spans);
                         lines.remove(k);
@@ -2652,30 +2913,37 @@ impl HistoryCell for StreamingContentCell {
         if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
-            for mut line in all_lines.into_iter() {
+            for line in all_lines.into_iter() {
                 if crate::render::line_utils::is_code_block_painted(&line) {
                     transformed.push(line);
                     continue;
                 }
                 if is_horizontal_rule_line(&line) {
                     transformed.push(Line::from(Span::styled(
-                        std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
+                        std::iter::repeat('─')
+                            .take(text_wrap_width as usize)
+                            .collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     )));
                     continue;
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
                     if is_first_output_line && bullet_char == "-" {
-                        use ratatui::text::Span;
-                        let mut spans = std::mem::take(&mut line.spans);
-                        let mut i = 0usize;
-                        let mut out_spans: Vec<Span<'static>> = Vec::new();
-                        if indent_spaces > 0 { out_spans.push(Span::raw(" ".repeat(indent_spaces))); i = 1; }
-                        i = i.saturating_add(2);
-                        out_spans.extend(spans.drain(i..));
-                        transformed.push(ratatui::text::Line::from(out_spans));
+                        let hang_cols =
+                            unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        transformed.extend(wrap_hanging_line(
+                            line,
+                            indent_spaces,
+                            hang_cols,
+                            text_wrap_width,
+                        ));
                     } else {
-                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, text_wrap_width));
+                        transformed.extend(wrap_bullet_line(
+                            line,
+                            indent_spaces,
+                            &bullet_char,
+                            text_wrap_width,
+                        ));
                     }
                 } else {
                     transformed.push(line);
@@ -2689,13 +2957,20 @@ impl HistoryCell for StreamingContentCell {
         let mut i = 0usize;
         while i < all_lines.len() {
             let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
-            let start = i; i += 1;
-            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            let start = i;
+            i += 1;
+            while i < all_lines.len()
+                && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code
+            {
+                i += 1;
+            }
             if is_code {
                 let mut chunk_len = (i - start) as u16;
                 if let Some(first) = all_lines[start..i].first() {
                     let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    if flat.contains("⟦LANG:") { chunk_len = chunk_len.saturating_sub(1); }
+                    if flat.contains("⟦LANG:") {
+                        chunk_len = chunk_len.saturating_sub(1);
+                    }
                 }
                 total = total.saturating_add(chunk_len.saturating_add(4));
             } else {
@@ -2729,7 +3004,7 @@ impl HistoryCell for StreamingContentCell {
         if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
-            for mut line in all_lines.into_iter() {
+            for line in all_lines.into_iter() {
                 if crate::render::line_utils::is_code_block_painted(&line) {
                     transformed.push(line);
                     continue;
@@ -2746,17 +3021,14 @@ impl HistoryCell for StreamingContentCell {
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
                     if is_first_output_line && bullet_char == "-" {
-                        use ratatui::text::Span;
-                        let mut spans = std::mem::take(&mut line.spans);
-                        let mut i = 0usize;
-                        let mut out_spans: Vec<Span<'static>> = Vec::new();
-                        if indent_spaces > 0 {
-                            out_spans.push(Span::raw(" ".repeat(indent_spaces)));
-                            i = 1; // skip the indent span we expect
-                        }
-                        i = i.saturating_add(2); // skip bullet and following space
-                        out_spans.extend(spans.drain(i..));
-                        transformed.push(ratatui::text::Line::from(out_spans));
+                        let hang_cols =
+                            unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        transformed.extend(wrap_hanging_line(
+                            line,
+                            indent_spaces,
+                            hang_cols,
+                            text_wrap_width,
+                        ));
                     } else {
                         transformed.extend(wrap_bullet_line(
                             line,
@@ -2775,53 +3047,97 @@ impl HistoryCell for StreamingContentCell {
 
         // Segment into normal text vs code blocks (contiguous painted lines)
         #[derive(Debug)]
-        enum Seg { Text(Vec<Line<'static>>), Code(Vec<Line<'static>>), }
+        enum Seg {
+            Text(Vec<Line<'static>>),
+            Code(Vec<Line<'static>>),
+        }
         let mut segs: Vec<Seg> = Vec::new();
         let mut i = 0usize;
         while i < all_lines.len() {
             let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
-            let start = i; i += 1;
-            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            let start = i;
+            i += 1;
+            while i < all_lines.len()
+                && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code
+            {
+                i += 1;
+            }
             let chunk: Vec<Line<'static>> = all_lines[start..i].to_vec();
-            segs.push(if is_code { Seg::Code(chunk) } else { Seg::Text(chunk) });
+            segs.push(if is_code {
+                Seg::Code(chunk)
+            } else {
+                Seg::Text(chunk)
+            });
         }
 
         // Streaming-style top padding row
         let mut remaining_skip = skip_rows;
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
-        if remaining_skip == 0 && cur_y < end_y { cur_y = cur_y.saturating_add(1); }
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        }
         remaining_skip = remaining_skip.saturating_sub(1);
 
         // Helpers
         use unicode_width::UnicodeWidthStr as UW;
-        let measure_line = |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
+        let measure_line =
+            |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
         let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
-            if *y >= end_y { return; }
+            if *y >= end_y {
+                return;
+            }
             match seg {
                 Seg::Text(lines) => {
                     let txt = Text::from(lines.clone());
-                    let total: u16 = Paragraph::new(txt.clone()).wrap(Wrap { trim: false }).line_count(text_wrap_width).try_into().unwrap_or(0);
-                    if *skip >= total { *skip -= total; return; }
+                    let total: u16 = Paragraph::new(txt.clone())
+                        .wrap(Wrap { trim: false })
+                        .line_count(text_wrap_width)
+                        .try_into()
+                        .unwrap_or(0);
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
-                    Paragraph::new(txt).block(Block::default().style(bg_style)).wrap(Wrap { trim: false }).scroll((*skip, 0)).style(bg_style).render(rect, buf);
-                    *y = y.saturating_add(draw_h); *skip = 0;
+                    if draw_h == 0 {
+                        return;
+                    }
+                    let rect = Rect {
+                        x: area.x,
+                        y: *y,
+                        width: area.width,
+                        height: draw_h,
+                    };
+                    Paragraph::new(txt)
+                        .block(Block::default().style(bg_style))
+                        .wrap(Wrap { trim: false })
+                        .scroll((*skip, 0))
+                        .style(bg_style)
+                        .render(rect, buf);
+                    *y = y.saturating_add(draw_h);
+                    *skip = 0;
                 }
                 Seg::Code(lines_in) => {
-                    if lines_in.is_empty() { return; }
+                    if lines_in.is_empty() {
+                        return;
+                    }
                     // Extract optional language sentinel and drop it from the content lines
                     let mut lang_label: Option<String> = None;
                     let mut lines = lines_in.clone();
                     if let Some(first) = lines.first() {
                         let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                         if let Some(s) = flat.strip_prefix("⟦LANG:") {
-                            if let Some(end) = s.find('⟧') { lang_label = Some(s[..end].to_string()); lines.remove(0); }
+                            if let Some(end) = s.find('⟧') {
+                                lang_label = Some(s[..end].to_string());
+                                lines.remove(0);
+                            }
                         }
                     }
-                    if lines.is_empty() { return; }
+                    if lines.is_empty() {
+                        return;
+                    }
                     // Determine target width of the code card (respect content width)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
@@ -2829,18 +3145,49 @@ impl HistoryCell for StreamingContentCell {
                     let card_w = inner_w.saturating_add(4).min(area.width.max(4));
                     // Include top/bottom border (2) + inner padding rows (2)
                     let total = lines.len() as u16 + 4;
-                    if *skip >= total { *skip -= total; return; }
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
-                    if avail == 0 { return; }
+                    if avail == 0 {
+                        return;
+                    }
                     // Compute visible slice of the card (accounting for inner padding rows)
                     let mut local_skip = *skip;
-                    let mut top_border = 1u16; if local_skip > 0 { let drop = local_skip.min(top_border); top_border -= drop; local_skip -= drop; }
-                    let mut top_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(top_pad); top_pad -= drop; local_skip -= drop; }
-                    let code_skip = local_skip.min(lines.len() as u16); local_skip -= code_skip;
-                    let mut bottom_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_pad); bottom_pad -= drop; }
-                    let mut bottom_border = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_border); bottom_border -= drop; }
-                    let visible = top_border + top_pad + (lines.len() as u16 - code_skip) + bottom_pad + bottom_border;
-                    let draw_h = visible.min(avail); if draw_h == 0 { return; }
+                    let mut top_border = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(top_border);
+                        top_border -= drop;
+                        local_skip -= drop;
+                    }
+                    let mut top_pad = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(top_pad);
+                        top_pad -= drop;
+                        local_skip -= drop;
+                    }
+                    let code_skip = local_skip.min(lines.len() as u16);
+                    local_skip -= code_skip;
+                    let mut bottom_pad = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(bottom_pad);
+                        bottom_pad -= drop;
+                    }
+                    let mut bottom_border = 1u16;
+                    if local_skip > 0 {
+                        let drop = local_skip.min(bottom_border);
+                        bottom_border -= drop;
+                    }
+                    let visible = top_border
+                        + top_pad
+                        + (lines.len() as u16 - code_skip)
+                        + bottom_pad
+                        + bottom_border;
+                    let draw_h = visible.min(avail);
+                    if draw_h == 0 {
+                        return;
+                    }
                     // Compute optional outer horizontal padding (1 col left/right) inside content area
                     let content_x = area.x;
                     let content_w = area.width;
@@ -2852,14 +3199,29 @@ impl HistoryCell for StreamingContentCell {
                         (content_x, false, rp)
                     };
                     // Draw bordered block for the visible rows
-                    let rect = Rect { x: rect_x, y: *y, width: card_w, height: draw_h };
+                    let rect = Rect {
+                        x: rect_x,
+                        y: *y,
+                        width: card_w,
+                        height: draw_h,
+                    };
                     let code_bg = crate::colors::code_block_bg();
                     let mut blk = Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 1, right: 1, top: 1, bottom: 1 });
-                    if let Some(lang) = &lang_label { blk = blk.title(Span::styled(format!(" {} ", lang), Style::default().fg(crate::colors::text_dim()))); }
+                        .padding(Padding {
+                            left: 1,
+                            right: 1,
+                            top: 1,
+                            bottom: 1,
+                        });
+                    if let Some(lang) = &lang_label {
+                        blk = blk.title(Span::styled(
+                            format!(" {} ", lang),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
+                    }
                     let blk_for_inner = blk.clone();
                     blk.render(rect, buf);
                     // Inner paragraph area (exclude borders)
@@ -2877,28 +3239,39 @@ impl HistoryCell for StreamingContentCell {
                     if left_pad {
                         let px = rect.x.saturating_sub(1);
                         for yy in rect.y..rect.y.saturating_add(rect.height) {
-                            buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                            buf[(px, yy)]
+                                .set_char(' ')
+                                .set_style(Style::default().bg(code_bg));
                         }
                     }
                     if right_pad {
                         let px = rect.x.saturating_add(rect.width);
                         if px < content_x.saturating_add(content_w) {
                             for yy in rect.y..rect.y.saturating_add(rect.height) {
-                                buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                                buf[(px, yy)]
+                                    .set_char(' ')
+                                    .set_style(Style::default().bg(code_bg));
                             }
                         }
                     }
-                    *y = y.saturating_add(draw_h); *skip = 0;
+                    *y = y.saturating_add(draw_h);
+                    *skip = 0;
                 }
             }
         };
 
         for seg in &segs {
-            if cur_y >= end_y { break; }
+            if cur_y >= end_y {
+                break;
+            }
             draw_segment(seg, &mut cur_y, &mut remaining_skip);
         }
         // Bottom padding row (blank): area already cleared
-        if remaining_skip == 0 && cur_y < end_y { cur_y = cur_y.saturating_add(1); } else { remaining_skip = remaining_skip.saturating_sub(1); }
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        } else {
+            remaining_skip = remaining_skip.saturating_sub(1);
+        }
         // Mark as used to satisfy unused_assignments lint
         let _ = (cur_y, remaining_skip);
     }
@@ -3015,8 +3388,12 @@ fn wrap_bullet_line(
 
     // Prefix widths (display columns)
     let bullet_cols = UWStr::width(bullet);
-    let first_prefix = indent_spaces + bullet_cols + 1 /*space*/;
-    let cont_prefix = indent_spaces + bullet_cols + 1; // spaces equal to bullet+space
+    // Use a two-space gap after the bullet for better legibility and to keep
+    // continuation lines aligned with the start of the bullet content. This
+    // matches typical Markdown list rendering expectations in terminals.
+    let gap_after_bullet = 2usize;
+    let first_prefix = indent_spaces + bullet_cols + gap_after_bullet;
+    let cont_prefix = indent_spaces + bullet_cols + gap_after_bullet; // spaces equal to bullet + gap
 
     let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
     let mut pos = 0usize;
@@ -3030,8 +3407,8 @@ fn wrap_bullet_line(
         let avail_cols = avail_cols.max(1);
 
         // Greedy take up to avail_cols, preferring to break at a preceding space.
-        let mut taken = 0usize;      // number of chars consumed
-        let mut cols = 0usize;       // display columns consumed
+        let mut taken = 0usize; // number of chars consumed
+        let mut cols = 0usize; // display columns consumed
         let mut last_space_char_idx: Option<usize> = None; // index into chars
         while pos + taken < chars.len() {
             let (ch, _) = chars[pos + taken];
@@ -3044,7 +3421,9 @@ fn wrap_bullet_line(
                 last_space_char_idx = Some(pos + taken);
             }
             taken += 1;
-            if cols == avail_cols { break; }
+            if cols == avail_cols {
+                break;
+            }
         }
 
         // Choose cut position: prefer last space within range; otherwise force break.
@@ -3054,9 +3433,13 @@ fn wrap_bullet_line(
             // cut_end excludes the space
             let mut cut = space_idx;
             // Also trim any trailing spaces before the break in this segment
-            while cut > pos && chars[cut - 1].0 == ' ' { cut -= 1; }
+            while cut > pos && chars[cut - 1].0 == ' ' {
+                cut -= 1;
+            }
             // Advance next past contiguous spaces
-            while next < chars.len() && chars[next].0 == ' ' { next += 1; }
+            while next < chars.len() && chars[next].0 == ' ' {
+                next += 1;
+            }
             (cut, next)
         } else {
             // No space seen in range – hard break (very long word or first token longer than width)
@@ -3066,8 +3449,11 @@ fn wrap_bullet_line(
         // If cut_end did not advance (e.g., segment starts with spaces), skip spaces and continue
         if cut_end <= pos {
             let mut p = pos;
-            while p < chars.len() && chars[p].0 == ' ' { p += 1; }
-            if p == pos { // safety: ensure forward progress
+            while p < chars.len() && chars[p].0 == ' ' {
+                p += 1;
+            }
+            if p == pos {
+                // safety: ensure forward progress
                 p = pos + 1;
             }
             pos = p;
@@ -3082,7 +3468,8 @@ fn wrap_bullet_line(
                 seg_spans.push(Span::raw(" ".repeat(indent_spaces)));
             }
             seg_spans.push(Span::styled(bullet.to_string(), bullet_style));
-            seg_spans.push(Span::raw(" "));
+            // Two-space gap after bullet for readability and hanging indent
+            seg_spans.push(Span::raw("  "));
         } else {
             seg_spans.push(Span::raw(" ".repeat(cont_prefix)));
         }
@@ -3118,6 +3505,131 @@ fn wrap_bullet_line(
         out.push(ratatui::text::Line::from(seg_spans));
     }
 
+    out
+}
+
+// Wrap a line with a hanging indent of `indent_spaces + hang_cols` columns, without
+// rendering a bullet glyph. This is used for the special case where we suppress the
+// initial "-" bullet on the first assistant line, but still want continuation lines
+// to align under where the content would begin (i.e., as if there were a bullet +
+// two-space gap).
+fn wrap_hanging_line(
+    mut line: ratatui::text::Line<'static>,
+    indent_spaces: usize,
+    hang_cols: usize,
+    width: u16,
+) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::text::Span;
+    use unicode_width::UnicodeWidthChar as UWChar;
+
+    let width = width as usize;
+    let mut spans = std::mem::take(&mut line.spans);
+    // If the line contains OSC 8 hyperlinks, avoid manual rewrapping to prevent
+    // breaking escape sequences; fall back to Paragraph wrapping by returning unchanged.
+    if spans.iter().any(|s| s.content.as_ref().contains('\u{1b}')) {
+        line.spans = spans;
+        return vec![line];
+    }
+    // The entire line is content (any leading indent kept by caller if needed)
+    let content_spans = std::mem::take(&mut spans);
+    let mut chars: Vec<(char, ratatui::style::Style)> = Vec::new();
+    for sp in &content_spans {
+        let st = sp.style;
+        for ch in sp.content.as_ref().chars() {
+            chars.push((ch, st));
+        }
+    }
+
+    let first_prefix = indent_spaces + hang_cols;
+    let cont_prefix = indent_spaces + hang_cols;
+    let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
+    let mut pos = 0usize;
+    let mut first = true;
+    while pos < chars.len() {
+        let avail_cols = if first {
+            width.saturating_sub(first_prefix)
+        } else {
+            width.saturating_sub(cont_prefix)
+        };
+        let avail_cols = avail_cols.max(1);
+
+        // Greedy take up to avail_cols, prefer to break at a preceding space
+        let mut taken = 0usize;
+        let mut cols = 0usize;
+        let mut last_space_char_idx: Option<usize> = None;
+        while pos + taken < chars.len() {
+            let (ch, _) = chars[pos + taken];
+            let w = UWChar::width(ch).unwrap_or(0).max(1);
+            if cols.saturating_add(w) > avail_cols {
+                break;
+            }
+            cols += w;
+            if ch == ' ' {
+                last_space_char_idx = Some(pos + taken);
+            }
+            taken += 1;
+            if cols == avail_cols {
+                break;
+            }
+        }
+        let (cut_end, next_start) = if let Some(space_idx) = last_space_char_idx {
+            // Trim spaces before EOL and skip spaces at BOL for next line
+            let mut cut = space_idx;
+            while cut > pos && chars[cut - 1].0 == ' ' {
+                cut -= 1;
+            }
+            let mut next = space_idx;
+            while next < chars.len() && chars[next].0 == ' ' {
+                next += 1;
+            }
+            (cut, next)
+        } else {
+            (pos + taken, pos + taken)
+        };
+        if cut_end <= pos {
+            let mut p = pos;
+            while p < chars.len() && chars[p].0 == ' ' {
+                p += 1;
+            }
+            if p == pos {
+                p = pos + 1;
+            }
+            pos = p;
+            continue;
+        }
+        // Build this wrapped row
+        let slice = &chars[pos..cut_end];
+        let mut seg_spans: Vec<Span<'static>> = Vec::new();
+        let prefix_spaces = if first { first_prefix } else { cont_prefix };
+        if prefix_spaces > 0 {
+            seg_spans.push(Span::raw(" ".repeat(prefix_spaces)));
+        }
+        let mut cur_style: Option<ratatui::style::Style> = None;
+        let mut buf = String::new();
+        for (ch, st) in slice.iter().copied() {
+            if cur_style.map(|cs| cs == st).unwrap_or(false) {
+                buf.push(ch);
+            } else {
+                if !buf.is_empty() {
+                    seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap()));
+                }
+                cur_style = Some(st);
+                buf.push(ch);
+            }
+        }
+        if !buf.is_empty() {
+            seg_spans.push(Span::styled(buf, cur_style.unwrap()));
+        }
+        out.push(ratatui::text::Line::from(seg_spans));
+        pos = next_start;
+        first = false;
+    }
+    if out.is_empty() {
+        let prefix_spaces = first_prefix;
+        out.push(ratatui::text::Line::from(Span::raw(
+            " ".repeat(prefix_spaces),
+        )));
+    }
     out
 }
 
@@ -4104,7 +4616,7 @@ fn new_parsed_command(
                 } else {
                     ("Run".to_string(), cmd.clone())
                 }
-            },
+            }
             ParsedCommand::Noop { .. } => continue,
         };
 
@@ -4228,7 +4740,8 @@ fn new_parsed_command(
                 }
                 _ => {
                     // For executed commands (Run/Test/Lint/etc.), use shell syntax highlighting.
-                    let mut hl = crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    let mut hl =
+                        crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
                         spans.extend(first.spans.drain(..));
                     } else {
@@ -4262,7 +4775,8 @@ fn new_exec_command_generic(
     let command_escaped = strip_bash_lc_and_escape(command);
     // Highlight the command as bash and then append a dimmed duration to the
     // first visual line while running.
-    let mut highlighted_cmd = crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
+    let mut highlighted_cmd =
+        crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
 
     let header_line = match output {
         None => {
@@ -4302,9 +4816,10 @@ fn new_exec_command_generic(
         if output.is_none() && start_time.is_some() {
             let elapsed = start_time.unwrap().elapsed();
             let duration_str = format!(" ({})", format_duration(elapsed));
-            first
-                .spans
-                .push(Span::styled(duration_str, Style::default().fg(crate::colors::text_dim())));
+            first.spans.push(Span::styled(
+                duration_str,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
         }
     }
     lines.extend(highlighted_cmd);

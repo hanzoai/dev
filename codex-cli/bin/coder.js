@@ -3,12 +3,64 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
+import { realpathSync, accessSync, constants } from "fs";
+import { spawnSync } from "child_process";
 
 // __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const { platform, arch } = process;
+
+// If invoked as "code" and another "code" exists in PATH that is not
+// this package's launcher, delegate to it (e.g., VS Code's CLI).
+// This avoids hijacking users who already have VS Code installed.
+const maybeDelegateToOtherCode = () => {
+  try {
+    const invoked = process.env._ || "";
+    const invokedBase = path.basename(invoked);
+    if (invokedBase !== "code") return false;
+
+    const ourScriptReal = realpathSync(process.argv[1]);
+
+    const which = spawnSync("bash", ["-lc", "which -a code 2>/dev/null"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (which.status !== 0 || !which.stdout) return false;
+
+    const candidates = which.stdout
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    for (const c of candidates) {
+      // Skip the path that was used to invoke us
+      if (c === invoked) continue;
+      try {
+        const real = realpathSync(c);
+        // Skip if it resolves to our own script (same file inside our package)
+        if (real === ourScriptReal) continue;
+
+        // Ensure it's executable; if so, exec and mirror exit code
+        accessSync(c, constants.X_OK);
+        const run = spawnSync(c, process.argv.slice(2), {
+          stdio: "inherit",
+        });
+        // If it executed (even with non-zero), we consider delegation done.
+        const code = run.status == null ? 1 : run.status;
+        process.exit(code);
+      } catch {
+        // Try next candidate
+      }
+    }
+  } catch {
+    // Fall through to our own binary
+  }
+  return false;
+};
+
+maybeDelegateToOtherCode();
 
 const isWSL = () => {
   if (platform !== "linux") return false;

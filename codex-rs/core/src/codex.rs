@@ -3415,8 +3415,54 @@ async fn handle_run_agent(
                     .into_iter()
                     .filter_map(|m| m.as_str().map(String::from))
                     .collect(),
-                _ => vec!["codex".to_string()], // Default model
+                _ => vec!["code".to_string()], // Default model
             };
+
+            // Helper: derive the command to check for a given model/config pair.
+            fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
+                if let Some(c) = cfg { return (c.command.clone(), false); }
+                let m = model.to_lowercase();
+                match m.as_str() {
+                    // Built-in: always available via current_exe fallback.
+                    "code" | "codex" => (m, true),
+                    // External CLIs expected to be in PATH
+                    "claude" => ("claude".to_string(), false),
+                    "gemini" => ("gemini".to_string(), false),
+                    _ => (m, false),
+                }
+            }
+
+            // Helper: PATH lookup to determine if a command exists.
+            fn command_exists(cmd: &str) -> bool {
+                if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
+                    return std::fs::metadata(cmd).is_ok();
+                }
+                let Some(path_os) = std::env::var_os("PATH") else { return false; };
+                let pathext: Vec<String> = if cfg!(windows) {
+                    std::env::var("PATHEXT")
+                        .unwrap_or(".COM;.EXE;.BAT;.CMD;.MSI;.PS1".to_string())
+                        .split(';')
+                        .filter(|e| !e.trim().is_empty())
+                        .map(|s| s.to_string())
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                for dir in std::env::split_paths(&path_os) {
+                    if dir.as_os_str().is_empty() { continue; }
+                    let base = dir.join(cmd);
+                    if cfg!(windows) {
+                        if std::fs::metadata(&base).is_ok() { return true; }
+                        for ext in &pathext {
+                            let candidate = base.with_extension(ext.trim_start_matches('.'));
+                            if std::fs::metadata(&candidate).is_ok() { return true; }
+                        }
+                    } else if std::fs::metadata(&base).is_ok() {
+                        return true;
+                    }
+                }
+                false
+            }
 
             let batch_id = if models.len() > 1 {
                 Some(Uuid::new_v4().to_string())
@@ -3425,6 +3471,7 @@ async fn handle_run_agent(
             };
 
             let mut agent_ids = Vec::new();
+            let mut skipped: Vec<String> = Vec::new();
             for model in models {
                 // Check if this model is configured and enabled
                 let agent_config = sess.agents.iter().find(|a| {
@@ -3435,6 +3482,12 @@ async fn handle_run_agent(
                 if let Some(config) = agent_config {
                     if !config.enabled {
                         continue; // Skip disabled agents
+                    }
+
+                    let (cmd_to_check, is_builtin) = resolve_command_for_check(&model, Some(config));
+                    if !is_builtin && !command_exists(&cmd_to_check) {
+                        skipped.push(format!("{} (missing: {})", model, cmd_to_check));
+                        continue;
                     }
 
                     // Override read_only if agent is configured as read-only
@@ -3455,6 +3508,11 @@ async fn handle_run_agent(
                     agent_ids.push(agent_id);
                 } else {
                     // Use default configuration for unknown agents
+                    let (cmd_to_check, is_builtin) = resolve_command_for_check(&model, None);
+                    if !is_builtin && !command_exists(&cmd_to_check) {
+                        skipped.push(format!("{} (missing: {})", model, cmd_to_check));
+                        continue;
+                    }
                     let agent_id = manager
                         .create_agent(
                             model,
@@ -3470,6 +3528,22 @@ async fn handle_run_agent(
                 }
             }
 
+            // If nothing runnable remains, fall back to a single built‑in Codex agent.
+            if agent_ids.is_empty() {
+                let agent_id = manager
+                    .create_agent(
+                        "code".to_string(),
+                        params.task.clone(),
+                        params.context.clone(),
+                        params.output.clone(),
+                        params.files.clone().unwrap_or_default(),
+                        params.read_only.unwrap_or(false),
+                        None,
+                    )
+                    .await;
+                agent_ids.push(agent_id);
+            }
+
             // Send agent status update event
             drop(manager); // Release the write lock first
             if agent_ids.len() > 0 {
@@ -3481,13 +3555,15 @@ async fn handle_run_agent(
                     "batch_id": batch_id,
                     "agent_ids": agent_ids,
                     "status": "started",
-                    "message": format!("Started {} agents", agent_ids.len())
+                    "message": format!("Started {} agents", agent_ids.len()),
+                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
                 })
             } else {
                 serde_json::json!({
                     "agent_id": agent_ids[0],
                     "status": "started",
-                    "message": "Agent started successfully"
+                    "message": "Agent started successfully",
+                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
                 })
             };
 
