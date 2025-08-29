@@ -433,6 +433,18 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
+    /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
+    fn maybe_hide_spinner(&mut self) {
+        let any_tools_running = !self.running_commands.is_empty()
+            || !self.running_custom_tools.is_empty()
+            || !self.running_web_search.is_empty();
+        let any_streaming = self.stream.is_write_cycle_active();
+        let any_agents_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
+        let any_tasks_active = !self.active_task_ids.is_empty();
+        if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
+            self.bottom_pane.set_task_running(false);
+        }
+    }
     fn finalize_exec_cell_at(&mut self, idx: usize, exit_code: i32, stdout: String, stderr: String) {
         if idx >= self.history_cells.len() { return; }
         if let Some(exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
@@ -528,6 +540,8 @@ impl ChatWidget<'_> {
         if !any_tasks_active {
             self.bottom_pane.set_task_running(false);
         }
+        // Re-check global idle state
+        self.maybe_hide_spinner();
     }
 
     fn finalize_all_running_due_to_answer(&mut self) {
@@ -1074,6 +1088,8 @@ impl ChatWidget<'_> {
             self.bottom_pane
                 .update_status_text(format!("command failed (exit {})", exit_code));
         }
+        // Drop spinner if we're now idle
+        self.maybe_hide_spinner();
     }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
@@ -1085,7 +1101,7 @@ impl ChatWidget<'_> {
         }
 
         // Helper to compute the header label used by exec cells
-        let exec_label = |e: &history_cell::ExecCell| -> &'static str {
+        let _exec_label = |e: &history_cell::ExecCell| -> &'static str {
             let action = history_cell::action_from_parsed(&e.parsed);
             match (&e.output, action) {
                 (None, "read") => "Reading...",
@@ -1099,7 +1115,7 @@ impl ChatWidget<'_> {
                 _ => "",
             }
         };
-        let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
+        let _is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
 
         // New cell must be an ExecCell with completed output
         let new_exec = match self.history_cells[idx]
@@ -1109,10 +1125,16 @@ impl ChatWidget<'_> {
             Some(e) if e.output.is_some() => e,
             _ => return,
         };
-        let new_label = exec_label(new_exec);
-        if new_label.is_empty() || !is_joinable_label(new_label) {
-            return;
-        }
+        // Compare kinds rather than labels to avoid string drift
+        let to_kind = |e: &history_cell::ExecCell| -> history_cell::ExecKind {
+            match history_cell::action_from_parsed(&e.parsed) {
+                "read" => history_cell::ExecKind::Read,
+                "search" => history_cell::ExecKind::Search,
+                "list" => history_cell::ExecKind::List,
+                _ => history_cell::ExecKind::Run,
+            }
+        };
+        let new_kind = to_kind(new_exec);
 
         // Case 1: previous is also a completed ExecCell with same header -> merge into MergedExecCell preserving styling
         if let Some(prev_exec) = self.history_cells[idx - 1]
@@ -1120,8 +1142,7 @@ impl ChatWidget<'_> {
             .downcast_ref::<history_cell::ExecCell>()
         {
             if prev_exec.output.is_some() {
-                let last_label = exec_label(prev_exec);
-                if last_label == new_label && !last_label.is_empty() {
+                if to_kind(prev_exec) == new_kind {
                     let mut merged = history_cell::MergedExecCell::from_exec(prev_exec);
                     if let Some(current_exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
                         merged.push_exec(current_exec);
@@ -1149,13 +1170,7 @@ impl ChatWidget<'_> {
                 .as_any_mut()
                 .downcast_mut::<history_cell::MergedExecCell>()
             {
-                let merged_label = match prev_merged.exec_kind() {
-                    history_cell::ExecKind::Read => "Read",
-                    history_cell::ExecKind::Search => "Searched",
-                    history_cell::ExecKind::List => "Listed",
-                    history_cell::ExecKind::Run => "Ran",
-                };
-                if new_label == merged_label {
+                if prev_merged.exec_kind() == new_kind {
                     if let Some(current_exec) = right[0]
                         .as_any()
                         .downcast_ref::<history_cell::ExecCell>()
@@ -1255,6 +1270,8 @@ impl ChatWidget<'_> {
         } else {
             self.add_to_history(history_cell::new_patch_apply_failure(ev.stderr));
         }
+        // After patch application completes, re-evaluate idle state
+        self.maybe_hide_spinner();
     }
 
     /// Get or create the global browser manager
@@ -1377,6 +1394,9 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_task_running(false);
         self.running_commands.clear();
         self.stream.clear_all();
+        self.agents_ready_to_start = false;
+        self.active_task_ids.clear();
+        self.maybe_hide_spinner();
         self.mark_needs_redraw();
     }
 
@@ -1396,6 +1416,10 @@ impl ChatWidget<'_> {
             self.live_builder = RowBuilder::new(usize::MAX);
             // Stream state is now managed by StreamController
             self.content_buffer.clear();
+            // Defensive: clear transient flags so UI can quiesce
+            self.agents_ready_to_start = false;
+            self.active_task_ids.clear();
+            self.maybe_hide_spinner();
             self.request_redraw();
         }
     }
@@ -2582,6 +2606,12 @@ impl ChatWidget<'_> {
                 self.last_assistant_message = Some(message);
                 // Mark this id closed for further answer deltas in this turn
                 self.closed_answer_ids.insert(id.clone());
+                // Defensive: this turn's task should be considered complete for UI purposes
+                self.active_task_ids.remove(&id);
+                // Defensive: clear transient agents-preparing state unless we see real updates
+                self.agents_ready_to_start = false;
+                // Possibly drop spinner if everything is idle now
+                self.maybe_hide_spinner();
                 self.mark_needs_redraw();
             }
             EventMsg::ReplayHistory(ev) => {
@@ -2678,6 +2708,8 @@ impl ChatWidget<'_> {
                 }
                 // Update status to reflect we're done searching
                 self.bottom_pane.update_status_text("responding".to_string());
+                // Re-evaluate spinner visibility
+                self.maybe_hide_spinner();
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -2756,6 +2788,10 @@ impl ChatWidget<'_> {
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
                 self.active_task_ids.remove(&id);
+                // Defensive: clear transient agents-preparing state
+                self.agents_ready_to_start = false;
+                // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
+                self.finalize_all_running_due_to_answer();
                 // Mark any running web searches as completed
                 if !self.running_web_search.is_empty() {
                     // Replace each running web search cell in-place with a completed one
@@ -2818,6 +2854,8 @@ impl ChatWidget<'_> {
                     self.bottom_pane.set_task_running(false);
                 }
                 self.current_stream_kind = None;
+                // Final re-check for idle state
+                self.maybe_hide_spinner();
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -3030,6 +3068,7 @@ impl ChatWidget<'_> {
 
                 // After tool completes, likely transitioning to response
                 self.bottom_pane.update_status_text("responding".to_string());
+                self.maybe_hide_spinner();
             }
             EventMsg::GetHistoryEntryResponse(event) => {
                 let codex_core::protocol::GetHistoryEntryResponseEvent {

@@ -53,12 +53,24 @@ pub(crate) enum OpenAiTool {
     Function(ResponsesApiTool),
     #[serde(rename = "local_shell")]
     LocalShell {},
-    // TODO: Understand why we get an error on web_search although the API docs say it's supported.
-    // https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses#:~:text=%7B%20type%3A%20%22web_search%22%20%7D%2C
-    #[serde(rename = "web_search_preview")]
-    WebSearch {},
+    /// Native Responses API web search tool. Optional fields like `filters`
+    /// are serialized alongside the type discriminator.
+    #[serde(rename = "web_search")]
+    WebSearch(WebSearchTool),
     #[serde(rename = "custom")]
     Freeform(FreeformTool),
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct WebSearchTool {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filters: Option<WebSearchFilters>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct WebSearchFilters {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_domains: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +90,7 @@ pub(crate) struct ToolsConfig {
     pub web_search_request: bool,
     #[allow(dead_code)]
     pub include_view_image_tool: bool,
+    pub web_search_allowed_domains: Option<Vec<String>>,
 }
 
 #[allow(dead_code)]
@@ -131,6 +144,7 @@ impl ToolsConfig {
             apply_patch_tool_type,
             web_search_request: include_web_search_request,
             include_view_image_tool,
+            web_search_allowed_domains: None,
         }
     }
 
@@ -583,7 +597,15 @@ pub(crate) fn get_openai_tools(
     tools.push(create_list_agents_tool());
 
     if config.web_search_request {
-        tools.push(OpenAiTool::WebSearch {});
+        let tool = match &config.web_search_allowed_domains {
+            Some(domains) if !domains.is_empty() => OpenAiTool::WebSearch(WebSearchTool {
+                filters: Some(WebSearchFilters {
+                    allowed_domains: Some(domains.clone()),
+                }),
+            }),
+            _ => OpenAiTool::WebSearch(WebSearchTool::default()),
+        };
+        tools.push(tool);
     }
 
     // Always include web_fetch tool
@@ -623,7 +645,7 @@ mod tests {
             .map(|tool| match tool {
                 OpenAiTool::Function(ResponsesApiTool { name, .. }) => name,
                 OpenAiTool::LocalShell {} => "local_shell",
-                OpenAiTool::WebSearch {} => "web_search",
+                OpenAiTool::WebSearch(_) => "web_search",
                 OpenAiTool::Freeform(FreeformTool { name, .. }) => name,
             })
             .collect::<Vec<_>>();

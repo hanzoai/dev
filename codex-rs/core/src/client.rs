@@ -5,6 +5,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use codex_login::AuthManager;
 use codex_login::AuthMode;
+use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 use reqwest::StatusCode;
@@ -18,7 +19,6 @@ use tracing::debug;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
-use codex_protocol::models::ResponseItem;
 
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
@@ -174,7 +174,7 @@ impl ModelClient {
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
         let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
-        // ChatGPT backend expects the preview name for web search.
+        // ChatGPT backend currently expects the preview tool name.
         if auth_mode == Some(AuthMode::ChatGPT) {
             for tool in &mut tools_json {
                 if let Some(map) = tool.as_object_mut() {

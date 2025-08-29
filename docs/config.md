@@ -615,3 +615,4 @@ Options that are specific to the TUI.
 | `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
 | `preferred_auth_method` | `chatgpt` | `apikey` | Select default auth method (default: `chatgpt`). |
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
+| `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |
