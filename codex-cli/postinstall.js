@@ -30,6 +30,30 @@ function getTargetTriple() {
   return `${rustArch}-${rustPlatform}`;
 }
 
+// Resolve a persistent user cache directory for binaries so that repeated
+// npx installs can reuse a previously downloaded artifact and skip work.
+function getCacheDir(version) {
+  const plt = platform();
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  let base = '';
+  if (plt === 'win32') {
+    base = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+  } else if (plt === 'darwin') {
+    base = join(home, 'Library', 'Caches');
+  } else {
+    base = process.env.XDG_CACHE_HOME || join(home, '.cache');
+  }
+  const dir = join(base, 'just-every', 'code', version);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function getCachedBinaryPath(version, targetTriple, isWindows) {
+  const ext = isWindows ? '.exe' : '';
+  const cacheDir = getCacheDir(version);
+  return join(cacheDir, `code-${targetTriple}${ext}`);
+}
+
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -151,27 +175,33 @@ function validateDownloadedBinary(p) {
 
 async function main() {
   // Detect potential PATH conflict with an existing `code` command (e.g., VS Code)
-  try {
-    const whichCmd = process.platform === 'win32' ? 'where code' : 'command -v code || which code || true';
-    const resolved = execSync(whichCmd, { stdio: ['ignore', 'pipe', 'ignore'], shell: process.platform !== 'win32' }).toString().split(/\r?\n/).filter(Boolean)[0];
-    if (resolved) {
-      let contents = '';
-      try {
-        contents = readFileSync(resolved, 'utf8');
-      } catch {
-        contents = '';
+  // Only relevant for global installs; skip for npx/local installs to keep postinstall fast.
+  const ua = process.env.npm_config_user_agent || '';
+  const isNpx = ua.includes('npx');
+  const isGlobal = process.env.npm_config_global === 'true';
+  if (isGlobal && !isNpx) {
+    try {
+      const whichCmd = process.platform === 'win32' ? 'where code' : 'command -v code || which code || true';
+      const resolved = execSync(whichCmd, { stdio: ['ignore', 'pipe', 'ignore'], shell: process.platform !== 'win32' }).toString().split(/\r?\n/).filter(Boolean)[0];
+      if (resolved) {
+        let contents = '';
+        try {
+          contents = readFileSync(resolved, 'utf8');
+        } catch {
+          contents = '';
+        }
+        const looksLikeOurs = contents.includes('@just-every/code') || contents.includes('bin/coder.js');
+        if (!looksLikeOurs) {
+          console.warn('[notice] Found an existing `code` on PATH at:');
+          console.warn(`         ${resolved}`);
+          console.warn('[notice] We will still install our CLI, also available as `coder`.');
+          console.warn('         If `code` runs another tool, prefer using: coder');
+          console.warn('         Or run our CLI explicitly via: npx -y @just-every/code');
+        }
       }
-      const looksLikeOurs = contents.includes('@just-every/code') || contents.includes('bin/coder.js');
-      if (!looksLikeOurs) {
-        console.warn('[notice] Found an existing `code` on PATH at:');
-        console.warn(`         ${resolved}`);
-        console.warn('[notice] We will still install our CLI, also available as `coder`.');
-        console.warn('         If `code` runs another tool, prefer using: coder');
-        console.warn('         Or run our CLI explicitly via: npx -y @just-every/code');
-      }
+    } catch {
+      // Ignore detection failures; proceed with install.
     }
-  } catch {
-    // Ignore detection failures; proceed with install.
   }
 
   const targetTriple = getTargetTriple();
@@ -195,6 +225,7 @@ async function main() {
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
     const localPath = join(binDir, binaryName);
+    const cachePath = getCachedBinaryPath(version, targetTriple, isWindows);
     
     // Skip if already exists and has correct permissions
     if (existsSync(localPath)) {
@@ -210,6 +241,21 @@ async function main() {
         console.log(`✓ ${binaryName} already exists`);
       }
       continue;
+    }
+
+    // Fast path: if a valid cached binary exists for this version+triple, reuse it.
+    try {
+      if (existsSync(cachePath)) {
+        const valid = validateDownloadedBinary(cachePath);
+        if (valid.ok) {
+          copyFileSync(cachePath, localPath);
+          if (!isWindows) chmodSync(localPath, 0o755);
+          console.log(`✓ Installed ${binaryName} from user cache`);
+          continue; // next binary
+        }
+      }
+    } catch {
+      // Ignore cache errors and fall through to normal paths
     }
     
     // First try platform package via npm optionalDependencies (fast path on npm CDN).
@@ -245,6 +291,12 @@ async function main() {
         copyFileSync(src, localPath);
         if (!isWindows) chmodSync(localPath, 0o755);
         console.log(`✓ Installed ${binaryName} from ${platformPkg.name}`);
+        // Populate cache for future npx runs
+        try {
+          if (!existsSync(cachePath)) {
+            copyFileSync(localPath, cachePath);
+          }
+        } catch {}
         continue; // next binary
       } catch (e) {
         console.warn(`⚠ Failed platform package install (${e.message}), falling back to GitHub download`);
@@ -317,6 +369,10 @@ async function main() {
       }
       
       console.log(`✓ Installed ${binaryName}`);
+      // Save into persistent cache for future fast installs
+      try {
+        copyFileSync(localPath, cachePath);
+      } catch {}
     } catch (error) {
       console.error(`✗ Failed to install ${binaryName}: ${error.message}`);
       console.error(`  Downloaded from: ${downloadUrl}`);
@@ -353,7 +409,8 @@ async function main() {
   }
 
   // With bin name = 'code', handle collisions (e.g., VS Code) and add legacy wrappers
-  try {
+  // Only do this for global installs; skip under npx/local to avoid extra work and collisions.
+  if (isGlobal && !isNpx) try {
     const isTTY = process.stdout && process.stdout.isTTY;
     const isWindows = platform() === 'win32';
 
