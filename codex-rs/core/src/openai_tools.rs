@@ -74,6 +74,7 @@ pub(crate) struct ToolsConfig {
     #[allow(dead_code)]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     pub web_search_request: bool,
+    pub include_view_image_tool: bool,
 }
 
 #[allow(dead_code)]
@@ -85,6 +86,7 @@ pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) include_apply_patch_tool: bool,
     pub(crate) include_web_search_request: bool,
     pub(crate) use_streamable_shell_tool: bool,
+    pub(crate) include_view_image_tool: bool,
 }
 
 impl ToolsConfig {
@@ -773,7 +775,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -842,6 +844,7 @@ mod tests {
             include_apply_patch_tool: false,
             include_web_search_request: true,
             use_streamable_shell_tool: false,
+            include_view_image_tool: true,
         });
 
         let tools = get_openai_tools(
@@ -887,7 +890,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -960,7 +963,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -1031,7 +1034,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1105,7 +1108,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {

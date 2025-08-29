@@ -7,6 +7,8 @@ use codex_core::ConversationManager;
 use codex_core::NewConversation;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
+use codex_core::config::ConfigToml;
+use codex_core::config::load_config_as_toml;
 use codex_core::git_info::git_diff_to_remote;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::Event;
@@ -40,6 +42,7 @@ use codex_protocol::mcp_protocol::ConversationId;
 use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::ExecCommandApprovalParams;
 use codex_protocol::mcp_protocol::ExecCommandApprovalResponse;
+use codex_protocol::mcp_protocol::GetConfigTomlResponse;
 use codex_protocol::mcp_protocol::InputItem as WireInputItem;
 use codex_protocol::mcp_protocol::InterruptConversationParams;
 use codex_protocol::mcp_protocol::InterruptConversationResponse;
@@ -148,6 +151,62 @@ impl CodexMessageProcessor {
                 self.git_diff_to_origin(request_id, params.cwd).await;
             }
         }
+    }
+
+    async fn get_config_toml(&self, request_id: RequestId) {
+        let toml_value = match load_config_as_toml(&self.config.codex_home) {
+            Ok(val) => val,
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to load config.toml: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let cfg: ConfigToml = match toml_value.try_into() {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to parse config.toml: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let profiles: HashMap<String, codex_protocol::config_types::ConfigProfile> = cfg
+            .profiles
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    // Define this explicitly here to avoid the need to
+                    // implement `From<codex_core::config_profile::ConfigProfile>`
+                    // for the `ConfigProfile` type and introduce a dependency on codex_core
+                    codex_protocol::config_types::ConfigProfile {
+                        model: v.model,
+                        approval_policy: v.approval_policy,
+                        model_reasoning_effort: v.model_reasoning_effort,
+                    },
+                )
+            })
+            .collect();
+
+        let response = GetConfigTomlResponse {
+            approval_policy: cfg.approval_policy,
+            sandbox_mode: cfg.sandbox_mode,
+            model_reasoning_effort: cfg.model_reasoning_effort,
+            profile: cfg.profile,
+            profiles: Some(profiles),
+        };
+
+        self.outgoing.send_response(request_id, response).await;
     }
 
     async fn process_new_conversation(&self, request_id: RequestId, params: NewConversationParams) {

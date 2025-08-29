@@ -124,7 +124,7 @@ impl OutgoingMessageSender {
 
     #[allow(dead_code)]
     pub(crate) async fn send_server_notification(&self, notification: ServerNotification) {
-        let method = format!("codex/event/{}", notification);
+        let method = format!("codex/event/{notification}");
         let params = match serde_json::to_value(&notification) {
             Ok(serde_json::Value::Object(mut map)) => map.remove("data"),
             _ => None,
