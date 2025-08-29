@@ -16,6 +16,21 @@ Completion/build step
 
 When making individual changes prefer running tests on individual files or projects first if asked, but otherwise rely on `./build-fast.sh` at the end.
 
+## Commit Messages
+
+- Review staged changes before every commit: `git --no-pager diff --staged --stat` (and skim `git --no-pager diff --staged` if needed).
+- Write a descriptive subject that explains what changed and why. Avoid placeholders like "chore: commit local work".
+- Prefer Conventional Commits with an optional scope: `feat(tui/history): …`, `fix(core/exec): …`, `chore(docs): …`.
+- Keep the subject ≤ 72 chars; add a short body if rationale or context helps future readers.
+- Use imperative, present tense: "add", "fix", "update" (not "added", "fixes").
+- For merge commits in the push flow, replace boilerplate with context, e.g.: `merge(main<-origin/main): adopt remote version bumps; keep ours for rust/*; resolve history_cell.rs conflict favoring new parser`.
+
+Examples:
+
+- `feat(tui/history): show exit code and duration for Exec cells`
+- `fix(core/codex): handle SIGINT in on_exec_command_begin to avoid orphaned child`
+- `chore(docs): clarify commit-message expectations in AGENTS.md`
+
 ## Git Push Policy (Do Not Rebase On Push Requests)
 
 When the user asks you to "push" local work:
@@ -31,7 +46,7 @@ Quick procedure (merge-only):
 - `git merge --no-ff --no-commit origin/main` (stops before commit so you can choose file sides)
 - Default to ours: `git checkout --ours .`
 - Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
-- `git add -A && git commit -m "merge(main<-origin/main): keep ours; adopt version bumps"`
+- `git add -A && git commit -m "merge(main<-origin/main): <brief description of conflict areas and resolution>"`
 - Run `./build-fast.sh` and then `git push`
 
 ## Command Execution Architecture
