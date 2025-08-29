@@ -778,8 +778,8 @@ impl HistoryCell for AssistantMarkdownCell {
                     // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    // Borders only (no inner left/right padding)
-                    let card_w = inner_w.saturating_add(2).min(area.width.max(2));
+                    // Borders (2) + inner horizontal padding (1 left, 1 right)
+                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
                     let total = lines.len() as u16 + 2; // top/bottom border only
                     if *skip >= total {
                         *skip -= total;
@@ -828,7 +828,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 0, right: 0, top: 0, bottom: 0 });
+                        .padding(Padding { left: 1, right: 1, top: 0, bottom: 0 });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
