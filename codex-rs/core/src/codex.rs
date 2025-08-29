@@ -2866,6 +2866,9 @@ async fn handle_web_fetch(
             }
 
             // Helper: remove obvious noisy blocks before markdown conversion.
+            // This uses a lightweight ASCII-insensitive scan to drop whole
+            // elements whose contents should never be surfaced to the model
+            // (scripts, styles, templates, headers/footers/navigation, etc.).
             fn strip_noisy_tags(mut html: String) -> String {
                 // Remove <script>, <style>, and <noscript> blocks with a simple
                 // ASCII case-insensitive scan that preserves UTF-8 boundaries.
@@ -2931,6 +2934,7 @@ async fn handle_web_fetch(
                     None
                 }
 
+                // Keep this conservative to avoid dropping content.
                 let tags = ["script", "style", "noscript"];
                 for tag in tags.iter() {
                     let mut guard = 0;
@@ -2952,6 +2956,278 @@ async fn handle_web_fetch(
                 html
             }
 
+            // Try to keep only <main> content if present; drastically reduces
+            // boilerplate from navigation and login banners on many sites.
+            fn extract_main(html: &str) -> Option<String> {
+                // Find opening <main ...>
+                let bytes = html.as_bytes();
+                let open = {
+                    let mut i = 0usize;
+                    let tag = b"main";
+                    while i + 5 < bytes.len() { // < m a i n > (min)
+                        if bytes[i] == b'<' {
+                            // skip '<' and whitespace
+                            let mut j = i + 1;
+                            while j < bytes.len() && bytes[j].is_ascii_whitespace() { j += 1; }
+                            if j + tag.len() <= bytes.len() && bytes[j..j+tag.len()].eq_ignore_ascii_case(tag) {
+                                // Found '<main'; now find '>'
+                                while j < bytes.len() && bytes[j] != b'>' { j += 1; }
+                                if j < bytes.len() { Some((i, j + 1)) } else { None }
+                            } else { None }
+                        } else { None }
+                            .map(|pair| return pair);
+                        i += 1;
+                    }
+                    None
+                };
+                let (start, after_open) = open?;
+                // Find closing </main>
+                let mut i = after_open;
+                let tag_close = b"</main";
+                while i + tag_close.len() + 1 < bytes.len() {
+                    if bytes[i] == b'<' && bytes[i+1] == b'/' {
+                        if bytes[i..].len() >= tag_close.len() && bytes[i..i+tag_close.len()].eq_ignore_ascii_case(tag_close) {
+                            // Find closing '>'
+                            let mut j = i + tag_close.len();
+                            while j < bytes.len() && bytes[j] != b'>' { j += 1; }
+                            if j < bytes.len() {
+                                return Some(html[start..j+1].to_string());
+                            } else {
+                                return Some(html[start..].to_string());
+                            }
+                        }
+                    }
+                    i += 1;
+                }
+                Some(html[start..].to_string())
+            }
+
+            // Inside fenced code blocks, collapse massively-escaped Windows paths like
+            // `C:\\Users\\...` to `C:\Users\...`. Only applies to drive-rooted paths.
+            fn unescape_windows_paths(line: &str) -> String {
+                let bytes = line.as_bytes();
+                let mut out = String::with_capacity(line.len());
+                let mut i = 0usize;
+                while i < bytes.len() {
+                    // Pattern: [A-Za-z] : \\+
+                    if i + 3 < bytes.len()
+                        && bytes[i].is_ascii_alphabetic()
+                        && bytes[i+1] == b':'
+                        && bytes[i+2] == b'\\'
+                        && bytes[i+3] == b'\\'
+                    {
+                        // Emit drive and a single backslash
+                        out.push(bytes[i] as char);
+                        out.push(':');
+                        out.push('\\');
+                        // Skip all following backslashes in this run
+                        i += 4;
+                        while i < bytes.len() && bytes[i] == b'\\' { i += 1; }
+                        continue;
+                    }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                out
+            }
+
+            // Lightweight cleanup on the resulting markdown to remove leaked
+            // JSON blobs and obvious client boot payloads that sometimes escape
+            // the <script> filter on complex sites. Avoids touching fenced code.
+            fn postprocess_markdown(md: &str) -> String {
+                let mut out: Vec<String> = Vec::with_capacity(md.len() / 64 + 1);
+                let mut in_fence = false;
+                let mut empty_run = 0usize;
+                for line in md.lines() {
+                    // Track fenced code blocks
+                    if let Some(rest) = line.trim_start().strip_prefix("```") {
+                        in_fence = !in_fence;
+                        let _lang = if in_fence { Some(rest.trim()) } else { None };
+                        out.push(line.to_string());
+                        empty_run = 0;
+                        continue;
+                    }
+                    if in_fence {
+                        // Only normalize Windows path over-escaping; do not alter other content.
+                        let normalized = unescape_windows_paths(line);
+                        out.push(normalized);
+                        continue;
+                    }
+
+                    let trimmed = line.trim();
+                    // Drop extremely long single lines only if they're likely SPA boot payloads
+                    if trimmed.len() > 8000 { continue; }
+                    // Common SPA boot keys that shouldn't appear in human output.
+                    // Keep this list tight to avoid dropping legitimate examples.
+                    if trimmed.contains("\"payload\"") || trimmed.contains("\"props\"") || trimmed.contains("\"preloaded_records\"") || trimmed.contains("\"appPayload\"") || trimmed.contains("\"preloadedQueries\"") {
+                        continue;
+                    }
+
+                    if trimmed.is_empty() {
+                        // Collapse multiple empty lines to max 1
+                        if empty_run == 0 {
+                            out.push(String::new());
+                        }
+                        empty_run += 1;
+                    } else {
+                        out.push(line.to_string());
+                        empty_run = 0;
+                    }
+                }
+                // Trim leading/trailing blank lines
+                let mut s = out.join("\n");
+                while s.starts_with('\n') { s.remove(0); }
+                while s.ends_with('\n') { s.pop(); }
+                s
+            }
+
+            // Domain-specific: extract rich content from GitHub issue/PR pages
+            // without requiring a JS-capable browser. We parse JSON-LD and the
+            // inlined GraphQL payload (preloadedQueries) to reconstruct the
+            // issue body and comments into readable markdown.
+            fn try_extract_github_issue_markdown(html: &str) -> Option<String> {
+                // Helper: extract the first <script type="application/ld+json"> block
+                fn extract_ld_json(html: &str) -> Option<serde_json::Value> {
+                    let mut s = html;
+                    loop {
+                        let start = s.find("<script").map(|i| i)?;
+                        let rest = &s[start + 7..];
+                        if rest.to_lowercase().contains("type=\"application/ld+json\"") {
+                            // Find end of script open tag
+                            let open_end_rel = rest.find('>')?;
+                            let open_end = start + 7 + open_end_rel + 1;
+                            let after_open = &s[open_end..];
+                            // Find closing </script>
+                            if let Some(close_rel) = after_open.to_lowercase().find("</script>") {
+                                let json_str = &after_open[..close_rel];
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                    return Some(v);
+                                }
+                                // Some pages JSON-encode the JSON-LD; try to unescape once
+                                if let Ok(un) = serde_json::from_str::<String>(json_str) {
+                                    if let Ok(v2) = serde_json::from_str::<serde_json::Value>(&un) {
+                                        return Some(v2);
+                                    }
+                                }
+                                // Advance after this script to search for next
+                                s = &after_open[close_rel + 9..];
+                                continue;
+                            }
+                        }
+                        // Advance and continue search
+                        s = &rest[1..];
+                    }
+                }
+
+                // Helper: extract substring for the JSON array that follows key
+                fn extract_json_array_after(html: &str, key: &str) -> Option<String> {
+                    let idx = html.find(key)?;
+                    let bytes = html.as_bytes();
+                    // Find the first '[' after key
+                    let mut i = idx + key.len();
+                    while i < bytes.len() && bytes[i] != b'[' { i += 1; }
+                    if i >= bytes.len() { return None; }
+                    let start = i;
+                    // Scan to matching ']' accounting for strings and escapes
+                    let mut depth: i32 = 0;
+                    let mut in_str = false;
+                    let mut escape = false;
+                    while i < bytes.len() {
+                        let c = bytes[i] as char;
+                        if in_str {
+                            if escape { escape = false; }
+                            else if c == '\\' { escape = true; }
+                            else if c == '"' { in_str = false; }
+                            i += 1; continue;
+                        }
+                        match c {
+                            '"' => { in_str = true; },
+                            '[' => { depth += 1; },
+                            ']' => { depth -= 1; if depth == 0 { let end = i + 1; return Some(html[start..end].to_string()); } },
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                    None
+                }
+
+                // Parse JSON-LD for headline, articleBody, author, date
+                let mut title: Option<String> = None;
+                let mut issue_body_md: Option<String> = None;
+                let mut opened_by: Option<String> = None;
+                let mut opened_at: Option<String> = None;
+                if let Some(ld) = extract_ld_json(html) {
+                    if ld.get("@type").and_then(|v| v.as_str()) == Some("DiscussionForumPosting") {
+                        title = ld.get("headline").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        issue_body_md = ld.get("articleBody").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        opened_by = ld.get("author").and_then(|a| a.get("name")).and_then(|v| v.as_str()).map(|s| s.to_string());
+                        opened_at = ld.get("datePublished").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    }
+                }
+
+                // Parse GraphQL payload for comments and state
+                let arr_str = extract_json_array_after(html, "\"preloadedQueries\"")?;
+                let arr: serde_json::Value = serde_json::from_str(&arr_str).ok()?;
+                let mut comments: Vec<(String, String, String)> = Vec::new();
+                let mut state: Option<String> = None;
+                let mut state_reason: Option<String> = None;
+                if let Some(items) = arr.as_array() {
+                    for item in items {
+                        let repo = item.get("result").and_then(|v| v.get("data")).and_then(|v| v.get("repository"));
+                        let issue = repo.and_then(|r| r.get("issue"));
+                        if let Some(issue) = issue {
+                            if state.is_none() {
+                                state = issue.get("state").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                state_reason = issue.get("stateReason").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            }
+                            if let Some(edges) = issue.get("frontTimelineItems").and_then(|v| v.get("edges")).and_then(|v| v.as_array()) {
+                                for e in edges {
+                                    let node = e.get("node");
+                                    let typename = node.and_then(|n| n.get("__typename")).and_then(|v| v.as_str()).unwrap_or("");
+                                    if typename == "IssueComment" {
+                                        let author = node.and_then(|n| n.get("author")).and_then(|a| a.get("login")).and_then(|v| v.as_str()).unwrap_or("");
+                                        let created = node.and_then(|n| n.get("createdAt")).and_then(|v| v.as_str()).unwrap_or("");
+                                        let body = node.and_then(|n| n.get("body")).and_then(|v| v.as_str()).unwrap_or("");
+                                        if !body.is_empty() {
+                                            comments.push((author.to_string(), created.to_string(), body.to_string()));
+                                        } else {
+                                            let body_html = node.and_then(|n| n.get("bodyHTML")).and_then(|v| v.as_str()).unwrap_or("");
+                                            if !body_html.is_empty() {
+                                                // Minimal HTML→MD for comments if body missing
+                                                let options = htmd::options::Options { heading_style: htmd::options::HeadingStyle::Atx, code_block_style: htmd::options::CodeBlockStyle::Fenced, link_style: htmd::options::LinkStyle::Inlined, ..Default::default() };
+                                                let conv = htmd::HtmlToMarkdown::builder().options(options).build();
+                                                if let Ok(md) = conv.convert(body_html) {
+                                                    comments.push((author.to_string(), created.to_string(), md));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If nothing meaningful extracted, bail out.
+                if title.is_none() && comments.is_empty() && issue_body_md.is_none() {
+                    return None;
+                }
+
+                // Compose readable markdown
+                let mut out = String::new();
+                if let Some(t) = title { out.push_str(&format!("# {}\n\n", t)); }
+                if let (Some(by), Some(at)) = (opened_by, opened_at) { out.push_str(&format!("Opened by {} on {}\n\n", by, at)); }
+                if let (Some(s), _) = (state.clone(), state_reason.clone()) { out.push_str(&format!("State: {}\n\n", s)); }
+                if let Some(body) = issue_body_md { out.push_str(&format!("{}\n\n", body)); }
+                if !comments.is_empty() {
+                    out.push_str("## Comments\n\n");
+                    for (author, created, body) in comments {
+                        out.push_str(&format!("- {} — {}\n\n{}\n\n", author, created, body));
+                    }
+                }
+                Some(out)
+            }
+
             // Helper: convert HTML to markdown and truncate if too large.
             fn convert_html_to_markdown_trimmed(html: String, max_chars: usize) -> crate::error::Result<(String, bool)> {
                 let options = htmd::options::Options {
@@ -2961,8 +3237,10 @@ async fn handle_web_fetch(
                     ..Default::default()
                 };
                 let converter = htmd::HtmlToMarkdown::builder().options(options).build();
-                let sanitized = strip_noisy_tags(html);
+                let reduced = extract_main(&html).unwrap_or(html);
+                let sanitized = strip_noisy_tags(reduced);
                 let markdown = converter.convert(&sanitized)?;
+                let markdown = postprocess_markdown(&markdown);
                 let mut truncated = false;
                 let rendered = {
                     let char_count = markdown.chars().count();
@@ -3012,6 +3290,49 @@ async fn handle_web_fetch(
 
             let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
             let codex_ua = crate::user_agent::get_codex_user_agent(Some("web_fetch"));
+
+            // Heuristic: some domains render key content client-side. Prefer a
+            // quick browser render first so we capture comments/timelines.
+            let is_dynamic_domain = {
+                let u = params.url.to_lowercase();
+                u.contains("github.com/")
+            };
+
+            if !matches!(params.mode.as_deref(), Some("http")) && is_dynamic_domain {
+                let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
+                if let Ok(res) = browser_manager.goto(&params.url).await {
+                    // Poll briefly for discussion/timeline elements to appear
+                    for _ in 0..6 {
+                        let js = r#"(function(){ const sel1 = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]'); const sel2 = document.querySelectorAll('.js-timeline-item'); return (sel1.length + sel2.length); })()"#;
+                        if let Ok(val) = browser_manager.execute_javascript(js).await {
+                            let n = val.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
+                            if n > 0 { break; }
+                        }
+                        tokio::time::sleep(Duration::from_millis(800)).await;
+                    }
+                    if let Ok(val) = browser_manager.execute_javascript(r#"(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()"#).await {
+                        if let Some(html) = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()) {
+                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
+                                }
+                            };
+                            let body = serde_json::json!({
+                                "url": params.url,
+                                "status": 200,
+                                "final_url": res.url,
+                                "content_type": "text/html",
+                                "used_browser_ua": true,
+                                "via_browser": true,
+                                "truncated": truncated,
+                                "markdown": markdown,
+                            });
+                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                        }
+                    }
+                }
+            }
 
             // If explicit browser mode requested, try the internal browser first.
             if matches!(params.mode.as_deref(), Some("browser")) {
@@ -3258,6 +3579,22 @@ async fn handle_web_fetch(
                 };
             }
 
+            // Domain-specific extraction first (e.g., GitHub issues)
+            if params.url.contains("github.com/") && params.url.contains("/issues/") {
+                if let Some(md) = try_extract_github_issue_markdown(&body_text) {
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": status.as_u16(),
+                        "final_url": final_url,
+                        "content_type": content_type,
+                        "used_browser_ua": used_browser_ua,
+                        "truncated": false,
+                        "markdown": md,
+                    });
+                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
+                }
+            }
+
             // Success: convert to markdown (sanitized and size-limited)
             let (markdown, truncated) = match convert_html_to_markdown_trimmed(body_text, 120_000) {
                 Ok(t) => t,
@@ -3434,34 +3771,32 @@ async fn handle_run_agent(
 
             // Helper: PATH lookup to determine if a command exists.
             fn command_exists(cmd: &str) -> bool {
+                // Absolute/relative path with separators: verify it points to a file.
                 if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-                    return std::fs::metadata(cmd).is_ok();
+                    return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
                 }
-                let Some(path_os) = std::env::var_os("PATH") else { return false; };
-                let pathext: Vec<String> = if cfg!(windows) {
-                    std::env::var("PATHEXT")
-                        .unwrap_or(".COM;.EXE;.BAT;.CMD;.MSI;.PS1".to_string())
-                        .split(';')
-                        .filter(|e| !e.trim().is_empty())
-                        .map(|s| s.to_string())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                for dir in std::env::split_paths(&path_os) {
-                    if dir.as_os_str().is_empty() { continue; }
-                    let base = dir.join(cmd);
-                    if cfg!(windows) {
-                        if std::fs::metadata(&base).is_ok() { return true; }
-                        for ext in &pathext {
-                            let candidate = base.with_extension(ext.trim_start_matches('.'));
-                            if std::fs::metadata(&candidate).is_ok() { return true; }
+
+                #[cfg(target_os = "windows")]
+                {
+                    return which::which(cmd).map(|p| p.is_file()).unwrap_or(false);
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let Some(path_os) = std::env::var_os("PATH") else { return false; };
+                    for dir in std::env::split_paths(&path_os) {
+                        if dir.as_os_str().is_empty() { continue; }
+                        let candidate = dir.join(cmd);
+                        if let Ok(meta) = std::fs::metadata(&candidate) {
+                            if meta.is_file() {
+                                let mode = meta.permissions().mode();
+                                if mode & 0o111 != 0 { return true; }
+                            }
                         }
-                    } else if std::fs::metadata(&base).is_ok() {
-                        return true;
                     }
+                    false
                 }
-                false
             }
 
             let batch_id = if models.len() > 1 {

@@ -164,7 +164,8 @@ impl BottomPane<'_> {
                 self.active_view = Some(view);
             }
             // Don't create a status view - keep composer visible
-            self.request_immediate_redraw();
+            // Debounce view navigation redraws to reduce render thrash
+            self.request_redraw();
             InputResult::None
         } else {
             // If a task is running and a status line is visible, allow Esc to
@@ -177,7 +178,9 @@ impl BottomPane<'_> {
             }
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
             if needs_redraw {
-                self.request_immediate_redraw();
+                // Route input updates through the app's debounced redraw path
+                // so typing doesn't attempt a full-screen redraw per key.
+                self.request_redraw();
             }
             if self.composer.is_in_paste_burst() {
                 self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
@@ -189,14 +192,14 @@ impl BottomPane<'_> {
     /// Attempt to navigate history upwards from the composer. Returns true if consumed.
     pub(crate) fn try_history_up(&mut self) -> bool {
         let consumed = self.composer.try_history_up();
-        if consumed { self.request_immediate_redraw(); }
+        if consumed { self.request_redraw(); }
         consumed
     }
 
     /// Attempt to navigate history downwards from the composer. Returns true if consumed.
     pub(crate) fn try_history_down(&mut self) -> bool {
         let consumed = self.composer.try_history_down();
-        if consumed { self.request_immediate_redraw(); }
+        if consumed { self.request_redraw(); }
         consumed
     }
 
@@ -234,7 +237,8 @@ impl BottomPane<'_> {
         if self.active_view.is_none() {
             let needs_redraw = self.composer.handle_paste(pasted);
             if needs_redraw {
-                self.request_immediate_redraw();
+                // Large pastes may arrive as bursts; coalesce paints
+                self.request_redraw();
             }
         }
     }
@@ -458,9 +462,8 @@ impl BottomPane<'_> {
         self.app_event_tx.send(AppEvent::RequestRedraw)
     }
 
-    pub(crate) fn request_immediate_redraw(&self) {
-        self.app_event_tx.send(AppEvent::ImmediateRedraw)
-    }
+    // Immediate redraw path removed; all UI updates flow through the
+    // debounced RequestRedraw/App::Redraw scheduler to reduce thrash.
 
     pub(crate) fn flash_footer_notice(&mut self, text: String) {
         self.composer.flash_footer_notice(text);
