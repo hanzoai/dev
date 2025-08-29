@@ -4653,10 +4653,19 @@ async fn handle_container_exec_with_params(
 
         // If no confirm prefix and it looks like a branch change, reject with guidance.
         if !has_confirm_prefix && looks_like_branch_change(trimmed) {
-            let guidance = "blocked potentially destructive git branch change. If you intended this, resend the shell command prefixed with 'confirm:' and include a brief reason in your assistant message.";
+            // Provide the exact argv the model should resend with the confirm prefix.
+            let mut argv_confirm = params.command.clone();
+            argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
+            let suggested = serde_json::to_string(&argv_confirm)
+                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+            let guidance = format!(
+                "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_script: {}\nresend_exact_argv: {}",
+                script,
+                suggested
+            );
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
-                output: FunctionCallOutputPayload { content: guidance.to_string(), success: None },
+                output: FunctionCallOutputPayload { content: guidance, success: None },
             };
         }
 
