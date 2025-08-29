@@ -85,17 +85,15 @@ impl EnvironmentContext {
         }
         if let Some(approval_policy) = self.approval_policy {
             lines.push(format!(
-                "  <approval_policy>{}</approval_policy>",
-                approval_policy
+                "  <approval_policy>{approval_policy}</approval_policy>"
             ));
         }
         if let Some(sandbox_mode) = self.sandbox_mode {
-            lines.push(format!("  <sandbox_mode>{}</sandbox_mode>", sandbox_mode));
+            lines.push(format!("  <sandbox_mode>{sandbox_mode}</sandbox_mode>"));
         }
         if let Some(network_access) = self.network_access {
             lines.push(format!(
-                "  <network_access>{}</network_access>",
-                network_access
+                "  <network_access>{network_access}</network_access>"
             ));
         }
         if let Some(shell) = self.shell {

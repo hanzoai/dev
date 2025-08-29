@@ -10,6 +10,7 @@ use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
+use std::time::Duration;
 
 mod approval_modal_view;
 mod bottom_pane_view;
@@ -19,6 +20,7 @@ pub mod chrome_selection_view;
 mod diff_popup;
 mod command_popup;
 mod file_search_popup;
+mod paste_burst;
 mod live_ring_widget;
 mod popup_consts;
 mod reasoning_selection_view;
@@ -176,6 +178,9 @@ impl BottomPane<'_> {
             let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
             if needs_redraw {
                 self.request_immediate_redraw();
+            }
+            if self.composer.is_in_paste_burst() {
+                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
             }
             input_result
         }
@@ -489,10 +494,24 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    pub(crate) fn request_redraw_in(&self, dur: Duration) {
+        self.app_event_tx.send(AppEvent::ScheduleFrameIn(dur));
+    }
+
     // --- History helpers ---
 
     pub(crate) fn set_history_metadata(&mut self, log_id: u64, entry_count: usize) {
         self.composer.set_history_metadata(log_id, entry_count);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
+        self.composer.flush_paste_burst_if_due()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_in_paste_burst(&self) -> bool {
+        self.composer.is_in_paste_burst()
     }
 
     pub(crate) fn on_history_entry_response(
@@ -809,7 +828,7 @@ mod tests {
         // Push an approval modal (e.g., command approval) which should hide the status view.
         pane.push_approval_request(exec_request());
 
-        // Simulate pressing 'n' (deny) on the modal.
+        // Simulate pressing 'n' (No) on the modal.
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
