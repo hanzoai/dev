@@ -1132,6 +1132,137 @@ impl HistoryCell for DiffCell {
     }
 }
 
+// ==================== MergedExecCell ====================
+// Represents multiple completed exec results merged into one cell while preserving
+// the bordered, dimmed output styling for each command's stdout/stderr preview.
+
+pub(crate) struct MergedExecCell {
+    // Sequence of (preamble lines, output lines) for each completed exec
+    segments: Vec<(Vec<Line<'static>>, Vec<Line<'static>>)>,
+    // Choose icon/behavior based on predominant action kind for gutter
+    kind: ExecKind,
+}
+
+impl MergedExecCell {
+    pub(crate) fn exec_kind(&self) -> ExecKind { self.kind }
+    pub(crate) fn from_exec(exec: &ExecCell) -> Self {
+        let (pre, out) = exec.exec_render_parts();
+        let kind = match action_from_parsed(&exec.parsed) {
+            "read" => ExecKind::Read,
+            "search" => ExecKind::Search,
+            "list" => ExecKind::List,
+            _ => ExecKind::Run,
+        };
+        Self { segments: vec![(pre, out)], kind }
+    }
+    pub(crate) fn push_exec(&mut self, exec: &ExecCell) {
+        let (pre, out) = exec.exec_render_parts();
+        self.segments.push((pre, out));
+    }
+}
+
+impl HistoryCell for MergedExecCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Exec { kind: self.kind, status: ExecStatus::Success }
+    }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        // Fallback textual form: concatenate all preambles + outputs with blank separators.
+        let mut out: Vec<Line<'static>> = Vec::new();
+        for (i, (pre, body)) in self.segments.iter().enumerate() {
+            if i > 0 { out.push(Line::from("")); }
+            out.extend(trim_empty_lines(pre.clone()));
+            out.extend(trim_empty_lines(body.clone()));
+        }
+        out
+    }
+    fn has_custom_render(&self) -> bool { true }
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
+        // Render each segment exactly like ExecCell.custom_render_with_skip, one after another,
+        // inserting a blank separator row between segments.
+        let bg = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        // Hard clear area first
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_char(' ').set_style(bg);
+            }
+        }
+
+        let mut cur_y = area.y;
+        let end_y = area.y.saturating_add(area.height);
+        for (seg_idx, (pre, out)) in self.segments.iter().enumerate() {
+            if cur_y >= end_y { break; }
+            // Measure with same widths as ExecCell
+            let pre_text = Text::from(trim_empty_lines(pre.clone()));
+            let out_text = Text::from(trim_empty_lines(out.clone()));
+            let pre_wrap_width = area.width;
+            let out_wrap_width = area.width.saturating_sub(2);
+            let pre_total: u16 = Paragraph::new(pre_text.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(pre_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+            let out_total: u16 = Paragraph::new(out_text.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(out_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+
+            // Skip rows across pre + out
+            let pre_skip = skip_rows.min(pre_total);
+            let out_skip = skip_rows.saturating_sub(pre_total).min(out_total);
+
+            // Remaining space for this segment
+            let pre_remaining = pre_total.saturating_sub(pre_skip);
+            let pre_height = pre_remaining.min(end_y.saturating_sub(cur_y));
+            if pre_height > 0 {
+                let pre_area = Rect { x: area.x, y: cur_y, width: area.width, height: pre_height };
+                Paragraph::new(pre_text)
+                    .block(Block::default().style(bg))
+                    .wrap(Wrap { trim: false })
+                    .scroll((pre_skip, 0))
+                    .style(bg)
+                    .render(pre_area, buf);
+                cur_y = cur_y.saturating_add(pre_height);
+            }
+
+            if cur_y >= end_y { break; }
+            let out_remaining = out_total.saturating_sub(out_skip);
+            let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
+            if out_height > 0 {
+                let out_area = Rect { x: area.x, y: cur_y, width: area.width, height: out_height };
+                let block = Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                    .style(Style::default().bg(crate::colors::background()))
+                    .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                Paragraph::new(out_text)
+                    .block(block)
+                    .wrap(Wrap { trim: false })
+                    .scroll((out_skip, 0))
+                    .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                    .render(out_area, buf);
+                cur_y = cur_y.saturating_add(out_height);
+            }
+
+            // Separator row between segments (blank). Count toward skipping/rendering.
+            if seg_idx + 1 < self.segments.len() && cur_y < end_y {
+                if skip_rows == 0 {
+                    // already cleared, just move the cursor down one
+                    cur_y = cur_y.saturating_add(1);
+                } else {
+                    skip_rows = skip_rows.saturating_sub(1);
+                }
+            }
+
+            // Consume skip_rows used by this segment
+            let consumed = pre_total + out_total + if seg_idx + 1 < self.segments.len() { 1 } else { 0 };
+            skip_rows = skip_rows.saturating_sub(consumed);
+        }
+    }
+}
+
 fn exec_render_parts_generic(
     command: &[String],
     output: Option<&CommandOutput>,

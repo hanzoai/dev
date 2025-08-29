@@ -1072,7 +1072,7 @@ impl ChatWidget<'_> {
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
     /// previous cell when they represent the same action header (e.g., Searched, Read).
     fn try_merge_completed_exec_at(&mut self, idx: usize) {
-        use crate::history_cell::HistoryCellType;
+        // removed unused import of HistoryCellType
         if idx == 0 || idx >= self.history_cells.len() {
             return;
         }
@@ -1107,7 +1107,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        // Case 1: previous is also a completed ExecCell with same header -> merge both into Plain
+        // Case 1: previous is also a completed ExecCell with same header -> merge into MergedExecCell preserving styling
         if let Some(prev_exec) = self.history_cells[idx - 1]
             .as_any()
             .downcast_ref::<history_cell::ExecCell>()
@@ -1115,39 +1115,11 @@ impl ChatWidget<'_> {
             if prev_exec.output.is_some() {
                 let last_label = exec_label(prev_exec);
                 if last_label == new_label && !last_label.is_empty() {
-                    let mut combined = self.history_cells[idx - 1].display_lines();
-                    let mut body: Vec<ratatui::text::Line<'static>> = self.history_cells[idx]
-                        .display_lines()
-                        .into_iter()
-                        .skip(1)
-                        .collect();
-                    while combined
-                        .last()
-                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                        .unwrap_or(false)
-                    {
-                        combined.pop();
+                    let mut merged = history_cell::MergedExecCell::from_exec(prev_exec);
+                    if let Some(current_exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
+                        merged.push_exec(current_exec);
                     }
-                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.remove(0);
-                    }
-                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.pop();
-                    }
-                    if let Some(first_line) = body.first_mut() {
-                        if let Some(first_span) = first_line.spans.get_mut(0) {
-                            if first_span.content == "  └ " || first_span.content == "└ " {
-                                first_span.content = "  ".into();
-                            }
-                        }
-                    }
-                    combined.extend(body);
-                    // Coalesce adjacent Read entries of the same file with contiguous ranges
-                    coalesce_read_ranges_in_lines(&mut combined);
-                    self.history_cells[idx - 1] = Box::new(history_cell::PlainHistoryCell {
-                        lines: combined,
-                        kind: HistoryCellType::Plain,
-                    });
+                    self.history_cells[idx - 1] = Box::new(merged);
                     // Remove the now-merged current cell
                     self.history_cells.remove(idx);
                     self.invalidate_height_cache();
@@ -1160,55 +1132,41 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Case 2: previous is a PlainHistoryCell produced by a prior merge with same header
+        // Case 2: previous is a MergedExecCell produced by a prior merge with same header
         // Fetch new cell lines before borrowing previous mutably to satisfy the borrower
-        let new_lines_snapshot = self.history_cells[idx].display_lines();
-        if let Some(prev_plain) = self.history_cells[idx - 1]
-            .as_any_mut()
-            .downcast_mut::<history_cell::PlainHistoryCell>()
-        {
-            let last_lines_snapshot = prev_plain.lines.clone();
-            let last_header = last_lines_snapshot
-                .first()
-                .and_then(|l| l.spans.get(0))
-                .map(|s| s.content.clone().to_string())
-                .unwrap_or_default();
-            if last_header == new_label {
-                let new_lines = new_lines_snapshot;
-                let mut combined = prev_plain.lines.clone();
-                while combined
-                    .last()
-                    .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                    .unwrap_or(false)
-                {
-                    combined.pop();
-                }
-                let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                    body.remove(0);
-                }
-                while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                    body.pop();
-                }
-                if let Some(first_line) = body.first_mut() {
-                    if let Some(first_span) = first_line.spans.get_mut(0) {
-                        if first_span.content == "  └ " || first_span.content == "└ " {
-                            first_span.content = "  ".into();
-                        }
+        // Borrow previous and current as non-overlapping slices to satisfy the borrow checker
+        let mut did_merge_into_prev = false;
+        if idx < self.history_cells.len() {
+            let (left, right) = self.history_cells.split_at_mut(idx);
+            if let Some(prev_merged) = left[idx - 1]
+                .as_any_mut()
+                .downcast_mut::<history_cell::MergedExecCell>()
+            {
+                let merged_label = match prev_merged.exec_kind() {
+                    history_cell::ExecKind::Read => "Read",
+                    history_cell::ExecKind::Search => "Searched",
+                    history_cell::ExecKind::List => "Listed",
+                    history_cell::ExecKind::Run => "Ran",
+                };
+                if new_label == merged_label {
+                    if let Some(current_exec) = right[0]
+                        .as_any()
+                        .downcast_ref::<history_cell::ExecCell>()
+                    {
+                        prev_merged.push_exec(current_exec);
+                        did_merge_into_prev = true;
                     }
                 }
-                combined.extend(body);
-                coalesce_read_ranges_in_lines(&mut combined);
-                prev_plain.lines = combined;
-                // Remove the now-merged current cell
-                self.history_cells.remove(idx);
-                self.invalidate_height_cache();
-                self.autoscroll_if_near_bottom();
-                self.bottom_pane.set_has_chat_history(true);
-                self.process_animation_cleanup();
-                self.app_event_tx.send(AppEvent::RequestRedraw);
-                return;
             }
+        }
+        if did_merge_into_prev {
+            self.history_cells.remove(idx);
+            self.invalidate_height_cache();
+            self.autoscroll_if_near_bottom();
+            self.bottom_pane.set_has_chat_history(true);
+            self.process_animation_cleanup();
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+            return;
         }
     }
 
