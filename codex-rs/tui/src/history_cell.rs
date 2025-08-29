@@ -1440,17 +1440,13 @@ impl HistoryCell for MergedExecCell {
             }
             if !added_corner {
                 if let Some(first) = pre.first_mut() {
-                    let flat: String =
-                        first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                     let already = flat.trim_start().starts_with("└ ")
                         || flat.trim_start().starts_with("  └ ");
                     if !already {
                         first.spans.insert(
                             0,
-                            Span::styled(
-                                "└ ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
+                            Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
                         );
                     }
                 }
@@ -4772,7 +4768,11 @@ fn new_parsed_command(
                     } else {
                         spans.push(Span::styled(
                             line_text.to_string(),
-                            Style::default().fg(if output.is_some() { crate::colors::text_bright() } else { crate::colors::text() }),
+                            Style::default().fg(if output.is_some() {
+                                crate::colors::text_bright()
+                            } else {
+                                crate::colors::text()
+                            }),
                         ));
                     }
                 }
