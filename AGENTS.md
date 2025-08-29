@@ -20,16 +20,16 @@ When making individual changes prefer running tests on individual files or proje
 
 - Review staged changes before every commit: `git --no-pager diff --staged --stat` (and skim `git --no-pager diff --staged` if needed).
 - Write a descriptive subject that explains what changed and why. Avoid placeholders like "chore: commit local work".
-- Prefer Conventional Commits with an optional scope: `feat(tui/history): …`, `fix(core/exec): …`, `chore(docs): …`.
+- Prefer Conventional Commits with an optional scope: `feat(tui/history): …`, `fix(core/exec): …`, `docs(agents): …`.
 - Keep the subject ≤ 72 chars; add a short body if rationale or context helps future readers.
 - Use imperative, present tense: "add", "fix", "update" (not "added", "fixes").
-- For merge commits in the push flow, replace boilerplate with context, e.g.: `merge(main<-origin/main): adopt remote version bumps; keep ours for rust/*; resolve history_cell.rs conflict favoring new parser`.
+- For merge commits, skip custom prefixes like `merge(main<-origin/main):`. Use a clear subject such as `Merge origin/main: <what changed and how conflicts were resolved>`.
 
 Examples:
 
 - `feat(tui/history): show exit code and duration for Exec cells`
 - `fix(core/codex): handle SIGINT in on_exec_command_begin to avoid orphaned child`
-- `chore(docs): clarify commit-message expectations in AGENTS.md`
+- `docs(agents): clarify commit-message expectations`
 
 ## Git Push Policy (Do Not Rebase On Push Requests)
 
@@ -42,11 +42,16 @@ When the user asks you to "push" local work:
 
 Quick procedure (merge-only):
 
-- `git fetch origin`
-- `git merge --no-ff --no-commit origin/main` (stops before commit so you can choose file sides)
-- Default to ours: `git checkout --ours .`
-- Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
-- `git add -A && git commit -m "merge(main<-origin/main): <brief description of conflict areas and resolution>"`
+- Commit your local work first:
+  - Review: `git --no-pager diff --stat` and `git --no-pager diff`
+  - Stage + commit: `git add -A && git commit -m "<descriptive message of local changes>"`
+- Fetch remote: `git fetch origin`
+- Merge without auto-commit: `git merge --no-ff --no-commit origin/main` (stops before committing so you can choose sides)
+- Resolve policy:
+  - Default to ours: `git checkout --ours .`
+  - Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
+- Stage and commit the merge with a descriptive message, e.g.:
+  - `git add -A && git commit -m "Merge origin/main: adopt remote version bumps; keep ours elsewhere (<areas>)"`
 - Run `./build-fast.sh` and then `git push`
 
 ## Command Execution Architecture
