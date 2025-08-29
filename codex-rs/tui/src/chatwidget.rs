@@ -966,7 +966,14 @@ impl ChatWidget<'_> {
                 .get(&ev.call_id)
                 .map(|rc| rc.command.join(" "))
                 .unwrap_or_else(|| "command".to_string());
-            let preview_short = if preview.len() > 40 { format!("{}…", &preview[..40]) } else { preview };
+            // Truncate preview safely at char boundaries (avoid slicing in the middle of UTF-8 like '❯')
+            let preview_short = if preview.chars().count() > 40 {
+                let mut truncated: String = preview.chars().take(40).collect();
+                truncated.push('…');
+                truncated
+            } else {
+                preview
+            };
             self.bottom_pane
                 .update_status_text(format!("running command: {}", preview_short));
         }
@@ -2123,35 +2130,10 @@ impl ChatWidget<'_> {
                 let new_label = exec_label(new_exec);
                 let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
                 if !last_label.is_empty() && last_label == new_label && is_joinable_label(last_label) {
-                    // Merge by rendered lines to preserve formatting
-                    let last_lines = last_box.display_lines();
-                    let new_lines = new_cell.display_lines();
-                    let mut combined = last_lines.clone();
-                    while combined
-                        .last()
-                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                        .unwrap_or(false)
-                    {
-                        combined.pop();
-                    }
-                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.remove(0);
-                    }
-                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.pop();
-                    }
-                    if let Some(first_line) = body.first_mut() {
-                        if let Some(first_span) = first_line.spans.get_mut(0) {
-                            if first_span.content == "  └ " || first_span.content == "└ " {
-                                first_span.content = "  ".into();
-                            }
-                        }
-                    }
-                    combined.extend(body);
-                    // Coalesce adjacent Read entries of the same file with contiguous ranges
-                    coalesce_read_ranges_in_lines(&mut combined);
-                    *last_box = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
+                    // Merge as a styled MergedExecCell to preserve per-exec formatting
+                    let mut merged = history_cell::MergedExecCell::from_exec(last_exec);
+                    merged.push_exec(new_exec);
+                    *last_box = Box::new(merged);
                     self.autoscroll_if_near_bottom();
                     self.bottom_pane.set_has_chat_history(true);
                     self.process_animation_cleanup();
@@ -2208,120 +2190,9 @@ impl ChatWidget<'_> {
                     return;
                 }
             } else {
-                // Also allow merging into an already-merged PlainHistoryCell produced above
-                if let Some(new_exec) = (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>() {
-                    // Only merge completed exec cells into a prior merged block
-                    if new_exec.output.is_none() { /* do not merge running exec */ }
-                    else {
-                    // Compute the label for the incoming exec
-                    let exec_label = |e: &history_cell::ExecCell| -> &'static str {
-                        let action = history_cell::action_from_parsed(&e.parsed);
-                        match (&e.output, action) {
-                            (None, "read") => "Reading...",
-                            (None, "search") => "Searching...",
-                            (None, "list") => "Listing...",
-                            (None, _) => "Running...",
-                            (Some(o), "read") if o.exit_code == 0 => "Read",
-                            (Some(o), "search") if o.exit_code == 0 => "Searched",
-                            (Some(o), "list") if o.exit_code == 0 => "Listed",
-                            (Some(o), _) if o.exit_code == 0 => "Ran",
-                            _ => "",
-                        }
-                    };
-                    let new_label = exec_label(new_exec);
-                    let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
-
-                    if let Some(last_plain) = last_box.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
-                        // Extract the header label from the first line (best-effort)
-                        let last_lines_snapshot = last_plain.lines.clone();
-                        let last_header = last_lines_snapshot.first().and_then(|l| l.spans.get(0)).map(|s| s.content.clone().to_string()).unwrap_or_default();
-                        if !new_label.is_empty() && is_joinable_label(new_label) && last_header == new_label {
-                            // Merge by appending the new body's content lines
-                            let new_lines = new_cell.display_lines();
-                            let mut combined = last_plain.lines.clone();
-                            while combined
-                                .last()
-                                .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                                .unwrap_or(false)
-                            {
-                                combined.pop();
-                            }
-                            let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                            while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                body.remove(0);
-                            }
-                            while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                body.pop();
-                            }
-                            if let Some(first_line) = body.first_mut() {
-                                if let Some(first_span) = first_line.spans.get_mut(0) {
-                                    if first_span.content == "  └ " || first_span.content == "└ " {
-                                        first_span.content = "  ".into();
-                                    }
-                                }
-                            }
-                            combined.extend(body);
-                            // Coalesce adjacent Read entries of the same file with contiguous ranges
-                            coalesce_read_ranges_in_lines(&mut combined);
-                            last_plain.lines = combined;
-                            self.autoscroll_if_near_bottom();
-                            self.bottom_pane.set_has_chat_history(true);
-                            self.process_animation_cleanup();
-                            self.app_event_tx.send(AppEvent::RequestRedraw);
-                            return;
-                        }
-                    }
-                    }
-                }
-                // Also allow merging Tool cells into a prior merged PlainHistoryCell with same header
-                if let Some(new_tool) = (&*new_cell).as_any().downcast_ref::<history_cell::ToolCallCell>() {
-                    if let Some(last_plain) = last_box.as_any_mut().downcast_mut::<history_cell::PlainHistoryCell>() {
-                        let last_lines_snapshot = last_plain.lines.clone();
-                        let last_header = last_lines_snapshot
-                            .first()
-                            .and_then(|l| l.spans.get(0))
-                            .map(|s| s.content.clone().to_string())
-                            .unwrap_or_default();
-                        let new_lines = new_tool.display_lines();
-                        let new_header = new_lines
-                            .first()
-                            .and_then(|l| l.spans.get(0))
-                            .map(|s| s.content.clone().to_string())
-                            .unwrap_or_default();
-                        if !new_header.is_empty() && new_header == last_header {
-                            let mut combined = last_plain.lines.clone();
-                            while combined
-                                .last()
-                                .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                                .unwrap_or(false)
-                            {
-                                combined.pop();
-                            }
-                            let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                            while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                body.remove(0);
-                            }
-                            while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                body.pop();
-                            }
-                            if let Some(first_line) = body.first_mut() {
-                                if let Some(first_span) = first_line.spans.get_mut(0) {
-                                    if first_span.content == "  └ " || first_span.content == "└ " {
-                                        first_span.content = "  ".into();
-                                    }
-                                }
-                            }
-                            combined.extend(body);
-                            last_plain.lines = combined;
-                            self.autoscroll_if_near_bottom();
-                            self.bottom_pane.set_has_chat_history(true);
-                            self.process_animation_cleanup();
-                            self.app_event_tx.send(AppEvent::RequestRedraw);
-                            return;
-                        }
-                    }
-                }
+                // Skip merging Exec into PlainHistoryCell; prefer typed MergedExecCell merges only.
             }
+            // (disabled) merging Tool cells into prior PlainHistoryCell to keep logic simpler here
         }
 
         // Store in memory for local rendering
@@ -7259,6 +7130,7 @@ fn add_token_usage(current_usage: &TokenUsage, new_usage: &TokenUsage) -> TokenU
 
 // Coalesce adjacent Read entries of the same file with contiguous ranges in a rendered lines vector.
 // Expects the vector to contain a header line at index 0 (e.g., "Read"). Modifies in place.
+#[allow(dead_code)]
 fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) {
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};

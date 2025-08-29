@@ -2849,24 +2849,83 @@ async fn handle_web_fetch(
 
             // Helper: remove obvious noisy blocks before markdown conversion.
             fn strip_noisy_tags(mut html: String) -> String {
-                // Basic, case-insensitive removal of <script>, <style>, and <noscript> blocks.
-                // Avoids dumping challenge JS into markdown on blocked pages.
-                let patterns = [("script", "</script>"), ("style", "</style>"), ("noscript", "</noscript>")];
-                for (open, close) in patterns {
-                    // Iterate until none remain (with a safety cap on iterations)
+                // Remove <script>, <style>, and <noscript> blocks with a simple
+                // ASCII case-insensitive scan that preserves UTF-8 boundaries.
+                // This avoids allocating lowercase copies and accidentally using
+                // indices from a different string representation.
+                fn eq_ascii_ci(a: u8, b: u8) -> bool {
+                    a.to_ascii_lowercase() == b.to_ascii_lowercase()
+                }
+                fn starts_with_tag_ci(bytes: &[u8], tag: &[u8]) -> bool {
+                    if bytes.len() < tag.len() { return false; }
+                    for i in 0..tag.len() {
+                        if !eq_ascii_ci(bytes[i], tag[i]) { return false; }
+                    }
+                    true
+                }
+                // Find the next opening tag like "<script" (allowing whitespace after '<').
+                fn find_open_tag_ci(s: &str, tag: &str, from: usize) -> Option<usize> {
+                    let bytes = s.as_bytes();
+                    let tag_bytes = tag.as_bytes();
+                    let mut i = from;
+                    while i + 1 < bytes.len() {
+                        if bytes[i] == b'<' {
+                            let mut j = i + 1;
+                            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r') {
+                                j += 1;
+                            }
+                            if j < bytes.len() && starts_with_tag_ci(&bytes[j..], tag_bytes) {
+                                return Some(i);
+                            }
+                        }
+                        i += 1;
+                    }
+                    None
+                }
+                // Find the corresponding closing tag like "</script>" starting at or after `from`.
+                // Returns the byte index just after the closing '>' if found.
+                fn find_close_after_ci(s: &str, tag: &str, from: usize) -> Option<usize> {
+                    let bytes = s.as_bytes();
+                    let tag_bytes = tag.as_bytes();
+                    let mut i = from;
+                    while i + 2 < bytes.len() { // need at least '<' '/' and one tag byte
+                        if bytes[i] == b'<' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                            let mut j = i + 2;
+                            // Optional whitespace before tag name
+                            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r') {
+                                j += 1;
+                            }
+                            if starts_with_tag_ci(&bytes[j..], tag_bytes) {
+                                // Advance past tag name
+                                j += tag_bytes.len();
+                                // Skip optional whitespace until '>'
+                                while j < bytes.len() && bytes[j] != b'>' {
+                                    j += 1;
+                                }
+                                if j < bytes.len() && bytes[j] == b'>' {
+                                    return Some(j + 1);
+                                }
+                                return None; // No closing '>'
+                            }
+                        }
+                        i += 1;
+                    }
+                    None
+                }
+
+                let tags = ["script", "style", "noscript"];
+                for tag in tags.iter() {
                     let mut guard = 0;
                     loop {
                         if guard > 64 { break; }
-                        let start = html.to_lowercase().find(&format!("<{open}"));
-                        let Some(s) = start else { break; };
-                        let end_search_from = s + 1;
-                        let lower = html.to_lowercase();
-                        let end = lower[end_search_from..].find(&close).map(|i| end_search_from + i + close.len());
-                        if let Some(e) = end {
-                            html.replace_range(s..e, "");
+                        let Some(start) = find_open_tag_ci(&html, tag, 0) else { break; };
+                        let search_from = start + 1; // after '<'
+                        if let Some(end) = find_close_after_ci(&html, tag, search_from) {
+                            // Safe because both start and end are on ASCII boundaries ('<' and '>')
+                            html.replace_range(start..end, "");
                         } else {
-                            // No close tag found; remove from open to end
-                            html.truncate(s);
+                            // No close tag found; drop from the opening tag to end
+                            html.truncate(start);
                             break;
                         }
                         guard += 1;
@@ -2887,14 +2946,16 @@ async fn handle_web_fetch(
                 let sanitized = strip_noisy_tags(html);
                 let markdown = converter.convert(&sanitized)?;
                 let mut truncated = false;
-                let rendered = if markdown.len() > max_chars {
-                    truncated = true;
-                    let mut s = markdown;
-                    s.truncate(max_chars);
-                    s.push_str("\n\n… (truncated)\n");
-                    s
-                } else {
-                    markdown
+                let rendered = {
+                    let char_count = markdown.chars().count();
+                    if char_count > max_chars {
+                        truncated = true;
+                        let mut s: String = markdown.chars().take(max_chars).collect();
+                        s.push_str("\n\n… (truncated)\n");
+                        s
+                    } else {
+                        markdown
+                    }
                 };
                 Ok((rendered, truncated))
             }

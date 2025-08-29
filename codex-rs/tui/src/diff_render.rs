@@ -132,19 +132,22 @@ pub(super) fn create_diff_summary_with_width(
             .add_modifier(Modifier::BOLD),
     };
     header_spans.push(RtSpan::styled(title.to_owned(), title_style));
-    header_spans.push(RtSpan::raw(" "));
-    header_spans.push(RtSpan::raw(format!("{file_count} {noun} ")));
-    header_spans.push(RtSpan::raw("("));
-    header_spans.push(RtSpan::styled(
-        format!("+{total_added}"),
-        Style::default().fg(crate::colors::success()),
-    ));
-    header_spans.push(RtSpan::raw(" "));
-    header_spans.push(RtSpan::styled(
-        format!("-{total_removed}"),
-        Style::default().fg(crate::colors::error()),
-    ));
-    header_spans.push(RtSpan::raw(")"));
+    // Only include aggregate counts in header for approval requests; omit for apply/updated.
+    if matches!(event_type, PatchEventType::ApprovalRequest) {
+        header_spans.push(RtSpan::raw(" "));
+        header_spans.push(RtSpan::raw(format!("{file_count} {noun} ")));
+        header_spans.push(RtSpan::raw("("));
+        header_spans.push(RtSpan::styled(
+            format!("+{total_added}"),
+            Style::default().fg(crate::colors::success()),
+        ));
+        header_spans.push(RtSpan::raw(" "));
+        header_spans.push(RtSpan::styled(
+            format!("-{total_removed}"),
+            Style::default().fg(crate::colors::error()),
+        ));
+        header_spans.push(RtSpan::raw(")"));
+    }
     out.push(RtLine::from(header_spans));
 
     // Per-file lines with prefix
@@ -161,7 +164,7 @@ pub(super) fn create_diff_summary_with_width(
             f.display_path.clone(),
             Style::default().fg(crate::colors::text_dim()),
         ));
-        // Counts
+        // Per-file counts shown inline in chat summary
         spans.push(RtSpan::styled(" (".to_string(), Style::default().fg(crate::colors::text_dim())));
         spans.push(RtSpan::styled(
             format!("+{}", f.added),
