@@ -181,21 +181,11 @@ pub(crate) fn assistant_bg() -> Color {
 
 /// Background for multiline code blocks rendered in assistant markdown.
 ///
-/// Requirements:
-/// - Light themes: use plain white to create a crisp, paper-like block.
-/// - Dark themes: use a plain dark background (near-black) for high contrast.
-///
-/// We intentionally avoid theme tints here to keep code blocks visually
-/// distinct and consistent across themes, per request.
+/// New behavior: match the assistant message background so code cards feel
+/// integrated with the transcript instead of appearing as stark white/black
+/// panels. Borders and inner padding also use this same background.
 pub(crate) fn code_block_bg() -> Color {
-    let bg = current_theme().background;
-    let rgb = color_to_rgb(bg);
-    if is_light(rgb) {
-        Color::White
-    } else {
-        // Plain dark; choose true black for consistent appearance.
-        Color::Black
-    }
+    assistant_bg()
 }
 
 /// Color for horizontal rules inside assistant messages.
