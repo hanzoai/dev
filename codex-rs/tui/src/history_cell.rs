@@ -828,12 +828,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding {
-                            left: 1,
-                            right: 1,
-                            top: 1,
-                            bottom: 1,
-                        });
+                        .padding(Padding { left: 0, right: 0, top: 0, bottom: 0 });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
