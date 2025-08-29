@@ -16,6 +16,24 @@ Completion/build step
 
 When making individual changes prefer running tests on individual files or projects first if asked, but otherwise rely on `./build-fast.sh` at the end.
 
+## Git Push Policy (Do Not Rebase On Push Requests)
+
+When the user asks you to "push" local work:
+
+- Never rebase in this flow. Do not use `git pull --rebase` or attempt to replay local commits.
+- Prefer a simple merge of `origin/main` into the current branch, keeping our local history intact.
+- If the remote only has trivial release metadata changes (e.g., `codex-cli/package.json` version bumps), adopt the remote version for those files and keep ours for everything else unless the user specifies otherwise.
+- If in doubt or if conflicts touch non-trivial areas, pause and ask before resolving.
+
+Quick procedure (merge-only):
+
+- `git fetch origin`
+- `git merge --no-ff --no-commit origin/main` (stops before commit so you can choose file sides)
+- Default to ours: `git checkout --ours .`
+- Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
+- `git add -A && git commit -m "merge(main<-origin/main): keep ours; adopt version bumps"`
+- Run `./build-fast.sh` and then `git push`
+
 ## Command Execution Architecture
 
 The command execution flow in Codex follows an event-driven pattern:
