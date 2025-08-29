@@ -445,9 +445,19 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
                 added.push(path.clone());
             }
             Hunk::DeleteFile { path } => {
-                std::fs::remove_file(path)
-                    .with_context(|| format!("Failed to delete file {}", path.display()))?;
-                deleted.push(path.clone());
+                match std::fs::remove_file(path) {
+                    Ok(()) => deleted.push(path.clone()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // Treat deleting a non-existent file as success (idempotent delete).
+                        deleted.push(path.clone());
+                    }
+                    Err(e) => {
+                        return Err(anyhow::Error::new(e).context(format!(
+                            "Failed to delete file {}",
+                            path.display()
+                        )));
+                    }
+                }
             }
             Hunk::UpdateFile {
                 path,
@@ -466,8 +476,18 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
                     }
                     std::fs::write(dest, new_contents)
                         .with_context(|| format!("Failed to write file {}", dest.display()))?;
-                    std::fs::remove_file(path)
-                        .with_context(|| format!("Failed to remove original {}", path.display()))?;
+                    match std::fs::remove_file(path) {
+                        Ok(()) => (),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            // Original already gone; proceed.
+                        }
+                        Err(e) => {
+                            return Err(anyhow::Error::new(e).context(format!(
+                                "Failed to remove original {}",
+                                path.display()
+                            )));
+                        }
+                    }
                     modified.push(dest.clone());
                 } else {
                     std::fs::write(path, new_contents)
@@ -489,13 +509,33 @@ struct AppliedPatch {
     new_contents: String,
 }
 
+/// Best-effort read with brief retries for transient NotFound during editor-style atomic renames.
+fn read_to_string_with_retry(path: &Path) -> std::io::Result<String> {
+    use std::io::ErrorKind;
+    const MAX_ATTEMPTS: usize = 5;
+    let mut attempt = 0;
+    loop {
+        match std::fs::read_to_string(path) {
+            Ok(s) => return Ok(s),
+            Err(e) if e.kind() == ErrorKind::NotFound && attempt < MAX_ATTEMPTS => {
+                // Tiny backoff (10ms, 20ms, 40ms, 80ms, 160ms)
+                let delay_ms = 10u64 << attempt;
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                attempt += 1;
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Return *only* the new file contents (joined into a single `String`) after
 /// applying the chunks to the file at `path`.
 fn derive_new_contents_from_chunks(
     path: &Path,
     chunks: &[UpdateFileChunk],
 ) -> std::result::Result<AppliedPatch, ApplyPatchError> {
-    let original_contents = match std::fs::read_to_string(path) {
+    let original_contents = match read_to_string_with_retry(path) {
         Ok(contents) => contents,
         Err(err) => {
             return Err(ApplyPatchError::IoError(IoError {
