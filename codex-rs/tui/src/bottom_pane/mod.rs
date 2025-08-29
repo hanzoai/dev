@@ -20,6 +20,7 @@ pub mod chrome_selection_view;
 mod diff_popup;
 mod command_popup;
 mod file_search_popup;
+mod paste_burst;
 mod live_ring_widget;
 mod popup_consts;
 mod reasoning_selection_view;
@@ -494,7 +495,7 @@ impl BottomPane<'_> {
     }
 
     pub(crate) fn request_redraw_in(&self, dur: Duration) {
-        self.frame_requester.schedule_frame_in(dur);
+        self.app_event_tx.send(AppEvent::ScheduleFrameIn(dur));
     }
 
     // --- History helpers ---
@@ -503,10 +504,12 @@ impl BottomPane<'_> {
         self.composer.set_history_metadata(log_id, entry_count);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
         self.composer.flush_paste_burst_if_due()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn is_in_paste_burst(&self) -> bool {
         self.composer.is_in_paste_burst()
     }

@@ -361,9 +361,8 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
             break;
         }
 
-        if let Some(stream) = &stream
-            && emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
-        {
+        if let Some(stream) = &stream {
+            if emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
             let chunk = tmp[..n].to_vec();
             let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
                 call_id: stream.call_id.clone(),
@@ -381,6 +380,7 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
             #[allow(clippy::let_unit_value)]
             let _ = stream.tx_event.send(event).await;
             emitted_deltas += 1;
+            }
         }
 
         if let Some(tx) = &aggregate_tx {
