@@ -1,9 +1,9 @@
+#![allow(dead_code, unused_imports, unused_variables)]
 use std::io::Result;
-use std::time::Duration;
 
 use crate::insert_history;
 use crate::tui;
-use crate::tui::TuiEvent;
+use crate::transcript_app::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -195,7 +195,7 @@ impl PagerView {
             .render_ref(Rect::new(pct_x, sep_rect.y, pct_w, 1), buf);
     }
 
-    fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) -> Result<()> {
+    fn handle_key_event(&mut self, _tui: &mut tui::Tui, key_event: KeyEvent) -> Result<()> {
         match key_event {
             KeyEvent {
                 code: KeyCode::Up,
@@ -216,7 +216,8 @@ impl PagerView {
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
             } => {
-                let area = self.scroll_area(tui.terminal.viewport_area);
+                let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let area = self.scroll_area(Rect::new(0, 0, w, h));
                 self.scroll_offset = self.scroll_offset.saturating_sub(area.height as usize);
             }
             KeyEvent {
@@ -224,7 +225,8 @@ impl PagerView {
                 kind: KeyEventKind::Press | KeyEventKind::Repeat,
                 ..
             } => {
-                let area = self.scroll_area(tui.terminal.viewport_area);
+                let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+                let area = self.scroll_area(Rect::new(0, 0, w, h));
                 self.scroll_offset = self.scroll_offset.saturating_add(area.height as usize);
             }
             KeyEvent {
@@ -245,8 +247,6 @@ impl PagerView {
                 return Ok(());
             }
         }
-        tui.frame_requester()
-            .schedule_frame_in(Duration::from_millis(16));
         Ok(())
     }
 
@@ -314,23 +314,17 @@ impl PagerView {
         };
         let mut out: Vec<Line<'static>> = Vec::with_capacity(end - start);
         let mut bold_done = false;
-        for (row, src_line) in wrapped
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(end.saturating_sub(start))
-        {
+        for (row, src_line) in wrapped.iter().enumerate().skip(start).take(end.saturating_sub(start)) {
             let mut line = src_line.clone();
-            if let Some(src) = src_idx.get(row).copied()
-                && src >= hi_start
-                && src < hi_end
-            {
+            if let Some(src) = src_idx.get(row).copied() {
+                if src >= hi_start && src < hi_end {
                 for (i, s) in line.spans.iter_mut().enumerate() {
                     s.style.add_modifier |= Modifier::REVERSED;
                     if !bold_done && i == 0 {
                         s.style.add_modifier |= Modifier::BOLD;
                         bold_done = true;
                     }
+                }
                 }
             }
             out.push(line);
@@ -372,10 +366,10 @@ impl TranscriptOverlay {
         let line2 = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
         render_key_hints(line1, buf, PAGER_KEY_HINTS);
         let mut pairs: Vec<(&str, &str)> = vec![("q", "quit"), ("Esc", "edit prev")];
-        if let Some((start, end)) = self.highlight_range
-            && end > start
-        {
+        if let Some((start, end)) = self.highlight_range {
+            if end > start {
             pairs.push(("⏎", "edit message"));
+            }
         }
         render_key_hints(line2, buf, &pairs);
     }
@@ -417,8 +411,10 @@ impl TranscriptOverlay {
                 other => self.view.handle_key_event(tui, other),
             },
             TuiEvent::Draw => {
-                tui.draw(u16::MAX, |frame| {
-                    self.render(frame.area(), frame.buffer);
+                tui.draw(|frame| {
+                    let area = frame.area();
+                    let buf = frame.buffer_mut();
+                    self.render(area, buf);
                 })?;
                 Ok(())
             }
@@ -484,8 +480,10 @@ impl StaticOverlay {
                 other => self.view.handle_key_event(tui, other),
             },
             TuiEvent::Draw => {
-                tui.draw(u16::MAX, |frame| {
-                    self.render(frame.area(), frame.buffer);
+                tui.draw(|frame| {
+                    let area = frame.area();
+                    let buf = frame.buffer_mut();
+                    self.render(area, buf);
                 })?;
                 Ok(())
             }
