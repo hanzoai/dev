@@ -1276,6 +1276,12 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     }
 
     let mut out: Vec<Span<'static>> = Vec::with_capacity(spans.len());
+    // Slight blue-tinted color for visible URLs/domains. Blend theme text toward primary (blue-ish).
+    let link_fg = crate::colors::mix_toward(
+        crate::colors::text(),
+        crate::colors::primary(),
+        0.35,
+    );
     for s in spans {
         // Skip autolinking inside inline code spans (we style code with the
         // theme's function color). This avoids linking snippets like
@@ -1304,24 +1310,34 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                     span.content = text[cursor..abs_start].to_string().into();
                     out.push(span);
                 }
-                // Render underlined label (no OSC 8). Preserve existing style.
-                let mut lbl_span = s.clone();
-                let mut st = lbl_span.style;
-                st.add_modifier.insert(Modifier::UNDERLINED);
-                lbl_span.style = st;
-                lbl_span.content = label.into();
-                out.push(lbl_span);
-                // Append visible URL dimmed in parentheses after the label
-                let mut open_span = s.clone();
-                open_span.content = " (".into();
-                out.push(open_span);
-                let mut url_span = s.clone();
-                url_span.style = url_span.style.patch(Style::default().fg(crate::colors::text_dim()));
-                url_span.content = target.clone().into();
-                out.push(url_span);
-                let mut close_span = s.clone();
-                close_span.content = ")".into();
-                out.push(close_span);
+                // Special case: when the label is just a short preview of the target URL
+                // (e.g., "front.com" for "https://front.com/integrations/…"), emit ONLY
+                // the full URL so terminals can auto‑link it. Avoid underlines/parentheses
+                // to keep scroll rendering stable and prevent duplicate visual tokens.
+                if is_short_preview_of_url(&label, &target) {
+                    let mut url_only = s.clone();
+                    url_only.content = target.clone().into();
+                    url_only.style = url_only.style.patch(Style::default().fg(link_fg));
+                    out.push(url_only);
+                } else {
+                    // Default behavior: underlined label followed by dimmed URL in parens
+                    let mut lbl_span = s.clone();
+                    let mut st = lbl_span.style;
+                    st.add_modifier.insert(Modifier::UNDERLINED);
+                    lbl_span.style = st;
+                    lbl_span.content = label.into();
+                    out.push(lbl_span);
+                    let mut open_span = s.clone();
+                    open_span.content = " (".into();
+                    out.push(open_span);
+                    let mut url_span = s.clone();
+                    url_span.style = url_span.style.patch(Style::default().fg(link_fg));
+                    url_span.content = target.clone().into();
+                    out.push(url_span);
+                    let mut close_span = s.clone();
+                    close_span.content = ")".into();
+                    out.push(close_span);
+                }
                 cursor = abs_end;
                 changed = true;
                 continue;
@@ -1341,6 +1357,7 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 // Emit URL text verbatim; terminal will make it clickable.
                 let mut core_span = s.clone();
                 core_span.content = core.to_string().into();
+                core_span.style = core_span.style.patch(Style::default().fg(link_fg));
                 out.push(core_span);
                 if !trailing.is_empty() {
                     let mut span = s.clone();
@@ -1366,6 +1383,7 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 if is_probable_domain(core_dom) {
                     let mut core_span = s.clone();
                     core_span.content = core_dom.to_string().into();
+                    core_span.style = core_span.style.patch(Style::default().fg(link_fg));
                     out.push(core_span);
                     if !trailing.is_empty() {
                         let mut span = s.clone();
@@ -1513,6 +1531,92 @@ fn find_markdown_image(s: &str) -> Option<(usize, String, String)> {
         }
     }
     Some((k + 1, label.to_string(), target)) // consumed up to and including ')'
+}
+
+// Heuristic: determine if `label` is a short preview (typically a bare domain)
+// for the full `target` URL. When true, we should display only the full URL
+// (letting the terminal auto-link it) instead of "label (url)".
+fn is_short_preview_of_url(label: &str, target: &str) -> bool {
+    // Must be an explicit HTTP(S) URL and label must be shorter
+    let lt = label.trim();
+    let tt = target.trim();
+    if lt.is_empty() || tt.is_empty() {
+        return false;
+    }
+    let lower_t = tt.to_ascii_lowercase();
+    if !(lower_t.starts_with("http://") || lower_t.starts_with("https://")) {
+        return false;
+    }
+    if lt.chars().count() >= tt.chars().count() {
+        return false;
+    }
+
+    // Normalize a string into a domain host if possible.
+    fn extract_host(s: &str) -> Option<String> {
+        let s = s.trim();
+        let lower = s.to_ascii_lowercase();
+        let without_scheme = if lower.starts_with("http://") {
+            &s[7..]
+        } else if lower.starts_with("https://") {
+            &s[8..]
+        } else {
+            s
+        };
+        let mut host = without_scheme
+            .split(&['/', '?', '#'][..])
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if host.is_empty() {
+            return None;
+        }
+        // Strip userinfo and port if present
+        if let Some(idx) = host.rfind('@') {
+            host = host[idx + 1..].to_string();
+        }
+        if let Some(idx) = host.find(':') {
+            host = host[..idx].to_string();
+        }
+        // Drop leading www.
+        let host = host.trim().trim_matches('.').to_ascii_lowercase();
+        let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+        if host.contains('.') { Some(host) } else { None }
+    }
+
+    // Lightweight TLD guard for labels that aren't URLs
+    fn looks_like_domain(s: &str) -> bool {
+        let s = s.trim().trim_end_matches('/');
+        if !s.contains('.') || s.contains(' ') { return false; }
+        let tld = s.rsplit_once('.').map(|(_, t)| t).unwrap_or("").to_ascii_lowercase();
+        const ALLOWED_TLDS: &[&str] = &[
+            "com","org","net","edu","gov","io","ai","app","dev","co","us","uk","ca","de","fr","jp","cn","in","au"
+        ];
+        ALLOWED_TLDS.contains(&tld.as_str())
+    }
+
+    let label_host = if lower_t.starts_with("http://") || lower_t.starts_with("https://") {
+        // If label itself is a URL, compare its host; otherwise, treat as domain text
+        extract_host(lt).or_else(|| Some(lt.to_ascii_lowercase()))
+    } else {
+        Some(lt.to_ascii_lowercase())
+    };
+    let target_host = extract_host(tt);
+
+    match (label_host, target_host) {
+        (Some(lh_raw), Some(mut th)) => {
+            let mut lh = lh_raw.trim().trim_end_matches('/').to_ascii_lowercase();
+            if lh.starts_with("www.") { lh = lh.trim_start_matches("www.").to_string(); }
+            if th.starts_with("www.") { th = th.trim_start_matches("www.").to_string(); }
+            // Require label to look like a domain to avoid stripping arbitrary text
+            if !looks_like_domain(&lh) { return false; }
+            // Exact match or label equals the registrable/root portion of the host
+            if lh == th { return true; }
+            // Host may include subdomains; if it ends with .<label>, treat as preview
+            if th.ends_with(&format!(".{lh}")) { return true; }
+            false
+        }
+        _ => false,
+    }
 }
 
 // Map ASCII to Unicode subscript/superscript for a small useful subset.

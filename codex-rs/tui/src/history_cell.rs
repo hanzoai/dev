@@ -498,9 +498,10 @@ impl HistoryCell for AssistantMarkdownCell {
         // - One top padding row for the cell (+1)
         // - Fenced code blocks: exclude language sentinel; trim blank padding lines;
         //   add 4 rows for borders + inner pads
-        let inner_width = width.saturating_sub(2);
+        // Use full width for assistant text wrapping so bullets don't wrap early.
+        let text_wrap_width = width;
         let mut all_lines = self.display_lines_trimmed();
-        if inner_width > 4 {
+        if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
             for mut line in all_lines.into_iter() {
@@ -510,7 +511,7 @@ impl HistoryCell for AssistantMarkdownCell {
                 }
                 if is_horizontal_rule_line(&line) {
                     transformed.push(Line::from(Span::styled(
-                        std::iter::repeat('─').take(inner_width as usize).collect::<String>(),
+                        std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     )));
                     continue;
@@ -526,7 +527,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         out_spans.extend(spans.drain(i..));
                         transformed.push(ratatui::text::Line::from(out_spans));
                     } else {
-                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, inner_width));
+                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, text_wrap_width));
                     }
                 } else {
                     transformed.push(line);
@@ -555,7 +556,7 @@ impl HistoryCell for AssistantMarkdownCell {
                 let text = Text::from(all_lines[start..i].to_vec());
                 let rows: u16 = Paragraph::new(text)
                     .wrap(Wrap { trim: false })
-                    .line_count(inner_width)
+                    .line_count(text_wrap_width)
                     .try_into()
                     .unwrap_or(0);
                 total = total.saturating_add(rows);
@@ -581,8 +582,8 @@ impl HistoryCell for AssistantMarkdownCell {
         // and wrapping non-code text with bullet awareness. We'll render in
         // segments so fenced code can be drawn inside a background container.
         let mut all_lines = self.display_lines_trimmed();
-        let inner_width = area.width.saturating_sub(2);
-        if inner_width > 4 {
+        let text_wrap_width = area.width;
+        if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
             for mut line in all_lines.into_iter() {
@@ -593,7 +594,7 @@ impl HistoryCell for AssistantMarkdownCell {
                 if is_horizontal_rule_line(&line) {
                     let hr = Line::from(Span::styled(
                         std::iter::repeat('─')
-                            .take(inner_width as usize)
+                            .take(text_wrap_width as usize)
                             .collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     ));
@@ -623,7 +624,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         line,
                         indent_spaces,
                         &bullet_char,
-                        inner_width,
+                        text_wrap_width,
                     ));
                     }
                 } else {
@@ -688,7 +689,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     let txt = Text::from(lines.clone());
                     let total: u16 = Paragraph::new(txt.clone())
                         .wrap(Wrap { trim: false })
-                        .line_count(inner_width)
+                        .line_count(text_wrap_width)
                         .try_into()
                         .unwrap_or(0);
                     if *skip >= total {
@@ -698,7 +699,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
                     if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: inner_width, height: draw_h };
+                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
                     Paragraph::new(txt)
                         .block(Block::default().style(bg_style))
                         .wrap(Wrap { trim: false })
@@ -723,7 +724,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    let card_w = inner_w.saturating_add(4).min(inner_width.max(4));
+                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
                     let total = lines.len() as u16 + 4; // top/bottom border + inner padding rows
                     if *skip >= total { *skip -= total; return; }
                     let avail = end_y.saturating_sub(*y);
@@ -741,7 +742,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     if draw_h == 0 { return; }
                     // Compute optional outer horizontal padding (1 col left/right) inside content area
                     let content_x = area.x;
-                    let content_w = inner_width;
+                    let content_w = area.width;
                     let outer_needed = card_w.saturating_add(2);
                     let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
                         (content_x.saturating_add(1), true, true)
@@ -851,6 +852,26 @@ impl HistoryCell for ExecCell {
     }
     fn has_custom_render(&self) -> bool {
         true
+    }
+    fn desired_height(&self, width: u16) -> u16 {
+        // Measure exactly like custom_render_with_skip: preamble at full width,
+        // output inside a left-bordered block with left padding (width - 2).
+        let (pre_lines, out_lines) = self.exec_render_parts();
+        let pre_text = Text::from(trim_empty_lines(pre_lines));
+        let out_text = Text::from(trim_empty_lines(out_lines));
+        let pre_wrap_width = width;
+        let out_wrap_width = width.saturating_sub(2);
+        let pre_total: u16 = Paragraph::new(pre_text)
+            .wrap(Wrap { trim: false })
+            .line_count(pre_wrap_width)
+            .try_into()
+            .unwrap_or(0);
+        let out_total: u16 = Paragraph::new(out_text)
+            .wrap(Wrap { trim: false })
+            .line_count(out_wrap_width)
+            .try_into()
+            .unwrap_or(0);
+        pre_total.saturating_add(out_total)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render command header/content above and stdout/stderr preview inside a left-bordered block.
@@ -1168,27 +1189,80 @@ impl MergedExecCell {
             return None;
         }
         use ratatui::text::Span;
-        // Concatenate per-segment preambles (without their headers), ensure
-        // the first line has the leading connector, then coalesce contiguous
-        // ranges using the same logic as single-exec rendering.
-        let mut all: Vec<Line<'static>> = Vec::new();
-        for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
-            let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() { pre.remove(0); }
-            if i == 0 {
-                if let Some(first) = pre.first_mut() {
-                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
-                    if !already {
-                        first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+        // Concatenate per-segment preambles (without their headers), but KEEP ONLY
+        // read-like entries. Then normalize the connector so only the very first
+        // visible line uses "└ ", and subsequent lines use two spaces.
+        // Finally, coalesce contiguous ranges for the same file.
+
+        // Local helper: parse a read range line of the form
+        // "└ <file> (lines A to B)" or "  <file> (lines A to B)".
+        fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32)> {
+            if line.spans.is_empty() { return None; }
+            let first = line.spans[0].content.as_ref();
+            if !(first == "└ " || first == "  ") { return None; }
+            let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+            if let Some(idx) = rest.rfind(" (lines ") {
+                let fname = rest[..idx].to_string();
+                let tail = &rest[idx + 1..];
+                if tail.starts_with("(lines ") && tail.ends_with(")") {
+                    let inner = &tail[7..tail.len().saturating_sub(1)];
+                    if let Some((a, b)) = inner.split_once(" to ") {
+                        if let (Ok(s), Ok(e)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>()) {
+                            return Some((fname, s, e));
+                        }
                     }
                 }
             }
-            all.extend(pre);
+            None
         }
-        // Merge adjacent ranges like "app.rs (lines 1 to 200)" + "app.rs (lines 200 to 400)"
-        coalesce_read_ranges_in_lines_local(&mut all);
-        Some(all)
+
+        // Heuristic: identify search-like lines (e.g., "… in dir/" or " (in dir)") so
+        // they can be dropped from a Read aggregation if they slipped in.
+        fn is_search_like(line: &Line<'_>) -> bool {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            let t = text.trim();
+            t.contains(" (in ") || t.rsplit_once(" in ").map(|(_, rhs)| rhs.trim_end().ends_with('/')).unwrap_or(false)
+        }
+
+        let mut kept: Vec<Line<'static>> = Vec::new();
+        for (seg_idx, (pre_raw, _)) in self.segments.iter().enumerate() {
+            let mut pre = trim_empty_lines(pre_raw.clone());
+            if !pre.is_empty() { pre.remove(0); } // drop per-exec header
+            // Filter: keep definite read-range lines; drop obvious search-like lines.
+            for l in pre.into_iter() {
+                if is_search_like(&l) { continue; }
+                // Prefer lines that parse as read ranges; otherwise allow if they are not search-like.
+                let keep = parse_read_line(&l).is_some() || seg_idx == 0; // be permissive for first segment
+                if !keep { continue; }
+                kept.push(l);
+            }
+        }
+
+        if kept.is_empty() { return Some(kept); }
+
+        // Normalize connector: first visible line uses "└ ", later lines use "  ".
+        if let Some(first) = kept.first_mut() {
+            let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+            let has_connector = flat.trim_start().starts_with("└ ");
+            if !has_connector {
+                first
+                    .spans
+                    .insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+            }
+        }
+        for l in kept.iter_mut().skip(1) {
+            if let Some(sp0) = l.spans.get_mut(0) {
+                if sp0.content.as_ref() == "└ " {
+                    sp0.content = "  ".into();
+                    // Keep dim styling for alignment consistency
+                    sp0.style = sp0.style.add_modifier(Modifier::DIM);
+                }
+            }
+        }
+
+        // Merge adjacent/overlapping ranges in-place
+        coalesce_read_ranges_in_lines_local(&mut kept);
+        Some(kept)
     }
 }
 
@@ -2572,9 +2646,10 @@ impl HistoryCell for StreamingContentCell {
     }
     fn desired_height(&self, width: u16) -> u16 {
         // Match streaming render path, including bullet wrapping and HR expansion.
-        let inner_width = width.saturating_sub(2);
+        // Use the full available width for text to avoid premature wraps.
+        let text_wrap_width = width;
         let mut all_lines = self.display_lines_trimmed();
-        if inner_width > 4 {
+        if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
             for mut line in all_lines.into_iter() {
@@ -2584,7 +2659,7 @@ impl HistoryCell for StreamingContentCell {
                 }
                 if is_horizontal_rule_line(&line) {
                     transformed.push(Line::from(Span::styled(
-                        std::iter::repeat('─').take(inner_width as usize).collect::<String>(),
+                        std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     )));
                     continue;
@@ -2600,7 +2675,7 @@ impl HistoryCell for StreamingContentCell {
                         out_spans.extend(spans.drain(i..));
                         transformed.push(ratatui::text::Line::from(out_spans));
                     } else {
-                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, inner_width));
+                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, text_wrap_width));
                     }
                 } else {
                     transformed.push(line);
@@ -2627,7 +2702,7 @@ impl HistoryCell for StreamingContentCell {
                 let text = Text::from(all_lines[start..i].to_vec());
                 let rows: u16 = Paragraph::new(text)
                     .wrap(Wrap { trim: false })
-                    .line_count(inner_width)
+                    .line_count(text_wrap_width)
                     .try_into()
                     .unwrap_or(0);
                 total = total.saturating_add(rows);
@@ -2650,8 +2725,8 @@ impl HistoryCell for StreamingContentCell {
 
         // Prepare content lines (wrap non-code text only)
         let mut all_lines = self.display_lines_trimmed();
-        let inner_width = area.width.saturating_sub(2);
-        if inner_width > 4 {
+        let text_wrap_width = area.width;
+        if text_wrap_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
             let mut is_first_output_line = true;
             for mut line in all_lines.into_iter() {
@@ -2662,7 +2737,7 @@ impl HistoryCell for StreamingContentCell {
                 if is_horizontal_rule_line(&line) {
                     let hr = Line::from(Span::styled(
                         std::iter::repeat('─')
-                            .take(inner_width as usize)
+                            .take(text_wrap_width as usize)
                             .collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     ));
@@ -2687,7 +2762,7 @@ impl HistoryCell for StreamingContentCell {
                             line,
                             indent_spaces,
                             &bullet_char,
-                            inner_width,
+                            text_wrap_width,
                         ));
                     }
                 } else {
@@ -2726,12 +2801,12 @@ impl HistoryCell for StreamingContentCell {
             match seg {
                 Seg::Text(lines) => {
                     let txt = Text::from(lines.clone());
-                    let total: u16 = Paragraph::new(txt.clone()).wrap(Wrap { trim: false }).line_count(inner_width).try_into().unwrap_or(0);
+                    let total: u16 = Paragraph::new(txt.clone()).wrap(Wrap { trim: false }).line_count(text_wrap_width).try_into().unwrap_or(0);
                     if *skip >= total { *skip -= total; return; }
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
                     if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: inner_width, height: draw_h };
+                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
                     Paragraph::new(txt).block(Block::default().style(bg_style)).wrap(Wrap { trim: false }).scroll((*skip, 0)).style(bg_style).render(rect, buf);
                     *y = y.saturating_add(draw_h); *skip = 0;
                 }
@@ -2747,11 +2822,11 @@ impl HistoryCell for StreamingContentCell {
                         }
                     }
                     if lines.is_empty() { return; }
-                    // Determine target width of the code card (respect inner width)
+                    // Determine target width of the code card (respect content width)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
                     // Borders (2) + inner left/right padding (2)
-                    let card_w = inner_w.saturating_add(4).min(inner_width.max(4));
+                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
                     // Include top/bottom border (2) + inner padding rows (2)
                     let total = lines.len() as u16 + 4;
                     if *skip >= total { *skip -= total; return; }
@@ -2768,7 +2843,7 @@ impl HistoryCell for StreamingContentCell {
                     let draw_h = visible.min(avail); if draw_h == 0 { return; }
                     // Compute optional outer horizontal padding (1 col left/right) inside content area
                     let content_x = area.x;
-                    let content_w = inner_width;
+                    let content_w = area.width;
                     let outer_needed = card_w.saturating_add(2);
                     let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
                         (content_x.saturating_add(1), true, true)

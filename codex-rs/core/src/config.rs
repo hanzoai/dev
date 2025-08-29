@@ -175,6 +175,8 @@ pub struct Config {
     pub include_apply_patch_tool: bool,
     /// Enable the native Responses web_search tool.
     pub tools_web_search_request: bool,
+    /// Optional allow-list of domains for web_search filters.allowed_domains
+    pub tools_web_search_allowed_domains: Option<Vec<String>>,
     /// Experimental: enable streamable shell tool selection (off by default).
     pub use_experimental_streamable_shell_tool: bool,
     /// Enable the `view_image` tool that lets the agent attach local images.
@@ -563,6 +565,15 @@ pub struct ToolsToml {
     #[serde(default, alias = "web_search_request")]
     pub web_search: Option<bool>,
 
+    /// Optional allow-list of domains used by the Responses API web_search tool.
+    /// Example:
+    ///
+    /// [tools]
+    /// web_search = true
+    /// web_search_allowed_domains = ["openai.com", "arxiv.org"]
+    #[serde(default)]
+    pub web_search_allowed_domains: Option<Vec<String>>,
+
     /// Enable the `view_image` tool that lets the agent attach local images.
     #[serde(default)]
     pub view_image: Option<bool>,
@@ -749,6 +760,10 @@ impl Config {
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
+        let tools_web_search_allowed_domains = cfg
+            .tools
+            .as_ref()
+            .and_then(|t| t.web_search_allowed_domains.clone());
         // View Image tool is enabled by default; can be disabled in config.
         let include_view_image_tool_flag = cfg
             .tools
@@ -862,6 +877,7 @@ impl Config {
             include_plan_tool: include_plan_tool.unwrap_or(false),
             include_apply_patch_tool: false,
             tools_web_search_request,
+            tools_web_search_allowed_domains,
             use_experimental_streamable_shell_tool: false,
             include_view_image_tool: include_view_image_tool_flag,
             responses_originator_header,
@@ -1260,6 +1276,7 @@ disable_response_storage = true
                 include_plan_tool: false,
                 include_apply_patch_tool: false,
                 tools_web_search_request: false,
+                tools_web_search_allowed_domains: None,
                 use_experimental_streamable_shell_tool: false,
                 responses_originator_header: "codex_cli_rs".to_string(),
                 debug: false,
@@ -1317,6 +1334,7 @@ disable_response_storage = true
             include_plan_tool: false,
             include_apply_patch_tool: false,
             tools_web_search_request: false,
+            tools_web_search_allowed_domains: None,
             use_experimental_streamable_shell_tool: false,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
@@ -1388,8 +1406,9 @@ disable_response_storage = true
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
-            tools_web_search_request: false,
-            use_experimental_streamable_shell_tool: false,
+                tools_web_search_request: false,
+                tools_web_search_allowed_domains: None,
+                use_experimental_streamable_shell_tool: false,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,

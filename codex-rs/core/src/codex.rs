@@ -1561,18 +1561,22 @@ async fn submission_loop(
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
+                let mut tools_config = ToolsConfig::new(
+                    &config.model_family,
+                    approval_policy,
+                    sandbox_policy.clone(),
+                    config.include_plan_tool,
+                    config.include_apply_patch_tool,
+                    config.tools_web_search_request,
+                    config.use_experimental_streamable_shell_tool,
+                    config.include_view_image_tool,
+                );
+                tools_config.web_search_allowed_domains =
+                    config.tools_web_search_allowed_domains.clone();
+
                 sess = Some(Arc::new(Session {
                     client,
-                    tools_config: ToolsConfig::new(
-                        &config.model_family,
-                        approval_policy,
-                        sandbox_policy.clone(),
-                        config.include_plan_tool,
-                        config.include_apply_patch_tool,
-                        config.tools_web_search_request,
-                        config.use_experimental_streamable_shell_tool,
-                        config.include_view_image_tool,
-                    ),
+                    tools_config,
                     tx_event: tx_event.clone(),
                     user_instructions,
                     base_instructions,
@@ -2475,6 +2479,14 @@ async fn run_compact_agent(
                         }),
                     };
                     sess.send_event(event).await;
+                    // Ensure the UI is released from running state even on errors.
+                    let done = Event {
+                        id: sub_id.clone(),
+                        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                            last_agent_message: None,
+                        }),
+                    };
+                    sess.send_event(done).await;
                     return;
                 }
             }
