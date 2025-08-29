@@ -778,7 +778,8 @@ impl HistoryCell for AssistantMarkdownCell {
                     // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
+                    // Borders only (no inner left/right padding)
+                    let card_w = inner_w.saturating_add(2).min(area.width.max(2));
                     let total = lines.len() as u16 + 2; // top/bottom border only
                     if *skip >= total {
                         *skip -= total;
@@ -811,16 +812,10 @@ impl HistoryCell for AssistantMarkdownCell {
                     if draw_h == 0 {
                         return;
                     }
-                    // Compute optional outer horizontal padding (1 col left/right) inside content area
+                    // No outer horizontal padding; align card to content area.
                     let content_x = area.x;
-                    let content_w = area.width;
-                    let outer_needed = card_w.saturating_add(2);
-                    let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
-                        (content_x.saturating_add(1), true, true)
-                    } else {
-                        let rp = content_w.saturating_sub(card_w) > 0;
-                        (content_x, false, rp)
-                    };
+                    let _content_w = area.width;
+                    let rect_x = content_x;
                     // Draw bordered block for visible rows
                     let rect = Rect {
                         x: rect_x,
@@ -860,25 +855,7 @@ impl HistoryCell for AssistantMarkdownCell {
                             .block(Block::default().style(Style::default().bg(code_bg)))
                             .render(inner_rect, buf);
                     }
-                    // Draw optional outside padding stripes using code background
-                    if left_pad {
-                        let px = rect.x.saturating_sub(1);
-                        for yy in rect.y..rect.y.saturating_add(rect.height) {
-                            buf[(px, yy)]
-                                .set_char(' ')
-                                .set_style(Style::default().bg(code_bg));
-                        }
-                    }
-                    if right_pad {
-                        let px = rect.x.saturating_add(rect.width);
-                        if px < content_x.saturating_add(content_w) {
-                            for yy in rect.y..rect.y.saturating_add(rect.height) {
-                                buf[(px, yy)]
-                                    .set_char(' ')
-                                    .set_style(Style::default().bg(code_bg));
-                            }
-                        }
-                    }
+                    // No outside padding stripes.
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
                 }
@@ -3313,31 +3290,33 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
             idx = 1;
         }
     }
-    // Next must be a bullet-like prefix and a following space span.
-    // Handle three cases:
-    //  1) Unordered bullets (•, -, etc) and task checkboxes (☐, ✔)
-    //  2) Ordered bullets like "1." (digits followed by '.')
-    // In all cases, there must be a subsequent single-space span after the marker.
+    // Next must be a bullet-like prefix with an accompanying space. Accept either
+    // a separate single-space span after the marker OR a trailing space baked
+    // into the bullet span (e.g., checkboxes like "☐ ").
     let bullet_span = spans.get(idx)?;
-    let bullet = bullet_span.content.as_ref();
-    let has_space_after = spans
+    let mut bullet_text = bullet_span.content.as_ref().to_string();
+    let has_following_space_span = spans
         .get(idx + 1)
         .map(|s| s.content.as_ref() == " ")
         .unwrap_or(false);
-    if !has_space_after {
+    let has_trailing_space_in_bullet = bullet_text.ends_with(' ');
+    if !(has_following_space_span || has_trailing_space_in_bullet) {
         return None;
     }
-    if bullets.contains(&bullet) {
-        return Some((indent, bullet.to_string()));
+    if has_trailing_space_in_bullet {
+        bullet_text.pop();
+    }
+    if bullets.contains(&bullet_text.as_str()) {
+        return Some((indent, bullet_text));
     }
     // Ordered list: e.g., "1.", "12.", etc.
-    if bullet.len() >= 2
-        && bullet.ends_with('.')
-        && bullet[..bullet.len() - 1]
+    if bullet_text.len() >= 2
+        && bullet_text.ends_with('.')
+        && bullet_text[..bullet_text.len() - 1]
             .chars()
             .all(|c| c.is_ascii_digit())
     {
-        return Some((indent, bullet.to_string()));
+        return Some((indent, bullet_text));
     }
     None
 }
@@ -3358,22 +3337,21 @@ fn strip_first_bullet_and_space(mut line: ratatui::text::Line<'static>) -> ratat
             idx = 1;
         }
     }
-    // Must have bullet span and a following single-space span
-    if spans.len() <= idx + 1 {
-        return line;
-    }
-    let bullet = spans[idx].content.as_ref();
-    let space_is_single = spans[idx + 1].content.as_ref() == " ";
+    // Must have bullet span; optional following single-space span is handled.
+    if spans.len() <= idx { return line; }
+    let bullet_full = spans[idx].content.as_ref();
+    let bullet_trimmed = bullet_full.trim_end().to_string();
+    let has_following_space_span = spans.get(idx + 1).map(|s| s.content.as_ref() == " ").unwrap_or(false);
     // Accept unordered bullets, checkboxes, and ordered bullets ("1.")
     let unordered = ["-", "•", "◦", "·", "∘", "⋅", "☐", "✔"]; // same set as detect_bullet_prefix
-    let is_ordered = bullet.ends_with('.') && bullet[..bullet.len().saturating_sub(1)]
+    let is_ordered = bullet_trimmed.ends_with('.') && bullet_trimmed[..bullet_trimmed.len().saturating_sub(1)]
         .chars()
         .all(|c| c.is_ascii_digit());
-    if (unordered.contains(&bullet) || is_ordered) && space_is_single {
-        // Remove bullet and the following single space
-        spans.remove(idx); // bullet
-        // After removal, the former (idx + 1) becomes idx
-        if spans.len() > idx && spans[idx].content.as_ref() == " " {
+    if unordered.contains(&bullet_trimmed.as_str()) || is_ordered {
+        // Remove bullet span (may already include trailing space)
+        spans.remove(idx);
+        // Remove separate single-space span if present
+        if has_following_space_span && spans.len() > idx && spans[idx].content.as_ref() == " " {
             spans.remove(idx);
         }
     }
@@ -3409,14 +3387,19 @@ fn wrap_bullet_line(
             i += 1;
         }
     }
-    // Consume bullet span and following single-space span
-    let bullet_style = if i < spans.len() {
-        spans[i].style
-    } else {
-        Style::default()
-    };
-    i += 1; // bullet
-    i += 1; // space after bullet
+    // Consume bullet span and optional following single-space span. Support
+    // cases where the bullet span already contains a trailing space (e.g., "☐ ").
+    let bullet_style = if i < spans.len() { spans[i].style } else { Style::default() };
+    if i < spans.len() {
+        let bullet_span_text = spans[i].content.as_ref().to_string();
+        i += 1; // consume bullet span
+        if !bullet_span_text.ends_with(' ')
+            && i < spans.len()
+            && spans[i].content.as_ref() == " "
+        {
+            i += 1; // consume separate following space span
+        }
+    }
 
     // Remaining spans comprise the content
     let rest_spans = spans.drain(i..).collect::<Vec<_>>();
