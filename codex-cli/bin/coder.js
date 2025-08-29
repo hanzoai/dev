@@ -3,8 +3,6 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
-import { realpathSync, accessSync, constants } from "fs";
-import { spawnSync } from "child_process";
 
 // __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -12,55 +10,9 @@ const __dirname = path.dirname(__filename);
 
 const { platform, arch } = process;
 
-// If invoked as "code" and another "code" exists in PATH that is not
-// this package's launcher, delegate to it (e.g., VS Code's CLI).
-// This avoids hijacking users who already have VS Code installed.
-const maybeDelegateToOtherCode = () => {
-  try {
-    const invoked = process.env._ || "";
-    const invokedBase = path.basename(invoked);
-    if (invokedBase !== "code") return false;
-
-    const ourScriptReal = realpathSync(process.argv[1]);
-
-    const which = spawnSync("bash", ["-lc", "which -a code 2>/dev/null"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    if (which.status !== 0 || !which.stdout) return false;
-
-    const candidates = which.stdout
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    for (const c of candidates) {
-      // Skip the path that was used to invoke us
-      if (c === invoked) continue;
-      try {
-        const real = realpathSync(c);
-        // Skip if it resolves to our own script (same file inside our package)
-        if (real === ourScriptReal) continue;
-
-        // Ensure it's executable; if so, exec and mirror exit code
-        accessSync(c, constants.X_OK);
-        const run = spawnSync(c, process.argv.slice(2), {
-          stdio: "inherit",
-        });
-        // If it executed (even with non-zero), we consider delegation done.
-        const code = run.status == null ? 1 : run.status;
-        process.exit(code);
-      } catch {
-        // Try next candidate
-      }
-    }
-  } catch {
-    // Fall through to our own binary
-  }
-  return false;
-};
-
-maybeDelegateToOtherCode();
+// Important: Never delegate to another system's `code` binary (e.g., VS Code).
+// When users run via `npx @just-every/code`, we must always execute our
+// packaged native binary by absolute path to avoid PATH collisions.
 
 const isWSL = () => {
   if (platform !== "linux") return false;
@@ -130,6 +82,7 @@ if (!existsSync(binaryPath)) {
 
 // Check if binary exists and try to fix permissions if needed
 import { existsSync, chmodSync, statSync, openSync, readSync, closeSync } from "fs";
+import { spawnSync } from "child_process";
 if (existsSync(binaryPath)) {
   try {
     // Ensure binary is executable on Unix-like systems
@@ -199,6 +152,33 @@ if (!validation.ok) {
   }
   process.exit(1);
 }
+
+// If running under npx/npm, emit a concise notice about which binary path is used
+try {
+  const ua = process.env.npm_config_user_agent || "";
+  const isNpx = ua.includes("npx");
+  if (isNpx && process.stderr && process.stderr.isTTY) {
+    // Best-effort discovery of another 'code' on PATH for user clarity
+    let otherCode = "";
+    try {
+      const cmd = process.platform === "win32" ? "where code" : "command -v code || which code || true";
+      const out = spawnSync(process.platform === "win32" ? "cmd" : "bash", [
+        process.platform === "win32" ? "/c" : "-lc",
+        cmd,
+      ], { encoding: "utf8" });
+      const line = (out.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+      if (line && !line.includes("@just-every/code")) {
+        otherCode = line;
+      }
+    } catch {}
+    if (otherCode) {
+      console.error(`@just-every/code: running bundled binary -> ${binaryPath}`);
+      console.error(`Note: a different 'code' exists at ${otherCode}; not delegating.`);
+    } else {
+      console.error(`@just-every/code: running bundled binary -> ${binaryPath}`);
+    }
+  }
+} catch {}
 
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
