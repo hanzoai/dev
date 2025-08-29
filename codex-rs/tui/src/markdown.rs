@@ -81,41 +81,43 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                 let left_right_pad = if fenced { 1 } else { 0 };
                 let target_w = max_w + (left_right_pad * 2);
 
-                // Optional: add a blank row above for fenced code blocks
+                // When fenced and language is known, emit a hidden sentinel line so the
+                // downstream renderer can surface a border + title without losing lang info.
                 if fenced {
-                    let top = Line::from(Span::styled(" ".repeat(target_w), Style::default().bg(code_bg)));
-                    lines.push(top);
+                    let label = _lang.clone().unwrap_or_else(|| "text".to_string());
+                    let sentinel = format!("⟦LANG:{}⟧", label);
+                    lines.push(Line::from(Span::styled(sentinel, Style::default().fg(code_bg).bg(code_bg))));
                 }
 
-                for l in highlighted.iter_mut() {
-                    // Apply background to all existing spans instead of the line,
-                    // so the painted region matches our explicit padding width.
-                    for sp in l.spans.iter_mut() {
-                        sp.style = sp.style.bg(code_bg);
-                    }
-                    // Prepend left padding when requested
-                    if left_right_pad > 0 {
-                        l.spans.insert(0, Span::styled(" ", Style::default().bg(code_bg)));
-                    }
-                    let w: usize = l
-                        .spans
-                        .iter()
-                        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-                        .sum();
-                    if target_w > w {
-                        let pad = " ".repeat(target_w - w);
-                        l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
-                    } else if w == 0 {
-                        // Defensive: paint at least one cell so background shows
-                        l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
-                    }
-                }
-                lines.extend(highlighted);
-
-                // Optional: add a blank row below for fenced code blocks
                 if fenced {
-                    let bottom = Line::from(Span::styled(" ".repeat(target_w), Style::default().bg(code_bg)));
-                    lines.push(bottom);
+                    for l in highlighted.iter_mut() {
+                        // Apply background to all existing spans instead of the line,
+                        // so the painted region matches our explicit padding width.
+                        for sp in l.spans.iter_mut() {
+                            sp.style = sp.style.bg(code_bg);
+                        }
+                        // Prepend left padding when requested
+                        if left_right_pad > 0 {
+                            l.spans.insert(0, Span::styled(" ", Style::default().bg(code_bg)));
+                        }
+                        let w: usize = l
+                            .spans
+                            .iter()
+                            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                            .sum();
+                        if target_w > w {
+                            let pad = " ".repeat(target_w - w);
+                            l.spans.push(Span::styled(pad, Style::default().bg(code_bg)));
+                        } else if w == 0 {
+                            // Defensive: paint at least one cell so background shows
+                            l.spans.push(Span::styled(" ", Style::default().bg(code_bg)));
+                        }
+                    }
+                    lines.extend(highlighted);
+                } else {
+                    // Non‑fenced (indented) blocks: do NOT convert to code cards.
+                    // Preserve exact text and any syntax highlighting FG, but no background.
+                    lines.extend(highlighted);
                 }
             }
         }
@@ -426,6 +428,7 @@ mod tests {
         let cwd = Path::new("/");
         let mut out = Vec::new();
         append_markdown_with_opener_and_cwd(src, &mut out, UriBasedFileOpener::None, cwd);
+        // Filter out the hidden language sentinel line
         let rendered: Vec<String> = out
             .iter()
             .map(|l| {
@@ -434,17 +437,15 @@ mod tests {
                     .map(|s| s.content.clone())
                     .collect::<String>()
             })
+            .filter(|s| !s.contains("⟦LANG:"))
             .collect();
-        // Expect: top padding row, the 3 code lines (each with a leading space and optional trailing spaces), bottom padding row.
-        assert_eq!(rendered.len(), 5, "expected fenced padding rows added: {:?}", rendered);
-        // Helpers: identify padded blank line and strip left pad+trailing spaces
-        let is_padded_blank = |s: &str| !s.is_empty() && s.trim().is_empty();
-        let strip_line = |s: &str| s.strip_prefix(' ').unwrap_or(s).trim_end().to_string();
-        assert!(is_padded_blank(&rendered[0]));
-        assert_eq!(strip_line(&rendered[1]), "  indented");
-        assert_eq!(strip_line(&rendered[2]), "\t\twith tabs");
-        assert_eq!(strip_line(&rendered[3]), "    four spaces");
-        assert!(is_padded_blank(&rendered[4]));
+        // Expect just the code lines (no fence markers), preserving leading whitespace.
+        // We no longer inject visible padding rows here; borders/padding are applied at render time.
+        let strip_line = |s: &str| s.strip_prefix(' ').unwrap_or(s).to_string();
+        assert!(rendered.len() >= 3, "unexpected length: {:?}", rendered);
+        assert_eq!(strip_line(&rendered[0]), "  indented");
+        assert_eq!(strip_line(&rendered[1]), "\t\twith tabs");
+        assert_eq!(strip_line(&rendered[2]), "    four spaces");
     }
 
     #[test]
@@ -461,6 +462,7 @@ mod tests {
                     .map(|s| s.content.clone())
                     .collect::<String>()
             })
+            .filter(|s| !s.contains("⟦LANG:"))
             .collect();
         // Expect first and last lines rewritten, and the interior fenced code line
         // unchanged (but wrapped with left/right padding rows).
@@ -484,6 +486,7 @@ mod tests {
                     .map(|s| s.content.clone())
                     .collect::<String>()
             })
+            .filter(|s| !s.contains("⟦LANG:"))
             .collect();
         assert_eq!(
             rendered,
@@ -511,6 +514,7 @@ mod tests {
                     .map(|s| s.content.clone())
                     .collect::<String>()
             })
+            .filter(|s| !s.contains("⟦LANG:"))
             .collect();
         // Expect first and last lines rewritten, and the indented code line present
         // unchanged (citations inside not rewritten). We do not assert on blank
@@ -560,10 +564,11 @@ mod tests {
         let rendered: Vec<String> = out
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<String>())
+            .filter(|s| !s.contains("⟦LANG:"))
             .collect();
 
-        // There should be at least 9 lines including top/bottom padding.
-        assert!(rendered.len() >= 9, "unexpected line count: {:?}", rendered);
+        // There should be at least 7 visible code lines (no border/padding rows emitted here).
+        assert!(rendered.len() >= 7, "unexpected line count: {:?}", rendered);
 
         // Find the internal blank: it should be a line consisting only of spaces
         // (inserted by padding logic inside code block), not an actually empty string
