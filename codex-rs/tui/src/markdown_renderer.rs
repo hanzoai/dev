@@ -150,7 +150,7 @@ impl MarkdownRenderer {
                 })
                 .max()
                 .unwrap_or(0);
-            let target_w = max_w + 2; // left + right space
+            let target_w = max_w; // no extra horizontal padding
             // Emit hidden sentinel with language for border/title downstream
             let label = self
                 .code_block_lang
@@ -167,9 +167,6 @@ impl MarkdownRenderer {
                 for sp in l.spans.iter_mut() {
                     sp.style = sp.style.bg(code_bg);
                 }
-                // left pad
-                l.spans
-                    .insert(0, Span::styled(" ", Style::default().bg(code_bg)));
                 let w: usize = l
                     .spans
                     .iter()
@@ -698,7 +695,7 @@ impl MarkdownRenderer {
                 })
                 .max()
                 .unwrap_or(0);
-            let target_w = max_w + 2; // left + right space
+            let target_w = max_w; // no extra horizontal padding
             // Emit hidden sentinel with language for border/title downstream
             let label = self
                 .code_block_lang
@@ -713,9 +710,6 @@ impl MarkdownRenderer {
                 for sp in l.spans.iter_mut() {
                     sp.style = sp.style.bg(code_bg);
                 }
-                // left pad
-                l.spans
-                    .insert(0, Span::styled(" ", Style::default().bg(code_bg)));
                 let w: usize = l
                     .spans
                     .iter()
