@@ -107,6 +107,7 @@ pub async fn run_main<T: Reporter>(
         threads,
         cancel_flag,
         compute_indices,
+        /*prefer_cwd=*/ false,
     )?;
     let match_count = matches.len();
     let matches_truncated = total_match_count > match_count;
@@ -131,6 +132,7 @@ pub fn run(
     threads: NonZero<usize>,
     cancel_flag: Arc<AtomicBool>,
     compute_indices: bool,
+    prefer_cwd: bool,
 ) -> anyhow::Result<FileSearchResults> {
     let pattern = create_pattern(pattern_text);
     // Create one BestMatchesList per worker thread so that each worker can
@@ -147,6 +149,7 @@ pub fn run(
                 pattern.clone(),
                 Matcher::new(nucleo_matcher::Config::DEFAULT),
                 pattern_text.to_string(),
+                prefer_cwd,
             ))
         })
         .collect();
@@ -284,6 +287,7 @@ pub fn run_streaming(
     compute_indices: bool,
     tx: Sender<Vec<FileMatch>>,
     update_every: Duration,
+    prefer_cwd: bool,
 ) -> anyhow::Result<FileSearchResults> {
     let pattern = create_pattern(pattern_text);
     let WorkerCount { num_walk_builder_threads, num_best_matches_lists } =
@@ -297,6 +301,7 @@ pub fn run_streaming(
                 pattern.clone(),
                 Matcher::new(nucleo_matcher::Config::DEFAULT),
                 pattern_text.to_string(),
+                prefer_cwd,
             ))
         })
         .collect();
@@ -518,10 +523,14 @@ struct BestMatchesList {
     utf32buf: Vec<char>,
     /// Original pattern text (for basename substring/prefix bonuses)
     needle: String,
+    /// When true, prefer files in the search root ("current dir") for
+    /// ambiguous queries (e.g., plain filenames). Also influences tie‑breaks
+    /// when no explicit directory is hinted in the query.
+    prefer_cwd: bool,
 }
 
 impl BestMatchesList {
-    fn new(max_count: usize, pattern: Pattern, matcher: Matcher, needle: String) -> Self {
+    fn new(max_count: usize, pattern: Pattern, matcher: Matcher, needle: String, prefer_cwd: bool) -> Self {
         Self {
             max_count,
             num_matches: 0,
@@ -530,6 +539,7 @@ impl BestMatchesList {
             binary_heap: BinaryHeap::new(),
             utf32buf: Vec::<char>::new(),
             needle,
+            prefer_cwd,
         }
     }
 
@@ -543,8 +553,12 @@ impl BestMatchesList {
             // Apply light penalties to commonly ignored paths so they rank lower
             // while still being available in results.
             let penalty = path_penalty(line);
-            let bonus = basename_bonus(line, &self.needle);
-            let eff_score = score.saturating_add(bonus).saturating_sub(penalty);
+            let base_bonus = basename_bonus(line, &self.needle);
+            let dir_bonus = directory_hint_bonus(line, &self.needle, self.prefer_cwd);
+            let eff_score = score
+                .saturating_add(base_bonus)
+                .saturating_add(dir_bonus)
+                .saturating_sub(penalty);
 
             if self.binary_heap.len() < self.max_count {
                 self.binary_heap.push(Reverse((eff_score, line.to_string())));
@@ -629,6 +643,41 @@ fn basename_bonus(path: &str, needle: &str) -> u32 {
     let needle_l = needle.to_lowercase();
     if file_l.starts_with(&needle_l) { return 400; }
     if file_l.contains(&needle_l) { return 150; }
+    0
+}
+
+/// Prefer matches in the hinted directory (prefix before the last '/'),
+/// and prefer shallow paths when there is no explicit directory hint or
+/// when `prefer_cwd` is set.
+fn directory_hint_bonus(path: &str, needle: &str, prefer_cwd: bool) -> u32 {
+    // Helper: count directory depth (number of '/').
+    fn depth(p: &str) -> usize { p.as_bytes().iter().filter(|&&b| b == b'/').count() }
+
+    // If the user typed an explicit directory (e.g., "src/foo"), boost
+    // candidates under that directory strongly, and demote far-away paths.
+    if let Some((dir_hint, _rest)) = needle.rsplit_once('/') {
+        if !dir_hint.is_empty() {
+            // Normalize redundant "./" in dir hint
+            let hint = dir_hint.strip_prefix("./").unwrap_or(dir_hint);
+            if path.starts_with(hint) {
+                // Strong boost when the path actually starts with the hinted dir
+                // and moderate extra boost for exact directory depth match.
+                let exact_dir = path.strip_prefix(hint).unwrap_or("");
+                let extra = if exact_dir.starts_with('/') { 120 } else { 60 };
+                return 480 + extra;
+            }
+            // Small nudge for paths containing the hint as a directory segment
+            if path.contains(&format!("/{hint}/")) { return 120; }
+            // Otherwise no bonus
+            return 0;
+        }
+    }
+
+    // No explicit directory hint: prefer shallow files, especially when
+    // prefer_cwd is true (user typed "./").
+    let d = depth(path);
+    if d == 0 { return if prefer_cwd { 420 } else { 200 }; }
+    if d == 1 { return if prefer_cwd { 200 } else { 80 }; }
     0
 }
 

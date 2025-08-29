@@ -32,10 +32,6 @@ pub(crate) enum AppEvent {
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
 
-    /// Request an immediate redraw with no debounce. Intended for latency-sensitive
-    /// interactions like input editing and cursor movement.
-    ImmediateRedraw,
-
     /// Actually draw the next frame.
     Redraw,
 

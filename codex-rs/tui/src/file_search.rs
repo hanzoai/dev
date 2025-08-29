@@ -182,6 +182,10 @@ impl FileSearchManager {
                 }
             });
 
+            // Decide preference: when user starts with "./" or types a bare
+            // filename (no slash), rank files in the current directory first.
+            let prefer_cwd = query.starts_with("./") || !query.contains('/');
+
             // Run streaming search with modest update cadence for snappy UX.
             let _final = file_search::run_streaming(
                 &search_query,
@@ -193,6 +197,7 @@ impl FileSearchManager {
                 compute_indices,
                 part_tx,
                 Duration::from_millis(50),
+                prefer_cwd,
             );
 
             // Reset the active search state. Do a pointer comparison to verify
