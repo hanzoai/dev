@@ -370,6 +370,91 @@ fn default_theme<'a>() -> &'a Theme {
         .unwrap_or_else(|| ts.themes.values().next().expect("at least one syntect theme"))
 }
 
+// Build a syntect Theme derived from the active TUI theme so code in history
+// uses our UI palette (less jarring than stock syntax themes). We keep the
+// mapping intentionally simple and readable:
+// - Comments => text_dim
+// - Keywords => keyword, Functions => function, Strings => string
+// - Variables/props => text
+// - Headings/strong => info/primary accents
+fn build_ui_aware_theme() -> Theme {
+    use crate::colors;
+    let mut t = Theme::default();
+    let to_rgb = |c: ratatui::style::Color| {
+        let (r, g, b) = color_to_rgb(c);
+        SynColor { r, g, b, a: 0xFF }
+    };
+
+    // Base settings follow our UI theme closely
+    t.settings = {
+        let mut s = ThemeSettings::default();
+        s.foreground = Some(to_rgb(colors::text()));
+        s.background = Some(to_rgb(colors::background()));
+        s.selection = Some(to_rgb(colors::selection()));
+        // Subtle line highlight to match history rows
+        let bg = colors::background();
+        let lh = crate::colors::mix_toward(bg, colors::info(), if is_light_bg() { 0.06 } else { 0.04 });
+        s.line_highlight = Some(to_rgb(lh));
+        s
+    };
+
+    // Helpers for common scopes
+    let item_rgb = |scope: &str, col: ratatui::style::Color, style: Option<FontStyle>| -> ThemeItem {
+        ThemeItem { scope: scope.parse().unwrap_or_default(), style: StyleModifier { foreground: Some(to_rgb(col)), background: None, font_style: style } }
+    };
+
+    // Derived palette
+    let text = colors::text();
+    let text_dim = colors::text_dim();
+    let text_bright = colors::text_bright();
+    let info = colors::info();
+    let theme_now = crate::theme::current_theme();
+    let keyword = theme_now.keyword;
+    let func = theme_now.function;
+    let string_c = theme_now.string;
+
+    let italic = Some(FontStyle::ITALIC);
+
+    t.scopes = vec![
+        // Comments and doc comments
+        item_rgb("comment, punctuation.definition.comment", text_dim, italic),
+        // Strings / regex / escapes (mix slightly toward text for legibility)
+        item_rgb("string, string.regexp, constant.character.escape", crate::colors::mix_toward(string_c, text, 0.15), None),
+        // Numbers and constants
+        item_rgb("constant.numeric, constant.language, constant.other", text_bright, None),
+        // Keywords and operators
+        item_rgb("keyword, keyword.control, storage, storage.type, storage.modifier", keyword, None),
+        item_rgb("keyword.operator", text, None),
+        // Functions and calls
+        item_rgb("entity.name.function, support.function, meta.function-call, meta.function entity.name.function", func, None),
+        // Variables / properties
+        item_rgb("variable, variable.other.readwrite, variable.other.property, meta.definition.variable", text, None),
+        // Types / classes / interfaces
+        item_rgb("entity.name.type, support.type, entity.name.class, support.class, entity.name.interface, entity.name.enum", info, None),
+        // HTML / tags / attributes
+        item_rgb("entity.name.tag, punctuation.definition.tag", info, None),
+        item_rgb("entity.other.attribute-name, support.type.property-name, variable.other.property", text, None),
+        // Markdown accents
+        item_rgb("markup.heading", info, None),
+        item_rgb("markup.bold", info, None),
+        item_rgb("markup.italic", text, None),
+        item_rgb("markup.inline.raw", crate::colors::mix_toward(text, info, 0.20), None),
+        item_rgb("markup.quote", text_dim, None),
+        // Diffs (aligned with our success/warning/error)
+        item_rgb("markup.inserted", colors::success(), None),
+        item_rgb("markup.deleted", colors::error(), None),
+        item_rgb("markup.changed, diff.header, meta.diff.header, meta.diff.range", info, None),
+    ];
+    t
+}
+
+fn use_ui_aware_theme() -> bool {
+    match pref_cell().read() {
+        Ok(pref) => matches!(*pref, HighlightPref::Auto),
+        Err(_) => true,
+    }
+}
+
 fn try_syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> Option<&'a SyntaxReference> {
     // Try token, then extension, then name (case-insensitive fallback).
     let lang = normalize_lang(lang);
@@ -414,7 +499,15 @@ fn span_from_syn((SynStyle { foreground, font_style, .. }, text): (SynStyle, &st
 
 /// Highlight a code block into ratatui Lines while preserving exact text.
 pub(crate) fn highlight_code_block(content: &str, lang: Option<&str>) -> Vec<Line<'static>> {
-    let theme = default_theme();
+    // Choose theme: if user configured a specific syntect theme, honor it.
+    // Otherwise, derive colors from our current UI theme for cohesion.
+    let ui_theme_holder;
+    let theme: &Theme = if use_ui_aware_theme() {
+        ui_theme_holder = build_ui_aware_theme();
+        &ui_theme_holder
+    } else {
+        default_theme()
+    };
 
     // Resolve across default and optional extra syntax sets
     let mut ps = syntax_set();
