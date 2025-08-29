@@ -151,11 +151,14 @@ impl MarkdownRenderer {
                 .max()
                 .unwrap_or(0);
             let target_w = max_w + 2; // left + right space
-
-            // Add top blank row
+            // Emit hidden sentinel with language for border/title downstream
+            let label = self
+                .code_block_lang
+                .clone()
+                .unwrap_or_else(|| "text".to_string());
             self.lines.push(Line::from(Span::styled(
-                " ".repeat(target_w),
-                Style::default().bg(code_bg),
+                format!("⟦LANG:{}⟧", label),
+                Style::default().fg(code_bg).bg(code_bg),
             )));
 
             for l in highlighted.iter_mut() {
@@ -183,11 +186,6 @@ impl MarkdownRenderer {
                 }
             }
             self.lines.extend(highlighted);
-            // Add bottom blank row
-            self.lines.push(Line::from(Span::styled(
-                " ".repeat(target_w),
-                Style::default().bg(code_bg),
-            )));
             self.code_block_buf.clear();
             self.in_code_block = false;
             self.code_block_lang = None;
@@ -395,14 +393,20 @@ impl MarkdownRenderer {
                         spans.push(Span::raw(current_text.clone()));
                         current_text.clear();
                     }
-                    // Render as a hyperlink span with a friendly label
+                    // Render label and make the target URL visible next to it.
                     let lbl = if label.is_empty() {
                         "Image".to_string()
                     } else {
                         label
                     };
-                    let link = hyperlink_span(&lbl, &target, &Span::raw(""));
-                    spans.push(link);
+                    // Underlined label
+                    let mut st = Style::default();
+                    st.add_modifier.insert(Modifier::UNDERLINED);
+                    spans.push(Span::styled(lbl, st));
+                    // Append visible URL in parens (dimmed)
+                    spans.push(Span::raw(" ("));
+                    spans.push(Span::styled(target.clone(), Style::default().fg(crate::colors::text_dim())));
+                    spans.push(Span::raw(")"));
                     i += consumed;
                     continue;
                 }
@@ -695,10 +699,14 @@ impl MarkdownRenderer {
                 .max()
                 .unwrap_or(0);
             let target_w = max_w + 2; // left + right space
-            // Add top blank row
+            // Emit hidden sentinel with language for border/title downstream
+            let label = self
+                .code_block_lang
+                .clone()
+                .unwrap_or_else(|| "text".to_string());
             self.lines.push(Line::from(Span::styled(
-                " ".repeat(target_w),
-                Style::default().bg(code_bg),
+                format!("⟦LANG:{}⟧", label),
+                Style::default().fg(code_bg).bg(code_bg),
             )));
 
             for l in highlighted.iter_mut() {
@@ -723,11 +731,6 @@ impl MarkdownRenderer {
                 }
             }
             self.lines.extend(highlighted);
-            // Add bottom blank row
-            self.lines.push(Line::from(Span::styled(
-                " ".repeat(target_w),
-                Style::default().bg(code_bg),
-            )));
             self.code_block_buf.clear();
             self.in_code_block = false;
             self.code_block_lang = None;
@@ -1196,15 +1199,19 @@ fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
     true
 }
 
-// Turn inline markdown links and bare URLs into OSC 8 hyperlinks.
-// This runs late, on the already-styled spans for a line, so it preserves
-// bold/italic styling while adding underlines for links and embedding the
-// hyperlink escape sequences in the text.
-// Mixed mode hyperlinking:
-// - Only Markdown links are wrapped with OSC 8 (to keep labeled links clickable).
-// - Explicit http(s) URLs and bare domains are left as plain text so the
-//   terminal's native URL detection handles them. This avoids width/underline
-//   glitches reported in some terminals (e.g., iTerm2) when OSC 8 is pervasive.
+// Turn inline markdown links and bare URLs into display-friendly spans.
+// NOTE: We intentionally avoid emitting OSC 8 hyperlinks here. While OSC 8
+// hyperlinks render correctly when static, some terminals exhibit artifacts
+// when scrolling or re-wrapping content that contains embedded escape
+// sequences. By rendering labels as plain underlined text and leaving literal
+// URLs as-is (so the terminal can auto-detect them), we guarantee stable
+// rendering during scroll without leaking control characters.
+//
+// Behavior:
+// - Markdown links [label](target): render as an underlined `label` span
+//   (no OSC 8). We prefer stability over clickability for labeled links.
+// - Explicit http(s) URLs and bare domains: emit verbatim text so terminals
+//   can auto-link them. This keeps them clickable without control sequences.
 fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     // Patterns: markdown [label](target), explicit http(s) URLs, and plain domains.
     // Keep conservative to avoid false positives.
@@ -1297,7 +1304,24 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                     span.content = text[cursor..abs_start].to_string().into();
                     out.push(span);
                 }
-                out.push(hyperlink_span(&label, &target, &s));
+                // Render underlined label (no OSC 8). Preserve existing style.
+                let mut lbl_span = s.clone();
+                let mut st = lbl_span.style;
+                st.add_modifier.insert(Modifier::UNDERLINED);
+                lbl_span.style = st;
+                lbl_span.content = label.into();
+                out.push(lbl_span);
+                // Append visible URL dimmed in parentheses after the label
+                let mut open_span = s.clone();
+                open_span.content = " (".into();
+                out.push(open_span);
+                let mut url_span = s.clone();
+                url_span.style = url_span.style.patch(Style::default().fg(crate::colors::text_dim()));
+                url_span.content = target.clone().into();
+                out.push(url_span);
+                let mut close_span = s.clone();
+                close_span.content = ")".into();
+                out.push(close_span);
                 cursor = abs_end;
                 changed = true;
                 continue;
@@ -1328,7 +1352,7 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
                 continue;
             }
 
-            // 3) bare domain (Mixed mode: no OSC 8; emit as text)
+            // 3) bare domain: emit as text so terminal can auto-link
             if let Some(m) = dom_re.find(after) {
                 let start = cursor + m.start();
                 let end = cursor + m.end();
@@ -1379,12 +1403,13 @@ fn autolink_spans(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
     out
 }
 
-fn hyperlink_span(label: &str, target: &str, base: &Span<'static>) -> Span<'static> {
-    // OSC 8 wrapper (Markdown links only in Mixed mode). Avoid adding our own
-    // underline to prevent double/dotted underline when terminals decorate
-    // hyperlinks themselves.
-    let content = format!("\u{1b}]8;;{target}\u{7}{label}\u{1b}]8;;\u{7}");
-    Span::styled(content, base.style)
+// Deprecated: OSC 8 emission removed for scroll stability. Keep a small helper
+// to style a label consistently if future callers rely on it.
+#[allow(dead_code)]
+fn hyperlink_span(label: &str, _target: &str, base: &Span<'static>) -> Span<'static> {
+    let mut st = base.style;
+    st.add_modifier.insert(Modifier::UNDERLINED);
+    Span::styled(label.to_string(), st)
 }
 
 // Return (start, end, label, target) for the first markdown link found in `s`.
@@ -1646,7 +1671,7 @@ mod fenced_padding_tests {
         let text = "```rust\nfn a() {}\n\nfn bbbbb() { println!(\"hi\"); }\n```";
         let lines = MarkdownRenderer::render(text);
         // Expect at least top pad, 3 content lines, bottom pad
-        assert!(lines.len() >= 5);
+        assert!(lines.len() >= 3);
         let widths: Vec<usize> = lines
             .iter()
             .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum())
