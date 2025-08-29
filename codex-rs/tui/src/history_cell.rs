@@ -1160,74 +1160,35 @@ impl MergedExecCell {
         self.segments.push((pre, out));
     }
 
-    // Build an aggregated preamble for Read segments by collapsing multiple
-    // ranges of the same file into a single combined range. Returns None for
-    // non-Read kinds or when parsing fails (fallback to per-segment rendering).
+    // Build an aggregated preamble for Read segments by concatenating
+    // all per-exec preambles and coalescing contiguous ranges for the
+    // same file. Returns None for non-Read kinds.
     fn aggregated_read_preamble_lines(&self) -> Option<Vec<Line<'static>>> {
         if self.kind != ExecKind::Read {
             return None;
         }
-        use std::collections::BTreeMap;
         use ratatui::text::Span;
-
-        // filename -> (min_start, max_end)
-        let mut ranges: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-
-        // Helper: parse a logical display line like
-        //   "└ history_cell.rs (lines 1 to 240)"
-        // into (filename, start, end). Returns None on unknown formats.
-        let parse_line = |line: &Line<'_>| -> Option<(String, u32, u32)> {
-            let flat: String = line
-                .spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect();
-            let s = flat.trim_start();
-            let s = s.strip_prefix("└ ").unwrap_or(s);
-            let s = s.strip_prefix("  ").unwrap_or(s);
-            let (left, right) = s.rsplit_once(" (")?; // split before annotation
-            let ann = right.trim_end_matches(')');
-            // Only handle the common "(lines A to B)" pattern here
-            if let Some(rest) = ann.strip_prefix("lines ") {
-                if let Some((a, b)) = rest.split_once(" to ") {
-                    let start: u32 = a.trim().parse().ok()?;
-                    let end: u32 = b.trim().parse().ok()?;
-                    return Some((left.trim().to_string(), start, end));
-                }
-            }
-            None
-        };
-
-        for (pre_raw, _out_raw) in &self.segments {
+        // Concatenate per-segment preambles (without their headers), ensure
+        // the first line has the leading connector, then coalesce contiguous
+        // ranges using the same logic as single-exec rendering.
+        let mut all: Vec<Line<'static>> = Vec::new();
+        for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() { pre.remove(0); } // drop per-segment header
-            for line in pre.iter() {
-                if let Some((fname, a, b)) = parse_line(line) {
-                    let entry = ranges.entry(fname).or_insert((a, b));
-                    entry.0 = entry.0.min(a);
-                    entry.1 = entry.1.max(b);
-                } else {
-                    // Unknown/unsupported format; abort aggregation
-                    return None;
+            if !pre.is_empty() { pre.remove(0); }
+            if i == 0 {
+                if let Some(first) = pre.first_mut() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                    if !already {
+                        first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                    }
                 }
             }
+            all.extend(pre);
         }
-
-        if ranges.is_empty() { return None; }
-
-        // Build display lines with a single leading "└ " for the first file
-        let mut out: Vec<Line<'static>> = Vec::new();
-        for (i, (fname, (start, end))) in ranges.into_iter().enumerate() {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            let prefix = if i == 0 { "└ " } else { "  " };
-            spans.push(Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)));
-            spans.push(Span::styled(fname, Style::default().fg(crate::colors::text())));
-            let rest = format!(" (lines {} to {})", start, end);
-            spans.push(Span::styled(rest, Style::default().fg(crate::colors::text_dim())));
-            out.push(Line::from(spans));
-        }
-
-        Some(out)
+        // Merge adjacent ranges like "app.rs (lines 1 to 200)" + "app.rs (lines 200 to 400)"
+        coalesce_read_ranges_in_lines_local(&mut all);
+        Some(all)
     }
 }
 
@@ -1766,7 +1727,17 @@ fn exec_render_parts_parsed(
             ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
             ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
             ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
-            ParsedCommand::Unknown { cmd } => ("Run".to_string(), cmd.clone()),
+            ParsedCommand::Unknown { cmd } => {
+                // Suppress separator helpers like `echo ---` which are used
+                // internally to delimit chunks when reading files.
+                let t = cmd.trim();
+                let lower = t.to_lowercase();
+                if lower.starts_with("echo") && lower.contains("---") {
+                    (String::new(), String::new()) // drop from preamble
+                } else {
+                    ("Run".to_string(), cmd.clone())
+                }
+            },
             ParsedCommand::Noop { .. } => continue,
         };
         if label.is_empty() && content.is_empty() {
@@ -1907,7 +1878,7 @@ fn exec_render_parts_parsed(
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
     use ratatui::text::Span;
-    if lines.len() <= 2 { return; }
+    if lines.len() <= 1 { return; }
     fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32, String)> {
         if line.spans.is_empty() { return None; }
         let prefix = line.spans[0].content.to_string();
@@ -1927,23 +1898,31 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
         }
         None
     }
-    let mut i: usize = 1; // skip header
-    while i + 1 < lines.len() {
-        let left = parse_read_line(&lines[i]);
-        let right = parse_read_line(&lines[i + 1]);
-        if let (Some((fname_a, mut a1, mut a2, prefix_a)), Some((fname_b, b1, b2, _))) = (left, right) {
-            if fname_a == fname_b && (b1 == a2 || b1 == a2 + 1) {
-                a1 = a1.min(b1);
-                a2 = a2.max(b2);
-                let new_spans: Vec<Span<'static>> = vec![
-                    Span::styled(prefix_a, Style::default().add_modifier(Modifier::DIM)),
-                    Span::styled(fname_a, Style::default().fg(crate::colors::text())),
-                    Span::styled(format!(" (lines {} to {})", a1, a2), Style::default().fg(crate::colors::text_dim())),
-                ];
-                lines[i] = Line::from(new_spans);
-                lines.remove(i + 1);
-                continue;
+    // Merge overlapping or touching ranges for the same file, regardless of adjacency.
+    let mut i: usize = 0;
+    while i < lines.len() {
+        let Some((fname_a, mut a1, mut a2, prefix_a)) = parse_read_line(&lines[i]) else { i += 1; continue; };
+        let mut k = i + 1;
+        while k < lines.len() {
+            if let Some((fname_b, b1, b2, _prefix_b)) = parse_read_line(&lines[k]) {
+                if fname_b == fname_a {
+                    // Merge if overlapping or contiguous
+                    let touch_or_overlap = b1 <= a2.saturating_add(1) && b2.saturating_add(1) >= a1;
+                    if touch_or_overlap {
+                        a1 = a1.min(b1);
+                        a2 = a2.max(b2);
+                        let new_spans: Vec<Span<'static>> = vec![
+                            Span::styled(prefix_a.clone(), Style::default().add_modifier(Modifier::DIM)),
+                            Span::styled(fname_a.clone(), Style::default().fg(crate::colors::text())),
+                            Span::styled(format!(" (lines {} to {})", a1, a2), Style::default().fg(crate::colors::text_dim())),
+                        ];
+                        lines[i] = Line::from(new_spans);
+                        lines.remove(k);
+                        continue; // keep checking more occurrences of the same file
+                    }
+                }
             }
+            k += 1;
         }
         i += 1;
     }
@@ -4042,7 +4021,15 @@ fn new_parsed_command(
             ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
             ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
             ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
-            ParsedCommand::Unknown { cmd } => ("Run".to_string(), cmd.clone()),
+            ParsedCommand::Unknown { cmd } => {
+                let t = cmd.trim();
+                let lower = t.to_lowercase();
+                if lower.starts_with("echo") && lower.contains("---") {
+                    (String::new(), String::new())
+                } else {
+                    ("Run".to_string(), cmd.clone())
+                }
+            },
             ParsedCommand::Noop { .. } => continue,
         };
 

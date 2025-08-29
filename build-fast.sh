@@ -234,9 +234,8 @@ fi
 # This reuses the host stdlib and normal cache
 
 # Build with or without --locked based on lockfile validity
-# Merge cargo's stderr into stdout so CI/harnesses that only capture stdout
-# still show all compilation lines and warnings just like an interactive shell.
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec 2>&1
+# Keep stderr and stdout separate so downstream tools can capture both streams.
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -273,9 +272,9 @@ if [ $? -eq 0 ]; then
     # dependencies/proc-macro dylibs are not affected.
     if [ "${DETERMINISTIC_NO_UUID:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-cli --bin code -- -C link-arg=-Wl,-no_uuid 2>&1 || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-tui --bin code-tui -- -C link-arg=-Wl,-no_uuid 2>&1 || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid 2>&1 || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-cli --bin code -- -C link-arg=-Wl,-no_uuid || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-tui --bin code-tui -- -C link-arg=-Wl,-no_uuid || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid || true
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)

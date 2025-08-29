@@ -335,19 +335,23 @@ impl App<'_> {
 
                     match key_event {
                         KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
-                            // Unified Esc policy (highest confidence first):
-                            // 1) If there's text, clear it.
-                            // 2) Else if agent is running, stop it.
-                            // 3) Else double‑Esc engages backtrack/edit‑previous.
+                            // Unified Esc policy with modal-first handling:
+                            // - If any modal is active, forward Esc to the widget so the modal can close itself.
+                            // - Otherwise apply global Esc ordering:
+                            //   1) If there's text, clear it.
+                            //   2) Else if agent is running, stop it.
+                            //   3) Else double‑Esc engages backtrack/edit‑previous.
                             if let AppState::Chat { widget } = &mut self.app_state {
+                                // Modal-first: give active modal views priority to handle Esc.
+                                if widget.has_active_modal_view() {
+                                    widget.handle_key_event(key_event);
+                                    continue;
+                                }
+
                                 // If a file-search popup is visible, close it first
                                 // then continue with global Esc policy in the same keypress.
-                                let closed_file_popup = widget.close_file_popup_if_active();
-                                // If any other modal/overlay view is active, do NOT
-                                // run global Esc policy; the view will handle Esc itself.
-                                if !closed_file_popup && widget.has_active_modal_view() {
-                                    // Do nothing else; the view consumed Esc.
-                                } else {
+                                let _closed_file_popup = widget.close_file_popup_if_active();
+                                {
                                     let now = Instant::now();
                                     const THRESHOLD: Duration = Duration::from_millis(600);
 
@@ -557,25 +561,22 @@ impl App<'_> {
                             break;
                         }
                         SlashCommand::Diff => {
-                            let (is_git_repo, diff_text) = match tokio::runtime::Handle::current().block_on(get_git_diff()) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    let msg = format!("Failed to compute diff: {e}");
-                                    if let AppState::Chat { widget } = &mut self.app_state {
-                                        widget.add_diff_output(msg);
+                            let tx = self.app_event_tx.clone();
+                            tokio::spawn(async move {
+                                match get_git_diff().await {
+                                    Ok((is_git_repo, diff_text)) => {
+                                        let text = if is_git_repo {
+                                            diff_text
+                                        } else {
+                                            "`/diff` — _not inside a git repository_".to_string()
+                                        };
+                                        tx.send(AppEvent::DiffResult(text));
                                     }
-                                    continue;
+                                    Err(e) => {
+                                        tx.send(AppEvent::DiffResult(format!("Failed to compute diff: {e}")));
+                                    }
                                 }
-                            };
-
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                let text = if is_git_repo {
-                                    diff_text
-                                } else {
-                                    "`/diff` — _not inside a git repository_".to_string()
-                                };
-                                widget.add_diff_output(text);
-                            }
+                            });
                         }
                         SlashCommand::Mention => {
                             // The mention feature is handled differently in our fork
@@ -826,63 +827,73 @@ impl App<'_> {
                         // Build response items from current UI history
                         let items = widget.export_response_items();
                         let cfg = widget.config_ref().clone();
-                        // Fork conversation synchronously
-                        let result = tokio::runtime::Handle::current().block_on(async {
-                            self._server.fork_conversation(items.clone(), nth, cfg.clone()).await
-                        });
-                        match result {
-                            Ok(new_conv) => {
-                                // Replace widget with a new one bound to the forked conversation
-                                let session_conf = new_conv.session_configured.clone();
-                                let conv = new_conv.conversation.clone();
-                                let new_widget = ChatWidget::new_from_existing(
-                                    cfg,
-                                    conv,
-                                    session_conf,
-                                    self.app_event_tx.clone(),
-                                    self.enhanced_keys_supported,
-                                    self.terminal_info.clone(),
-                                );
 
-                                // Compute prefix up to selected user message: take items before the cut
-                                let prefix_items = {
-                                    // Find cut index: the header of the Nth last user message
-                                    let mut user_seen = 0usize;
-                                    let mut cut = items.len();
-                                    for (idx, it) in items.iter().enumerate().rev() {
-                                        if let codex_protocol::models::ResponseItem::Message { role, .. } = it {
-                                            if role == "user" {
-                                                user_seen += 1;
-                                                if user_seen == nth { cut = idx; break; }
-                                            }
-                                        }
+                        // Compute prefix up to selected user message now
+                        let prefix_items = {
+                            let mut user_seen = 0usize;
+                            let mut cut = items.len();
+                            for (idx, it) in items.iter().enumerate().rev() {
+                                if let codex_protocol::models::ResponseItem::Message { role, .. } = it {
+                                    if role == "user" {
+                                        user_seen += 1;
+                                        if user_seen == nth { cut = idx; break; }
                                     }
-                                    items.into_iter().take(cut).collect::<Vec<_>>()
-                                };
-
-                                // Install new widget
-                                self.app_state = AppState::Chat { widget: Box::new(new_widget) };
-
-                                // Replay prefix to the UI
-                                let ev = codex_core::protocol::Event {
-                                    id: "fork".to_string(),
-                                    msg: codex_core::protocol::EventMsg::ReplayHistory(
-                                        codex_core::protocol::ReplayHistoryEvent { items: prefix_items }
-                                    ),
-                                };
-                                self.app_event_tx.send(AppEvent::CodexEvent(ev));
-
-                                // Prefill composer with the edited text
-                                if let AppState::Chat { widget } = &mut self.app_state {
-                                    widget.insert_str(&prefill);
                                 }
-                                self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
-                            Err(e) => {
+                            items.iter().take(cut).cloned().collect::<Vec<_>>()
+                        };
+
+                        // Perform the fork off the UI thread to avoid nested runtimes
+                        let server = self._server.clone();
+                        let tx = self.app_event_tx.clone();
+                        let prefill_clone = prefill.clone();
+                        std::thread::spawn(move || {
+                            let rt = tokio::runtime::Builder::new_multi_thread()
+                                .enable_all()
+                                .build()
+                                .expect("build tokio runtime");
+                            // Clone cfg for the async block to keep original for the event
+                            let cfg_for_rt = cfg.clone();
+                            let result = rt.block_on(async move {
+                                server.fork_conversation(items, nth, cfg_for_rt).await
+                            });
+                            if let Ok(new_conv) = result {
+                                tx.send(AppEvent::JumpBackForked { cfg, new_conv: crate::app_event::Redacted(new_conv), prefix_items, prefill: prefill_clone });
+                            } else if let Err(e) = result {
                                 tracing::error!("error forking conversation: {e:#}");
                             }
-                        }
+                        });
                     }
+                }
+                AppEvent::JumpBackForked { cfg, new_conv, prefix_items, prefill } => {
+                    // Replace widget with a new one bound to the forked conversation
+                    let session_conf = new_conv.0.session_configured.clone();
+                    let conv = new_conv.0.conversation.clone();
+                    let new_widget = ChatWidget::new_from_existing(
+                        cfg,
+                        conv,
+                        session_conf,
+                        self.app_event_tx.clone(),
+                        self.enhanced_keys_supported,
+                        self.terminal_info.clone(),
+                    );
+
+                    self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+
+                    // Replay prefix to the UI
+                    let ev = codex_core::protocol::Event {
+                        id: "fork".to_string(),
+                        msg: codex_core::protocol::EventMsg::ReplayHistory(
+                            codex_core::protocol::ReplayHistoryEvent { items: prefix_items }
+                        ),
+                    };
+                    self.app_event_tx.send(AppEvent::CodexEvent(ev));
+
+                    // Prefill composer with the edited text
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if !prefill.is_empty() { widget.insert_str(&prefill); }
+                    }
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::ScheduleFrameIn(duration) => {
                     // Schedule the next redraw with the requested duration

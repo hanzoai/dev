@@ -4545,17 +4545,14 @@ fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool) {
 
 fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     let ExecToolCallOutput {
-        exit_code,
-        stdout,
-        stderr,
+        aggregated_output,
         ..
     } = exec_output;
 
-    let is_success = *exit_code == 0;
-    let output = if is_success { stdout } else { stderr };
-
-    let mut formatted_output = output.text.clone();
-    if let Some(truncated_after_lines) = output.truncated_after_lines {
+    // Always use the aggregated (stdout + stderr interleaved) stream so the
+    // model sees the full build log regardless of which stream a tool used.
+    let mut formatted_output = aggregated_output.text.clone();
+    if let Some(truncated_after_lines) = aggregated_output.truncated_after_lines {
         formatted_output.push_str(&format!(
             "\n\n[Output truncated after {truncated_after_lines} lines: too many lines or bytes.]",
         ));
