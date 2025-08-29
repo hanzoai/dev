@@ -500,7 +500,7 @@ impl HistoryCell for AssistantMarkdownCell {
         // - Apply bullet wrapping and horizontal rules transformation
         // - One top padding row for the cell (+1)
         // - Fenced code blocks: exclude language sentinel; trim blank padding lines;
-        //   add 4 rows for borders + inner pads
+        //   add 2 rows for borders (no inner top/bottom padding)
         // Use full width for assistant text wrapping so bullets don't wrap early.
         let text_wrap_width = width;
         let mut all_lines = self.display_lines_trimmed();
@@ -528,8 +528,13 @@ impl HistoryCell for AssistantMarkdownCell {
                         // lines align under the content start.
                         let hang_cols =
                             unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        // Remove the leading bullet and its following single-space span so the
+                        // first visual row starts with actual content. Without this, the bullet
+                        // would still appear after the hanging indent and shift the first row's
+                        // content to the right, causing misalignment with wrapped rows.
+                        let stripped = strip_first_bullet_and_space(line.clone());
                         transformed.extend(wrap_hanging_line(
-                            line,
+                            stripped,
                             indent_spaces,
                             hang_cols,
                             text_wrap_width,
@@ -581,7 +586,7 @@ impl HistoryCell for AssistantMarkdownCell {
                 {
                     chunk.pop();
                 }
-                total = total.saturating_add(chunk.len() as u16 + 4);
+                total = total.saturating_add(chunk.len() as u16 + 2);
             } else {
                 let text = Text::from(all_lines[start..i].to_vec());
                 let rows: u16 = Paragraph::new(text)
@@ -637,8 +642,11 @@ impl HistoryCell for AssistantMarkdownCell {
                     if is_first_output_line && bullet_char == "-" {
                         let hang_cols =
                             unicode_width::UnicodeWidthStr::width(bullet_char.as_str()) + 2;
+                        // Remove the bullet + following space so the first row's text starts
+                        // where the hanging indent expects, aligning with continuation rows.
+                        let stripped = strip_first_bullet_and_space(line.clone());
                         transformed.extend(wrap_hanging_line(
-                            line,
+                            stripped,
                             indent_spaces,
                             hang_cols,
                             text_wrap_width,
@@ -771,7 +779,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
                     let card_w = inner_w.saturating_add(4).min(area.width.max(4));
-                    let total = lines.len() as u16 + 4; // top/bottom border + inner padding rows
+                    let total = lines.len() as u16 + 2; // top/bottom border only
                     if *skip >= total {
                         *skip -= total;
                         return;
@@ -788,19 +796,8 @@ impl HistoryCell for AssistantMarkdownCell {
                         top_border -= drop;
                         local_skip -= drop;
                     }
-                    let mut top_pad = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(top_pad);
-                        top_pad -= drop;
-                        local_skip -= drop;
-                    }
                     let code_skip = local_skip.min(lines.len() as u16);
                     local_skip -= code_skip;
-                    let mut bottom_pad = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(bottom_pad);
-                        bottom_pad -= drop;
-                    }
                     let mut bottom_border = 1u16;
                     if local_skip > 0 {
                         let drop = local_skip.min(bottom_border);
@@ -808,9 +805,7 @@ impl HistoryCell for AssistantMarkdownCell {
                     }
                     // Compute drawable height in this pass
                     let visible = top_border
-                        + top_pad
                         + (lines.len() as u16 - code_skip)
-                        + bottom_pad
                         + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
@@ -3345,6 +3340,44 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
         return Some((indent, bullet.to_string()));
     }
     None
+}
+
+/// For lines that begin with a markdown bullet produced by our renderer,
+/// return a copy of the line with the bullet marker and its following single
+/// space removed. Leading indent (spaces) is preserved.
+fn strip_first_bullet_and_space(mut line: ratatui::text::Line<'static>) -> ratatui::text::Line<'static> {
+    let spans = &mut line.spans;
+    if spans.is_empty() {
+        return line;
+    }
+    // Compute index of bullet span after optional leading spaces
+    let mut idx = 0usize;
+    if let Some(s) = spans.get(0) {
+        let t = s.content.as_ref();
+        if !t.is_empty() && t.chars().all(|c| c == ' ') {
+            idx = 1;
+        }
+    }
+    // Must have bullet span and a following single-space span
+    if spans.len() <= idx + 1 {
+        return line;
+    }
+    let bullet = spans[idx].content.as_ref();
+    let space_is_single = spans[idx + 1].content.as_ref() == " ";
+    // Accept unordered bullets, checkboxes, and ordered bullets ("1.")
+    let unordered = ["-", "•", "◦", "·", "∘", "⋅", "☐", "✔"]; // same set as detect_bullet_prefix
+    let is_ordered = bullet.ends_with('.') && bullet[..bullet.len().saturating_sub(1)]
+        .chars()
+        .all(|c| c.is_ascii_digit());
+    if (unordered.contains(&bullet) || is_ordered) && space_is_single {
+        // Remove bullet and the following single space
+        spans.remove(idx); // bullet
+        // After removal, the former (idx + 1) becomes idx
+        if spans.len() > idx && spans[idx].content.as_ref() == " " {
+            spans.remove(idx);
+        }
+    }
+    line
 }
 
 // Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
