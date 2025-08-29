@@ -115,7 +115,11 @@ pub struct Tui {
     /// Theme configuration for the TUI
     #[serde(default)]
     pub theme: ThemeConfig,
-    
+
+    /// Syntax highlighting configuration (Markdown fenced code blocks)
+    #[serde(default)]
+    pub highlight: HighlightConfig,
+
     /// Whether to show reasoning content expanded by default (can be toggled with Ctrl+R/T)
     #[serde(default)]
     pub show_reasoning: bool,
@@ -140,6 +144,19 @@ impl Default for ThemeConfig {
             colors: ThemeColors::default(),
         }
     }
+}
+
+/// Configuration for syntax highlighting in Markdown code blocks.
+///
+/// `theme` accepts the following values:
+/// - "auto" (default): choose a sensible built-in syntect theme based on
+///   whether the current UI theme is light or dark.
+/// - "<name>": use a specific syntect theme by name from the default ThemeSet.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct HighlightConfig {
+    /// Theme selection preference (see docstring for accepted values)
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 /// Available predefined themes
