@@ -364,20 +364,32 @@ async function main() {
 
     const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
 
-    // Resolve which 'code' is currently on PATH
-    const resolveOnPath = (cmd) => {
+    // Resolve all 'code' candidates on PATH (so we detect collisions even if
+    // our npm global bin currently appears first).
+    const resolveAllOnPath = () => {
       try {
         if (isWindows) {
-          const out = execSync(`where ${cmd}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split(/\r?\n/)[0]?.trim();
-          return out || '';
-        } else {
-          return execSync(`command -v ${cmd}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+          const out = execSync('where code', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+          return out.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
         }
-      } catch { return ''; }
+        // Prefer 'which -a' if available; fall back to 'command -v'
+        let out = '';
+        try {
+          out = execSync('bash -lc "which -a code 2>/dev/null"', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+        } catch {
+          try {
+            out = execSync('command -v code || true', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+          } catch { out = ''; }
+        }
+        return out.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      } catch {
+        return [];
+      }
     };
 
-    const codeResolved = resolveOnPath('code');
-    const collision = codeResolved && ourShim && codeResolved !== ourShim;
+    const candidates = resolveAllOnPath();
+    const others = candidates.filter(p => p && ourShim && p !== ourShim);
+    const collision = others.length > 0;
 
     const ensureWrapper = (name, args) => {
       if (!globalBin) return;
@@ -402,26 +414,22 @@ async function main() {
     ensureWrapper('code-exec', 'exec');
 
     if (collision) {
-      console.log('⚠ Detected an existing `code` command on your PATH (likely VS Code).');
+      console.log('⚠ Detected existing `code` on PATH:');
+      for (const p of others) console.log(`   - ${p}`);
       if (globalBin) {
-        // Create a 'coder' shim that forwards to our installed 'code' in the same dir
+        // Remove our global `code` shim to avoid shadowing editors like VS Code
         try {
-          const coderShim = join(globalBin, isWindows ? 'coder.cmd' : 'coder');
-          if (isWindows) {
-            const content = `@echo off\r\n"%~dp0code" %*\r\n`;
-            writeFileSync(coderShim, content);
-          } else {
-            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/code" "$@"\n`;
-            writeFileSync(coderShim, content);
-            chmodSync(coderShim, 0o755);
+          if (existsSync(ourShim)) {
+            unlinkSync(ourShim);
+            console.log(`✓ Skipped global 'code' shim (removed ${ourShim})`);
           }
-          console.log(`✓ Created fallback command \`coder\` -> our \`code\``);
         } catch (e) {
-          console.log(`⚠ Failed to create 'coder' fallback: ${e.message}`);
+          console.log(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
         }
 
         // Offer to create a 'vscode' alias that points to the existing system VS Code
-        if (isTTY && codeResolved) {
+        const primaryOther = others[0];
+        if (isTTY && primaryOther) {
           const prompt = (msg) => {
             process.stdout.write(msg);
             try {
@@ -436,10 +444,10 @@ async function main() {
             try {
               const vscodeShim = join(globalBin, isWindows ? 'vscode.cmd' : 'vscode');
               if (isWindows) {
-                const content = `@echo off\r\n"${codeResolved}" %*\r\n`;
+                const content = `@echo off\r\n"${primaryOther}" %*\r\n`;
                 writeFileSync(vscodeShim, content);
               } else {
-                const content = `#!/bin/sh\nexec "${codeResolved}" "$@"\n`;
+                const content = `#!/bin/sh\nexec "${primaryOther}" "$@"\n`;
                 writeFileSync(vscodeShim, content);
                 chmodSync(vscodeShim, 0o755);
               }
@@ -451,7 +459,6 @@ async function main() {
             console.log('Skipping creation of `vscode` alias.');
           }
         }
-
         console.log('→ Use `coder` to run this tool, and `vscode` (if created) for your editor.');
       } else {
         console.log('Note: could not determine npm global bin; skipping alias creation.');
