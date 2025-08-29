@@ -1041,15 +1041,15 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
             }
         }
 
-        // Render the quote content using a nested MarkdownRenderer so lists/code inside
-        // the quote are fully supported.
-        let mut inner = MarkdownRenderer::new();
-        inner.process_text(&content);
-        inner.finish();
-        let lines_to_render = if inner.lines.is_empty() {
+        // Render the quote content as raw literal text without interpreting
+        // Markdown syntax inside the blockquote. This preserves the exact
+        // characters shown by the model (e.g., `**bold**`, lists, images)
+        // rather than re‑parsing them. Each input line corresponds to a
+        // single rendered line of content.
+        let lines_to_render = if content.is_empty() {
             vec![Line::from("")]
         } else {
-            inner.lines
+            vec![Line::from(Span::raw(content.clone()))]
         };
 
         let bar_style = if callout_kind.is_some() {
@@ -1074,13 +1074,11 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
                 .spans
                 .into_iter()
                 .map(|s| {
-                    if let Some(fg) = s.style.fg {
-                        if fg == crate::colors::function() {
-                            let mut st = s.style;
-                            st.fg = Some(crate::colors::mix_toward(fg, content_fg, 0.30));
-                            return Span::styled(s.content, st);
-                        }
-                        return s;
+                    if let Some(_fg) = s.style.fg {
+                        // Preserve explicit colors (e.g., code spans) even though we
+                        // no longer parse markdown inside quotes. If a span already has
+                        // an FG, keep it as-is.
+                        s
                     } else {
                         let mut st = s.style;
                         st.fg = Some(content_fg);

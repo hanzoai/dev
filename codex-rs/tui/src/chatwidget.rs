@@ -150,6 +150,8 @@ pub(crate) struct ChatWidget<'a> {
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
+    // Store pending non-image file paths keyed by their placeholder text
+    pending_files: HashMap<String, PathBuf>,
     welcome_shown: bool,
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
@@ -218,6 +220,10 @@ pub(crate) struct ChatWidget<'a> {
 
     // Prefix sums of content heights (including spacing) for fast scroll range
     prefix_sums: std::cell::RefCell<Vec<u16>>,
+    // Cache key for prefix_sums to avoid rebuilding on pure scroll frames
+    last_prefix_width: std::cell::Cell<u16>,
+    last_prefix_count: std::cell::Cell<usize>,
+    prefix_valid: std::cell::Cell<bool>,
 
     // Stateful vertical scrollbar for history view
     vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
@@ -272,8 +278,11 @@ struct DiffConfirm {
 }
 
 struct UserMessage {
-    text: String,
-    image_paths: Vec<PathBuf>,
+    /// What to show in the chat history (keeps placeholders like "[image: name.png]")
+    display_text: String,
+    /// Items to send to the core/model in the correct order, with inline
+    /// markers preceding images so the LLM knows placement.
+    ordered_items: Vec<InputItem>,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -417,10 +426,11 @@ enum AgentStatus {
 
 impl From<String> for UserMessage {
     fn from(text: String) -> Self {
-        Self {
-            text,
-            image_paths: Vec::new(),
+        let mut ordered = Vec::new();
+        if !text.trim().is_empty() {
+            ordered.push(InputItem::Text { text: text.clone() });
         }
+        Self { display_text: text, ordered_items: ordered }
     }
 }
 
@@ -428,7 +438,16 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
     if text.is_empty() && image_paths.is_empty() {
         None
     } else {
-        Some(UserMessage { text, image_paths })
+        let mut ordered: Vec<InputItem> = Vec::new();
+        if !text.trim().is_empty() {
+            ordered.push(InputItem::Text { text: text.clone() });
+        }
+        for path in image_paths {
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+            ordered.push(InputItem::Text { text: format!("[image: {}]", filename) });
+            ordered.push(InputItem::LocalImage { path });
+        }
+        Some(UserMessage { display_text: text, ordered_items: ordered })
     }
 }
 
@@ -875,6 +894,7 @@ impl ChatWidget<'_> {
     fn invalidate_height_cache(&mut self) {
         self.height_cache.borrow_mut().clear();
         self.prefix_sums.borrow_mut().clear();
+        self.prefix_valid.set(false);
     }
 
 
@@ -1290,60 +1310,141 @@ impl ChatWidget<'_> {
         const IMAGE_EXTENSIONS: &[&str] = &[
             ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif",
         ];
+        // We keep a visible copy of the original (normalized) text for history
+        let mut display_text = text.clone();
+        let mut ordered_items: Vec<InputItem> = Vec::new();
 
-        let mut image_paths = Vec::new();
-        let mut cleaned_text = text.clone();
-
-        // First, handle [image: ...] placeholders from drag-and-drop
-        let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]").unwrap();
+        // First, handle [image: ...] and [file: ...] placeholders from drag-and-drop
+        let placeholder_regex = regex_lite::Regex::new(r"\[(image|file): [^\]]+\]").unwrap();
+        let mut cursor = 0usize;
         for mat in placeholder_regex.find_iter(&text) {
+            // Push preceding text as a text item (if any)
+            if mat.start() > cursor {
+                let chunk = &text[cursor..mat.start()];
+                if !chunk.trim().is_empty() {
+                    ordered_items.push(InputItem::Text { text: chunk.to_string() });
+                }
+            }
+
             let placeholder = mat.as_str();
-            if let Some(path) = self.pending_images.remove(placeholder) {
-                image_paths.push(path);
-                // Remove the placeholder from the text
-                cleaned_text = cleaned_text.replace(placeholder, "");
+            if placeholder.starts_with("[image:") {
+                if let Some(path) = self.pending_images.remove(placeholder) {
+                    // Emit a small marker followed by the image so the LLM sees placement
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                    let marker = format!("[image: {}]", filename);
+                    ordered_items.push(InputItem::Text { text: marker });
+                    ordered_items.push(InputItem::LocalImage { path });
+                } else {
+                    // Unknown placeholder: preserve as text
+                    ordered_items.push(InputItem::Text { text: placeholder.to_string() });
+                }
+            } else if placeholder.starts_with("[file:") {
+                if let Some(path) = self.pending_files.remove(placeholder) {
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    // Always include a marker text
+                    ordered_items.push(InputItem::Text { text: format!("[file: {}]", filename) });
+                    // Inline small textual files; otherwise, include a short descriptor
+                    if let Ok(meta) = std::fs::metadata(&path) {
+                        let size = meta.len();
+                        // Threshold ~64 KiB
+                        let inline_limit: u64 = 64 * 1024;
+                        if size <= inline_limit {
+                            match std::fs::read(&path) {
+                                Ok(bytes) => {
+                                    if let Ok(text) = String::from_utf8(bytes) {
+                                        // Detect language by extension for nicer fences
+                                        let lang = path
+                                            .extension()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("");
+                                        let mut block = String::new();
+                                        block.push_str(&format!("\n```{}\n", lang));
+                                        block.push_str(&text);
+                                        if !text.ends_with('\n') { block.push('\n'); }
+                                        block.push_str("```\n");
+                                        ordered_items.push(InputItem::Text { text: block });
+                                    } else {
+                                        ordered_items.push(InputItem::Text { text: format!("(binary or non-UTF8 file, {} bytes; not inlined)", size) });
+                                    }
+                                }
+                                Err(e) => {
+                                    ordered_items.push(InputItem::Text { text: format!("(failed to read file: {})", e) });
+                                }
+                            }
+                        } else {
+                            ordered_items.push(InputItem::Text { text: format!("(large file, {} bytes; not inlined)", size) });
+                        }
+                    } else {
+                        ordered_items.push(InputItem::Text { text: "(file not found at submit)".to_string() });
+                    }
+                } else {
+                    ordered_items.push(InputItem::Text { text: placeholder.to_string() });
+                }
+            } else {
+                // Unknown placeholder type; preserve
+                ordered_items.push(InputItem::Text { text: placeholder.to_string() });
+            }
+            cursor = mat.end();
+        }
+        // Push any remaining trailing text
+        if cursor < text.len() {
+            let chunk = &text[cursor..];
+            if !chunk.trim().is_empty() {
+                ordered_items.push(InputItem::Text { text: chunk.to_string() });
             }
         }
 
-        // Then check for direct file paths in the text
+        // Then check for direct file paths typed into the message (no placeholder).
+        // We conservatively append these at the end to avoid mis-ordering text.
+        // This keeps the behavior consistent while still including the image.
+        // We do NOT strip them from display_text so the user sees what they typed.
         let words: Vec<String> = text.split_whitespace().map(String::from).collect();
-
         for word in &words {
-            // Skip placeholders we already handled
-            if word.starts_with("[image:") {
-                continue;
+            if word.starts_with("[image:") { continue; }
+            let is_image_path = IMAGE_EXTENSIONS.iter().any(|ext| word.to_lowercase().ends_with(ext));
+            if !is_image_path { continue; }
+            let path = Path::new(word);
+            if path.exists() {
+                // Add a marker then the image so the LLM has contextual placement info
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                ordered_items.push(InputItem::Text { text: format!("[image: {}]", filename) });
+                ordered_items.push(InputItem::LocalImage { path: path.to_path_buf() });
             }
+        }
 
-            // Check if this looks like an image path
-            let is_image_path = IMAGE_EXTENSIONS
-                .iter()
-                .any(|ext| word.to_lowercase().ends_with(ext));
-
-            if is_image_path {
-                let path = Path::new(word);
-
-                // Check if it's a relative or absolute path that exists
-                if path.exists() {
-                    image_paths.push(path.to_path_buf());
-                    // Remove the path from the text
-                    cleaned_text = cleaned_text.replace(word, "");
-                } else {
-                    // Try with common relative paths
-                    let potential_paths = vec![
-                        PathBuf::from(word),
-                        PathBuf::from("./").join(word),
-                        std::env::current_dir()
-                            .ok()
-                            .map(|d| d.join(word))
-                            .unwrap_or_default(),
-                    ];
-
-                    for potential_path in potential_paths {
-                        if potential_path.exists() {
-                            image_paths.push(potential_path);
-                            cleaned_text = cleaned_text.replace(word, "");
-                            break;
+        // Also handle non-image direct file paths by appending a marker and an inline preview (if small text)
+        for word in &words {
+            if word.starts_with("[file:") || word.starts_with("[image:") { continue; }
+            // Heuristic: treat anything that looks like a path with an extension as a candidate
+            let looks_like_path = word.contains('/') || word.contains('\\');
+            let has_ext = std::path::Path::new(word).extension().is_some();
+            if !(looks_like_path && has_ext) { continue; }
+            let path = Path::new(word);
+            if path.exists() && path.is_file() {
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                ordered_items.push(InputItem::Text { text: format!("[file: {}]", filename) });
+                if let Ok(meta) = std::fs::metadata(path) {
+                    let size = meta.len();
+                    let inline_limit: u64 = 64 * 1024;
+                    if size <= inline_limit {
+                        match std::fs::read(path) {
+                            Ok(bytes) => {
+                                if let Ok(text) = String::from_utf8(bytes) {
+                                    let lang = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                                    let mut block = String::new();
+                                    block.push_str(&format!("\n```{}\n", lang));
+                                    block.push_str(&text);
+                                    if !text.ends_with('\n') { block.push('\n'); }
+                                    block.push_str("```\n");
+                                    ordered_items.push(InputItem::Text { text: block });
+                                } else {
+                                    ordered_items.push(InputItem::Text { text: format!("(binary or non-UTF8 file, {} bytes; not inlined)", size) });
+                                }
+                            }
+                            Err(e) => ordered_items.push(InputItem::Text { text: format!("(failed to read file: {})", e) }),
                         }
+                    } else {
+                        ordered_items.push(InputItem::Text { text: format!("(large file, {} bytes; not inlined)", size) });
                     }
                 }
             }
@@ -1353,8 +1454,8 @@ impl ChatWidget<'_> {
         // - Normalize CRLF -> LF
         // - Trim trailing spaces per line
         // - Remove any completely blank lines at the start and end
-        cleaned_text = cleaned_text.replace("\r\n", "\n");
-        let mut _lines_tmp: Vec<String> = cleaned_text
+        display_text = display_text.replace("\r\n", "\n");
+        let mut _lines_tmp: Vec<String> = display_text
             .lines()
             .map(|l| l.trim_end().to_string())
             .collect();
@@ -1364,11 +1465,11 @@ impl ChatWidget<'_> {
         while _lines_tmp.last().map_or(false, |s| s.trim().is_empty()) {
             _lines_tmp.pop();
         }
-        cleaned_text = _lines_tmp.join("\n");
+        display_text = _lines_tmp.join("\n");
 
         UserMessage {
-            text: cleaned_text,
-            image_paths,
+            display_text,
+            ordered_items,
         }
     }
 
@@ -1556,6 +1657,7 @@ impl ChatWidget<'_> {
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
+            pending_files: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
@@ -1589,9 +1691,12 @@ impl ChatWidget<'_> {
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
-            last_hud_present: std::cell::Cell::new(false),
+        last_hud_present: std::cell::Cell::new(false),
             prefix_sums: std::cell::RefCell::new(Vec::new()),
-            vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+            last_prefix_width: std::cell::Cell::new(0),
+            last_prefix_count: std::cell::Cell::new(0),
+            prefix_valid: std::cell::Cell::new(false),
+        vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
             scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
             perf_enabled: false,
@@ -1666,6 +1771,7 @@ impl ChatWidget<'_> {
             running_web_search: HashMap::new(),
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
+            pending_files: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
@@ -1699,9 +1805,12 @@ impl ChatWidget<'_> {
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
-            last_hud_present: std::cell::Cell::new(false),
+        last_hud_present: std::cell::Cell::new(false),
             prefix_sums: std::cell::RefCell::new(Vec::new()),
-            vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+            last_prefix_width: std::cell::Cell::new(0),
+            last_prefix_count: std::cell::Cell::new(0),
+            prefix_valid: std::cell::Cell::new(false),
+        vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
             scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
             perf_enabled: false,
@@ -2088,6 +2197,17 @@ impl ChatWidget<'_> {
                 } else {
                     tracing::warn!("Image path does not exist: {:?}", path);
                 }
+            } else {
+                // Handle non-image file drop/paste by inserting a [file: name] token
+                let path = PathBuf::from(&path_str);
+                if path.exists() && path.is_file() {
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                    let placeholder = format!("[file: {}]", filename);
+                    self.pending_files.insert(placeholder.clone(), path);
+                    self.bottom_pane.handle_paste(placeholder);
+                    self.request_redraw();
+                    return;
+                }
             }
         }
 
@@ -2250,11 +2370,13 @@ impl ChatWidget<'_> {
     fn submit_user_message(&mut self, user_message: UserMessage) {
         // Fade the welcome cell only when a user actually posts a message.
         for cell in &self.history_cells { cell.trigger_fade(); }
-        let UserMessage { text, image_paths } = user_message;
-
-        // Keep the original text for display purposes
-        let original_text = text.clone();
-        let mut actual_text = text;
+        let UserMessage { display_text, mut ordered_items } = user_message;
+        let original_text = display_text.clone();
+        // Build a combined string view of the text-only parts to process slash commands
+        let mut text_only = String::new();
+        for it in &ordered_items {
+            if let InputItem::Text { text } = it { if !text_only.is_empty() { text_only.push('\n'); } text_only.push_str(text); }
+        }
 
         // Save the prompt if it's a multi-agent command
         let original_trimmed = original_text.trim();
@@ -2266,16 +2388,17 @@ impl ChatWidget<'_> {
         }
 
         // Process slash commands and expand them if needed
-        let processed = crate::slash_command::process_slash_command_message(&original_text);
+        let processed = crate::slash_command::process_slash_command_message(&text_only);
         match processed {
             crate::slash_command::ProcessedCommand::ExpandedPrompt(expanded) => {
-                // Replace the slash command with the expanded prompt for the LLM
-                actual_text = expanded;
+                // Replace the message with the expanded prompt
+                ordered_items.clear();
+                ordered_items.push(InputItem::Text { text: expanded });
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
                 // This is a regular slash command, dispatch it normally
                 self.app_event_tx
-                    .send(AppEvent::DispatchCommand(cmd, actual_text.clone()));
+                    .send(AppEvent::DispatchCommand(cmd, original_text.clone()));
                 return;
             }
             crate::slash_command::ProcessedCommand::Error(error_msg) => {
@@ -2425,16 +2548,8 @@ impl ChatWidget<'_> {
             tracing::info!("Browser is not enabled, skipping screenshot capture");
         }
 
-        if !actual_text.is_empty() {
-            items.push(InputItem::Text {
-                text: actual_text.clone(),
-            });
-        }
-
-        // Add user-provided images (these are persistent in history)
-        for path in image_paths {
-            items.push(InputItem::LocalImage { path });
-        }
+        // Use the ordered items (text + images interleaved with markers)
+        items.extend(ordered_items);
 
         if items.is_empty() {
             return;
@@ -6474,6 +6589,7 @@ impl WidgetRef for &ChatWidget<'_> {
         if self.height_cache_last_width.get() != content_area.width {
             self.height_cache.borrow_mut().clear();
             self.prefix_sums.borrow_mut().clear();
+            self.prefix_valid.set(false);
             self.height_cache_last_width.set(content_area.width);
         }
 
@@ -6483,11 +6599,18 @@ impl WidgetRef for &ChatWidget<'_> {
             p.frames = p.frames.saturating_add(1);
         }
 
-        let total_height: u16 = {
+        // Detect dynamic content that requires per-frame recomputation
+        let has_active_animation_early = self.history_cells.iter().any(|cell| cell.is_animating());
+        let must_rebuild_prefix = !self.prefix_valid.get()
+            || self.last_prefix_width.get() != content_area.width
+            || self.last_prefix_count.get() != all_content.len()
+            || streaming_cell.is_some()
+            || has_active_animation_early;
+
+        let total_height: u16 = if must_rebuild_prefix {
             let perf_enabled = self.perf_enabled;
             let total_start = if perf_enabled { Some(std::time::Instant::now()) } else { None };
             let mut ps = self.prefix_sums.borrow_mut();
-            // Always rebuild to account for height changes without item count changes
             ps.clear();
             ps.push(0);
             let mut acc = 0u16;
@@ -6552,12 +6675,19 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             let total = *ps.last().unwrap_or(&0);
             if let Some(start) = total_start {
-                if perf_enabled {
+                if self.perf_enabled {
                     let mut p = self.perf.borrow_mut();
                     p.ns_total_height = p.ns_total_height.saturating_add(start.elapsed().as_nanos());
                 }
             }
+            // Update cache keys
+            self.last_prefix_width.set(content_area.width);
+            self.last_prefix_count.set(all_content.len());
+            self.prefix_valid.set(true);
             total
+        } else {
+            // Use cached prefix sums
+            *self.prefix_sums.borrow().last().unwrap_or(&0)
         };
 
         // Check for active animations using the trait method
@@ -6761,7 +6891,13 @@ impl WidgetRef for &ChatWidget<'_> {
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
-                            crate::colors::info()
+                            // Handle merged exec cells (multi-block "Ran") the same as single execs
+                            match item.kind() {
+                                crate::history_cell::HistoryCellType::Exec { kind: crate::history_cell::ExecKind::Run, status: crate::history_cell::ExecStatus::Success } => ratatui::style::Color::Black,
+                                crate::history_cell::HistoryCellType::Exec { kind: crate::history_cell::ExecKind::Run, status: crate::history_cell::ExecStatus::Error } => crate::colors::error(),
+                                crate::history_cell::HistoryCellType::Exec { .. } => crate::colors::info(),
+                                _ => crate::colors::info(),
+                            }
                         }
                     } else if symbol == "↯" {
                         // Patch/Updated arrow color – match the header text color

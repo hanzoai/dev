@@ -544,47 +544,32 @@ async fn execute_model_with_permissions(
 ) -> Result<String, String> {
     // Helper: cross‑platform check whether an executable is available in PATH.
     fn command_exists(cmd: &str) -> bool {
-        // Absolute/relative path with separators: check directly.
+        // Absolute/relative path with separators: check directly (files only).
         if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-            return std::fs::metadata(cmd).is_ok();
+            return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
         }
 
-        let path = std::env::var_os("PATH");
-        if path.is_none() {
-            return false;
+        #[cfg(target_os = "windows")]
+        {
+            return which::which(cmd).map(|p| p.is_file()).unwrap_or(false);
         }
-        let pathext: Vec<String> = if cfg!(windows) {
-            // Default Windows PATHEXT set; also respect env if provided.
-            let env_ext = std::env::var("PATHEXT").unwrap_or(".COM;.EXE;.BAT;.CMD;.MSI;.PS1".to_string());
-            env_ext.split(';').filter_map(|e| {
-                let e = e.trim();
-                if e.is_empty() { None } else { Some(e.to_string()) }
-            }).collect()
-        } else {
-            Vec::new()
-        };
 
-        for dir in std::env::split_paths(&path.unwrap()) {
-            if dir.as_os_str().is_empty() {
-                continue;
-            }
-            let base = dir.join(cmd);
-            if cfg!(windows) {
-                // Try with PATHEXT variants
-                if std::fs::metadata(&base).is_ok() {
-                    return true;
-                }
-                for ext in &pathext {
-                    let candidate = base.with_extension(ext.trim_start_matches('.'));
-                    if std::fs::metadata(&candidate).is_ok() {
-                        return true;
+        #[cfg(not(target_os = "windows"))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let Some(path_os) = std::env::var_os("PATH") else { return false; };
+            for dir in std::env::split_paths(&path_os) {
+                if dir.as_os_str().is_empty() { continue; }
+                let candidate = dir.join(cmd);
+                if let Ok(meta) = std::fs::metadata(&candidate) {
+                    if meta.is_file() {
+                        let mode = meta.permissions().mode();
+                        if mode & 0o111 != 0 { return true; }
                     }
                 }
-            } else if std::fs::metadata(&base).is_ok() {
-                return true;
             }
+            false
         }
-        false
     }
 
     // Use config command if provided, otherwise use model name
@@ -670,7 +655,36 @@ async fn execute_model_with_permissions(
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
-    let output = cmd.output().await.map_err(|e| format!("Failed to execute {}: {}", model, e))?;
+    // Attempt to spawn the external command; if it fails due to NotFound or a
+    // similar OS error, fall back to invoking the current executable (built‑in)
+    // for better portability, especially on Windows with PATH shims.
+    let output = match cmd.output().await {
+        Ok(o) => o,
+        Err(e) => {
+            // Only fall back for external CLIs (not the built-in code/codex path)
+            if model_name == "codex" || model_name == "code" {
+                return Err(format!("Failed to execute {}: {}", model, e));
+            }
+            let mut fb = match std::env::current_exe() {
+                Ok(p) => Command::new(p),
+                Err(e2) => return Err(format!(
+                    "Failed to execute {} and could not resolve built-in fallback: {} / {}",
+                    model, e, e2
+                )),
+            };
+            if read_only {
+                fb.args(["-s", "read-only", "-a", "never", "exec", prompt]);
+            } else {
+                fb.args(["-s", "workspace-write", "-a", "never", "exec", prompt]);
+            }
+            fb.output().await.map_err(|e2| {
+                format!(
+                    "Failed to execute {} ({}). Built-in fallback also failed: {}",
+                    model, e, e2
+                )
+            })?
+        }
+    };
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())

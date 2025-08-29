@@ -245,12 +245,13 @@ impl App<'_> {
         {
             return;
         }
+        // Leading-edge draw now for lower input latency; coalesce further
+        // requests until the debounce window elapses.
+        self.app_event_tx.send(AppEvent::Redraw);
 
-        let tx = self.app_event_tx.clone();
         let pending_redraw = self.pending_redraw.clone();
         thread::spawn(move || {
             thread::sleep(REDRAW_DEBOUNCE);
-            tx.send(AppEvent::Redraw);
             pending_redraw.store(false, Ordering::Release);
         });
     }
@@ -294,10 +295,6 @@ impl App<'_> {
                 },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
-                }
-                AppEvent::ImmediateRedraw => {
-                    // Draw immediately; no debounce
-                    std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
                 }
                 AppEvent::Redraw => {
                     std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;

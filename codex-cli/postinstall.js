@@ -413,23 +413,19 @@ async function main() {
   if (isGlobal && !isNpx) try {
     const isTTY = process.stdout && process.stdout.isTTY;
     const isWindows = platform() === 'win32';
+    const ua = process.env.npm_config_user_agent || '';
+    const isBun = ua.includes('bun') || !!process.env.BUN_INSTALL;
 
-    let globalBin = '';
-    try {
-      globalBin = execSync('npm bin -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch {}
+    const installedCmds = new Set(['coder']); // global install always exposes coder via package manager
+    const skippedCmds = [];
 
-    const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
-
-    // Resolve all 'code' candidates on PATH (so we detect collisions even if
-    // our npm global bin currently appears first).
+    // Helper to resolve all 'code' on PATH
     const resolveAllOnPath = () => {
       try {
         if (isWindows) {
           const out = execSync('where code', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
           return out.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
         }
-        // Prefer 'which -a' if available; fall back to 'command -v'
         let out = '';
         try {
           out = execSync('bash -lc "which -a code 2>/dev/null"', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -444,81 +440,111 @@ async function main() {
       }
     };
 
-    const candidates = resolveAllOnPath();
-    const others = candidates.filter(p => p && ourShim && p !== ourShim);
-    const collision = others.length > 0;
-
-    const ensureWrapper = (name, args) => {
-      if (!globalBin) return;
+    if (isBun) {
+      // Bun creates shims for every bin; if another 'code' exists elsewhere on PATH, remove Bun's shim
+      let bunBin = '';
       try {
-        const wrapperPath = join(globalBin, isWindows ? `${name}.cmd` : name);
-        if (isWindows) {
-          const content = `@echo off\r\n"%~dp0${collision ? 'coder' : 'code'}" ${args} %*\r\n`;
-          writeFileSync(wrapperPath, content);
-        } else {
-          const content = `#!/bin/sh\nexec "$(dirname \"$0\")/${collision ? 'coder' : 'code'}" ${args} "$@"\n`;
-          writeFileSync(wrapperPath, content);
-          chmodSync(wrapperPath, 0o755);
-        }
-        console.log(`✓ Created wrapper '${name}' -> ${collision ? 'coder' : 'code'} ${args}`);
-      } catch (e) {
-        console.log(`⚠ Failed to create '${name}' wrapper: ${e.message}`);
-      }
-    };
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        const bunBase = process.env.BUN_INSTALL || join(home, '.bun');
+        bunBin = join(bunBase, 'bin');
+      } catch {}
 
-    // Always create legacy wrappers so existing scripts keep working
-    ensureWrapper('code-tui', '');
-    ensureWrapper('code-exec', 'exec');
-
-    if (collision) {
-      console.log('⚠ Detected existing `code` on PATH:');
-      for (const p of others) console.log(`   - ${p}`);
-      if (globalBin) {
-        // Remove our global `code` shim to avoid shadowing editors like VS Code
+      const bunShim = join(bunBin || '', isWindows ? 'code.cmd' : 'code');
+      const candidates = resolveAllOnPath();
+      const other = candidates.find(p => p && (!bunBin || !p.startsWith(bunBin)));
+      if (other && existsSync(bunShim)) {
         try {
-          if (existsSync(ourShim)) {
-            unlinkSync(ourShim);
-            console.log(`✓ Skipped global 'code' shim (removed ${ourShim})`);
-          }
+          unlinkSync(bunShim);
+          console.log(`✓ Skipped global 'code' shim under Bun (existing: ${other})`);
+          skippedCmds.push({ name: 'code', reason: `existing: ${other}` });
         } catch (e) {
-          console.log(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
+          console.log(`⚠ Could not remove Bun shim '${bunShim}': ${e.message}`);
         }
+      } else if (existsSync(bunShim)) {
+        installedCmds.add('code');
+      }
 
-        // Offer to create a 'vscode' alias that points to the existing system VS Code
-        const primaryOther = others[0];
-        if (isTTY && primaryOther) {
-          const prompt = (msg) => {
-            process.stdout.write(msg);
-            try {
-              const buf = Buffer.alloc(1024);
-              const bytes = readSync(0, buf, 0, 1024, null);
-              const ans = buf.slice(0, bytes).toString('utf8').trim().toLowerCase();
-              return ans;
-            } catch { return 'n'; }
-          };
-          const ans = prompt('Create a `vscode` alias for your existing editor? [y/N] ');
-          if (ans === 'y' || ans === 'yes') {
-            try {
-              const vscodeShim = join(globalBin, isWindows ? 'vscode.cmd' : 'vscode');
-              if (isWindows) {
-                const content = `@echo off\r\n"${primaryOther}" %*\r\n`;
-                writeFileSync(vscodeShim, content);
-              } else {
-                const content = `#!/bin/sh\nexec "${primaryOther}" "$@"\n`;
-                writeFileSync(vscodeShim, content);
-                chmodSync(vscodeShim, 0o755);
-              }
-              console.log('✓ Created `vscode` alias for your editor');
-            } catch (e) {
-              console.log(`⚠ Failed to create 'vscode' alias: ${e.message}`);
-            }
-          } else {
-            console.log('Skipping creation of `vscode` alias.');
-          }
-        }
-        console.log('→ Use `coder` to run this tool, and `vscode` (if created) for your editor.');
+      // Print summary for Bun
+      const list = Array.from(installedCmds).sort().join(', ');
+      console.log(`Commands installed (bun): ${list}`);
+      if (skippedCmds.length) {
+        for (const s of skippedCmds) console.log(`Commands skipped: ${s.name} (${s.reason})`);
+        console.log('→ Use `coder` to run this tool.');
+      }
+      // Final friendly usage hint
+      if (installedCmds.has('code')) {
+        console.log("Use 'code' to launch Code.");
       } else {
-        console.log('Note: could not determine npm global bin; skipping alias creation.');
+        console.log("Use 'coder' to launch Code.");
+      }
+    } else {
+      // npm/pnpm/yarn path
+      let globalBin = '';
+      try {
+        globalBin = execSync('npm bin -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      } catch {}
+
+      const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
+      const candidates = resolveAllOnPath();
+      const others = candidates.filter(p => p && ourShim && p !== ourShim);
+      const collision = others.length > 0;
+
+      const ensureWrapper = (name, args) => {
+        if (!globalBin) return;
+        try {
+          const wrapperPath = join(globalBin, isWindows ? `${name}.cmd` : name);
+          if (isWindows) {
+            const content = `@echo off\r\n"%~dp0${collision ? 'coder' : 'code'}" ${args} %*\r\n`;
+            writeFileSync(wrapperPath, content);
+          } else {
+            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/${collision ? 'coder' : 'code'}" ${args} "$@"\n`;
+            writeFileSync(wrapperPath, content);
+            chmodSync(wrapperPath, 0o755);
+          }
+          console.log(`✓ Created wrapper '${name}' -> ${collision ? 'coder' : 'code'} ${args}`);
+          installedCmds.add(name);
+        } catch (e) {
+          console.log(`⚠ Failed to create '${name}' wrapper: ${e.message}`);
+        }
+      };
+
+      // Always create legacy wrappers so existing scripts keep working
+      ensureWrapper('code-tui', '');
+      ensureWrapper('code-exec', 'exec');
+
+      if (collision) {
+        console.log('⚠ Detected existing `code` on PATH:');
+        for (const p of others) console.log(`   - ${p}`);
+        if (globalBin) {
+          try {
+            if (existsSync(ourShim)) {
+              unlinkSync(ourShim);
+              console.log(`✓ Skipped global 'code' shim (removed ${ourShim})`);
+              skippedCmds.push({ name: 'code', reason: `existing: ${others[0]}` });
+            }
+          } catch (e) {
+            console.log(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
+          }
+          console.log('→ Use `coder` to run this tool.');
+        } else {
+          console.log('Note: could not determine npm global bin; skipping alias creation.');
+        }
+      } else {
+        // No collision; npm created a 'code' shim for us.
+        if (globalBin && existsSync(ourShim)) installedCmds.add('code');
+      }
+
+      // Print summary for npm/pnpm/yarn
+      const list = Array.from(installedCmds).sort().join(', ');
+      console.log(`Commands installed: ${list}`);
+      if (skippedCmds.length) {
+        for (const s of skippedCmds) console.log(`Commands skipped: ${s.name} (${s.reason})`);
+      }
+      // Final friendly usage hint
+      if (installedCmds.has('code')) {
+        console.log("Use 'code' to launch Code.");
+      } else {
+        console.log("Use 'coder' to launch Code.");
       }
     }
   } catch {
