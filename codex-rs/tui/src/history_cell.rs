@@ -775,11 +775,11 @@ impl HistoryCell for AssistantMarkdownCell {
                     if lines.is_empty() {
                         return;
                     }
-                    // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
+                    // Determine target width for the code card (content width) and add borders (2) + inner pads (left/right = 2 each)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    // Borders (2) + inner horizontal padding (1 left, 1 right)
-                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
+                    // Borders (2) + inner horizontal padding (2 left, 2 right) => +6
+                    let card_w = inner_w.saturating_add(6).min(area.width.max(6));
                     let total = lines.len() as u16 + 2; // top/bottom border only
                     if *skip >= total {
                         *skip -= total;
@@ -828,7 +828,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 1, right: 1, top: 0, bottom: 0 });
+                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
@@ -2948,7 +2948,8 @@ impl HistoryCell for StreamingContentCell {
                         chunk_len = chunk_len.saturating_sub(1);
                     }
                 }
-                total = total.saturating_add(chunk_len.saturating_add(4));
+                // Borders only (2). No inner vertical padding rows.
+                total = total.saturating_add(chunk_len.saturating_add(2));
             } else {
                 let text = Text::from(all_lines[start..i].to_vec());
                 let rows: u16 = Paragraph::new(text)
@@ -3117,10 +3118,10 @@ impl HistoryCell for StreamingContentCell {
                     // Determine target width of the code card (respect content width)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    // Borders (2) + inner left/right padding (2)
-                    let card_w = inner_w.saturating_add(4).min(area.width.max(4));
-                    // Include top/bottom border (2) + inner padding rows (2)
-                    let total = lines.len() as u16 + 4;
+                    // Borders (2) + inner left/right padding (4 total for two spaces each)
+                    let card_w = inner_w.saturating_add(6).min(area.width.max(6));
+                    // Include top/bottom border only (2); no inner vertical padding
+                    let total = lines.len() as u16 + 2;
                     if *skip >= total {
                         *skip -= total;
                         return;
@@ -3137,43 +3138,23 @@ impl HistoryCell for StreamingContentCell {
                         top_border -= drop;
                         local_skip -= drop;
                     }
-                    let mut top_pad = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(top_pad);
-                        top_pad -= drop;
-                        local_skip -= drop;
-                    }
                     let code_skip = local_skip.min(lines.len() as u16);
                     local_skip -= code_skip;
-                    let mut bottom_pad = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(bottom_pad);
-                        bottom_pad -= drop;
-                    }
                     let mut bottom_border = 1u16;
                     if local_skip > 0 {
                         let drop = local_skip.min(bottom_border);
                         bottom_border -= drop;
                     }
                     let visible = top_border
-                        + top_pad
                         + (lines.len() as u16 - code_skip)
-                        + bottom_pad
                         + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
                         return;
                     }
-                    // Compute optional outer horizontal padding (1 col left/right) inside content area
+                    // Align card to content area (no outer left/right stripes)
                     let content_x = area.x;
-                    let content_w = area.width;
-                    let outer_needed = card_w.saturating_add(2);
-                    let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
-                        (content_x.saturating_add(1), true, true)
-                    } else {
-                        let rp = content_w.saturating_sub(card_w) > 0;
-                        (content_x, false, rp)
-                    };
+                    let rect_x = content_x;
                     // Draw bordered block for the visible rows
                     let rect = Rect {
                         x: rect_x,
@@ -3186,12 +3167,7 @@ impl HistoryCell for StreamingContentCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding {
-                            left: 1,
-                            right: 1,
-                            top: 1,
-                            bottom: 1,
-                        });
+                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
@@ -3211,25 +3187,7 @@ impl HistoryCell for StreamingContentCell {
                             .block(Block::default().style(Style::default().bg(code_bg)))
                             .render(inner_rect, buf);
                     }
-                    // Draw optional outside padding stripes
-                    if left_pad {
-                        let px = rect.x.saturating_sub(1);
-                        for yy in rect.y..rect.y.saturating_add(rect.height) {
-                            buf[(px, yy)]
-                                .set_char(' ')
-                                .set_style(Style::default().bg(code_bg));
-                        }
-                    }
-                    if right_pad {
-                        let px = rect.x.saturating_add(rect.width);
-                        if px < content_x.saturating_add(content_w) {
-                            for yy in rect.y..rect.y.saturating_add(rect.height) {
-                                buf[(px, yy)]
-                                    .set_char(' ')
-                                    .set_style(Style::default().bg(code_bg));
-                            }
-                        }
-                    }
+                    // No outside padding stripes.
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
                 }
