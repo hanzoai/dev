@@ -6755,8 +6755,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         // Executed arrow – color reflects exec state
                         if let Some(exec) = item.as_any().downcast_ref::<crate::history_cell::ExecCell>() {
                             match &exec.output {
-                                None => crate::colors::info(),             // Running...
-                                Some(o) if o.exit_code == 0 => crate::colors::text_bright(), // Ran
+                                None => crate::colors::info(),              // Running...
+                                // On successful completion, turn the gutter arrow solid black
+                                Some(o) if o.exit_code == 0 => ratatui::style::Color::Black, // Ran
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
