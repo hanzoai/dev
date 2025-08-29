@@ -19,10 +19,12 @@ use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::WidgetRef;
 
 use super::chat_composer_history::ChatComposerHistory;
+use super::command_popup::CommandItem;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::paste_burst::PasteBurst;
 use crate::slash_command::SlashCommand;
+use codex_protocol::custom_prompts::CustomPrompt;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -45,6 +47,7 @@ const BASE_PLACEHOLDER_TEXT: &str = "Welcome to Code — What are we coding toda
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
 
 /// Result returned when the user interacts with the text area.
+#[derive(Debug, PartialEq)]
 pub enum InputResult {
     Submitted(String),
     Command(SlashCommand),
@@ -601,16 +604,27 @@ impl ChatComposer {
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
-                if let Some(cmd) = popup.selected_command() {
+                if let Some(sel) = popup.selected_item() {
                     let first_line = self.textarea.text().lines().next().unwrap_or("");
 
-                    let starts_with_cmd = first_line
-                        .trim_start()
-                        .starts_with(&format!("/{}", cmd.command()));
-
-                    if !starts_with_cmd {
-                        self.textarea.set_text(&format!("/{} ", cmd.command()));
-                        self.textarea.set_cursor(self.textarea.text().len());
+                    match sel {
+                        CommandItem::Builtin(cmd) => {
+                            let starts_with_cmd = first_line
+                                .trim_start()
+                                .starts_with(&format!("/{}", cmd.command()));
+                            if !starts_with_cmd {
+                                self.textarea.set_text(&format!("/{} ", cmd.command()));
+                            }
+                        }
+                        CommandItem::UserPrompt(idx) => {
+                            if let Some(name) = popup.prompt_name(idx) {
+                                let starts_with_cmd =
+                                    first_line.trim_start().starts_with(&format!("/{name}"));
+                                if !starts_with_cmd {
+                                    self.textarea.set_text(&format!("/{name} "));
+                                }
+                            }
+                        }
                     }
                     // After completing, place the cursor at the end of the
                     // slash command so the user can immediately type args.
@@ -624,31 +638,39 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                if let Some(cmd) = popup.selected_command() {
+                if let Some(sel) = popup.selected_item() {
                     // Get the full command text before clearing
                     let command_text = self.textarea.text().to_string();
 
                     // Record the exact slash command that was typed
                     self.history.record_local_submission(&command_text);
 
-                    // Check if this is a prompt-expanding command that will trigger agents
-                    if cmd.is_prompt_expanding() {
-                        self.app_event_tx.send(AppEvent::PrepareAgents);
+                    match sel {
+                        CommandItem::Builtin(cmd) => {
+                            // Check if this is a prompt-expanding command that will trigger agents
+                            if cmd.is_prompt_expanding() {
+                                self.app_event_tx.send(AppEvent::PrepareAgents);
+                            }
+                            // Send command to the app layer with full text.
+                            self.app_event_tx
+                                .send(AppEvent::DispatchCommand(cmd, command_text.clone()));
+                            // Clear textarea and dismiss popup
+                            self.textarea.set_text("");
+                            self.active_popup = ActivePopup::None;
+                            return (InputResult::Command(cmd), true);
+                        }
+                        CommandItem::UserPrompt(idx) => {
+                            let prompt_content = popup
+                                .prompt_content(idx)
+                                .map(|s| s.to_string());
+                            self.textarea.set_text("");
+                            self.active_popup = ActivePopup::None;
+                            if let Some(contents) = prompt_content {
+                                return (InputResult::Submitted(contents), true);
+                            }
+                            return (InputResult::None, true);
+                        }
                     }
-
-                    // Send command to the app layer with full text.
-                    self.app_event_tx
-                        .send(AppEvent::DispatchCommand(*cmd, command_text.clone()));
-
-                    // Clear textarea so no residual text remains.
-                    self.textarea.set_text("");
-
-                    let result = (InputResult::Command(*cmd), true);
-
-                    // Hide popup since the command has been dispatched.
-                    self.active_popup = ActivePopup::None;
-
-                    return result;
                 }
                 // Fallback to default newline handling if no command selected.
                 self.handle_key_event_without_popup(key_event)
@@ -1224,6 +1246,13 @@ impl ChatComposer {
                     self.app_event_tx.send(AppEvent::ComposerExpanded);
                 }
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_custom_prompts(&mut self, prompts: Vec<CustomPrompt>) {
+        if let ActivePopup::Command(popup) = &mut self.active_popup {
+            popup.set_prompts(prompts);
         }
     }
 
