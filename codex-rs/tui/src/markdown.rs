@@ -77,9 +77,8 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                     .map(|l| l.spans.iter().map(|s| UnicodeWidthStr::width(s.content.as_ref())).sum::<usize>())
                     .max()
                     .unwrap_or(0);
-                // Add 1 space of horizontal padding on both sides for fenced blocks
-                let left_right_pad = if fenced { 1 } else { 0 };
-                let target_w = max_w + (left_right_pad * 2);
+                // No extra horizontal padding; use exact content width.
+                let target_w = max_w;
 
                 // When fenced and language is known, emit a hidden sentinel line so the
                 // downstream renderer can surface a border + title without losing lang info.
@@ -95,10 +94,6 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                         // so the painted region matches our explicit padding width.
                         for sp in l.spans.iter_mut() {
                             sp.style = sp.style.bg(code_bg);
-                        }
-                        // Prepend left padding when requested
-                        if left_right_pad > 0 {
-                            l.spans.insert(0, Span::styled(" ", Style::default().bg(code_bg)));
                         }
                         let w: usize = l
                             .spans
