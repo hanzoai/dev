@@ -53,6 +53,21 @@ impl FileSearchPopup {
         if !keep_existing {
             self.matches.clear();
             self.state.reset();
+        } else {
+            // While waiting for new results, proactively trim any rows that
+            // no longer plausibly match the refined query to avoid stale
+            // completions completing the wrong path on double-Tab.
+            let ql = query.to_lowercase();
+            self.matches.retain(|m| {
+                let path_l = m.path.to_lowercase();
+                if path_l.contains(&ql) { return true; }
+                // Also match basename for convenience
+                if let Some((_, base)) = m.path.rsplit_once('/') {
+                    return base.to_lowercase().contains(&ql);
+                }
+                false
+            });
+            self.state.clamp_selection(self.matches.len());
         }
     }
 
