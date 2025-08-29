@@ -74,6 +74,8 @@ pub(crate) struct ToolsConfig {
     #[allow(dead_code)]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     pub web_search_request: bool,
+    #[allow(dead_code)]
+    pub include_view_image_tool: bool,
 }
 
 #[allow(dead_code)]
@@ -85,6 +87,7 @@ pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) include_apply_patch_tool: bool,
     pub(crate) include_web_search_request: bool,
     pub(crate) use_streamable_shell_tool: bool,
+    pub(crate) include_view_image_tool: bool,
 }
 
 impl ToolsConfig {
@@ -96,6 +99,7 @@ impl ToolsConfig {
         include_apply_patch_tool: bool,
         include_web_search_request: bool,
         _use_streamable_shell_tool: bool,
+        include_view_image_tool: bool,
     ) -> Self {
         // Our fork does not yet enable the experimental streamable shell tool
         // in the tool selection phase. Default to the existing behaviors.
@@ -124,6 +128,7 @@ impl ToolsConfig {
             plan_tool: include_plan_tool,
             apply_patch_tool_type,
             web_search_request: include_web_search_request,
+            include_view_image_tool,
         }
     }
 
@@ -138,6 +143,7 @@ impl ToolsConfig {
             p.include_apply_patch_tool,
             p.include_web_search_request,
             p.use_streamable_shell_tool,
+            p.include_view_image_tool,
         )
     }
 }
@@ -773,7 +779,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -842,6 +848,7 @@ mod tests {
             include_apply_patch_tool: false,
             include_web_search_request: true,
             use_streamable_shell_tool: false,
+            include_view_image_tool: true,
         });
 
         let tools = get_openai_tools(
@@ -887,7 +894,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -960,7 +967,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -1031,7 +1038,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1105,7 +1112,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[2],
+            tools[3],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {
