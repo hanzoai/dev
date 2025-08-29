@@ -142,7 +142,7 @@ impl RolloutRecorder {
                 | ResponseItem::CustomToolCall { .. }
                 | ResponseItem::CustomToolCallOutput { .. }
                 | ResponseItem::Reasoning { .. } => filtered.push(item.clone()),
-                ResponseItem::Other => {
+                ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {
                     // These should never be serialized.
                     continue;
                 }
@@ -206,7 +206,7 @@ impl RolloutRecorder {
                     | ResponseItem::CustomToolCall { .. }
                     | ResponseItem::CustomToolCallOutput { .. }
                     | ResponseItem::Reasoning { .. } => items.push(item),
-                    ResponseItem::Other => {}
+                    ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {}
                 },
                 Err(e) => {
                     warn!("failed to parse item: {v:?}, error: {e}");
@@ -387,7 +387,7 @@ async fn rollout_writer(
                                 msg_count_delta = msg_count_delta.saturating_add(1);
                             }
                         }
-                        ResponseItem::Other => {}
+                        ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {}
                     }
                 }
 
