@@ -16,6 +16,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc::{self, Sender};
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 
 mod cli;
@@ -197,23 +199,7 @@ pub fn run(
         })
     });
 
-    fn get_file_path<'a>(
-        entry_result: &'a Result<ignore::DirEntry, ignore::Error>,
-        search_directory: &std::path::Path,
-    ) -> Option<&'a str> {
-        let entry = match entry_result {
-            Ok(e) => e,
-            Err(_) => return None,
-        };
-        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-            return None;
-        }
-        let path = entry.path();
-        match path.strip_prefix(search_directory) {
-            Ok(rel_path) => rel_path.to_str(),
-            Err(_) => None,
-        }
-    }
+    // get_file_path moved to top-level below for reuse in streaming.
 
     // If the cancel flag is set, we return early with an empty result.
     if cancel_flag.load(Ordering::Relaxed) {
@@ -281,6 +267,235 @@ pub fn run(
         matches,
         total_match_count,
     })
+}
+
+/// Streaming variant of [`run`] that emits partial top-N snapshots during the scan.
+///
+/// - Sends incremental `Vec<FileMatch>` updates over `tx` at most every
+///   `update_every` interval and on meaningful changes.
+/// - Still returns the final `FileSearchResults` when complete (or cancelled).
+pub fn run_streaming(
+    pattern_text: &str,
+    limit: NonZero<usize>,
+    search_directory: &Path,
+    exclude: Vec<String>,
+    threads: NonZero<usize>,
+    cancel_flag: Arc<AtomicBool>,
+    compute_indices: bool,
+    tx: Sender<Vec<FileMatch>>,
+    update_every: Duration,
+) -> anyhow::Result<FileSearchResults> {
+    let pattern = create_pattern(pattern_text);
+    let WorkerCount { num_walk_builder_threads, num_best_matches_lists } =
+        create_worker_count(threads);
+
+    // Per-worker matchers
+    let best_matchers_per_worker: Vec<UnsafeCell<BestMatchesList>> = (0..num_best_matches_lists)
+        .map(|_| {
+            UnsafeCell::new(BestMatchesList::new(
+                limit.get(),
+                pattern.clone(),
+                Matcher::new(nucleo_matcher::Config::DEFAULT),
+                pattern_text.to_string(),
+            ))
+        })
+        .collect();
+
+    let mut walk_builder = WalkBuilder::new(search_directory);
+    walk_builder.threads(num_walk_builder_threads);
+    walk_builder
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .hidden(false);
+    if !exclude.is_empty() {
+        let mut override_builder = OverrideBuilder::new(search_directory);
+        for exclude in exclude {
+            let exclude_pattern = format!("!{exclude}");
+            override_builder.add(&exclude_pattern)?;
+        }
+        let override_matcher = override_builder.build()?;
+        walk_builder.overrides(override_matcher);
+    }
+
+    let walker = walk_builder.build_parallel();
+
+    // Streaming aggregator: receives periodic worker snapshots and emits
+    // deduplicated global top-N lists to tx.
+    let (snap_tx, snap_rx) = mpsc::channel::<Vec<(u32, String)>>();
+    let agg_cancel = cancel_flag.clone();
+    let tx_for_agg = tx.clone();
+    let pattern_for_indices = if compute_indices { Some(pattern.clone()) } else { None };
+    let agg_handle = std::thread::spawn(move || {
+        use std::collections::{BinaryHeap, HashSet};
+        let mut global_heap: BinaryHeap<Reverse<(u32, String)>> = BinaryHeap::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut last_emit: Instant = Instant::now().checked_sub(update_every).unwrap_or_else(Instant::now);
+        loop {
+            // Drain any available snapshots quickly
+            let mut progressed = false;
+            while let Ok(mut snap) = snap_rx.try_recv() {
+                progressed = true;
+                for (score, path) in snap.drain(..) {
+                    if seen.contains(&path) {
+                        continue;
+                    }
+                    if global_heap.len() < limit.get() {
+                        seen.insert(path.clone());
+                        global_heap.push(Reverse((score, path)));
+                    } else if let Some(min_el) = global_heap.peek() {
+                        if score > min_el.0 .0 {
+                            // Pop the smallest and remove from seen
+                            if let Some(Reverse((_, removed_path))) = global_heap.pop() {
+                                seen.remove(&removed_path);
+                            }
+                            seen.insert(path.clone());
+                            global_heap.push(Reverse((score, path)));
+                        }
+                    }
+                }
+            }
+
+            let due = last_emit.elapsed() >= update_every;
+            if progressed && due {
+                let mut raw: Vec<(u32, String)> = global_heap.clone().into_iter().map(|r| r.0).collect();
+                sort_matches(&mut raw);
+                // Build FileMatch list (indices optional)
+                let mut m = if compute_indices { Some(Matcher::new(nucleo_matcher::Config::DEFAULT)) } else { None };
+                let mut out: Vec<FileMatch> = Vec::with_capacity(raw.len());
+                for (score, path) in raw.into_iter() {
+                    let indices = if let (Some(pat), Some(mat)) = (&pattern_for_indices, &mut m) {
+                        let mut buf = Vec::<char>::new();
+                        let hay: Utf32Str<'_> = Utf32Str::new(&path, &mut buf);
+                        let mut idx: Vec<u32> = Vec::new();
+                        pat.indices(hay, mat, &mut idx);
+                        idx.sort_unstable();
+                        idx.dedup();
+                        Some(idx)
+                    } else {
+                        None
+                    };
+                    out.push(FileMatch { score, path, indices });
+                }
+                let _ = tx_for_agg.send(out);
+                last_emit = Instant::now();
+            }
+
+            if agg_cancel.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Throttle to avoid busy-waiting when there's no activity.
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    // Walk and have workers periodically send snapshots to the aggregator.
+    let index_counter = AtomicUsize::new(0);
+    walker.run(|| {
+        let index = index_counter.fetch_add(1, Ordering::Relaxed);
+        let best_list_ptr = best_matchers_per_worker[index].get();
+        let best_list = unsafe { &mut *best_list_ptr };
+
+        const CHECK_INTERVAL: usize = 1024;
+        let mut processed = 0;
+        let cancel = cancel_flag.clone();
+        let snap_tx = snap_tx.clone();
+        let mut last_sent = Instant::now();
+        let min_send_gap = update_every;
+
+        Box::new(move |entry| {
+            if let Some(path) = get_file_path(&entry, search_directory) {
+                best_list.insert(path);
+            }
+
+            processed += 1;
+            // Periodically send a snapshot of this worker's current heap.
+            if processed % CHECK_INTERVAL == 0 || last_sent.elapsed() >= min_send_gap {
+                // Extract a cheap snapshot of the worker's heap (scores + paths).
+                let snapshot: Vec<(u32, String)> = best_list
+                    .binary_heap
+                    .iter()
+                    .map(|Reverse((s, p))| (*s, p.clone()))
+                    .collect();
+                let _ = snap_tx.send(snapshot);
+                last_sent = Instant::now();
+            }
+
+            if processed % CHECK_INTERVAL == 0 && cancel.load(Ordering::Relaxed) {
+                ignore::WalkState::Quit
+            } else {
+                ignore::WalkState::Continue
+            }
+        })
+    });
+
+    // Merge results across best_matchers_per_worker (final merge mirrors `run`).
+    if cancel_flag.load(Ordering::Relaxed) {
+        // Signal aggregator to stop and join before returning.
+        cancel_flag.store(true, Ordering::Relaxed);
+        let _ = agg_handle.join();
+        return Ok(FileSearchResults { matches: Vec::new(), total_match_count: 0 });
+    }
+
+    let mut global_heap: BinaryHeap<Reverse<(u32, String)>> = BinaryHeap::new();
+    let mut total_match_count = 0;
+    for best_list_cell in best_matchers_per_worker.iter() {
+        let best_list = unsafe { &*best_list_cell.get() };
+        total_match_count += best_list.num_matches;
+        for &Reverse((score, ref line)) in best_list.binary_heap.iter() {
+            if global_heap.len() < limit.get() {
+                global_heap.push(Reverse((score, line.clone())));
+            } else if let Some(min_element) = global_heap.peek() {
+                if score > min_element.0.0 {
+                    global_heap.pop();
+                    global_heap.push(Reverse((score, line.clone())));
+                }
+            }
+        }
+    }
+
+    let mut raw_matches: Vec<(u32, String)> = global_heap.into_iter().map(|r| r.0).collect();
+    sort_matches(&mut raw_matches);
+
+    let mut matcher = if compute_indices {
+        Some(Matcher::new(nucleo_matcher::Config::DEFAULT))
+    } else {
+        None
+    };
+
+    let matches: Vec<FileMatch> = raw_matches
+        .into_iter()
+        .map(|(score, path)| {
+            let indices = if compute_indices {
+                let mut buf = Vec::<char>::new();
+                let haystack: Utf32Str<'_> = Utf32Str::new(&path, &mut buf);
+                let mut idx_vec: Vec<u32> = Vec::new();
+                if let Some(ref mut m) = matcher {
+                    pattern.indices(haystack, m, &mut idx_vec);
+                }
+                idx_vec.sort_unstable();
+                idx_vec.dedup();
+                Some(idx_vec)
+            } else {
+                None
+            };
+
+            FileMatch { score, path, indices }
+        })
+        .collect();
+
+    let final_res = FileSearchResults { matches: matches.clone(), total_match_count };
+
+    // One last emit with final results (best effort).
+    let _ = tx.send(matches);
+
+    // Signal aggregator to stop and wait for it to finish.
+    cancel_flag.store(true, Ordering::Relaxed);
+    let _ = agg_handle.join();
+
+    Ok(final_res)
 }
 
 /// Sort matches in-place by descending score, then ascending path.
@@ -374,6 +589,24 @@ fn create_pattern(pattern: &str) -> Pattern {
         Normalization::Smart,
         AtomKind::Fuzzy,
     )
+}
+
+fn get_file_path<'a>(
+    entry_result: &'a Result<ignore::DirEntry, ignore::Error>,
+    search_directory: &std::path::Path,
+) -> Option<&'a str> {
+    let entry = match entry_result {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+    if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+        return None;
+    }
+    let path = entry.path();
+    match path.strip_prefix(search_directory) {
+        Ok(rel_path) => rel_path.to_str(),
+        Err(_) => None,
+    }
 }
 
 fn path_penalty(path: &str) -> u32 {

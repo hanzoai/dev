@@ -166,7 +166,24 @@ impl FileSearchManager {
         std::thread::spawn(move || {
             // Normalize the query: strip leading "./" so it matches repo-relative paths.
             let search_query = query.strip_prefix("./").unwrap_or(&query).to_string();
-            let matches = file_search::run(
+            // Create a streaming channel for partial updates.
+            let (part_tx, part_rx) = std::sync::mpsc::channel::<Vec<file_search::FileMatch>>();
+
+            // Receiver thread: forward partial updates to the App as they come in.
+            let rx_tx = tx.clone();
+            let rx_query = query.clone();
+            let rx_cancel = cancellation_token.clone();
+            std::thread::spawn(move || {
+                while let Ok(matches) = part_rx.recv() {
+                    if rx_cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    rx_tx.send(AppEvent::FileSearchResult { query: rx_query.clone(), matches });
+                }
+            });
+
+            // Run streaming search with modest update cadence for snappy UX.
+            let _final = file_search::run_streaming(
                 &search_query,
                 MAX_FILE_SEARCH_RESULTS,
                 &search_dir,
@@ -174,14 +191,9 @@ impl FileSearchManager {
                 NUM_FILE_SEARCH_THREADS,
                 cancellation_token.clone(),
                 compute_indices,
-            )
-            .map(|res| res.matches)
-            .unwrap_or_default();
-
-            let is_cancelled = cancellation_token.load(Ordering::Relaxed);
-            if !is_cancelled {
-                tx.send(AppEvent::FileSearchResult { query, matches });
-            }
+                part_tx,
+                Duration::from_millis(50),
+            );
 
             // Reset the active search state. Do a pointer comparison to verify
             // that we are clearing the ActiveSearch that corresponds to the
