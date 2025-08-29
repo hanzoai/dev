@@ -1823,7 +1823,9 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     }
     let event = Event {
         id: sub_id.clone(),
-        msg: EventMsg::TaskStarted,
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: turn_context.client.get_model_context_window(),
+        }),
     };
     if sess.tx_event.send(event).await.is_err() {
         return;
@@ -2419,9 +2421,12 @@ async fn run_compact_agent(
     input: Vec<InputItem>,
     compact_instructions: String,
 ) {
+    let model_context_window = turn_context.client.get_model_context_window();
     let start_event = Event {
         id: sub_id.clone(),
-        msg: EventMsg::TaskStarted,
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window,
+        }),
     };
     if sess.tx_event.send(start_event).await.is_err() {
         return;
@@ -4318,11 +4323,15 @@ async fn handle_container_exec_with_params(
                 sandbox_type,
                 sandbox_policy: &sess.sandbox_policy,
                 codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                stdout_stream: Some(StdoutStream {
-                    sub_id: sub_id.clone(),
-                    call_id: call_id.clone(),
-                    tx_event: sess.tx_event.clone(),
-                }),
+                stdout_stream: if exec_command_context.apply_patch.is_some() {
+                    None
+                } else {
+                    Some(StdoutStream {
+                        sub_id: sub_id.clone(),
+                        call_id: call_id.clone(),
+                        tx_event: sess.tx_event.clone(),
+                    })
+                },
             },
         )
         .await;
@@ -4449,11 +4458,15 @@ async fn handle_sandbox_error(
                         sandbox_type: SandboxType::None,
                         sandbox_policy: &sess.sandbox_policy,
                         codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                        stdout_stream: Some(StdoutStream {
-                            sub_id: sub_id.clone(),
-                            call_id: call_id.clone(),
-                            tx_event: sess.tx_event.clone(),
-                        }),
+                        stdout_stream: if exec_command_context.apply_patch.is_some() {
+                            None
+                        } else {
+                            Some(StdoutStream {
+                                sub_id: sub_id.clone(),
+                                call_id: call_id.clone(),
+                                tx_event: sess.tx_event.clone(),
+                            })
+                        },
                     },
                 )
                 .await;

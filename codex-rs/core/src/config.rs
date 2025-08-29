@@ -544,6 +544,11 @@ pub struct ConfigToml {
 
     /// Nested tools section for feature toggles
     pub tools: Option<ToolsToml>,
+
+    /// When true, disables burst-paste detection for typed input entirely.
+    /// All characters are inserted as they are received, and no buffering
+    /// or placeholder replacement will occur for fast keypress bursts.
+    pub disable_paste_burst: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -556,6 +561,10 @@ pub struct ToolsToml {
     // Renamed from `web_search_request`; keep alias for backwards compatibility.
     #[serde(default, alias = "web_search_request")]
     pub web_search: Option<bool>,
+
+    /// Enable the `view_image` tool that lets the agent attach local images.
+    #[serde(default)]
+    pub view_image: Option<bool>,
 }
 
 impl ConfigToml {
@@ -739,6 +748,10 @@ impl Config {
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
+
+        let include_view_image_tool = include_view_image_tool
+            .or(cfg.tools.as_ref().and_then(|t| t.view_image))
+            .unwrap_or(true);
 
         let model = model
             .or(config_profile.model)
@@ -1397,9 +1410,9 @@ disable_response_storage = true
 
         let raw_path = project_dir.path().to_string_lossy();
         let path_str = if raw_path.contains('\\') {
-            format!("'{}'", raw_path)
+            format!("'{raw_path}'")
         } else {
-            format!("\"{}\"", raw_path)
+            format!("\"{raw_path}\"")
         };
         let expected = format!(
             r#"[projects.{path_str}]
@@ -1420,9 +1433,9 @@ trust_level = "trusted"
         let config_path = codex_home.path().join(CONFIG_TOML_FILE);
         let raw_path = project_dir.path().to_string_lossy();
         let path_str = if raw_path.contains('\\') {
-            format!("'{}'", raw_path)
+            format!("'{raw_path}'")
         } else {
-            format!("\"{}\"", raw_path)
+            format!("\"{raw_path}\"")
         };
         // Use a quoted key so backslashes don't require escaping on Windows
         let initial = format!(
