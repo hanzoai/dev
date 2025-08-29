@@ -3,8 +3,9 @@ use ratatui::text::{Line, Span};
 
 // syntect imports
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Style as SynStyle, Theme, ThemeSet};
+use syntect::highlighting::{Style as SynStyle, Theme, ThemeItem, ThemeSet, ThemeSettings, StyleModifier, FontStyle, Color as SynColor};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::parsing::SyntaxSetBuilder;
 use syntect::util::LinesWithEndings;
 
 // Convert a ratatui Color to RGB tuple; mirrored locally to avoid exposing internals.
@@ -44,19 +45,316 @@ fn is_light_bg() -> bool {
 }
 
 static PS: OnceCell<SyntaxSet> = OnceCell::new();
+static PS_EXTRA: OnceCell<Option<SyntaxSet>> = OnceCell::new();
 static THEMES: OnceCell<ThemeSet> = OnceCell::new();
+
+// --- Highlight theme preference ---
+#[derive(Debug, Clone)]
+enum HighlightPref {
+    Auto,
+    Name(String),
+}
+
+static PREF: OnceCell<std::sync::RwLock<HighlightPref>> = OnceCell::new();
+
+fn pref_cell() -> &'static std::sync::RwLock<HighlightPref> {
+    PREF.get_or_init(|| std::sync::RwLock::new(HighlightPref::Auto))
+}
+
+/// Initialize the highlight preference from config.
+pub fn init_highlight_from_config(cfg: &codex_core::config_types::HighlightConfig) {
+    let raw = cfg.theme.as_deref().unwrap_or("auto");
+    let val_trim = raw.trim();
+    // Only support "auto" or a bare theme name. Anything else falls back to auto.
+    let parsed = if val_trim.is_empty() || val_trim.eq_ignore_ascii_case("auto") {
+        HighlightPref::Auto
+    } else if let Some(rest) = val_trim.strip_prefix("syntect:") {
+        // Deprecated prefix; ignore and treat as bare name for compatibility.
+        let name = rest.trim();
+        if name.is_empty() { HighlightPref::Auto } else { HighlightPref::Name(name.to_string()) }
+    } else if val_trim.eq_ignore_ascii_case("follow-ui") {
+        // Deprecated alias; treat as auto.
+        HighlightPref::Auto
+    } else {
+        HighlightPref::Name(val_trim.to_string())
+    };
+    if let Ok(mut lock) = pref_cell().write() {
+        *lock = parsed;
+    }
+}
 
 fn syntax_set() -> &'static SyntaxSet {
     PS.get_or_init(|| SyntaxSet::load_defaults_newlines())
 }
 
-fn themes() -> &'static ThemeSet {
-    THEMES.get_or_init(ThemeSet::load_defaults)
+fn extra_syntax_set() -> &'static Option<SyntaxSet> {
+    PS_EXTRA.get_or_init(|| {
+        use std::path::PathBuf;
+        let mut folder = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        folder.push("assets/syntaxes");
+        if folder.is_dir() {
+            let mut builder = SyntaxSetBuilder::new();
+            builder.add_plain_text_syntax();
+            match builder.add_from_folder(&folder, true) {
+                Ok(_) => Some(builder.build()),
+                Err(e) => {
+                    tracing::warn!("Failed to load extra syntaxes from {}: {}", folder.display(), e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    })
 }
 
-fn current_theme_name<'a>(_ts: &'a ThemeSet) -> &'a str {
-    // Restrict to Solarized only; pick based on current UI background brightness.
-    if is_light_bg() { "Solarized (light)" } else { "Solarized (dark)" }
+fn themes() -> &'static ThemeSet {
+    THEMES.get_or_init(|| {
+        let mut ts = ThemeSet::load_defaults();
+        // Insert Codex built-in themes
+        ts.themes.insert("Code Dark".to_string(), build_code_dark_theme());
+        ts.themes.insert("Code Light".to_string(), build_code_light_theme());
+        ts
+    })
+}
+
+fn hex(rgb: (u8, u8, u8)) -> SynColor { SynColor { r: rgb.0, g: rgb.1, b: rgb.2, a: 0xFF } }
+fn hexa(r: u8, g: u8, b: u8, a: u8) -> SynColor { SynColor { r, g, b, a } }
+
+fn item(scope: &str, fg: (u8,u8,u8), style: Option<FontStyle>) -> ThemeItem {
+    ThemeItem {
+        scope: scope.parse().unwrap_or_default(),
+        style: StyleModifier { foreground: Some(hex(fg)), background: None, font_style: style },
+    }
+}
+
+fn build_code_dark_theme() -> Theme {
+    let mut t = Theme::default();
+    t.name = Some("Code Dark".to_string());
+    t.settings = {
+        let mut s = ThemeSettings::default();
+        // Globals
+        s.foreground = Some(hex((0xD4,0xD4,0xD4)));
+        s.background = Some(hex((0x1E,0x1E,0x1E)));
+        s.caret = Some(hex((0xAE,0xAF,0xAD)));
+        s.selection = Some(hex((0x26,0x4F,0x78)));
+        s.line_highlight = Some(hex((0x2A,0x2A,0x2A)));
+        // UI extras
+        s.misspelling = Some(hex((0xF1,0x4C,0x4C)));
+        s.minimap_border = Some(hex((0x01,0x04,0x09))); // #010409
+        s.accent = Some(hex((0x00,0x78,0xD4)));
+        s.bracket_contents_foreground = Some(hex((0xFF,0xD7,0x00))); // gold
+        s.brackets_foreground = Some(hex((0x88,0x88,0x88)));
+        s.brackets_background = Some(hexa(0,100,0,0x1A)); // #0064001A
+        s.tags_foreground = Some(hex((0x56,0x9C,0xD6)));
+        s.highlight = Some(hexa(0xAD,0xD6,0xFF,0x26));
+        s.find_highlight = Some(hex((0x9E,0x6A,0x03)));
+        s.find_highlight_foreground = Some(hex((0x00,0x00,0x00)));
+        s.gutter = Some(hex((0x1E,0x1E,0x1E)));
+        s.gutter_foreground = Some(hex((0x6E,0x76,0x81)));
+        s.selection_foreground = Some(hex((0xD4,0xD4,0xD4)));
+        s.selection_border = Some(hexa(0,0,0,0x00));
+        s.inactive_selection = Some(hex((0x3A,0x3D,0x41)));
+        s.inactive_selection_foreground = Some(hex((0xD4,0xD4,0xD4)));
+        s.guide = Some(hex((0x40,0x40,0x40)));
+        s.active_guide = Some(hex((0x70,0x70,0x70)));
+        s.stack_guide = Some(hex((0x58,0x58,0x58)));
+        s.shadow = Some(hexa(0,0,0,0x5C)); // 0.36
+        // CSS strings (kept empty per mapping)
+        s.popup_css = Some(String::new());
+        s.phantom_css = Some(String::new());
+        // Underline options
+        s.bracket_contents_options = Some(syntect::highlighting::UnderlineOption::None);
+        s.brackets_options = Some(syntect::highlighting::UnderlineOption::Underline);
+        s.tags_options = Some(syntect::highlighting::UnderlineOption::None);
+        s
+    };
+    let italic = Some(FontStyle::ITALIC);
+    let _bold_italic = Some(FontStyle::BOLD | FontStyle::ITALIC);
+    t.scopes = vec![
+        // Comments
+        item("comment", (0x6A,0x99,0x55), italic),
+        // Strings
+        item("string", (0xCE,0x91,0x78), None),
+        item("string.regexp", (0xD1,0x69,0x69), None),
+        item("string.template", (0xCE,0x91,0x78), None),
+        item("constant.regexp", (0x64,0x66,0x95), None),
+        item("constant.character.escape", (0xD7,0xBA,0x7D), None),
+        // Numbers / constants
+        item("constant.numeric", (0xB5,0xCE,0xA8), None),
+        item("constant.language.boolean", (0x56,0x9C,0xD6), None),
+        item("constant.language.null", (0x56,0x9C,0xD6), None),
+        // Keywords / operators / storage
+        item("keyword", (0xC5,0x86,0xC0), None),
+        item("keyword.control", (0xC5,0x86,0xC0), None),
+        item("keyword.operator", (0xD4,0xD4,0xD4), None),
+        item("storage, storage.type, storage.modifier", (0x56,0x9C,0xD6), None),
+        // Variables / properties
+        item("variable, variable.other.readwrite, meta.definition.variable", (0x9C,0xDC,0xFE), None),
+        item("variable.language", (0x56,0x9C,0xD6), None),
+        item("variable.other.member", (0x9C,0xDC,0xFE), None),
+        item("variable.other.constant", (0x9C,0xDC,0xFE), None),
+        item("variable.parameter", (0x9C,0xDC,0xFE), None),
+        item("meta.object-literal.key, support.type.property-name, variable.other.property", (0x9C,0xDC,0xFE), None),
+        item("support.type.property-name.json", (0x9C,0xDC,0xFE), None),
+        // Functions
+        item("function, entity.name.function, support.function, meta.function-call", (0xDC,0xDC,0xAA), None),
+        item("meta.function entity.name.function", (0xDC,0xDC,0xAA), None),
+        // Types / classes
+        item("type, entity.name.type, support.type, entity.name.class, support.class, entity.name.interface, entity.name.enum", (0x4E,0xC9,0xB0), None),
+        // HTML / XML
+        item("entity.name.tag", (0x56,0x9C,0xD6), None),
+        item("entity.other.attribute-name", (0x9C,0xDC,0xFE), None),
+        item("punctuation.definition.tag", (0x80,0x80,0x80), None),
+        // Markdown
+        item("markup.heading", (0x56,0x9C,0xD6), None),
+        item("markup.bold", (0x56,0x9C,0xD6), None),
+        item("markup.italic", (0xD4,0xD4,0xD4), None),
+        item("markup.strikethrough", (0xD4,0xD4,0xD4), None),
+        item("markup.inline.raw", (0xCE,0x91,0x78), None),
+        item("markup.quote", (0x6A,0x99,0x55), None),
+        // Diffs
+        item("diff.header", (0x56,0x9C,0xD6), None),
+        item("markup.inserted", (0x3F,0xB9,0x50), None),
+        item("markup.deleted", (0xF8,0x51,0x49), None),
+        item("markup.changed", (0x56,0x9C,0xD6), None),
+        item("markup.ignored", (0x80,0x80,0x80), None),
+        item("meta.diff.header, meta.diff.range", (0x56,0x9C,0xD6), None),
+        item("source.diff", (0xD4,0xD4,0xD4), None),
+        // Punctuation helpers
+        item("punctuation.definition.quote.begin.markdown", (0x6A,0x99,0x55), None),
+        item("punctuation.definition.list.begin.markdown", (0x67,0x96,0xE6), None),
+        item("punctuation.section.embedded", (0x56,0x9C,0xD6), None),
+        item("punctuation.section.template-expression", (0x56,0x9C,0xD6), None),
+        item("punctuation.definition.parameters", (0xD4,0xD4,0xD4), None),
+        item("punctuation.separator.key-value", (0xD4,0xD4,0xD4), None),
+        // Invalid
+        item("invalid", (0xF4,0x47,0x47), None),
+    ];
+    t
+}
+
+fn build_code_light_theme() -> Theme {
+    let mut t = Theme::default();
+    t.name = Some("Code Light".to_string());
+    t.settings = {
+        let mut s = ThemeSettings::default();
+        // Globals
+        s.foreground = Some(hex((0x00,0x00,0x00)));
+        s.background = Some(hex((0xFF,0xFF,0xFF)));
+        s.caret = Some(hex((0x00,0x00,0x00)));
+        s.selection = Some(hex((0xAD,0xD6,0xFF)));
+        s.line_highlight = Some(hex((0xF3,0xF3,0xF3))); // per mapping
+        // UI extras
+        s.misspelling = Some(hex((0xE5,0x14,0x00)));
+        s.minimap_border = Some(hexa(0xD4,0xD4,0xD4,0x4D));
+        s.accent = Some(hex((0x00,0x78,0xD4)));
+        s.bracket_contents_foreground = Some(hex((0xFF,0xD7,0x00)));
+        s.brackets_foreground = Some(hex((0xB9,0xB9,0xB9)));
+        s.brackets_background = Some(hexa(0,100,0,0x1A)); // 0.10
+        s.tags_foreground = Some(hex((0x80,0x00,0x00)));
+        s.highlight = Some(hexa(0xAD,0xD6,0xFF,0x80));
+        s.find_highlight = Some(hex((0x9E,0x6A,0x03)));
+        s.find_highlight_foreground = Some(hex((0x00,0x00,0x00)));
+        s.gutter = Some(hex((0xFF,0xFF,0xFF)));
+        s.gutter_foreground = Some(hexa(0,0,0,0x80)); // 0.50
+        s.selection_foreground = Some(hex((0x00,0x00,0x00)));
+        s.selection_border = Some(hexa(0,0,0,0x00));
+        s.inactive_selection = Some(hex((0xE5,0xEB,0xF1)));
+        s.inactive_selection_foreground = Some(hex((0x00,0x00,0x00)));
+        s.guide = Some(hex((0xD3,0xD3,0xD3)));
+        s.active_guide = Some(hex((0x93,0x93,0x93)));
+        s.stack_guide = Some(hexa(0,0,0,0x00));
+        s.shadow = Some(hexa(0,0,0,0x5C)); // 0.36
+        // CSS strings and underline options
+        s.popup_css = Some(String::new());
+        s.phantom_css = Some(String::new());
+        s.bracket_contents_options = Some(syntect::highlighting::UnderlineOption::None);
+        s.brackets_options = Some(syntect::highlighting::UnderlineOption::Underline);
+        s.tags_options = Some(syntect::highlighting::UnderlineOption::None);
+        s
+    };
+    let italic = Some(FontStyle::ITALIC);
+    let _bold_italic = Some(FontStyle::BOLD | FontStyle::ITALIC);
+    t.scopes = vec![
+        // Comments
+        item("comment", (0x00,0x80,0x00), italic),
+        // Strings / regex
+        item("string", (0xA3,0x15,0x15), None),
+        item("string.regexp", (0x81,0x1F,0x3F), None),
+        item("constant.regexp", (0xAF,0x00,0xDB), None),
+        item("constant.character.escape", (0xEE,0x00,0x00), None),
+        // Numbers / units
+        item("constant.numeric, keyword.other.unit", (0x09,0x86,0x58), None),
+        item("constant.language.boolean", (0x00,0x00,0xFF), None),
+        // Keywords / storage
+        item("keyword, keyword.control, storage, storage.type, storage.modifier", (0x00,0x00,0xFF), None),
+        item("keyword.operator", (0x00,0x00,0x00), None),
+        // Variables
+        item("variable, variable.other.readwrite, meta.definition.variable", (0x00,0x10,0x80), None),
+        item("variable.parameter", (0x00,0x10,0x80), None),
+        // Functions
+        item("entity.name.function, support.function, meta.function-call", (0x79,0x5E,0x26), None),
+        item("meta.function entity.name.function", (0x79,0x5E,0x26), None),
+        // Types / classes
+        item("entity.name.type, support.type, entity.name.class, support.class, entity.name.interface, entity.name.enum", (0x26,0x7F,0x99), None),
+        // HTML / CSS / JSON
+        item("entity.name.tag", (0x80,0x00,0x00), None),
+        item("entity.name.selector", (0x80,0x00,0x00), None),
+        item("entity.other.attribute-name", (0xE5,0x00,0x00), None),
+        item("punctuation.definition.tag", (0x80,0x00,0x00), None),
+        item("meta.object-literal.key, support.type.property-name, variable.other.property", (0x00,0x10,0x80), None),
+        item("support.type.property-name.json, meta.structure.dictionary.key.python", (0x04,0x51,0xA5), None),
+        // Markdown
+        item("markup.heading", (0x80,0x00,0x00), None),
+        item("markup.bold", (0x00,0x00,0x80), None),
+        item("markup.italic", (0x00,0x00,0x00), None),
+        item("markup.strikethrough", (0x00,0x00,0x00), None),
+        item("markup.inline.raw", (0x80,0x00,0x00), None),
+        item("markup.quote", (0x04,0x51,0xA5), None),
+        // Diffs
+        item("diff.header", (0x00,0x00,0x80), None),
+        item("markup.inserted", (0x1A,0x7F,0x37), None),
+        item("markup.deleted", (0xCF,0x22,0x2E), None),
+        item("markup.changed", (0x04,0x51,0xA5), None),
+        item("markup.ignored", (0x80,0x80,0x80), None),
+        item("meta.diff.header", (0x00,0x00,0x80), None),
+        item("meta.diff.range", (0x04,0x51,0xA5), None),
+        item("source.diff", (0x00,0x00,0x00), None),
+        // Punctuation helpers
+        item("punctuation.definition.quote.begin.markdown", (0x04,0x51,0xA5), None),
+        item("punctuation.definition.list.begin.markdown", (0x04,0x51,0xA5), None),
+        item("punctuation.section.embedded", (0x00,0x00,0xFF), None),
+        item("punctuation.section.template-expression", (0x00,0x00,0xFF), None),
+        item("punctuation.definition.parameters", (0x00,0x00,0x00), None),
+        item("punctuation.separator.key-value", (0x00,0x00,0x00), None),
+        // Invalid
+        item("invalid", (0xE5,0x14,0x00), None),
+    ];
+    t
+}
+
+fn current_theme_name<'a>(ts: &'a ThemeSet) -> &'a str {
+    // Resolve based on configured preference; fall back to Solarized light/dark.
+    let pref = match pref_cell().read() {
+        Ok(g) => g.clone(),
+        Err(_) => HighlightPref::Auto,
+    };
+    match pref {
+        HighlightPref::Name(ref name) => {
+            if let Some((_k, _v)) = ts.themes.iter().find(|(k, _)| k.to_ascii_lowercase() == name.to_ascii_lowercase()) {
+                // SAFETY: We just looked up the same key; fetch again by exact key to get &'a str
+                for key in ts.themes.keys() {
+                    if key.to_ascii_lowercase() == name.to_ascii_lowercase() {
+                        return key;
+                    }
+                }
+            }
+            // Not found: fall back to auto below
+        }
+        HighlightPref::Auto => {}
+    }
+    if is_light_bg() { "Code Light" } else { "Code Dark" }
 }
 
 fn blending_enabled() -> bool { false }
@@ -68,21 +366,32 @@ fn default_theme<'a>() -> &'a Theme {
     // Prefer the Solarized themes; fall back to first available if missing.
     ts.themes
         .get(name)
-        .or_else(|| ts.themes.get(if is_light_bg() { "Solarized (light)" } else { "Solarized (dark)" }))
+        .or_else(|| ts.themes.get(if is_light_bg() { "Code Light" } else { "Code Dark" }))
         .unwrap_or_else(|| ts.themes.values().next().expect("at least one syntect theme"))
 }
 
 fn try_syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> Option<&'a SyntaxReference> {
-    // Try token, then extension, then name; return None if not found.
+    // Try token, then extension, then name (case-insensitive fallback).
     let lang = normalize_lang(lang);
     ps.find_syntax_by_token(lang)
         .or_else(|| ps.find_syntax_by_extension(lang))
         .or_else(|| ps.find_syntax_by_name(lang))
+        .or_else(|| {
+            let want = lang.to_ascii_lowercase();
+            ps.syntaxes()
+                .iter()
+                .find(|s| s.name.to_ascii_lowercase() == want)
+        })
+        .or_else(|| {
+            // Graceful fallback: if TOML isn't bundled in this build of syntect,
+            // approximate with INI so keys/sections/strings get some color.
+            if lang.eq_ignore_ascii_case("toml") {
+                ps.find_syntax_by_name("INI").or_else(|| ps.find_syntax_by_extension("ini"))
+            } else { None }
+        })
 }
 
-fn syntax_for_lang<'a>(ps: &'a SyntaxSet, lang: &str) -> &'a SyntaxReference {
-    try_syntax_for_lang(ps, lang).unwrap_or_else(|| ps.find_syntax_plain_text())
-}
+// Removed unused helper to keep build warning-free.
 
 fn span_from_syn((SynStyle { foreground, font_style, .. }, text): (SynStyle, &str)) -> Span<'static> {
     use ratatui::style::{Color, Modifier, Style};
@@ -105,28 +414,42 @@ fn span_from_syn((SynStyle { foreground, font_style, .. }, text): (SynStyle, &st
 
 /// Highlight a code block into ratatui Lines while preserving exact text.
 pub(crate) fn highlight_code_block(content: &str, lang: Option<&str>) -> Vec<Line<'static>> {
-    let ps = syntax_set();
     let theme = default_theme();
-    // Resolve language
-    let syntax = {
-        // Prefer the provided language when it maps to a known syntax.
-        if let Some(l) = lang.and_then(|l| if l.trim().is_empty() { None } else { Some(l) }) {
-            if let Some(s) = try_syntax_for_lang(ps, l) {
-                s
-            } else {
-                // Unknown language label: try a best-effort auto-detect before
-                // falling back to plain text.
-                autodetect_lang(content)
-                    .map(|dl| syntax_for_lang(ps, dl))
-                    .unwrap_or_else(|| ps.find_syntax_plain_text())
+
+    // Resolve across default and optional extra syntax sets
+    let mut ps = syntax_set();
+    let mut syntax = if let Some(l) = lang.and_then(|l| if l.trim().is_empty() { None } else { Some(l) }) {
+        if let Some(s) = try_syntax_for_lang(ps, l) { s } else if let Some(ref extra) = *extra_syntax_set() {
+            if let Some(s2) = try_syntax_for_lang(extra, l) { ps = extra; s2 } else { ps.find_syntax_plain_text() }
+        } else { ps.find_syntax_plain_text() }
+    } else { ps.find_syntax_plain_text() };
+
+    if std::ptr::eq(syntax, ps.find_syntax_plain_text()) {
+        if let Some(dl) = autodetect_lang(content) {
+            if let Some(s2) = try_syntax_for_lang(ps, dl) { syntax = s2; }
+            else if let Some(ref extra) = *extra_syntax_set() {
+                if let Some(s3) = try_syntax_for_lang(extra, dl) { ps = extra; syntax = s3; }
             }
-        } else {
-            // No label provided: attempt auto-detection, otherwise plain text.
-            autodetect_lang(content)
-                .map(|dl| syntax_for_lang(ps, dl))
-                .unwrap_or_else(|| ps.find_syntax_plain_text())
         }
-    };
+        if std::ptr::eq(syntax, ps.find_syntax_plain_text()) {
+            if let Some(first) = content.lines().next() {
+                if let Some(s4) = ps.find_syntax_by_first_line(first) { syntax = s4; }
+                else if let Some(ref extra) = *extra_syntax_set() {
+                    if let Some(s5) = extra.find_syntax_by_first_line(first) { ps = extra; syntax = s5; }
+                }
+            }
+        }
+    }
+
+    // TOML special-case: if labelled or looks like Cargo/Clear TOML and still plain, try INI.
+    if (lang.map(|l| l.eq_ignore_ascii_case("toml")).unwrap_or(false) || content.contains("[package]"))
+        && std::ptr::eq(syntax, ps.find_syntax_plain_text())
+    {
+        if let Some(sini) = ps.find_syntax_by_name("INI").or_else(|| ps.find_syntax_by_extension("ini")) { syntax = sini; }
+        else if let Some(ref extra) = *extra_syntax_set() {
+            if let Some(sini2) = extra.find_syntax_by_name("INI").or_else(|| extra.find_syntax_by_extension("ini")) { ps = extra; syntax = sini2; }
+        }
+    }
 
     let mut highlighter = HighlightLines::new(syntax, theme);
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -206,58 +529,73 @@ fn normalize_lang(lang: &str) -> &str {
     match l.as_str() {
         // Shells
         "sh" | "bash" | "zsh" | "shell" | "console" | "shellsession" => "bash",
+        "ps" | "ps1" | "pwsh" | "powershell" => "PowerShell",
+        "bat" | "cmd" | "batch" => "Batch File",
         // Web
-        "html" | "htm" | "xhtml" => "html",
-        "xml" => "xml",
-        "css" => "css",
-        "scss" | "sass" => "scss",
+        "html" | "htm" | "xhtml" => "HTML",
+        "xml" => "XML",
+        "css" => "CSS",
+        "scss" | "sass" => "SCSS",
         // JS/TS
-        "js" | "javascript" => "javascript",
-        "mjs" | "cjs" => "javascript",
-        "jsx" => "jsx",
-        "ts" | "typescript" => "typescript",
-        "tsx" => "tsx",
+        "js" | "javascript" => "JavaScript",
+        "mjs" | "cjs" => "JavaScript",
+        "jsx" => "JavaScript (JSX)",
+        "ts" | "typescript" => "TypeScript",
+        "tsx" => "TypeScriptReact",
         // Data/config
-        "json" => "json",
-        "yaml" | "yml" => "yaml",
-        "toml" => "toml",
+        "json" => "JSON",
+        "yaml" | "yml" => "YAML",
+        "toml" => "TOML",
         "ini" | "cfg" | "conf" | "dotenv" | ".env" => "ini",
+        "properties" => "Java Properties",
         // Rust and friends
-        "rs" | "rust" => "rust",
+        "rs" | "rust" => "Rust",
+        "toml.lock" | "cargo.lock" => "TOML",
         // Python
-        "py" | "python" | "py3" => "python",
+        "py" | "python" | "py3" => "Python",
         // C-family
-        "c" => "c",
-        "h" => "c",
-        "cpp" | "c++" | "cxx" | "cc" | "hpp" | "hh" => "cpp",
-        "objc" | "objective-c" | "m" | "mm" => "objective-c",
-        "cs" | "csharp" => "cs",
+        "c" => "C",
+        "h" => "C",
+        "cpp" | "c++" | "cxx" | "cc" | "hpp" | "hh" => "C++",
+        "objc" | "objective-c" | "m" | "mm" => "Objective-C",
+        "cs" | "csharp" => "C#",
         // Other popular
-        "go" => "go",
-        "rb" | "ruby" => "ruby",
-        "java" => "java",
-        "scala" => "scala",
-        "kt" | "kts" | "kotlin" => "kotlin",
-        "swift" => "swift",
-        "php" => "php",
-        "dart" => "dart",
-        "lua" => "lua",
-        "r" => "r",
-        "hs" | "haskell" => "haskell",
+        "go" => "Go",
+        "rb" | "ruby" => "Ruby",
+        "java" => "Java",
+        "scala" => "Scala",
+        "kt" | "kts" | "kotlin" => "Kotlin",
+        "swift" => "Swift",
+        "php" => "PHP",
+        "dart" => "Dart",
+        "lua" => "Lua",
+        "r" => "R",
+        "hs" | "haskell" => "Haskell",
+        "zig" => "zig",
+        "nim" => "nim",
+        "jl" | "julia" => "julia",
+        "ex" | "exs" | "elixir" => "elixir",
+        "erl" | "erlang" => "erlang",
+        "clj" | "cljs" | "cljc" | "edn" | "clojure" => "clojure",
+        "ml" | "mli" | "ocaml" => "OCaml",
         // Infra / devops
-        "docker" | "dockerfile" => "docker",
-        "make" | "makefile" | "mk" => "make",
-        "cmake" | "cmakelists.txt" => "cmake",
-        "nix" => "nix",
-        "tf" | "terraform" => "terraform",
-        "hcl" => "hcl",
+        "docker" | "dockerfile" => "Dockerfile",
+        "make" | "makefile" | "mk" => "Makefile",
+        "cmake" | "cmakelists.txt" => "CMake",
+        "nix" => "Nix",
+        "tf" | "terraform" => "HCL",
+        "hcl" => "HCL",
+        "nginx" => "nginx",
+        "apache" | "apacheconf" | "htaccess" => "Apache Conf",
+        // Diffs/patches
+        "diff" | "patch" => "Diff",
         // Markup / docs
-        "md" | "markdown" => "markdown",
+        "md" | "markdown" => "Markdown",
         // Data formats and misc languages
-        "sql" => "sql",
-        "proto" | "protobuf" => "protobuf",
-        "graphql" | "gql" => "graphql",
-        "plantuml" | "puml" => "plantuml",
+        "sql" => "SQL",
+        "proto" | "protobuf" => "Protocol Buffer",
+        "graphql" | "gql" => "GraphQL",
+        "plantuml" | "puml" => "PlantUML",
         // Fallback
         other => Box::leak(other.to_string().into_boxed_str()),
     }
@@ -359,13 +697,34 @@ fn autodetect_lang(content: &str) -> Option<&'static str> {
         return Some("sql");
     }
 
-    // 9) INI / TOML / YAML (rough heuristics)
+    // 9) INI / TOML / YAML (improved heuristics)
     if let Some(first_line) = s.lines().find(|l| !l.trim().is_empty()) {
         let fl = first_line.trim();
         if fl.starts_with('[') && fl.ends_with(']') {
-            if s.contains("[[") || s.contains("]]") || s.contains("=\"") {
-                return Some("toml");
-            }
+            // Distinguish common TOML sections (Cargo.toml and dotted sections)
+            let section = fl.trim_matches(['[', ']']);
+            let is_toml_section = matches!(
+                section,
+                "package" | "dependencies" | "dev-dependencies" | "build-dependencies" |
+                "workspace" | "profile" | _ if section.contains('.') || section.contains('-')
+            );
+            if is_toml_section { return Some("toml"); }
+        }
+    }
+    // Strong TOML signals across first 50 lines
+    let toml_signals = {
+        let lines: Vec<&str> = s.lines().take(50).collect();
+        let has_dotted_keys = lines.iter().any(|l| l.trim_start().split_once('=').map(|(k, _)| k.contains('.')).unwrap_or(false));
+        let has_inline_table = lines.iter().any(|l| l.contains("={") || l.contains(" = {"));
+        let has_array = lines.iter().any(|l| l.contains("=[") || l.contains(" = ["));
+        let has_quoted_assign = lines.iter().any(|l| l.contains("= \"") || l.contains("=\""));
+        (has_dotted_keys as u8 + has_inline_table as u8 + has_array as u8 + has_quoted_assign as u8) >= 2
+    };
+    if toml_signals { return Some("toml"); }
+    // Fallback to INI if it looks like sectioned key=value without YAML/hints
+    if let Some(first_line) = s.lines().find(|l| !l.trim().is_empty()) {
+        let fl = first_line.trim();
+        if fl.starts_with('[') && fl.ends_with(']') {
             if s.lines().any(|l| l.contains('=')) && !s.contains(": ") {
                 return Some("ini");
             }

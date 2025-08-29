@@ -32,41 +32,7 @@ The browser will either be an internal headless browser, or a CPD connection to 
 
 ## Agent tools
 
-Your agents are like having a team of expert peers at your disposal at any time. Use them for non-trivial work in these types of situations;
-
-### Solve
-If you get stuck on a problem and your first attempt has failed, race your agents to find the solution in read_only mode. Research shows that the fastest agent is frequently the most accurate.
-
-Example;
-agent_run {
-  "task": "Find and fix flaky test `test_refund_flow` in services/payments. Produce: (1) root cause, (2) minimal unified diff, (3) commands to reproduce and verify. Do not change business logic.",
-  "context": "Monorepo; CI fails intermittently on macOS since a1b2c3. Stripe sandbox used in tests.",
-  "files": ["services/payments", "services/payments/tests", "ci/config.yml"],
-  "model": ["claude","gemini","codex"],
-  "output": "Root cause + minimal patch + reproducible verification",
-  "read_only": true
-}
-agent_wait {"batch_id":"<batch_id>","return_all":false} // will return as soon as first agent is complete
-agent_result {"agent_id":"<first_agent_id>"}
-// Repeat and create new agents if needed until problem is resolved
-agent_cancel {"batch_id":"<batch>"}  // stop running agents ONLY once the task is tested and confirmed solved. Even if you think you have solved the problem it may be good to check the output of other agents
-
-### Plan
-When starting a complicated task without an obvious direction, you can find multiple perspectives then merge into one plan with rationale.
-
-Example;
-agent_run {
-  "task": "Draft a phased rollout plan for feature flags across apps/web and services. Include migration steps, rollback, monitoring, ownership, and two safe defaults.",
-  "context": "apps/web (Next.js), services/api (Rust Axum). Existing env flags in `config/flags`. Goal: progressive delivery.",
-  "files": ["apps/web/package.json", "services/api/Cargo.toml", "config/flags"],
-  "model": ["claude","gemini","codex"],
-  "output": "Numbered phases + risk matrix + observability plan",
-  "read_only": true
-}
-agent_wait { "batch_id": "<batch_id>", "return_all": true } // wait for all
-
-### Code
-Implement multiple tasks at once, or see how multiple other peers would build a solution.
+Your agents are like having a team of expert peers at your disposal at any time. Use them for non-trivial work.
 
 Example;
 agent_run {
@@ -81,3 +47,16 @@ agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } /
 
 # Warnings
 - Do not create new branches or make changes to git unless requested.
+
+# Final output
+You can include FULL markdown in any responses you make. These will be converted to beautiful output in the terminal.
+
+**In particular** you can use fenced code blocks which will be shown with full syntax highlighting. Try to include the language of the block e.g.
+
+```bash
+# Shell example
+set -euo pipefail
+./build-fast.sh
+```
+
+Markdown tables, quotes, callouts, task lists, strikethrough and inline code are also all supported.

@@ -353,6 +353,65 @@ impl HistoryCell for PlainHistoryCell {
             self.lines.clone()
         }
     }
+
+    fn has_custom_render(&self) -> bool {
+        matches!(self.kind, HistoryCellType::User)
+    }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        if matches!(self.kind, HistoryCellType::User) {
+            // Match input composer wrapping by reserving 2 columns of right padding.
+            // Composer content width is pane−6; history content is pane−4 (after gutter).
+            // Subtract 2 more so wrapping positions are identical when the message moves
+            // from the composer into history.
+            let inner_w = width.saturating_sub(2);
+            let text = Text::from(self.display_lines_trimmed());
+            Paragraph::new(text)
+                .wrap(Wrap { trim: false })
+                .line_count(inner_w)
+                .try_into()
+                .unwrap_or(0)
+        } else {
+            Paragraph::new(Text::from(self.display_lines_trimmed()))
+                .wrap(Wrap { trim: false })
+                .line_count(width)
+                .try_into()
+                .unwrap_or(0)
+        }
+    }
+
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        if !matches!(self.kind, HistoryCellType::User) {
+            // Fallback to default behavior for non-user cells
+            return HistoryCell::custom_render_with_skip(self, area, buf, skip_rows);
+        }
+
+        // Render User cells with extra right padding to mirror the composer input padding.
+        let cell_bg = crate::colors::background();
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+
+        // Clear area
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_char(' ').set_style(bg_style);
+            }
+        }
+
+        let lines = self.display_lines_trimmed();
+        let text = Text::from(lines);
+
+        // Add Block with padding: reserve 2 columns on the right.
+        let block = Block::default()
+            .style(bg_style)
+            .padding(Padding { left: 0, right: 2, top: 0, bottom: 0 });
+
+        Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((skip_rows, 0))
+            .style(bg_style)
+            .render(area, buf);
+    }
 }
 
 // ==================== ExecCell ====================
@@ -434,14 +493,76 @@ impl HistoryCell for AssistantMarkdownCell {
         true
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Match StreamingContentCell: 1 row padding above and below
-        let content = Text::from(self.display_lines_trimmed());
-        let content_rows: u16 = Paragraph::new(content)
-            .wrap(Wrap { trim: false })
-            .line_count(width.saturating_sub(2))
-            .try_into()
-            .unwrap_or(0);
-        content_rows.saturating_add(2)
+        // Match custom rendering exactly:
+        // - Apply bullet wrapping and horizontal rules transformation
+        // - One top padding row for the cell (+1)
+        // - Fenced code blocks: exclude language sentinel; trim blank padding lines;
+        //   add 4 rows for borders + inner pads
+        let inner_width = width.saturating_sub(2);
+        let mut all_lines = self.display_lines_trimmed();
+        if inner_width > 4 {
+            let mut transformed: Vec<Line<'static>> = Vec::new();
+            let mut is_first_output_line = true;
+            for mut line in all_lines.into_iter() {
+                if crate::render::line_utils::is_code_block_painted(&line) {
+                    transformed.push(line);
+                    continue;
+                }
+                if is_horizontal_rule_line(&line) {
+                    transformed.push(Line::from(Span::styled(
+                        std::iter::repeat('─').take(inner_width as usize).collect::<String>(),
+                        Style::default().fg(crate::colors::assistant_hr()),
+                    )));
+                    continue;
+                }
+                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
+                    if is_first_output_line && bullet_char == "-" {
+                        use ratatui::text::Span;
+                        let mut spans = std::mem::take(&mut line.spans);
+                        let mut i = 0usize;
+                        let mut out_spans: Vec<Span<'static>> = Vec::new();
+                        if indent_spaces > 0 { out_spans.push(Span::raw(" ".repeat(indent_spaces))); i = 1; }
+                        i = i.saturating_add(2);
+                        out_spans.extend(spans.drain(i..));
+                        transformed.push(ratatui::text::Line::from(out_spans));
+                    } else {
+                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, inner_width));
+                    }
+                } else {
+                    transformed.push(line);
+                }
+                is_first_output_line = false;
+            }
+            all_lines = transformed;
+        }
+
+        let mut total: u16 = 0;
+        let mut i = 0usize;
+        while i < all_lines.len() {
+            let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
+            let start = i; i += 1;
+            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            if is_code {
+                let mut chunk: Vec<Line<'static>> = all_lines[start..i].to_vec();
+                if let Some(first) = chunk.first() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    if flat.contains("⟦LANG:") { chunk.remove(0); }
+                }
+                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
+                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
+                total = total.saturating_add(chunk.len() as u16 + 4);
+            } else {
+                let text = Text::from(all_lines[start..i].to_vec());
+                let rows: u16 = Paragraph::new(text)
+                    .wrap(Wrap { trim: false })
+                    .line_count(inner_width)
+                    .try_into()
+                    .unwrap_or(0);
+                total = total.saturating_add(rows);
+            }
+        }
+        // Top + bottom padding rows
+        total.saturating_add(2)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Mirror StreamingContentCell rendering so finalized assistant cells look
@@ -463,7 +584,8 @@ impl HistoryCell for AssistantMarkdownCell {
         let inner_width = area.width.saturating_sub(2);
         if inner_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
-            for line in all_lines.into_iter() {
+            let mut is_first_output_line = true;
+            for mut line in all_lines.into_iter() {
                 if crate::render::line_utils::is_code_block_painted(&line) {
                     transformed.push(line);
                     continue;
@@ -479,15 +601,35 @@ impl HistoryCell for AssistantMarkdownCell {
                     continue;
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
+                    // Special case: If this is the very first output line and the bullet
+                    // is a plain hyphen ("-"), drop the bullet itself and keep the content.
+                    if is_first_output_line && bullet_char == "-" {
+                        use ratatui::text::Span;
+                        let mut spans = std::mem::take(&mut line.spans);
+                        let mut i = 0usize;
+                        // Optional leading indent
+                        let mut out_spans: Vec<Span<'static>> = Vec::new();
+                        if indent_spaces > 0 {
+                            out_spans.push(Span::raw(" ".repeat(indent_spaces)));
+                            i = 1; // skip the indent span we expect
+                        }
+                        // Skip bullet span and the following single-space span
+                        i = i.saturating_add(2);
+                        // Append the rest of the content as-is
+                        out_spans.extend(spans.drain(i..));
+                        transformed.push(ratatui::text::Line::from(out_spans));
+                    } else {
                     transformed.extend(wrap_bullet_line(
                         line,
                         indent_spaces,
                         &bullet_char,
                         inner_width,
                     ));
+                    }
                 } else {
                     transformed.push(line);
                 }
+                is_first_output_line = false;
             }
             all_lines = transformed;
         }
@@ -566,44 +708,87 @@ impl HistoryCell for AssistantMarkdownCell {
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
                 }
-                Seg::Code(lines) => {
+                Seg::Code(lines_in) => {
+                    if lines_in.is_empty() { return; }
+                    // Extract language sentinel and drop it from visible lines
+                    let mut lang_label: Option<String> = None;
+                    let mut lines = lines_in.clone();
+                    if let Some(first) = lines.first() {
+                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
+                            if let Some(end) = s.find('⟧') { lang_label = Some(s[..end].to_string()); lines.remove(0); }
+                        }
+                    }
                     if lines.is_empty() { return; }
-                    // Determine target width for the code card: fit content but not beyond inner_width
+                    // Determine target width for the code card (content width) and add borders (2) + inner pads (2)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
-                    let card_w = max_w.min(inner_width).max(1);
-                    let total = lines.len() as u16 + 2; // top+bottom padding rows
+                    let inner_w = max_w.max(1);
+                    let card_w = inner_w.saturating_add(4).min(inner_width.max(4));
+                    let total = lines.len() as u16 + 4; // top/bottom border + inner padding rows
                     if *skip >= total { *skip -= total; return; }
                     let avail = end_y.saturating_sub(*y);
                     if avail == 0 { return; }
-                    // Compute visible slice
+                    // Compute visible slice (accounting for top/bottom border + inner padding rows)
                     let mut local_skip = *skip;
-                    let mut top_pad = 1u16;
-                    if local_skip > 0 { let drop = local_skip.min(top_pad); top_pad -= drop; local_skip -= drop; }
-                    let code_skip = local_skip.min(lines.len() as u16);
-                    local_skip -= code_skip;
-                    let mut bottom_pad = 1u16;
-                    if local_skip > 0 { let drop = local_skip.min(bottom_pad); bottom_pad -= drop; }
+                    let mut top_border = 1u16; if local_skip > 0 { let drop = local_skip.min(top_border); top_border -= drop; local_skip -= drop; }
+                    let mut top_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(top_pad); top_pad -= drop; local_skip -= drop; }
+                    let code_skip = local_skip.min(lines.len() as u16); local_skip -= code_skip;
+                    let mut bottom_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_pad); bottom_pad -= drop; }
+                    let mut bottom_border = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_border); bottom_border -= drop; }
                     // Compute drawable height in this pass
-                    let visible = top_pad + (lines.len() as u16 - code_skip) + bottom_pad;
+                    let visible = top_border + top_pad + (lines.len() as u16 - code_skip) + bottom_pad + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 { return; }
-                    // Draw background block for visible rows
-                    let rect = Rect { x: area.x, y: *y, width: card_w, height: draw_h };
+                    // Compute optional outer horizontal padding (1 col left/right) inside content area
+                    let content_x = area.x;
+                    let content_w = inner_width;
+                    let outer_needed = card_w.saturating_add(2);
+                    let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
+                        (content_x.saturating_add(1), true, true)
+                    } else {
+                        let rp = content_w.saturating_sub(card_w) > 0;
+                        (content_x, false, rp)
+                    };
+                    // Draw bordered block for visible rows
+                    let rect = Rect { x: rect_x, y: *y, width: card_w, height: draw_h };
                     let code_bg = crate::colors::code_block_bg();
-                    let blk = Block::default().style(Style::default().bg(code_bg));
+                    let mut blk = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(crate::colors::border()))
+                        .style(Style::default().bg(code_bg))
+                        .padding(Padding { left: 1, right: 1, top: 1, bottom: 1 });
+                    if let Some(lang) = &lang_label {
+                        blk = blk.title(Span::styled(format!(" {} ", lang), Style::default().fg(crate::colors::text_dim())));
+                    }
+                    // Clone before render so we can compute inner rect after drawing borders
+                    let blk_for_inner = blk.clone();
                     blk.render(rect, buf);
-                    // Inner paragraph area (exclude top padding row if present)
-                    let inner_y = rect.y + top_pad.min(draw_h);
-                    let inner_h = rect.height.saturating_sub(top_pad + bottom_pad).min(rect.height);
+                    // Inner paragraph area (exclude borders)
+                    let inner_rect = blk_for_inner.inner(rect);
+                    let inner_h = inner_rect.height.min(rect.height);
                     if inner_h > 0 {
                         let slice_start = code_skip as usize;
                         let slice_end = lines.len();
                         let txt = Text::from(lines[slice_start..slice_end].to_vec());
-                        let inner_rect = Rect { x: rect.x, y: inner_y, width: rect.width, height: inner_h };
                         Paragraph::new(txt)
                             .style(Style::default().bg(code_bg))
                             .block(Block::default().style(Style::default().bg(code_bg)))
                             .render(inner_rect, buf);
+                    }
+                    // Draw optional outside padding stripes using code background
+                    if left_pad {
+                        let px = rect.x.saturating_sub(1);
+                        for yy in rect.y..rect.y.saturating_add(rect.height) {
+                            buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                        }
+                    }
+                    if right_pad {
+                        let px = rect.x.saturating_add(rect.width);
+                        if px < content_x.saturating_add(content_w) {
+                            for yy in rect.y..rect.y.saturating_add(rect.height) {
+                                buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                            }
+                        }
                     }
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
@@ -615,6 +800,14 @@ impl HistoryCell for AssistantMarkdownCell {
             if cur_y >= end_y { break; }
             draw_segment(seg, &mut cur_y, &mut remaining_skip);
         }
+        // Bottom padding row (blank): area is already cleared to bg
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        } else {
+            remaining_skip = remaining_skip.saturating_sub(1);
+        }
+        // Mark as used to satisfy unused_assignments lint
+        let _ = (cur_y, remaining_skip);
     }
 }
 
@@ -1970,22 +2163,74 @@ impl HistoryCell for StreamingContentCell {
         true
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Reserve one row of padding above and below the assistant content.
-        // Also reserve 1 col of left padding and 2 cols of right padding.
-        let content = Text::from(self.display_lines_trimmed());
-        let content_rows: u16 = Paragraph::new(content)
-            .wrap(Wrap { trim: false })
-            .line_count(width.saturating_sub(2))
-            .try_into()
-            .unwrap_or(0);
-        content_rows.saturating_add(2)
+        // Match streaming render path, including bullet wrapping and HR expansion.
+        let inner_width = width.saturating_sub(2);
+        let mut all_lines = self.display_lines_trimmed();
+        if inner_width > 4 {
+            let mut transformed: Vec<Line<'static>> = Vec::new();
+            let mut is_first_output_line = true;
+            for mut line in all_lines.into_iter() {
+                if crate::render::line_utils::is_code_block_painted(&line) {
+                    transformed.push(line);
+                    continue;
+                }
+                if is_horizontal_rule_line(&line) {
+                    transformed.push(Line::from(Span::styled(
+                        std::iter::repeat('─').take(inner_width as usize).collect::<String>(),
+                        Style::default().fg(crate::colors::assistant_hr()),
+                    )));
+                    continue;
+                }
+                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
+                    if is_first_output_line && bullet_char == "-" {
+                        use ratatui::text::Span;
+                        let mut spans = std::mem::take(&mut line.spans);
+                        let mut i = 0usize;
+                        let mut out_spans: Vec<Span<'static>> = Vec::new();
+                        if indent_spaces > 0 { out_spans.push(Span::raw(" ".repeat(indent_spaces))); i = 1; }
+                        i = i.saturating_add(2);
+                        out_spans.extend(spans.drain(i..));
+                        transformed.push(ratatui::text::Line::from(out_spans));
+                    } else {
+                        transformed.extend(wrap_bullet_line(line, indent_spaces, &bullet_char, inner_width));
+                    }
+                } else {
+                    transformed.push(line);
+                }
+                is_first_output_line = false;
+            }
+            all_lines = transformed;
+        }
+
+        let mut total: u16 = 0;
+        let mut i = 0usize;
+        while i < all_lines.len() {
+            let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
+            let start = i; i += 1;
+            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            if is_code {
+                let mut chunk_len = (i - start) as u16;
+                if let Some(first) = all_lines[start..i].first() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    if flat.contains("⟦LANG:") { chunk_len = chunk_len.saturating_sub(1); }
+                }
+                total = total.saturating_add(chunk_len.saturating_add(4));
+            } else {
+                let text = Text::from(all_lines[start..i].to_vec());
+                let rows: u16 = Paragraph::new(text)
+                    .wrap(Wrap { trim: false })
+                    .line_count(inner_width)
+                    .try_into()
+                    .unwrap_or(0);
+                total = total.saturating_add(rows);
+            }
+        }
+        // Top + bottom padding rows
+        total.saturating_add(2)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render with a 1-row top and bottom padding, all using the assistant bg tint.
         let cell_bg = crate::colors::assistant_bg();
-        // Do not set a widget-level FG here; it can mask per-span modifiers like BOLD on some terminals.
-        // Keep only BG tint so span-level styles remain authoritative.
-        // (A debug flag still exists, but this is now the default behavior.)
         let bg_style = Style::default().bg(cell_bg);
 
         // Hard clear area with assistant background
@@ -1995,17 +2240,21 @@ impl HistoryCell for StreamingContentCell {
             }
         }
 
-        // Prepare lines with bullet hanging-indents (first-sentence styling is now handled in the markdown renderer).
-        let mut content_lines = self.display_lines_trimmed();
-        let wrap_width = area.width.saturating_sub(2); // keep 2-col right padding in layout
-        if wrap_width > 4 {
+        // Prepare content lines (wrap non-code text only)
+        let mut all_lines = self.display_lines_trimmed();
+        let inner_width = area.width.saturating_sub(2);
+        if inner_width > 4 {
             let mut transformed: Vec<Line<'static>> = Vec::new();
-            for line in content_lines.into_iter() {
-                // Horizontal rule: lines of only --- *** or ___ -> draw across width
+            let mut is_first_output_line = true;
+            for mut line in all_lines.into_iter() {
+                if crate::render::line_utils::is_code_block_painted(&line) {
+                    transformed.push(line);
+                    continue;
+                }
                 if is_horizontal_rule_line(&line) {
                     let hr = Line::from(Span::styled(
                         std::iter::repeat('─')
-                            .take(wrap_width as usize)
+                            .take(inner_width as usize)
                             .collect::<String>(),
                         Style::default().fg(crate::colors::assistant_hr()),
                     ));
@@ -2013,66 +2262,162 @@ impl HistoryCell for StreamingContentCell {
                     continue;
                 }
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    transformed.extend(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        wrap_width,
-                    ));
+                    if is_first_output_line && bullet_char == "-" {
+                        use ratatui::text::Span;
+                        let mut spans = std::mem::take(&mut line.spans);
+                        let mut i = 0usize;
+                        let mut out_spans: Vec<Span<'static>> = Vec::new();
+                        if indent_spaces > 0 {
+                            out_spans.push(Span::raw(" ".repeat(indent_spaces)));
+                            i = 1; // skip the indent span we expect
+                        }
+                        i = i.saturating_add(2); // skip bullet and following space
+                        out_spans.extend(spans.drain(i..));
+                        transformed.push(ratatui::text::Line::from(out_spans));
+                    } else {
+                        transformed.extend(wrap_bullet_line(
+                            line,
+                            indent_spaces,
+                            &bullet_char,
+                            inner_width,
+                        ));
+                    }
                 } else {
                     transformed.push(line);
                 }
+                is_first_output_line = false;
             }
-            content_lines = transformed;
+            all_lines = transformed;
         }
-        let content_text = Text::from(content_lines);
-        let content_total: u16 = Paragraph::new(content_text.clone())
-            .wrap(Wrap { trim: false })
-            .line_count(area.width.saturating_sub(2))
-            .try_into()
-            .unwrap_or(0);
 
+        // Segment into normal text vs code blocks (contiguous painted lines)
+        #[derive(Debug)]
+        enum Seg { Text(Vec<Line<'static>>), Code(Vec<Line<'static>>), }
+        let mut segs: Vec<Seg> = Vec::new();
+        let mut i = 0usize;
+        while i < all_lines.len() {
+            let is_code = crate::render::line_utils::is_code_block_painted(&all_lines[i]);
+            let start = i; i += 1;
+            while i < all_lines.len() && crate::render::line_utils::is_code_block_painted(&all_lines[i]) == is_code { i += 1; }
+            let chunk: Vec<Line<'static>> = all_lines[start..i].to_vec();
+            segs.push(if is_code { Seg::Code(chunk) } else { Seg::Text(chunk) });
+        }
+
+        // Streaming-style top padding row
         let mut remaining_skip = skip_rows;
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
-
-        // Top padding (1 row)
-        if remaining_skip == 0 && cur_y < end_y {
-            // already cleared with bg; nothing else to draw
-            cur_y = cur_y.saturating_add(1);
-        }
+        if remaining_skip == 0 && cur_y < end_y { cur_y = cur_y.saturating_add(1); }
         remaining_skip = remaining_skip.saturating_sub(1);
 
-        // Content block
-        if cur_y < end_y {
-            let content_skip = remaining_skip.min(content_total);
-            let avail = end_y.saturating_sub(cur_y);
-            let draw_h = (content_total.saturating_sub(content_skip)).min(avail);
-            if draw_h > 0 {
-                // Render content flush to the gutter (no extra left pad) and keep 2 cols right pad
-                let content_area = Rect {
-                    x: area.x,
-                    y: cur_y,
-                    width: area.width.saturating_sub(2),
-                    height: draw_h,
-                };
-                let block = Block::default().style(bg_style);
-                Paragraph::new(content_text)
-                    .block(block)
-                    .wrap(Wrap { trim: false })
-                    .scroll((content_skip, 0))
-                    .style(bg_style)
-                    .render(content_area, buf);
-                cur_y = cur_y.saturating_add(draw_h);
+        // Helpers
+        use unicode_width::UnicodeWidthStr as UW;
+        let measure_line = |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
+        let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
+            if *y >= end_y { return; }
+            match seg {
+                Seg::Text(lines) => {
+                    let txt = Text::from(lines.clone());
+                    let total: u16 = Paragraph::new(txt.clone()).wrap(Wrap { trim: false }).line_count(inner_width).try_into().unwrap_or(0);
+                    if *skip >= total { *skip -= total; return; }
+                    let avail = end_y.saturating_sub(*y);
+                    let draw_h = (total.saturating_sub(*skip)).min(avail);
+                    if draw_h == 0 { return; }
+                    let rect = Rect { x: area.x, y: *y, width: inner_width, height: draw_h };
+                    Paragraph::new(txt).block(Block::default().style(bg_style)).wrap(Wrap { trim: false }).scroll((*skip, 0)).style(bg_style).render(rect, buf);
+                    *y = y.saturating_add(draw_h); *skip = 0;
+                }
+                Seg::Code(lines_in) => {
+                    if lines_in.is_empty() { return; }
+                    // Extract optional language sentinel and drop it from the content lines
+                    let mut lang_label: Option<String> = None;
+                    let mut lines = lines_in.clone();
+                    if let Some(first) = lines.first() {
+                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
+                            if let Some(end) = s.find('⟧') { lang_label = Some(s[..end].to_string()); lines.remove(0); }
+                        }
+                    }
+                    if lines.is_empty() { return; }
+                    // Determine target width of the code card (respect inner width)
+                    let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
+                    let inner_w = max_w.max(1);
+                    // Borders (2) + inner left/right padding (2)
+                    let card_w = inner_w.saturating_add(4).min(inner_width.max(4));
+                    // Include top/bottom border (2) + inner padding rows (2)
+                    let total = lines.len() as u16 + 4;
+                    if *skip >= total { *skip -= total; return; }
+                    let avail = end_y.saturating_sub(*y);
+                    if avail == 0 { return; }
+                    // Compute visible slice of the card (accounting for inner padding rows)
+                    let mut local_skip = *skip;
+                    let mut top_border = 1u16; if local_skip > 0 { let drop = local_skip.min(top_border); top_border -= drop; local_skip -= drop; }
+                    let mut top_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(top_pad); top_pad -= drop; local_skip -= drop; }
+                    let code_skip = local_skip.min(lines.len() as u16); local_skip -= code_skip;
+                    let mut bottom_pad = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_pad); bottom_pad -= drop; }
+                    let mut bottom_border = 1u16; if local_skip > 0 { let drop = local_skip.min(bottom_border); bottom_border -= drop; }
+                    let visible = top_border + top_pad + (lines.len() as u16 - code_skip) + bottom_pad + bottom_border;
+                    let draw_h = visible.min(avail); if draw_h == 0 { return; }
+                    // Compute optional outer horizontal padding (1 col left/right) inside content area
+                    let content_x = area.x;
+                    let content_w = inner_width;
+                    let outer_needed = card_w.saturating_add(2);
+                    let (rect_x, left_pad, right_pad) = if content_w >= outer_needed {
+                        (content_x.saturating_add(1), true, true)
+                    } else {
+                        let rp = content_w.saturating_sub(card_w) > 0;
+                        (content_x, false, rp)
+                    };
+                    // Draw bordered block for the visible rows
+                    let rect = Rect { x: rect_x, y: *y, width: card_w, height: draw_h };
+                    let code_bg = crate::colors::code_block_bg();
+                    let mut blk = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(crate::colors::border()))
+                        .style(Style::default().bg(code_bg))
+                        .padding(Padding { left: 1, right: 1, top: 1, bottom: 1 });
+                    if let Some(lang) = &lang_label { blk = blk.title(Span::styled(format!(" {} ", lang), Style::default().fg(crate::colors::text_dim()))); }
+                    let blk_for_inner = blk.clone();
+                    blk.render(rect, buf);
+                    // Inner paragraph area (exclude borders)
+                    let inner_rect = blk_for_inner.inner(rect);
+                    let inner_h = inner_rect.height.min(rect.height);
+                    if inner_h > 0 {
+                        let slice_start = code_skip as usize;
+                        let txt = Text::from(lines[slice_start..].to_vec());
+                        Paragraph::new(txt)
+                            .style(Style::default().bg(code_bg))
+                            .block(Block::default().style(Style::default().bg(code_bg)))
+                            .render(inner_rect, buf);
+                    }
+                    // Draw optional outside padding stripes
+                    if left_pad {
+                        let px = rect.x.saturating_sub(1);
+                        for yy in rect.y..rect.y.saturating_add(rect.height) {
+                            buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                        }
+                    }
+                    if right_pad {
+                        let px = rect.x.saturating_add(rect.width);
+                        if px < content_x.saturating_add(content_w) {
+                            for yy in rect.y..rect.y.saturating_add(rect.height) {
+                                buf[(px, yy)].set_char(' ').set_style(Style::default().bg(code_bg));
+                            }
+                        }
+                    }
+                    *y = y.saturating_add(draw_h); *skip = 0;
+                }
             }
-        }
+        };
 
-        // Bottom padding (1 row)
-        if cur_y < end_y {
-            // one row already cleared with bg; nothing else to draw
-            // when remaining_skip > 0, the single bottom pad row is entirely skipped.
-            // if remaining_skip > 0, the single bottom pad row is entirely skipped
+        for seg in &segs {
+            if cur_y >= end_y { break; }
+            draw_segment(seg, &mut cur_y, &mut remaining_skip);
         }
+        // Bottom padding row (blank): area already cleared
+        if remaining_skip == 0 && cur_y < end_y { cur_y = cur_y.saturating_add(1); } else { remaining_skip = remaining_skip.saturating_sub(1); }
+        // Mark as used to satisfy unused_assignments lint
+        let _ = (cur_y, remaining_skip);
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Hide the header line (e.g., "codex") when using a gutter symbol
@@ -2092,7 +2437,8 @@ impl HistoryCell for StreamingContentCell {
 
 // Detect lines that start with a markdown bullet produced by our renderer and return (indent, bullet)
 fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String)> {
-    let bullets = ["-", "•", "◦", "·", "∘", "⋅"];
+    // Treat these as unordered bullets, plus checkbox glyphs for task lists.
+    let bullets = ["-", "•", "◦", "·", "∘", "⋅", "☐", "✔"];
     let spans = &line.spans;
     if spans.is_empty() {
         return None;
@@ -2107,21 +2453,33 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
             idx = 1;
         }
     }
-    // Next must be bullet glyph
+    // Next must be a bullet-like prefix and a following space span.
+    // Handle three cases:
+    //  1) Unordered bullets (•, -, etc) and task checkboxes (☐, ✔)
+    //  2) Ordered bullets like "1." (digits followed by '.')
+    // In all cases, there must be a subsequent single-space span after the marker.
     let bullet_span = spans.get(idx)?;
     let bullet = bullet_span.content.as_ref();
-    if !bullets.contains(&bullet) {
-        return None;
-    }
-    // Next must be a single space span (renderer adds one)
-    let space_ok = spans
+    let has_space_after = spans
         .get(idx + 1)
         .map(|s| s.content.as_ref() == " ")
         .unwrap_or(false);
-    if !space_ok {
+    if !has_space_after {
         return None;
     }
-    Some((indent, bullet.to_string()))
+    if bullets.contains(&bullet) {
+        return Some((indent, bullet.to_string()));
+    }
+    // Ordered list: e.g., "1.", "12.", etc.
+    if bullet.len() >= 2
+        && bullet.ends_with('.')
+        && bullet[..bullet.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_digit())
+    {
+        return Some((indent, bullet.to_string()));
+    }
+    None
 }
 
 // Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
@@ -2133,6 +2491,8 @@ fn wrap_bullet_line(
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::style::Style;
     use ratatui::text::Span;
+    use unicode_width::UnicodeWidthChar as UWChar;
+    use unicode_width::UnicodeWidthStr as UWStr;
 
     let width = width as usize;
     let mut spans = std::mem::take(&mut line.spans);
@@ -2170,27 +2530,68 @@ fn wrap_bullet_line(
         }
     }
 
-    // Prefix widths
-    let first_prefix = indent_spaces + 1 /*bullet*/ + 1 /*space*/;
-    let cont_prefix = indent_spaces + 2; // spaces equal to bullet+space
+    // Prefix widths (display columns)
+    let bullet_cols = UWStr::width(bullet);
+    let first_prefix = indent_spaces + bullet_cols + 1 /*space*/;
+    let cont_prefix = indent_spaces + bullet_cols + 1; // spaces equal to bullet+space
 
     let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
     let mut pos = 0usize;
     let mut first = true;
     while pos < chars.len() {
-        let avail = if first {
+        let avail_cols = if first {
             width.saturating_sub(first_prefix)
         } else {
             width.saturating_sub(cont_prefix)
-        };
-        let avail = avail.max(1);
-        let mut take = 0usize;
-        let mut col = 0usize;
-        while pos + take < chars.len() && col < avail {
-            col += 1;
-            take += 1;
+        } as usize;
+        let avail_cols = avail_cols.max(1);
+
+        // Greedy take up to avail_cols, preferring to break at a preceding space.
+        let mut taken = 0usize;      // number of chars consumed
+        let mut cols = 0usize;       // display columns consumed
+        let mut last_space_char_idx: Option<usize> = None; // index into chars
+        while pos + taken < chars.len() {
+            let (ch, _) = chars[pos + taken];
+            let w = UWChar::width(ch).unwrap_or(0).max(1);
+            if cols.saturating_add(w) > avail_cols {
+                break;
+            }
+            cols += w;
+            if ch == ' ' {
+                last_space_char_idx = Some(pos + taken);
+            }
+            taken += 1;
+            if cols == avail_cols { break; }
         }
-        let slice = &chars[pos..pos + take];
+
+        // Choose cut position: prefer last space within range; otherwise force break.
+        let (cut_end, next_start) = if let Some(space_idx) = last_space_char_idx {
+            // Trim any spaces following the break point for next line start
+            let mut next = space_idx;
+            // cut_end excludes the space
+            let mut cut = space_idx;
+            // Also trim any trailing spaces before the break in this segment
+            while cut > pos && chars[cut - 1].0 == ' ' { cut -= 1; }
+            // Advance next past contiguous spaces
+            while next < chars.len() && chars[next].0 == ' ' { next += 1; }
+            (cut, next)
+        } else {
+            // No space seen in range – hard break (very long word or first token longer than width)
+            (pos + taken, pos + taken)
+        };
+
+        // If cut_end did not advance (e.g., segment starts with spaces), skip spaces and continue
+        if cut_end <= pos {
+            let mut p = pos;
+            while p < chars.len() && chars[p].0 == ' ' { p += 1; }
+            if p == pos { // safety: ensure forward progress
+                p = pos + 1;
+            }
+            pos = p;
+            continue;
+        }
+
+        let slice = &chars[pos..cut_end];
         let mut seg_spans: Vec<Span<'static>> = Vec::new();
         // Build prefix spans
         if first {
@@ -2220,7 +2621,7 @@ fn wrap_bullet_line(
             seg_spans.push(Span::styled(buf, cur_style.unwrap()));
         }
         out.push(ratatui::text::Line::from(seg_spans));
-        pos += take;
+        pos = next_start;
         first = false;
     }
 
@@ -2577,6 +2978,7 @@ fn normalize_overwrite_sequences(input: &str) -> String {
 fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
+    let processed = expand_tabs_to_spaces(&processed, 4);
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
 
     enum Seg<'a> {
@@ -2645,7 +3047,7 @@ fn output_lines(
             format!("Error (exit code {})", exit_code),
             Style::default().fg(crate::colors::error()),
         ));
-        let stderr_norm = normalize_overwrite_sequences(stderr);
+        let stderr_norm = expand_tabs_to_spaces(&normalize_overwrite_sequences(stderr), 4);
         for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
@@ -4317,8 +4719,12 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
         Line::from(""),
     ];
 
-    for line in stderr.lines() {
-        lines.push(ansi_escape_line(line).red());
+    let norm = normalize_overwrite_sequences(&stderr);
+    let norm = expand_tabs_to_spaces(&norm, 4);
+    for line in norm.lines() {
+        if !line.is_empty() {
+            lines.push(ansi_escape_line(line).red());
+        }
     }
 
     lines.push(Line::from(""));
