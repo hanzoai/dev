@@ -21,6 +21,8 @@ use ratatui::widgets::WidgetRef;
 use super::chat_composer_history::ChatComposerHistory;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
+use super::paste_burst::CharDecision;
+use super::paste_burst::PasteBurst;
 use crate::slash_command::SlashCommand;
 
 use crate::app_event::AppEvent;
@@ -133,7 +135,7 @@ impl ChatComposer {
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
 
-        Self {
+        let mut this = Self {
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
             active_popup: ActivePopup::None,
@@ -431,7 +433,11 @@ impl ChatComposer {
             self.textarea.insert_str(&pasted);
         }
         self.sync_command_popup();
-        self.sync_file_search_popup();
+        if matches!(self.active_popup, ActivePopup::Command(_)) {
+            self.dismissed_file_popup_token = None;
+        } else {
+            self.sync_file_search_popup();
+        }
         true
     }
 
@@ -456,6 +462,23 @@ impl ChatComposer {
         self.textarea.set_text("");
         self.pending_pastes.clear();
         self.history.reset_navigation();
+    }
+
+    pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
+        let now = Instant::now();
+        if let Some(pasted) = self.paste_burst.flush_if_due(now) {
+            let _ = self.handle_paste(pasted);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn is_in_paste_burst(&self) -> bool {
+        self.paste_burst.is_active()
+    }
+
+    pub(crate) fn recommended_paste_flush_delay() -> Duration {
+        PasteBurst::recommended_flush_delay()
     }
 
     /// Integrate results from an asynchronous file search.
@@ -628,6 +651,31 @@ impl ChatComposer {
             }
             input => self.handle_input_basic(input),
         }
+    }
+    #[inline]
+    fn clamp_to_char_boundary(text: &str, pos: usize) -> usize {
+        let mut p = pos.min(text.len());
+        if p < text.len() && !text.is_char_boundary(p) {
+            p = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= p)
+                .last()
+                .unwrap_or(0);
+        }
+        p
+    }
+
+    #[inline]
+    fn handle_non_ascii_char(&mut self, input: KeyEvent) -> (InputResult, bool) {
+        if let Some(pasted) = self.paste_burst.flush_before_modified_input() {
+            self.handle_paste(pasted);
+        }
+        self.textarea.input(input);
+        let text_after = self.textarea.text();
+        self.pending_pastes
+            .retain(|(placeholder, _)| text_after.contains(placeholder));
+        (InputResult::None, true)
     }
 
     /// Handle key events when file search popup is visible.
@@ -891,9 +939,11 @@ impl ChatComposer {
     fn insert_selected_path(&mut self, path: &str) {
         let cursor_offset = self.textarea.cursor();
         let text = self.textarea.text();
+        // Clamp to a valid char boundary to avoid panics when slicing.
+        let safe_cursor = Self::clamp_to_char_boundary(text, cursor_offset);
 
-        let before_cursor = &text[..cursor_offset];
-        let after_cursor = &text[cursor_offset..];
+        let before_cursor = &text[..safe_cursor];
+        let after_cursor = &text[safe_cursor..];
 
         // Determine token boundaries.
         let start_idx = before_cursor
@@ -907,7 +957,7 @@ impl ChatComposer {
             .find(|(_, c)| c.is_whitespace())
             .map(|(idx, _)| idx)
             .unwrap_or(after_cursor.len());
-        let end_idx = cursor_offset + end_rel_idx;
+        let end_idx = safe_cursor + end_rel_idx;
 
         // Replace the slice `[start_idx, end_idx)` with the chosen path and a trailing space.
         let mut new_text =
@@ -1123,6 +1173,7 @@ impl ChatComposer {
     fn try_remove_placeholder_at_cursor(&mut self) -> bool {
         let p = self.textarea.cursor();
         let text = self.textarea.text();
+        let p = Self::clamp_to_char_boundary(text, self.textarea.cursor());
 
         // Find any placeholder that ends at the cursor position
         let placeholder_to_remove = self.pending_pastes.iter().find_map(|(ph, _)| {
@@ -1794,6 +1845,18 @@ mod tests {
         }
     }
 
+    // Test helper: simulate human typing with a brief delay and flush the paste-burst buffer
+    fn type_chars_humanlike(composer: &mut ChatComposer, chars: &[char]) {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+        for &ch in chars {
+            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+            std::thread::sleep(ChatComposer::recommended_paste_flush_delay());
+            let _ = composer.flush_paste_burst_if_due();
+        }
+    }
+
     #[test]
     fn slash_init_dispatches_command_and_does_not_submit_literal_text() {
         use crossterm::event::KeyCode;
@@ -1806,11 +1869,7 @@ mod tests {
         let mut composer = ChatComposer::new(true, sender, false);
 
         // Type the slash command.
-        for ch in [
-            '/', 'i', 'n', 'i', 't', // "/init"
-        ] {
-            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
+        type_chars_humanlike(&mut composer, &['/', 'i', 'n', 'i', 't']);
 
         // Press Enter to dispatch the selected command.
         let (result, _needs_redraw) =
@@ -1847,12 +1906,15 @@ mod tests {
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
-        let mut composer =
-            ChatComposer::new(true, sender, false, "Ask Codex to do anything".to_string());
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
 
-        for ch in ['/', 'c'] {
-            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
+        type_chars_humanlike(&mut composer, &['/', 'c']);
 
         let (_result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
@@ -1872,9 +1934,7 @@ mod tests {
         let sender = AppEventSender::new(tx);
         let mut composer = ChatComposer::new(true, sender, false);
 
-        for ch in ['/', 'm', 'e', 'n', 't', 'i', 'o', 'n'] {
-            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
+        type_chars_humanlike(&mut composer, &['/', 'm', 'e', 'n', 't', 'i', 'o', 'n']);
 
         let (result, _needs_redraw) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
