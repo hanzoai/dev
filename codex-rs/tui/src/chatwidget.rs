@@ -190,6 +190,8 @@ pub(crate) struct ChatWidget<'a> {
     // Any further deltas for these ids should be ignored to avoid post-final updates.
     closed_answer_ids: HashSet<String>,
     closed_reasoning_ids: HashSet<String>,
+    // Guard for out-of-order exec events: track call_ids that already ended
+    ended_call_ids: HashSet<String>,
 
 
     // Accumulated patch change sets for this session (latest last)
@@ -233,6 +235,10 @@ pub(crate) struct ChatWidget<'a> {
 
     // Pending jump-back state (reversible until submit)
     pending_jump_back: Option<PendingJumpBack>,
+
+    // Track active task ids so we don't drop the working status while any
+    // agent/sub‑agent is still running (long‑running sessions can interleave).
+    active_task_ids: HashSet<String>,
 }
 
 struct PendingJumpBack {
@@ -427,6 +433,176 @@ fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Optio
 }
 
 impl ChatWidget<'_> {
+    fn finalize_exec_cell_at(&mut self, idx: usize, exit_code: i32, stdout: String, stderr: String) {
+        if idx >= self.history_cells.len() { return; }
+        if let Some(exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
+            if exec.output.is_none() {
+                let completed = history_cell::new_completed_exec_command(
+                    exec.command.clone(),
+                    exec.parsed.clone(),
+                    CommandOutput { exit_code, stdout, stderr },
+                );
+                self.history_cells[idx] = Box::new(completed);
+                self.invalidate_height_cache();
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn finalize_all_running_as_interrupted(&mut self) {
+        // Mark running Exec cells as interrupted (SIGINT semantics 130)
+        let interrupted_msg = "Interrupted by user".to_string();
+        let stdout_empty = String::new();
+        // Snapshot keys to avoid borrow issues
+        let running: Vec<(String, Option<usize>)> = self
+            .running_commands
+            .iter()
+            .map(|(k, v)| (k.clone(), v.history_index))
+            .collect();
+        for (_call_id, maybe_idx) in running {
+            if let Some(idx) = maybe_idx { self.finalize_exec_cell_at(idx, 130, stdout_empty.clone(), interrupted_msg.clone()); }
+        }
+        self.running_commands.clear();
+
+        // Custom tools: replace running cells with a failed completion note
+        if !self.running_custom_tools.is_empty() {
+            let entries: Vec<(String, usize)> = self.running_custom_tools.iter().map(|(k, i)| (k.clone(), *i)).collect();
+            for (_k, idx) in entries {
+                if idx < self.history_cells.len() {
+                    // Create a synthetic completion with failure
+                    let completed = history_cell::new_completed_custom_tool_call(
+                        "custom".to_string(),
+                        None,
+                        std::time::Duration::from_millis(0),
+                        false,
+                        "Interrupted by user".to_string(),
+                    );
+                    self.history_cells[idx] = Box::new(completed);
+                }
+            }
+            self.running_custom_tools.clear();
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+
+        // Web searches: finalize as unsuccessful
+        if !self.running_web_search.is_empty() {
+            let entries: Vec<(String, (usize, Option<String>))> = self.running_web_search.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            for (call_id, (idx, query_opt)) in entries {
+                let mut target_idx = None;
+                if idx < self.history_cells.len() {
+                    let is_ws = self.history_cells[idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                        .is_some_and(|rt| rt.has_title("Web Search..."));
+                    if is_ws { target_idx = Some(idx); }
+                }
+                if target_idx.is_none() {
+                    for i in (0..self.history_cells.len()).rev() {
+                        if let Some(rt) = self.history_cells[i]
+                            .as_any()
+                            .downcast_ref::<history_cell::RunningToolCallCell>()
+                        {
+                            if rt.has_title("Web Search...") { target_idx = Some(i); break; }
+                        }
+                    }
+                }
+                if let Some(i) = target_idx {
+                    if let Some(rt) = self.history_cells[i]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                    {
+                        let completed = rt.finalize_web_search(false, query_opt);
+                        self.history_cells[i] = Box::new(completed);
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                    }
+                }
+                self.running_web_search.remove(&call_id);
+            }
+        }
+
+        // If nothing else is active, hide the spinner and show cancelled
+        self.bottom_pane.update_status_text("cancelled".to_string());
+        let any_tasks_active = !self.active_task_ids.is_empty();
+        if !any_tasks_active {
+            self.bottom_pane.set_task_running(false);
+        }
+    }
+
+    fn finalize_all_running_due_to_answer(&mut self) {
+        // Convert any lingering running exec/tool cells to completed so the UI doesn't hang.
+        let note = "Completed (final answer received)".to_string();
+        let stdout_empty = String::new();
+        let running: Vec<(String, Option<usize>)> = self
+            .running_commands
+            .iter()
+            .map(|(k, v)| (k.clone(), v.history_index))
+            .collect();
+        for (_call_id, maybe_idx) in running {
+            if let Some(idx) = maybe_idx { self.finalize_exec_cell_at(idx, 0, stdout_empty.clone(), note.clone()); }
+        }
+        self.running_commands.clear();
+
+        if !self.running_custom_tools.is_empty() {
+            let entries: Vec<(String, usize)> = self.running_custom_tools.iter().map(|(k, i)| (k.clone(), *i)).collect();
+            for (_k, idx) in entries {
+                if idx < self.history_cells.len() {
+                    let completed = history_cell::new_completed_custom_tool_call(
+                        "custom".to_string(),
+                        None,
+                        std::time::Duration::from_millis(0),
+                        true,
+                        "Final answer received".to_string(),
+                    );
+                    self.history_cells[idx] = Box::new(completed);
+                }
+            }
+            self.running_custom_tools.clear();
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+
+        if !self.running_web_search.is_empty() {
+            let entries: Vec<(String, (usize, Option<String>))> = self
+                .running_web_search
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            for (call_id, (idx, query_opt)) in entries {
+                let mut target_idx = None;
+                if idx < self.history_cells.len() {
+                    let is_ws = self.history_cells[idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                        .is_some_and(|rt| rt.has_title("Web Search..."));
+                    if is_ws { target_idx = Some(idx); }
+                }
+                if target_idx.is_none() {
+                    for i in (0..self.history_cells.len()).rev() {
+                        if let Some(rt) = self.history_cells[i]
+                            .as_any()
+                            .downcast_ref::<history_cell::RunningToolCallCell>()
+                        {
+                            if rt.has_title("Web Search...") { target_idx = Some(i); break; }
+                        }
+                    }
+                }
+                if let Some(i) = target_idx {
+                    if let Some(rt) = self.history_cells[i]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                    {
+                        let completed = rt.finalize_web_search(true, query_opt);
+                        self.history_cells[i] = Box::new(completed);
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                    }
+                }
+                self.running_web_search.remove(&call_id);
+            }
+        }
+    }
     fn perf_label_for_item(&self, item: &dyn HistoryCell) -> String {
         use crate::history_cell::{ExecKind, ExecStatus, HistoryCellType, PatchKind, ToolStatus};
         match item.kind() {
@@ -753,6 +929,11 @@ impl ChatWidget<'_> {
 
     /// Handle exec command begin immediately
     fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
+        // If we already saw an end for this call_id (out-of-order delivery),
+        // ignore the late begin to avoid creating a phantom running cell.
+        if self.ended_call_ids.contains(&ev.call_id) {
+            return;
+        }
         // Ensure welcome animation fades out when a command starts
         for cell in &self.history_cells {
             cell.trigger_fade();
@@ -793,6 +974,8 @@ impl ChatWidget<'_> {
 
     /// Handle exec command end immediately
     fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent) {
+        // Record that this call has ended so a late Begin can be ignored.
+        self.ended_call_ids.insert(ev.call_id.clone());
         let ExecCommandEndEvent {
             call_id,
             exit_code,
@@ -1235,10 +1418,14 @@ impl ChatWidget<'_> {
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
             self.active_exec_cell = None;
-            self.running_commands.clear();
+            // Finalize any visible running indicators as interrupted (Exec/Web/Custom)
+            self.finalize_all_running_as_interrupted();
             self.bottom_pane.clear_ctrl_c_quit_hint();
             self.submit_op(Op::Interrupt);
-            self.bottom_pane.set_task_running(false);
+            // If nothing else is active, drop spinner; otherwise status already updated.
+            if self.active_task_ids.is_empty() {
+                self.bottom_pane.set_task_running(false);
+            }
             self.bottom_pane.clear_live_ring();
             // Reset with max width to disable wrapping
             self.live_builder = RowBuilder::new(usize::MAX);
@@ -1401,6 +1588,7 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             closed_answer_ids: HashSet::new(),
             closed_reasoning_ids: HashSet::new(),
+            ended_call_ids: HashSet::new(),
             session_patch_sets: Vec::new(),
             baseline_file_contents: HashMap::new(),
             diff_overlay: None,
@@ -1421,6 +1609,7 @@ impl ChatWidget<'_> {
             perf: std::cell::RefCell::new(PerfStats::default()),
             session_id: None,
             pending_jump_back: None,
+            active_task_ids: HashSet::new(),
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1509,6 +1698,7 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             closed_answer_ids: HashSet::new(),
             closed_reasoning_ids: HashSet::new(),
+            ended_call_ids: HashSet::new(),
             session_patch_sets: Vec::new(),
             baseline_file_contents: HashMap::new(),
             diff_overlay: None,
@@ -1529,6 +1719,7 @@ impl ChatWidget<'_> {
             perf: std::cell::RefCell::new(PerfStats::default()),
             session_id: None,
             pending_jump_back: None,
+            active_task_ids: HashSet::new(),
         }
     }
 
@@ -2550,6 +2741,8 @@ impl ChatWidget<'_> {
                     message.len(),
                     message.chars().take(80).collect::<String>()
                 );
+                // Fallback: if any tools/execs are still marked running, complete them now.
+                self.finalize_all_running_due_to_answer();
                 // Use StreamController for final answer
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Answer);
@@ -2671,6 +2864,8 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
                 tracing::debug!("AgentReasoning event with text: {:?}...", text.chars().take(100).collect::<String>());
+                // Fallback: if any tools/execs are still marked running, complete them now.
+                self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Reasoning);
@@ -2708,7 +2903,10 @@ impl ChatWidget<'_> {
                 // New turn: clear closed id guards
                 self.closed_answer_ids.clear();
                 self.closed_reasoning_ids.clear();
+                self.ended_call_ids.clear();
                 self.bottom_pane.clear_ctrl_c_quit_hint();
+                // Mark this task id as active and ensure the status stays visible
+                self.active_task_ids.insert(id.clone());
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane.update_status_text("waiting for model".to_string());
                 
@@ -2727,6 +2925,8 @@ impl ChatWidget<'_> {
                     self.current_stream_kind = Some(StreamKind::Answer);
                     self.stream.finalize(StreamKind::Answer, true, &sink);
                 }
+                // Remove this id from the active set (it may be a sub‑agent)
+                self.active_task_ids.remove(&id);
                 // Mark any running web searches as completed
                 if !self.running_web_search.is_empty() {
                     // Replace each running web search cell in-place with a completed one
@@ -2776,7 +2976,18 @@ impl ChatWidget<'_> {
                 }
                 // Now that streaming is complete, flush any queued interrupts
                 self.flush_interrupt_queue();
-                self.bottom_pane.set_task_running(false);
+
+                // Only drop the working status if nothing is actually running.
+                let any_tools_running = !self.running_commands.is_empty()
+                    || !self.running_custom_tools.is_empty()
+                    || !self.running_web_search.is_empty();
+                let any_streaming = self.stream.is_write_cycle_active();
+                let any_agents_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
+                let any_tasks_active = !self.active_task_ids.is_empty();
+
+                if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
+                    self.bottom_pane.set_task_running(false);
+                }
                 self.current_stream_kind = None;
                 self.mark_needs_redraw();
             }

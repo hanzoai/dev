@@ -56,5 +56,11 @@ pub fn is_code_block_painted(line: &Line<'_>) -> bool {
     if line.style.bg == Some(code_bg) {
         return true;
     }
-    line.spans.iter().any(|s| s.style.bg == Some(code_bg))
+    if line.spans.iter().any(|s| s.style.bg == Some(code_bg)) {
+        return true;
+    }
+    // Treat our hidden language sentinel as code so it groups with the block.
+    let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    if flat.contains("⟦LANG:") { return true; }
+    false
 }
