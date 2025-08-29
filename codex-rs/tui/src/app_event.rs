@@ -12,6 +12,17 @@ use std::time::Duration;
 use crate::app::ChatWidgetArgs;
 use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
+use codex_protocol::models::ResponseItem;
+use std::fmt;
+
+/// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
+pub(crate) struct Redacted<T>(pub T);
+
+impl<T> fmt::Debug for Redacted<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -112,5 +123,13 @@ pub(crate) enum AppEvent {
     /// Begin jump-back to the Nth last user message (1 = latest).
     /// Trims visible history up to that point and pre-fills the composer.
     JumpBack { nth: usize, prefill: String },
+    /// Result of an async jump-back fork operation performed off the UI thread.
+    /// Carries the forked conversation, trimmed prefix to replay, and composer prefill.
+    JumpBackForked {
+        cfg: codex_core::config::Config,
+        new_conv: Redacted<codex_core::NewConversation>,
+        prefix_items: Vec<ResponseItem>,
+        prefill: String,
+    },
     
 }

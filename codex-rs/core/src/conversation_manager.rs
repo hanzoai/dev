@@ -27,6 +27,16 @@ pub struct NewConversation {
     pub session_configured: SessionConfiguredEvent,
 }
 
+impl std::fmt::Debug for NewConversation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewConversation")
+            .field("conversation_id", &self.conversation_id)
+            .field("conversation", &"<omitted>")
+            .field("session_configured", &"<omitted>")
+            .finish()
+    }
+}
+
 /// [`ConversationManager`] is responsible for creating conversations and
 /// maintaining them in memory.
 pub struct ConversationManager {
