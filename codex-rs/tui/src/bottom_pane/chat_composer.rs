@@ -21,7 +21,6 @@ use ratatui::widgets::WidgetRef;
 use super::chat_composer_history::ChatComposerHistory;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
-use super::paste_burst::CharDecision;
 use super::paste_burst::PasteBurst;
 use crate::slash_command::SlashCommand;
 
@@ -38,6 +37,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 const BASE_PLACEHOLDER_TEXT: &str = "Welcome to Code — What are we coding today? Type / to see commands";
 /// If the pasted content exceeds this number of characters, replace it with a
@@ -117,6 +117,8 @@ pub(crate) struct ChatComposer {
     // chat ScrollDown instead of moving within the textarea, unless another
     // key is pressed in between.
     next_down_scrolls_history: bool,
+    // Detect and coalesce paste bursts for smoother UX
+    paste_burst: PasteBurst,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -135,7 +137,7 @@ impl ChatComposer {
     ) -> Self {
         let use_shift_enter_hint = enhanced_keys_supported;
 
-        let mut this = Self {
+        Self {
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
             active_popup: ActivePopup::None,
@@ -160,6 +162,7 @@ impl ChatComposer {
             show_diffs_hint: false,
             reasoning_shown: false,
             next_down_scrolls_history: false,
+            paste_burst: PasteBurst::default(),
         }
     }
 
@@ -464,6 +467,7 @@ impl ChatComposer {
         self.history.reset_navigation();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
         let now = Instant::now();
         if let Some(pasted) = self.paste_burst.flush_if_due(now) {
@@ -667,6 +671,7 @@ impl ChatComposer {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn handle_non_ascii_char(&mut self, input: KeyEvent) -> (InputResult, bool) {
         if let Some(pasted) = self.paste_burst.flush_before_modified_input() {
             self.handle_paste(pasted);
@@ -1171,7 +1176,6 @@ impl ChatComposer {
     /// Attempts to remove a placeholder if the cursor is at the end of one.
     /// Returns true if a placeholder was removed.
     fn try_remove_placeholder_at_cursor(&mut self) -> bool {
-        let p = self.textarea.cursor();
         let text = self.textarea.text();
         let p = Self::clamp_to_char_boundary(text, self.textarea.cursor());
 

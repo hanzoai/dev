@@ -150,11 +150,14 @@ impl CodexMessageProcessor {
             ClientRequest::GitDiffToRemote { request_id, params } => {
                 self.git_diff_to_origin(request_id, params.cwd).await;
             }
+            ClientRequest::GetConfigToml { request_id } => {
+                self.get_config_toml(request_id).await;
+            }
         }
     }
 
     async fn get_config_toml(&self, request_id: RequestId) {
-        let toml_value = match load_config_as_toml(&self.config.codex_home) {
+        let toml_value = match load_config_as_toml(&self._config.codex_home) {
             Ok(val) => val,
             Err(err) => {
                 let error = JSONRPCErrorError {
@@ -191,17 +194,17 @@ impl CodexMessageProcessor {
                     // for the `ConfigProfile` type and introduce a dependency on codex_core
                     codex_protocol::config_types::ConfigProfile {
                         model: v.model,
-                        approval_policy: v.approval_policy,
-                        model_reasoning_effort: v.model_reasoning_effort,
+                        approval_policy: v.approval_policy.map(map_ask_for_approval_to_wire),
+                        model_reasoning_effort: v.model_reasoning_effort.map(map_reasoning_effort_to_wire),
                     },
                 )
             })
             .collect();
 
         let response = GetConfigTomlResponse {
-            approval_policy: cfg.approval_policy,
+            approval_policy: cfg.approval_policy.map(map_ask_for_approval_to_wire),
             sandbox_mode: cfg.sandbox_mode,
-            model_reasoning_effort: cfg.model_reasoning_effort,
+            model_reasoning_effort: cfg.model_reasoning_effort.map(map_reasoning_effort_to_wire),
             profile: cfg.profile,
             profiles: Some(profiles),
         };
@@ -700,5 +703,28 @@ fn map_ask_for_approval_from_wire(a: codex_protocol::protocol::AskForApproval) -
         codex_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
         codex_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
         codex_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
+    }
+}
+
+fn map_ask_for_approval_to_wire(a: core_protocol::AskForApproval) -> codex_protocol::protocol::AskForApproval {
+    match a {
+        core_protocol::AskForApproval::UnlessTrusted => codex_protocol::protocol::AskForApproval::UnlessTrusted,
+        core_protocol::AskForApproval::OnFailure => codex_protocol::protocol::AskForApproval::OnFailure,
+        core_protocol::AskForApproval::OnRequest => codex_protocol::protocol::AskForApproval::OnRequest,
+        core_protocol::AskForApproval::Never => codex_protocol::protocol::AskForApproval::Never,
+    }
+}
+
+fn map_reasoning_effort_to_wire(
+    e: codex_core::config_types::ReasoningEffort,
+) -> codex_protocol::config_types::ReasoningEffort {
+    use codex_core::config_types::ReasoningEffort as CoreRE;
+    use codex_protocol::config_types::ReasoningEffort as WireRE;
+    match e {
+        CoreRE::Minimal => WireRE::Minimal,
+        CoreRE::Low => WireRE::Low,
+        CoreRE::Medium => WireRE::Medium,
+        CoreRE::High => WireRE::High,
+        CoreRE::None => WireRE::Medium,
     }
 }

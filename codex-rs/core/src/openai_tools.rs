@@ -74,6 +74,7 @@ pub(crate) struct ToolsConfig {
     #[allow(dead_code)]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     pub web_search_request: bool,
+    #[allow(dead_code)]
     pub include_view_image_tool: bool,
 }
 
@@ -98,6 +99,7 @@ impl ToolsConfig {
         include_apply_patch_tool: bool,
         include_web_search_request: bool,
         _use_streamable_shell_tool: bool,
+        include_view_image_tool: bool,
     ) -> Self {
         // Our fork does not yet enable the experimental streamable shell tool
         // in the tool selection phase. Default to the existing behaviors.
@@ -126,6 +128,7 @@ impl ToolsConfig {
             plan_tool: include_plan_tool,
             apply_patch_tool_type,
             web_search_request: include_web_search_request,
+            include_view_image_tool,
         }
     }
 
@@ -140,6 +143,7 @@ impl ToolsConfig {
             p.include_apply_patch_tool,
             p.include_web_search_request,
             p.use_streamable_shell_tool,
+            p.include_view_image_tool,
         )
     }
 }

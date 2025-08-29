@@ -177,6 +177,8 @@ pub struct Config {
     pub tools_web_search_request: bool,
     /// Experimental: enable streamable shell tool selection (off by default).
     pub use_experimental_streamable_shell_tool: bool,
+    /// Enable the `view_image` tool that lets the agent attach local images.
+    pub include_view_image_tool: bool,
     /// The value for the `originator` header included with Responses API requests.
     pub responses_originator_header: String,
 
@@ -748,9 +750,11 @@ impl Config {
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
-
-        let include_view_image_tool = include_view_image_tool
-            .or(cfg.tools.as_ref().and_then(|t| t.view_image))
+        // View Image tool is enabled by default; can be disabled in config.
+        let include_view_image_tool_flag = cfg
+            .tools
+            .as_ref()
+            .and_then(|t| t.view_image)
             .unwrap_or(true);
 
         let model = model
@@ -860,6 +864,7 @@ impl Config {
             include_apply_patch_tool: false,
             tools_web_search_request,
             use_experimental_streamable_shell_tool: false,
+            include_view_image_tool: include_view_image_tool_flag,
             responses_originator_header,
             debug: debug.unwrap_or(false),
             // Already computed before moving codex_home
