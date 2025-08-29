@@ -37,6 +37,7 @@ use uuid::Uuid;
 use codex_login::CodexAuth;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
+use codex_protocol::models::WebSearchAction;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -2311,13 +2312,12 @@ async fn try_run_turn(
 
                 output.push(ProcessedResponseItem { item, response });
             }
-            ResponseEvent::WebSearchCallBegin { call_id, query } => {
-                let q = query.unwrap_or_else(|| "Searching Web...".to_string());
+            ResponseEvent::WebSearchCallBegin { call_id } => {
                 let _ = sess
                     .tx_event
                     .send(Event {
                         id: sub_id.to_string(),
-                        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: q }),
+                        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: None }),
                     })
                     .await;
             }
@@ -2640,6 +2640,17 @@ async fn handle_response_item(
         }
         ResponseItem::CustomToolCallOutput { .. } => {
             debug!("unexpected CustomToolCallOutput from stream");
+            None
+        }
+        ResponseItem::WebSearchCall { id, action, .. } => {
+            if let WebSearchAction::Search { query } = action {
+                let call_id = id.unwrap_or_else(|| "".to_string());
+                let event = Event {
+                    id: sub_id.to_string(),
+                    msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query: Some(query) }),
+                };
+                sess.tx_event.send(event).await.ok();
+            }
             None
         }
         ResponseItem::Other => None,

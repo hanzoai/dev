@@ -560,7 +560,6 @@ pub struct ProjectConfig {
 
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct ToolsToml {
-    // Renamed from `web_search_request`; keep alias for backwards compatibility.
     #[serde(default, alias = "web_search_request")]
     pub web_search: Option<bool>,
 
@@ -724,7 +723,7 @@ impl Config {
             })?
             .clone();
 
-        let shell_environment_policy = cfg.shell_environment_policy.clone().into();
+        let shell_environment_policy = cfg.shell_environment_policy.into();
 
         let resolved_cwd = {
             use std::env;
@@ -745,7 +744,7 @@ impl Config {
             }
         };
 
-        let history = cfg.history.clone().unwrap_or_default();
+        let history = cfg.history.unwrap_or_default();
 
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
@@ -833,7 +832,7 @@ impl Config {
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            tui: cfg.tui.clone().unwrap_or_default(),
+            tui: cfg.tui.unwrap_or_default(),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -856,7 +855,7 @@ impl Config {
 
             chatgpt_base_url: config_profile
                 .chatgpt_base_url
-                .or(cfg.chatgpt_base_url.clone())
+                .or(cfg.chatgpt_base_url)
                 .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
 
             experimental_resume,

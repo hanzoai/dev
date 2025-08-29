@@ -187,7 +187,6 @@ pub enum ResponseEvent {
     ReasoningSummaryPartAdded,
     WebSearchCallBegin {
         call_id: String,
-        query: Option<String>,
     },
     WebSearchCallCompleted {
         call_id: String,

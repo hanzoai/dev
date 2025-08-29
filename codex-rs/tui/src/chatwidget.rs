@@ -2551,12 +2551,12 @@ impl ChatWidget<'_> {
                 self.flush_interrupt_queue();
 
                 // Show an active Web Search entry with live timer and query (if present)
-                let cell = history_cell::new_running_web_search(Some(ev.query.clone()));
+                let cell = history_cell::new_running_web_search(ev.query.clone());
                 self.add_to_history(cell);
 
                 // Track by call_id so we can mark complete later
                 if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-                    self.running_web_search.insert(ev.call_id, (last_idx, Some(ev.query)));
+                    self.running_web_search.insert(ev.call_id, (last_idx, ev.query));
                 }
 
                 // Reflect status in the input border

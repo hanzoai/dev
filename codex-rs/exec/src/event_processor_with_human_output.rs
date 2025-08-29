@@ -23,6 +23,7 @@ use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TurnDiffEvent;
 use codex_core::protocol::WebSearchBeginEvent;
+use codex_core::protocol::WebSearchCompleteEvent;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use shlex::try_join;
@@ -359,11 +360,11 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     }
                 }
             }
-            EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id: _, query }) => {
-                ts_println!(self, "🌐 {query}");
-            }
-            EventMsg::WebSearchComplete(_) => {
-                // No-op for human output; completion is reflected in UI.
+            EventMsg::WebSearchBegin(WebSearchBeginEvent { .. }) => {}
+            EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id: _, query }) => {
+                if let Some(query) = query {
+                    ts_println!(self, "🌐 Searched: {query}");
+                }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id,
