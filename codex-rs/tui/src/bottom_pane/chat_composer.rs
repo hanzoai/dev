@@ -1483,11 +1483,11 @@ impl WidgetRef for ChatComposer {
                 Span::raw(" "), // Space before spinner
                 Span::styled(
                     spinner.to_string(),
-                    Style::default().fg(crate::colors::primary()),
+                    Style::default().fg(crate::colors::info()),
                 ),
                 Span::styled(
                     format!(" {}... ", self.status_message),
-                    Style::default().fg(crate::colors::primary()),
+                    Style::default().fg(crate::colors::info()),
                 ), // Space after spinner and after text
             ])
             .centered();

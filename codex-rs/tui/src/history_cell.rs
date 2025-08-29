@@ -1159,6 +1159,76 @@ impl MergedExecCell {
         let (pre, out) = exec.exec_render_parts();
         self.segments.push((pre, out));
     }
+
+    // Build an aggregated preamble for Read segments by collapsing multiple
+    // ranges of the same file into a single combined range. Returns None for
+    // non-Read kinds or when parsing fails (fallback to per-segment rendering).
+    fn aggregated_read_preamble_lines(&self) -> Option<Vec<Line<'static>>> {
+        if self.kind != ExecKind::Read {
+            return None;
+        }
+        use std::collections::BTreeMap;
+        use ratatui::text::Span;
+
+        // filename -> (min_start, max_end)
+        let mut ranges: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+
+        // Helper: parse a logical display line like
+        //   "└ history_cell.rs (lines 1 to 240)"
+        // into (filename, start, end). Returns None on unknown formats.
+        let parse_line = |line: &Line<'_>| -> Option<(String, u32, u32)> {
+            let flat: String = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            let s = flat.trim_start();
+            let s = s.strip_prefix("└ ").unwrap_or(s);
+            let s = s.strip_prefix("  ").unwrap_or(s);
+            let (left, right) = s.rsplit_once(" (")?; // split before annotation
+            let ann = right.trim_end_matches(')');
+            // Only handle the common "(lines A to B)" pattern here
+            if let Some(rest) = ann.strip_prefix("lines ") {
+                if let Some((a, b)) = rest.split_once(" to ") {
+                    let start: u32 = a.trim().parse().ok()?;
+                    let end: u32 = b.trim().parse().ok()?;
+                    return Some((left.trim().to_string(), start, end));
+                }
+            }
+            None
+        };
+
+        for (pre_raw, _out_raw) in &self.segments {
+            let mut pre = trim_empty_lines(pre_raw.clone());
+            if !pre.is_empty() { pre.remove(0); } // drop per-segment header
+            for line in pre.iter() {
+                if let Some((fname, a, b)) = parse_line(line) {
+                    let entry = ranges.entry(fname).or_insert((a, b));
+                    entry.0 = entry.0.min(a);
+                    entry.1 = entry.1.max(b);
+                } else {
+                    // Unknown/unsupported format; abort aggregation
+                    return None;
+                }
+            }
+        }
+
+        if ranges.is_empty() { return None; }
+
+        // Build display lines with a single leading "└ " for the first file
+        let mut out: Vec<Line<'static>> = Vec::new();
+        for (i, (fname, (start, end))) in ranges.into_iter().enumerate() {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let prefix = if i == 0 { "└ " } else { "  " };
+            spans.push(Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)));
+            spans.push(Span::styled(fname, Style::default().fg(crate::colors::text())));
+            let rest = format!(" (lines {} to {})", start, end);
+            spans.push(Span::styled(rest, Style::default().fg(crate::colors::text_dim())));
+            out.push(Line::from(spans));
+        }
+
+        Some(out)
+    }
 }
 
 impl HistoryCell for MergedExecCell {
@@ -1166,6 +1236,64 @@ impl HistoryCell for MergedExecCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Exec { kind: self.kind, status: ExecStatus::Success }
+    }
+    fn desired_height(&self, width: u16) -> u16 {
+        // Match custom_render_with_skip exactly:
+        // - Single shared header row (1)
+        // - For each segment:
+        //   - Measure preamble after dropping the per-segment header
+        //     and normalizing the leading "└ " prefix at full `width`.
+        //   - Measure output inside a left-bordered block with left padding,
+        //     which reduces the effective wrapping width by 2 columns.
+        let mut total: u16 = 1; // shared header (e.g., "Ran", "Read")
+        let pre_wrap_width = width;
+        let out_wrap_width = width.saturating_sub(2);
+
+        if let Some(agg_pre) = self.aggregated_read_preamble_lines() {
+            let pre_rows: u16 = Paragraph::new(Text::from(agg_pre))
+                .wrap(Wrap { trim: false })
+                .line_count(pre_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+            total = total.saturating_add(pre_rows);
+            for (_pre_raw, out_raw) in &self.segments {
+                let out = trim_empty_lines(out_raw.clone());
+                let out_rows: u16 = Paragraph::new(Text::from(out))
+                    .wrap(Wrap { trim: false })
+                    .line_count(out_wrap_width)
+                    .try_into()
+                    .unwrap_or(0);
+                total = total.saturating_add(out_rows);
+            }
+            return total;
+        }
+
+        for (pre_raw, out_raw) in &self.segments {
+            // Build preamble like the renderer: trim, drop first header line, ensure prefix
+            let mut pre = trim_empty_lines(pre_raw.clone());
+            if !pre.is_empty() { pre.remove(0); }
+            if let Some(first) = pre.first_mut() {
+                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                if !already {
+                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                }
+            }
+            let out = trim_empty_lines(out_raw.clone());
+            let pre_rows: u16 = Paragraph::new(Text::from(pre))
+                .wrap(Wrap { trim: false })
+                .line_count(pre_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+            let out_rows: u16 = Paragraph::new(Text::from(out))
+                .wrap(Wrap { trim: false })
+                .line_count(out_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+            total = total.saturating_add(pre_rows).saturating_add(out_rows);
+        }
+
+        total
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual form: concatenate all preambles + outputs with blank separators.
@@ -1179,8 +1307,7 @@ impl HistoryCell for MergedExecCell {
     }
     fn has_custom_render(&self) -> bool { true }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
-        // Render each segment exactly like ExecCell.custom_render_with_skip, one after another,
-        // inserting a blank separator row between segments.
+        // Single shared header (e.g., "Ran") then each segment's command + output.
         let bg = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
         // Hard clear area first
         for y in area.y..area.y.saturating_add(area.height) {
@@ -1189,13 +1316,145 @@ impl HistoryCell for MergedExecCell {
             }
         }
 
+        // Build one header line based on exec kind
+        let header_line = match self.kind {
+            ExecKind::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
+            ExecKind::Search => Line::styled("Searched", Style::default().fg(crate::colors::text())),
+            ExecKind::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
+            ExecKind::Run => Line::styled(
+                "Ran",
+                Style::default()
+                    .fg(crate::colors::text_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        };
+
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
-        for (seg_idx, (pre, out)) in self.segments.iter().enumerate() {
+
+        // Render or skip header line
+        if skip_rows == 0 {
+            if cur_y < end_y {
+                let txt = Text::from(vec![header_line.clone()]);
+                Paragraph::new(txt)
+                    .block(Block::default().style(bg))
+                    .wrap(Wrap { trim: false })
+                    .render(Rect { x: area.x, y: cur_y, width: area.width, height: 1 }, buf);
+                cur_y = cur_y.saturating_add(1);
+            }
+        } else {
+            skip_rows = skip_rows.saturating_sub(1);
+        }
+
+        // Helper: ensure the first visible line of `lines` begins with a dim "└ "
+        let ensure_prefix = |lines: &mut Vec<Line<'static>>| {
+            if let Some(first) = lines.first_mut() {
+                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                if !already {
+                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                }
+            }
+        };
+
+        // Special aggregated rendering for Read: collapse file ranges
+        if self.kind == ExecKind::Read {
+            // Build aggregated preamble once
+            let agg_pre = self
+                .aggregated_read_preamble_lines()
+                .unwrap_or_else(|| {
+                    // Fallback: concatenate per-segment preambles
+                    let mut all: Vec<Line<'static>> = Vec::new();
+                    for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
+                        let mut pre = trim_empty_lines(pre_raw.clone());
+                        if !pre.is_empty() { pre.remove(0); }
+                        if i == 0 {
+                            // ensure leading prefix
+                            if let Some(first) = pre.first_mut() {
+                                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                                let already = flat.trim_start().starts_with("└ ") || flat.trim_start().starts_with("  └ ");
+                                if !already {
+                                    first.spans.insert(0, Span::styled("└ ", Style::default().fg(crate::colors::text_dim())));
+                                }
+                            }
+                        }
+                        all.extend(pre);
+                    }
+                    all
+                });
+
+            // Header was already handled above (including skip accounting).
+            // Render aggregated preamble next using the current skip_rows.
+            let pre_text = Text::from(agg_pre);
+            let pre_wrap_width = area.width;
+            let pre_total: u16 = Paragraph::new(pre_text.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(pre_wrap_width)
+                .try_into()
+                .unwrap_or(0);
+            if cur_y < end_y {
+                let pre_skip = skip_rows.min(pre_total);
+                let pre_remaining = pre_total.saturating_sub(pre_skip);
+                let pre_height = pre_remaining.min(end_y.saturating_sub(cur_y));
+                if pre_height > 0 {
+                    Paragraph::new(pre_text)
+                        .block(Block::default().style(bg))
+                        .wrap(Wrap { trim: false })
+                        .scroll((pre_skip, 0))
+                        .style(bg)
+                        .render(Rect { x: area.x, y: cur_y, width: area.width, height: pre_height }, buf);
+                    cur_y = cur_y.saturating_add(pre_height);
+                }
+                skip_rows = skip_rows.saturating_sub(pre_skip);
+            }
+
+            // Render each segment's output only
+            let out_wrap_width = area.width.saturating_sub(2);
+            for (_pre_raw, out_raw) in self.segments.iter() {
+                if cur_y >= end_y { break; }
+                let out = trim_empty_lines(out_raw.clone());
+                let out_text = Text::from(out.clone());
+                let out_total: u16 = Paragraph::new(out_text.clone())
+                    .wrap(Wrap { trim: false })
+                    .line_count(out_wrap_width)
+                    .try_into()
+                    .unwrap_or(0);
+                let out_skip = skip_rows.min(out_total);
+                let out_remaining = out_total.saturating_sub(out_skip);
+                let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
+                if out_height > 0 {
+                    let out_area = Rect { x: area.x, y: cur_y, width: area.width, height: out_height };
+                    let block = Block::default()
+                        .borders(Borders::LEFT)
+                        .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                        .style(Style::default().bg(crate::colors::background()))
+                        .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                    Paragraph::new(out_text)
+                        .block(block)
+                        .wrap(Wrap { trim: false })
+                        .scroll((out_skip, 0))
+                        .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                        .render(out_area, buf);
+                    cur_y = cur_y.saturating_add(out_height);
+                }
+                skip_rows = skip_rows.saturating_sub(out_skip);
+            }
+            return;
+        }
+
+        for (pre_raw, out_raw) in self.segments.iter() {
             if cur_y >= end_y { break; }
+            // Drop the per-segment header line (first element)
+            let mut pre = trim_empty_lines(pre_raw.clone());
+            if !pre.is_empty() { pre.remove(0); }
+            // Normalize command prefix for generic execs
+            ensure_prefix(&mut pre);
+
+            let out = trim_empty_lines(out_raw.clone());
+
             // Measure with same widths as ExecCell
-            let pre_text = Text::from(trim_empty_lines(pre.clone()));
-            let out_text = Text::from(trim_empty_lines(out.clone()));
+            let pre_text = Text::from(pre.clone());
+            let out_text = Text::from(out.clone());
             let pre_wrap_width = area.width;
             let out_wrap_width = area.width.saturating_sub(2);
             let pre_total: u16 = Paragraph::new(pre_text.clone())
@@ -1209,25 +1468,25 @@ impl HistoryCell for MergedExecCell {
                 .try_into()
                 .unwrap_or(0);
 
-            // Skip rows across pre + out
+            // Apply skip to pre, then out
             let pre_skip = skip_rows.min(pre_total);
             let out_skip = skip_rows.saturating_sub(pre_total).min(out_total);
 
-            // Remaining space for this segment
+            // Render pre
             let pre_remaining = pre_total.saturating_sub(pre_skip);
             let pre_height = pre_remaining.min(end_y.saturating_sub(cur_y));
             if pre_height > 0 {
-                let pre_area = Rect { x: area.x, y: cur_y, width: area.width, height: pre_height };
                 Paragraph::new(pre_text)
                     .block(Block::default().style(bg))
                     .wrap(Wrap { trim: false })
                     .scroll((pre_skip, 0))
                     .style(bg)
-                    .render(pre_area, buf);
+                    .render(Rect { x: area.x, y: cur_y, width: area.width, height: pre_height }, buf);
                 cur_y = cur_y.saturating_add(pre_height);
             }
 
             if cur_y >= end_y { break; }
+            // Render out as bordered, dim block
             let out_remaining = out_total.saturating_sub(out_skip);
             let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
             if out_height > 0 {
@@ -1246,18 +1505,8 @@ impl HistoryCell for MergedExecCell {
                 cur_y = cur_y.saturating_add(out_height);
             }
 
-            // Separator row between segments (blank). Count toward skipping/rendering.
-            if seg_idx + 1 < self.segments.len() && cur_y < end_y {
-                if skip_rows == 0 {
-                    // already cleared, just move the cursor down one
-                    cur_y = cur_y.saturating_add(1);
-                } else {
-                    skip_rows = skip_rows.saturating_sub(1);
-                }
-            }
-
-            // Consume skip_rows used by this segment
-            let consumed = pre_total + out_total + if seg_idx + 1 < self.segments.len() { 1 } else { 0 };
+            // Consume skip rows used in this segment
+            let consumed = pre_total + out_total;
             skip_rows = skip_rows.saturating_sub(consumed);
         }
     }
@@ -1646,10 +1895,58 @@ fn exec_render_parts_parsed(
         }
     }
 
+    // Collapse adjacent Read ranges for the same file inside a single exec's preamble
+    coalesce_read_ranges_in_lines_local(&mut pre);
+
     // Output: show stdout only for real run commands; errors always included
     let show_stdout = action == "run";
     let out = output_lines(output, !show_stdout, false);
     (pre, out)
+}
+
+// Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
+fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
+    use ratatui::text::Span;
+    if lines.len() <= 2 { return; }
+    fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32, String)> {
+        if line.spans.is_empty() { return None; }
+        let prefix = line.spans[0].content.to_string();
+        if !(prefix == "└ " || prefix == "  ") { return None; }
+        let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+        if let Some(idx) = rest.rfind(" (lines ") {
+            let fname = rest[..idx].to_string();
+            let tail = &rest[idx + 1..];
+            if tail.starts_with("(lines ") && tail.ends_with(")") {
+                let inner = &tail[7..tail.len() - 1];
+                if let Some((s1, s2)) = inner.split_once(" to ") {
+                    if let (Ok(a), Ok(b)) = (s1.trim().parse::<u32>(), s2.trim().parse::<u32>()) {
+                        return Some((fname, a, b, prefix));
+                    }
+                }
+            }
+        }
+        None
+    }
+    let mut i: usize = 1; // skip header
+    while i + 1 < lines.len() {
+        let left = parse_read_line(&lines[i]);
+        let right = parse_read_line(&lines[i + 1]);
+        if let (Some((fname_a, mut a1, mut a2, prefix_a)), Some((fname_b, b1, b2, _))) = (left, right) {
+            if fname_a == fname_b && (b1 == a2 || b1 == a2 + 1) {
+                a1 = a1.min(b1);
+                a2 = a2.max(b2);
+                let new_spans: Vec<Span<'static>> = vec![
+                    Span::styled(prefix_a, Style::default().add_modifier(Modifier::DIM)),
+                    Span::styled(fname_a, Style::default().fg(crate::colors::text())),
+                    Span::styled(format!(" (lines {} to {})", a1, a2), Style::default().fg(crate::colors::text_dim())),
+                ];
+                lines[i] = Line::from(new_spans);
+                lines.remove(i + 1);
+                continue;
+            }
+        }
+        i += 1;
+    }
 }
 
 impl WidgetRef for &ExecCell {
