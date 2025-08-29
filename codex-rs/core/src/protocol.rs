@@ -541,7 +541,8 @@ impl From<TokenUsage> for FinalOutput {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebSearchBeginEvent {
     pub call_id: String,
-    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
