@@ -48,6 +48,8 @@ impl std::fmt::Debug for TerminalInfo {
 pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     // Initialize the theme based on config
     crate::theme::init_theme(&config.tui.theme);
+    // Initialize syntax highlighting preference from config
+    crate::syntax_highlight::init_highlight_from_config(&config.tui.highlight);
 
     execute!(stdout(), EnableBracketedPaste)?;
 
