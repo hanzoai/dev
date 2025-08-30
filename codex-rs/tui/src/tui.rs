@@ -7,7 +7,9 @@ use codex_core::config::Config;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableMouseCapture;
+use crossterm::event::DisableFocusChange;
 use crossterm::event::EnableBracketedPaste;
+use crossterm::event::EnableFocusChange;
 use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
@@ -52,6 +54,10 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     crate::syntax_highlight::init_highlight_from_config(&config.tui.highlight);
 
     execute!(stdout(), EnableBracketedPaste)?;
+    // Enable focus change events so we can detect when the terminal window/tab
+    // regains focus and proactively repaint the UI (helps terminals that clear
+    // their alt‑screen buffer while unfocused).
+    let _ = execute!(stdout(), EnableFocusChange);
 
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
@@ -162,6 +168,8 @@ pub fn restore() -> Result<()> {
     // Pop may fail on platforms that didn't support the push; ignore errors.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     execute!(stdout(), DisableBracketedPaste)?;
+    // Best‑effort: disable focus change notifications if supported.
+    let _ = execute!(stdout(), DisableFocusChange);
     execute!(stdout(), DisableMouseCapture)?;
     disable_raw_mode()?;
     // Leave alternate screen mode

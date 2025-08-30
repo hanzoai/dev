@@ -3,6 +3,9 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
+import { platform as nodePlatform, arch as nodeArch } from "os";
+import { execSync } from "child_process";
+import { get as httpsGet } from "https";
 
 // __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -76,12 +79,196 @@ if (!targetTriple) {
 
 // Prefer new 'code-*' binary names; fall back to legacy 'coder-*' if missing.
 let binaryPath = path.join(__dirname, "..", "bin", `code-${targetTriple}`);
-if (!existsSync(binaryPath)) {
-  binaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
+let legacyBinaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
+
+// --- Bootstrap helper (runs if the binary is missing, e.g. Bun blocked postinstall) ---
+import { existsSync, chmodSync, statSync, openSync, readSync, closeSync, mkdirSync, copyFileSync, readFileSync, unlinkSync } from "fs";
+
+const validateBinary = (p) => {
+  try {
+    const st = statSync(p);
+    if (!st.isFile() || st.size === 0) {
+      return { ok: false, reason: "empty or not a regular file" };
+    }
+    const fd = openSync(p, "r");
+    try {
+      const buf = Buffer.alloc(4);
+      const n = readSync(fd, buf, 0, 4, 0);
+      if (n < 2) return { ok: false, reason: "too short" };
+      if (platform === "win32") {
+        if (!(buf[0] === 0x4d && buf[1] === 0x5a)) return { ok: false, reason: "invalid PE header (missing MZ)" };
+      } else if (platform === "linux" || platform === "android") {
+        if (!(buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46)) return { ok: false, reason: "invalid ELF header" };
+      } else if (platform === "darwin") {
+        const isMachO = (buf[0] === 0xcf && buf[1] === 0xfa && buf[2] === 0xed && buf[3] === 0xfe) ||
+                        (buf[0] === 0xca && buf[1] === 0xfe && buf[2] === 0xba && buf[3] === 0xbe);
+        if (!isMachO) return { ok: false, reason: "invalid Mach-O header" };
+      }
+    } finally {
+      closeSync(fd);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+};
+
+const getCacheDir = (version) => {
+  const plt = nodePlatform();
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  let base = "";
+  if (plt === "win32") {
+    base = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+  } else if (plt === "darwin") {
+    base = path.join(home, "Library", "Caches");
+  } else {
+    base = process.env.XDG_CACHE_HOME || path.join(home, ".cache");
+  }
+  const dir = path.join(base, "just-every", "code", version);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+};
+
+const getCachedBinaryPath = (version) => {
+  const isWin = nodePlatform() === "win32";
+  const ext = isWin ? ".exe" : "";
+  const cacheDir = getCacheDir(version);
+  return path.join(cacheDir, `code-${targetTriple}${ext}`);
+};
+
+const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
+  const req = httpsGet(url, (res) => {
+    const status = res.statusCode || 0;
+    if (status >= 300 && status < 400 && res.headers.location) {
+      // follow one redirect recursively
+      return resolve(httpsDownload(res.headers.location, dest));
+    }
+    if (status !== 200) {
+      return reject(new Error(`HTTP ${status}`));
+    }
+    const out = require("fs").createWriteStream(dest);
+    res.pipe(out);
+    out.on("finish", () => out.close(resolve));
+    out.on("error", (e) => {
+      try { unlinkSync(dest); } catch {}
+      reject(e);
+    });
+  });
+  req.on("error", (e) => {
+    try { unlinkSync(dest); } catch {}
+    reject(e);
+  });
+  req.setTimeout(120000, () => {
+    req.destroy(new Error("download timed out"));
+  });
+});
+
+const tryBootstrapBinary = () => {
+  try {
+    // 1) Read our published version
+    const pkg = JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+    const version = pkg.version;
+
+    const binDir = path.join(__dirname, "..", "bin");
+    if (!existsSync(binDir)) mkdirSync(binDir, { recursive: true });
+
+    // 2) Fast path: user cache
+    const cachePath = getCachedBinaryPath(version);
+    if (existsSync(cachePath)) {
+      const v = validateBinary(cachePath);
+      if (v.ok) {
+        copyFileSync(cachePath, binaryPath);
+        if (platform !== "win32") chmodSync(binaryPath, 0o755);
+        return existsSync(binaryPath);
+      }
+    }
+
+    // 3) Try platform package (if present)
+    try {
+      const req = (await import("module")).createRequire(import.meta.url);
+      const name = (() => {
+        if (platform === "win32") return "@just-every/code-win32-x64"; // may be unpublished; falls through
+        const plt = nodePlatform();
+        const cpu = nodeArch();
+        if (plt === "darwin" && cpu === "arm64") return "@just-every/code-darwin-arm64";
+        if (plt === "darwin" && cpu === "x64") return "@just-every/code-darwin-x64";
+        if (plt === "linux" && cpu === "x64") return "@just-every/code-linux-x64-musl";
+        if (plt === "linux" && cpu === "arm64") return "@just-every/code-linux-arm64-musl";
+        return null;
+      })();
+      if (name) {
+        try {
+          const pkgJson = req.resolve(`${name}/package.json`);
+          const pkgDir = path.dirname(pkgJson);
+          const src = path.join(pkgDir, "bin", `code-${targetTriple}${platform === "win32" ? ".exe" : ""}`);
+          if (existsSync(src)) {
+            copyFileSync(src, binaryPath);
+            if (platform !== "win32") chmodSync(binaryPath, 0o755);
+            // refresh cache
+            try { copyFileSync(binaryPath, cachePath); } catch {}
+            return existsSync(binaryPath);
+          }
+        } catch { /* ignore and fall back */ }
+      }
+    } catch { /* ignore */ }
+
+    // 4) Download from GitHub release
+    const isWin = platform === "win32";
+    const archiveName = isWin
+      ? `code-${targetTriple}.zip`
+      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `code-${targetTriple}.zst`; } catch { return `code-${targetTriple}.tar.gz`; } })();
+    const url = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
+    const tmp = path.join(binDir, `.${archiveName}.part`);
+    return httpsDownload(url, tmp)
+      .then(() => {
+        if (isWin) {
+          try {
+            const ps = `powershell -NoProfile -NonInteractive -Command "Expand-Archive -Path '${tmp}' -DestinationPath '${binDir}' -Force"`;
+            execSync(ps, { stdio: "ignore" });
+          } catch (e) {
+            throw new Error(`failed to unzip: ${e.message}`);
+          } finally { try { unlinkSync(tmp); } catch {} }
+        } else {
+          if (archiveName.endsWith(".zst")) {
+            try { execSync(`zstd -d '${tmp}' -o '${binaryPath}'`, { stdio: 'ignore', shell: true }); }
+            catch (e) { try { unlinkSync(tmp); } catch {}; throw new Error(`failed to decompress zst: ${e.message}`); }
+            try { unlinkSync(tmp); } catch {}
+          } else {
+            try { execSync(`tar -xzf '${tmp}' -C '${binDir}'`, { stdio: 'ignore', shell: true }); }
+            catch (e) { try { unlinkSync(tmp); } catch {}; throw new Error(`failed to extract tar.gz: ${e.message}`); }
+            try { unlinkSync(tmp); } catch {}
+          }
+        }
+        const v = validateBinary(binaryPath);
+        if (!v.ok) throw new Error(`invalid binary (${v.reason})`);
+        if (platform !== "win32") chmodSync(binaryPath, 0o755);
+        try { copyFileSync(binaryPath, cachePath); } catch {}
+        return true;
+      })
+      .catch((_e) => false);
+  } catch {
+    return false;
+  }
+};
+
+// If missing, attempt to bootstrap into place (helps when Bun blocks postinstall)
+if (!existsSync(binaryPath) && !existsSync(legacyBinaryPath)) {
+  const ok = await tryBootstrapBinary();
+  if (!ok) {
+    // retry legacy name in case archive provided coder-*
+    if (existsSync(legacyBinaryPath) && !existsSync(binaryPath)) {
+      binaryPath = legacyBinaryPath;
+    }
+  }
+}
+
+// Fall back to legacy name if primary is still missing
+if (!existsSync(binaryPath) && existsSync(legacyBinaryPath)) {
+  binaryPath = legacyBinaryPath;
 }
 
 // Check if binary exists and try to fix permissions if needed
-import { existsSync, chmodSync, statSync, openSync, readSync, closeSync } from "fs";
+// fs imports are above; keep for readability if tree-shaken by bundlers
 import { spawnSync } from "child_process";
 if (existsSync(binaryPath)) {
   try {

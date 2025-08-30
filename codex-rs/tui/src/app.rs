@@ -148,6 +148,16 @@ impl App<'_> {
                                 crossterm::event::Event::Resize(_, _) => {
                                     app_event_tx.send(AppEvent::RequestRedraw);
                                 }
+                                // When the terminal/tab regains focus, issue a redraw.
+                                // Some terminals clear the alt‑screen buffer on focus switches,
+                                // which can leave the status bar and inline images blank until
+                                // the next resize. A focus‑gain repaint fixes this immediately.
+                                crossterm::event::Event::FocusGained => {
+                                    app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                                crossterm::event::Event::FocusLost => {
+                                    // No action needed; keep state as‑is.
+                                }
                                 crossterm::event::Event::Paste(pasted) => {
                                     // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
                                     // but tui-textarea expects \n. Normalize CR to LF.
@@ -159,9 +169,7 @@ impl App<'_> {
                                 crossterm::event::Event::Mouse(mouse_event) => {
                                     app_event_tx.send(AppEvent::MouseEvent(mouse_event));
                                 }
-                                _ => {
-                                    // Ignore any other events.
-                                }
+                                // All other event variants are explicitly handled above.
                             }
                         }
                     } else {
@@ -744,7 +752,11 @@ impl App<'_> {
                         widget.set_theme(new_theme);
                     }
 
-                    // Request a redraw to apply the new theme
+                    // Force a full redraw on the next frame so the entire
+                    // ratatui back buffer is cleared and repainted with the
+                    // new theme. This avoids any stale cells lingering on
+                    // terminals that preserve previous cell attributes.
+                    self.clear_on_first_frame = true;
                     self.schedule_redraw();
                 }
                 AppEvent::PreviewTheme(new_theme) => {
@@ -772,7 +784,8 @@ impl App<'_> {
                     }
 
                     // Don't update config or add to history for previews
-                    // Request a redraw to apply the new theme
+                    // Force a full redraw so previews repaint cleanly as you cycle
+                    self.clear_on_first_frame = true;
                     self.schedule_redraw();
                 }
                 AppEvent::ComposerExpanded => {
