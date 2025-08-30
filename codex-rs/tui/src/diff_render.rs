@@ -11,6 +11,73 @@ use codex_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
 
+// Sanitize diff content so tabs and control characters don’t break terminal layout.
+// Mirrors the behavior we use for user input and command output:
+// - Expand tabs to spaces using a fixed tab stop (4)
+// - Remove ASCII control characters (including ESC/CSI sequences) that could
+//   confuse terminal rendering; keep plain text only
+fn expand_tabs_to_spaces(input: &str, tabstop: usize) -> String {
+    let ts = tabstop.max(1);
+    let mut out = String::with_capacity(input.len());
+    let mut col = 0usize;
+    for ch in input.chars() {
+        match ch {
+            '\t' => {
+                let spaces = ts - (col % ts);
+                out.extend(std::iter::repeat(' ').take(spaces));
+                col += spaces;
+            }
+            _ => {
+                // Treat all other chars as width 1 for our fixed-width wrapping pre-pass.
+                // The ratatui layer will handle wide glyphs.
+                out.push(ch);
+                col += 1;
+            }
+        }
+    }
+    out
+}
+
+fn strip_control_sequences(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{001B}' {
+            // Skip a simple ESC [...] <alpha> CSI sequence, or generic ESC-seq until letter
+            if matches!(chars.peek(), Some('[')) {
+                // consume '['
+                let _ = chars.next();
+                // consume params until we hit an alphabetic final byte or end
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_alphabetic() { chars.next(); break; }
+                    let _ = chars.next();
+                }
+            } else {
+                // Consume until an alphabetic; best‑effort strip of non‑CSI
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_alphabetic() { let _ = chars.next(); break; }
+                    let _ = chars.next();
+                }
+            }
+            continue;
+        }
+        // Drop other ASCII control characters (0x00..0x1F, 0x7F)
+        if (ch as u32) < 0x20 || ch == '\u{007F}' {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[inline]
+fn sanitize_diff_text(s: &str) -> String {
+    // Order: first expand tabs (so control stripping doesn’t accidentally
+    // touch spaces we insert), then remove control sequences.
+    let expanded = expand_tabs_to_spaces(s, 4);
+    strip_control_sequences(&expanded)
+}
+
 #[allow(dead_code)]
 // Keep one space between the line number and the sign column for typical
 // 4‑digit line numbers (e.g., "1235 + "). This value is the total target
@@ -228,10 +295,11 @@ fn render_patch_details_with_width(
             FileChange::Add { content } => {
                 for (i, raw) in content.lines().enumerate() {
                     let ln = i + 1;
+                    let cleaned = sanitize_diff_text(raw);
                     out.extend(push_wrapped_diff_line_with_width(
                         ln,
                         DiffLineType::Insert,
-                        raw,
+                        &cleaned,
                         term_cols,
                     ));
                 }
@@ -240,10 +308,11 @@ fn render_patch_details_with_width(
                 let original = std::fs::read_to_string(path).unwrap_or_default();
                 for (i, raw) in original.lines().enumerate() {
                     let ln = i + 1;
+                    let cleaned = sanitize_diff_text(raw);
                     out.extend(push_wrapped_diff_line_with_width(
                         ln,
                         DiffLineType::Delete,
-                        raw,
+                        &cleaned,
                         term_cols,
                     ));
                 }
@@ -270,31 +339,31 @@ fn render_patch_details_with_width(
                         for l in h.lines() {
                             match l {
                                 diffy::Line::Insert(text) => {
-                                    let s = text.trim_end_matches('\n');
+                                    let s = sanitize_diff_text(text.trim_end_matches('\n'));
                     out.extend(push_wrapped_diff_line_with_width(
                         new_ln,
                         DiffLineType::Insert,
-                        s,
+                        &s,
                         term_cols,
                     ));
                                     new_ln += 1;
                                 }
                                 diffy::Line::Delete(text) => {
-                                    let s = text.trim_end_matches('\n');
+                                    let s = sanitize_diff_text(text.trim_end_matches('\n'));
                     out.extend(push_wrapped_diff_line_with_width(
                         old_ln,
                         DiffLineType::Delete,
-                        s,
+                        &s,
                         term_cols,
                     ));
                                     old_ln += 1;
                                 }
                                 diffy::Line::Context(text) => {
-                                    let s = text.trim_end_matches('\n');
+                                    let s = sanitize_diff_text(text.trim_end_matches('\n'));
                     out.extend(push_wrapped_diff_line_with_width(
                         new_ln,
                         DiffLineType::Context,
-                        s,
+                        &s,
                         term_cols,
                     ));
                                     old_ln += 1;
