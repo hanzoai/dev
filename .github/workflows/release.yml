@@ -351,9 +351,15 @@ jobs:
 
           for f in release-assets/*; do
             b="$(basename "$f")"
-            # Derive target triple from the filename: code-<triple>[.exe].*
-            t="${b#code-}"
-            t="${t%%.*}"
+            # Derive target triple from the filename while preserving optional .exe (Windows):
+            # code-<triple>[.exe].(zst|tar.gz|zip) -> <triple>[.exe]
+            case "$b" in
+              *.tar.gz) base="${b%.tar.gz}" ;;
+              *.zst)    base="${b%.zst}" ;;
+              *.zip)    base="${b%.zip}" ;;
+              *)        base="$b" ;;
+            esac
+            t="${base#code-}"
             meta="$(map_target "$t")" || true
             if [ -z "$meta" ]; then
               echo "Skipping unrecognized artifact: $b"
