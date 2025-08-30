@@ -4778,11 +4778,15 @@ pub(crate) fn new_running_browser_tool_call(
     tool_name: String,
     args: Option<String>,
 ) -> RunningToolCallCell {
-    // Parse args JSON and format like completed cells
+    // Parse args JSON and use compact humanized form when possible
     let mut arg_lines: Vec<Line<'static>> = Vec::new();
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            arg_lines.extend(format_browser_args_line(&json));
+            if let Some(lines) = format_browser_args_humanized(&tool_name, &json) {
+                arg_lines.extend(lines);
+            } else {
+                arg_lines.extend(format_browser_args_line(&json));
+            }
         }
     }
     RunningToolCallCell {
@@ -5004,6 +5008,62 @@ fn format_browser_args_line(args: &serde_json::Value) -> Vec<Line<'static>> {
     lines
 }
 
+// Attempt a compact, humanized one-line summary for browser tools.
+// Returns Some(lines) when a concise form is available for the given tool, else None.
+fn format_browser_args_humanized(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Option<Vec<Line<'static>>> {
+    use serde_json::Value;
+    let text = |s: String| Span::styled(s, Style::default().fg(crate::colors::text()));
+
+    // Helper: format coordinate pair as integers (pixels)
+    let fmt_xy = |x: f64, y: f64| -> String {
+        let xi = x.round() as i64;
+        let yi = y.round() as i64;
+        format!("({xi}, {yi})")
+    };
+
+    match (tool_name, args) {
+        ("browser_click", Value::Object(map)) => {
+            // Expect optional `type`, and x/y for absolute. Only compact when both x and y provided.
+            let ty = map
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("click")
+                .to_lowercase();
+            let (x, y) = match (
+                map.get("x").and_then(|v| v.as_f64()),
+                map.get("y").and_then(|v| v.as_f64()),
+            ) {
+                (Some(x), Some(y)) => (x, y),
+                _ => return None,
+            };
+            let msg = format!("└ {ty} at {}", fmt_xy(x, y));
+            Some(vec![Line::from(text(msg))])
+        }
+        ("browser_move", Value::Object(map)) => {
+            // Prefer absolute x/y → "to (x, y)"; otherwise relative dx/dy → "by (dx, dy)".
+            if let (Some(x), Some(y)) = (
+                map.get("x").and_then(|v| v.as_f64()),
+                map.get("y").and_then(|v| v.as_f64()),
+            ) {
+                let msg = format!("└ to {}", fmt_xy(x, y));
+                return Some(vec![Line::from(text(msg))]);
+            }
+            if let (Some(dx), Some(dy)) = (
+                map.get("dx").and_then(|v| v.as_f64()),
+                map.get("dy").and_then(|v| v.as_f64()),
+            ) {
+                let msg = format!("└ by {}", fmt_xy(dx, dy));
+                return Some(vec![Line::from(text(msg))]);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 fn new_completed_browser_tool_call(
     tool_name: String,
     args: Option<String>,
@@ -5041,7 +5101,11 @@ fn new_completed_browser_tool_call(
     let mut arg_lines: Vec<Line<'static>> = Vec::new();
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            arg_lines.extend(format_browser_args_line(&json));
+            if let Some(lines) = format_browser_args_humanized(&tool_name, &json) {
+                arg_lines.extend(lines);
+            } else {
+                arg_lines.extend(format_browser_args_line(&json));
+            }
         }
     }
 
