@@ -408,8 +408,12 @@ async function main() {
     console.warn('⚠ Main code binary not found. You may need to build from source.');
   }
 
-  // With bin name = 'code', handle collisions (e.g., VS Code) and add legacy wrappers
-  // Only do this for global installs; skip under npx/local to avoid extra work and collisions.
+  // Handle collisions (e.g., VS Code) and add wrappers. We no longer publish a
+  // `code` bin in package.json. Instead, for global installs we create a `code`
+  // wrapper only when there is no conflicting `code` earlier on PATH. This avoids
+  // hijacking the VS Code CLI while still giving users a friendly name when safe.
+  // For upgrades from older versions that published a `code` bin, we also remove
+  // our old shim if a conflict is detected.
   if (isGlobal && !isNpx) try {
     const isTTY = process.stdout && process.stdout.isTTY;
     const isWindows = platform() === 'win32';
@@ -460,8 +464,23 @@ async function main() {
         } catch (e) {
           console.log(`⚠ Could not remove Bun shim '${bunShim}': ${e.message}`);
         }
-      } else if (existsSync(bunShim)) {
-        installedCmds.add('code');
+      } else if (!other) {
+        // No conflict: create a wrapper that forwards to `coder`
+        try {
+          const wrapperPath = bunShim;
+          if (isWindows) {
+            const content = `@echo off\r\n"%~dp0coder" %*\r\n`;
+            writeFileSync(wrapperPath, content);
+          } else {
+            const content = `#!/bin/sh\nexec "$(dirname \"$0\")/coder" "$@"\n`;
+            writeFileSync(wrapperPath, content);
+            chmodSync(wrapperPath, 0o755);
+          }
+          console.log("✓ Created 'code' wrapper -> coder (bun)");
+          installedCmds.add('code');
+        } catch (e) {
+          console.log(`⚠ Failed to create 'code' wrapper (bun): ${e.message}`);
+        }
       }
 
       // Print summary for Bun
@@ -486,7 +505,7 @@ async function main() {
 
       const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
       const candidates = resolveAllOnPath();
-      const others = candidates.filter(p => p && ourShim && p !== ourShim);
+      const others = candidates.filter(p => p && (!ourShim || p !== ourShim));
       const collision = others.length > 0;
 
       const ensureWrapper = (name, args) => {
@@ -530,8 +549,20 @@ async function main() {
           console.log('Note: could not determine npm global bin; skipping alias creation.');
         }
       } else {
-        // No collision; npm created a 'code' shim for us.
-        if (globalBin && existsSync(ourShim)) installedCmds.add('code');
+        // No collision; ensure a 'code' wrapper exists forwarding to 'coder'
+        if (globalBin) {
+          try {
+            const content = isWindows
+              ? `@echo off\r\n"%~dp0coder" %*\r\n`
+              : `#!/bin/sh\nexec "$(dirname \"$0\")/coder" "$@"\n`;
+            writeFileSync(ourShim, content);
+            if (!isWindows) chmodSync(ourShim, 0o755);
+            console.log("✓ Created 'code' wrapper -> coder");
+            installedCmds.add('code');
+          } catch (e) {
+            console.log(`⚠ Failed to create 'code' wrapper: ${e.message}`);
+          }
+        }
       }
 
       // Print summary for npm/pnpm/yarn
