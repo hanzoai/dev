@@ -1908,7 +1908,7 @@ fn exec_render_parts_parsed(
                 }
                 ("Read".to_string(), c)
             }
-            ParsedCommand::ListFiles { cmd, path } => match path {
+            ParsedCommand::ListFiles { cmd: _, path } => match path {
                 Some(p) => {
                     if search_paths.contains(p) {
                         (String::new(), String::new())
@@ -1918,10 +1918,10 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("List Files".to_string(), display_p)
+                        ("List Files".to_string(), format!("in {}", display_p))
                     }
                 }
-                None => ("List Files".to_string(), cmd.clone()),
+                None => ("List Files".to_string(), "in ./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Make search terms human-readable:
@@ -4380,7 +4380,7 @@ fn new_parsed_command(
                 }
                 ("Read".to_string(), c)
             }
-            ParsedCommand::ListFiles { cmd, path } => match path {
+            ParsedCommand::ListFiles { cmd: _, path } => match path {
                 Some(p) => {
                     if search_paths.contains(p) {
                         (String::new(), String::new()) // suppressed
@@ -4390,10 +4390,10 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("List Files".to_string(), display_p)
+                        ("List Files".to_string(), format!("in {display_p}"))
                     }
                 }
-                None => ("List Files".to_string(), cmd.clone()),
+                None => ("List Files".to_string(), "in ./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
