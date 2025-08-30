@@ -34,13 +34,15 @@ The browser will either be an internal headless browser, or a CPD connection to 
 
 Two native web utilities are available for quick research and retrieval.
 
-- Website fetch: Retrieve a URL and return readable Markdown/HTML for quoting and synthesis.
+- Web fetch: Retrieve a URL and return readable Markdown for quoting and synthesis.
 
 web_fetch {
   "url": "https://example.com/some-article",
   "mode": "auto",               // "auto" (default), "browser", or "http"
   "timeout_ms": 20000            // Optional; defaults to tool standard
 }
+
+**NOTICE:** web_fetch is very fast and token efficient. It should be used by default to read webpages over using full browser tools.
 
 - Web search: Perform a general web search (optionally scoped to domains) and surface results in the UI with live status.
 

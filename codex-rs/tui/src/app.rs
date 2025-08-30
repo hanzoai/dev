@@ -587,6 +587,11 @@ impl App<'_> {
                                 widget.add_status_output();
                             }
                         }
+                        SlashCommand::Agents => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_agents_output();
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);

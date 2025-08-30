@@ -366,15 +366,37 @@ async fn get_git_root() -> Result<PathBuf, String> {
     }
 }
 
+fn sanitize_ref_component(s: &str) -> String {
+    // Git refname safe component: [a-z0-9-]+, collapse invalid runs to '-'
+    let mut out = String::with_capacity(s.len());
+    let mut last_dash = false;
+    for ch in s.chars() {
+        let c = ch.to_ascii_lowercase();
+        let valid = c.is_ascii_alphanumeric() || c == '-';
+        if valid {
+            out.push(c);
+            last_dash = c == '-';
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    // Trim leading/trailing '-'
+    let out = out.trim_matches('-').to_string();
+    // Avoid empty component
+    if out.is_empty() { "agent".to_string() } else { out }
+}
+
 fn generate_branch_id(model: &str, agent: &str) -> String {
     // Extract first few meaningful words from agent for the branch name
+    let stop = ["the", "and", "for", "with", "from", "into", "goal"]; // skip boilerplate
     let words: Vec<&str> = agent
         .split_whitespace()
-        .filter(|w| w.len() > 2 && !["the", "and", "for", "with", "from", "into"].contains(w))
+        .filter(|w| w.len() > 2 && !stop.contains(&w.to_ascii_lowercase().as_str()))
         .take(3)
         .collect();
 
-    let agent_suffix = if words.is_empty() {
+    let raw_suffix = if words.is_empty() {
         Uuid::new_v4()
             .to_string()
             .split('-')
@@ -382,10 +404,23 @@ fn generate_branch_id(model: &str, agent: &str) -> String {
             .unwrap_or("agent")
             .to_string()
     } else {
-        words.join("-").to_lowercase()
+        words.join("-")
     };
 
-    format!("code-{}-{}", model, agent_suffix)
+    // Sanitize both model and suffix for safety
+    let model_s = sanitize_ref_component(model);
+    let mut suffix_s = sanitize_ref_component(&raw_suffix);
+
+    // Constrain length to keep branch names readable
+    if suffix_s.len() > 40 {
+        suffix_s.truncate(40);
+        suffix_s = suffix_s.trim_matches('-').to_string();
+        if suffix_s.is_empty() {
+            suffix_s = "agent".to_string();
+        }
+    }
+
+    format!("code-{}-{}", model_s, suffix_s)
 }
 
 async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, String> {
@@ -638,9 +673,9 @@ async fn execute_model_with_permissions(
         }
         "codex" | "code" => {
             if read_only {
-                cmd.args(&["-s", "read-only", "-a", "never", "exec", prompt]);
+                cmd.args(&["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
             } else {
-                cmd.args(&["-s", "workspace-write", "-a", "never", "exec", prompt]);
+                cmd.args(&["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
             }
         }
         _ => {
@@ -673,9 +708,9 @@ async fn execute_model_with_permissions(
                 )),
             };
             if read_only {
-                fb.args(["-s", "read-only", "-a", "never", "exec", prompt]);
+                fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
             } else {
-                fb.args(["-s", "workspace-write", "-a", "never", "exec", prompt]);
+                fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
             }
             fb.output().await.map_err(|e2| {
                 format!(
