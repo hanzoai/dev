@@ -3389,6 +3389,32 @@ impl ChatWidget<'_> {
         lines.push(Line::from("/agents".magenta()));
         lines.push(Line::from(""));
 
+        // Platform + environment summary to aid debugging
+        lines.push(Line::from(vec!["🖥  ".into(), "Environment".bold()]));
+        let os = std::env::consts::OS;
+        let arch = std::env::consts::ARCH;
+        lines.push(Line::from(format!("  • Platform: {os}-{arch}")));
+        lines.push(Line::from(format!("  • CWD: {}", self.config.cwd.display())));
+        let in_git = codex_core::util::is_inside_git_repo(&self.config.cwd);
+        lines.push(Line::from(format!(
+            "  • Git repo: {}",
+            if in_git { "yes" } else { "no" }
+        )));
+        // PATH summary
+        if let Some(path_os) = std::env::var_os("PATH") {
+            let entries: Vec<String> = std::env::split_paths(&path_os)
+                .map(|p| p.display().to_string())
+                .collect();
+            let shown = entries.iter().take(6).cloned().collect::<Vec<_>>().join("; ");
+            let suffix = if entries.len() > 6 { format!(" (+{} more)", entries.len() - 6) } else { String::new() };
+            lines.push(Line::from(format!("  • PATH ({} entries): {}{}", entries.len(), shown, suffix)));
+        }
+        #[cfg(target_os = "windows")]
+        if let Ok(pathext) = std::env::var("PATHEXT") {
+            lines.push(Line::from(format!("  • PATHEXT: {}", pathext)));
+        }
+        lines.push(Line::from(""));
+
         // Section: Active agents
         lines.push(Line::from(vec!["🤖 ".into(), "Active Agents".bold()]));
         if self.active_agents.is_empty() {
@@ -3430,14 +3456,20 @@ impl ChatWidget<'_> {
             to_check.push(("code".to_string(), "code".to_string(), true));
         }
 
-        // Helper: PATH presence
-        let command_exists = |cmd: &str| -> bool { which::which(cmd).map(|p| p.is_file()).unwrap_or(false) };
+        // Helper: PATH presence + resolved path
+        let resolve_cmd = |cmd: &str| -> Option<String> { which::which(cmd).ok().map(|p| p.display().to_string()) };
 
         for (name, cmd, builtin) in to_check {
             if builtin {
-                lines.push(Line::from(format!("  • {} — available (built-in)", name)));
-            } else if command_exists(&cmd) {
-                lines.push(Line::from(format!("  • {} — available ({} in PATH)", name, cmd)));
+                let exe = std::env::current_exe()
+                    .ok()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "(unknown)".to_string());
+                lines.push(Line::from(format!("  • {} — available (built-in, exe: {})", name, exe)));
+                // Reminder about exec flag ordering for trust bypass
+                lines.push(Line::from("      Tip: use `exec --skip-git-repo-check` if needed (after subcommand)"));
+            } else if let Some(path) = resolve_cmd(&cmd) {
+                lines.push(Line::from(format!("  • {} — available ({} at {})", name, cmd, path)));
             } else {
                 lines.push(Line::from(format!("  • {} — not found (command: {})", name, cmd)));
                 // Short cross-platform hint
@@ -3445,6 +3477,12 @@ impl ChatWidget<'_> {
                 lines.push(Line::from("      Windows: run `where <cmd>`; macOS/Linux: `which <cmd>`"));
             }
         }
+
+        // Final helpful notes
+        lines.push(Line::from(""));
+        lines.push(Line::from("Notes:".bold()));
+        lines.push(Line::from("- Built-in 'code' runs even without global shims."));
+        lines.push(Line::from("- External CLIs must be in PATH; restart terminal after install."));
 
         self.add_to_history(crate::history_cell::PlainHistoryCell {
             lines,
