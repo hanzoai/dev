@@ -25,6 +25,7 @@ pub enum SlashCommand {
     Verbosity,
     Prompts,
     Perf,
+    Agents,
     Resume,
     // Prompt-expanding commands
     Plan,
@@ -57,6 +58,7 @@ impl SlashCommand {
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Theme => "switch between color themes",
             SlashCommand::Prompts => "show example prompts",
+            SlashCommand::Agents => "list agents (running and availability)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Logout => "log out of Codex",
             #[cfg(debug_assertions)]

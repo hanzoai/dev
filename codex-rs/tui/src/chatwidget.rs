@@ -993,7 +993,7 @@ impl ChatWidget<'_> {
 
         // Update status: show that a command is running
         if !self.running_web_search.is_empty() {
-            self.bottom_pane.update_status_text("Searching...".to_string());
+            self.bottom_pane.update_status_text("Searched".to_string());
         } else {
             let preview = self
                 .running_commands
@@ -1124,18 +1124,18 @@ impl ChatWidget<'_> {
         let _exec_label = |e: &history_cell::ExecCell| -> &'static str {
             let action = history_cell::action_from_parsed(&e.parsed);
             match (&e.output, action) {
-                (None, "read") => "Reading...",
-                (None, "search") => "Searching...",
-                (None, "list") => "Listing...",
+                (None, "read") => "Read",
+                (None, "search") => "Searched",
+                (None, "list") => "List Files",
                 (None, _) => "Running...",
                 (Some(o), "read") if o.exit_code == 0 => "Read",
                 (Some(o), "search") if o.exit_code == 0 => "Searched",
-                (Some(o), "list") if o.exit_code == 0 => "Listed",
+                (Some(o), "list") if o.exit_code == 0 => "List Files",
                 (Some(o), _) if o.exit_code == 0 => "Ran",
                 _ => "",
             }
         };
-        let _is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
+        let _is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "List Files" | "Ran" | "Running...");
 
         // New cell must be an ExecCell with completed output
         let new_exec = match self.history_cells[idx]
@@ -1846,8 +1846,10 @@ impl ChatWidget<'_> {
     /// Check if there are any animations and trigger redraw if needed
     pub fn check_for_initial_animations(&mut self) {
         if self.history_cells.iter().any(|cell| cell.is_animating()) {
-            tracing::info!("Initial animation detected, triggering redraw");
-            self.mark_needs_redraw();
+            tracing::info!("Initial animation detected, scheduling frame");
+            // Schedule initial frame for animations to ensure they start properly.
+            // Use ScheduleFrameIn to avoid debounce issues with immediate RequestRedraw.
+            self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(20)));
         }
     }
     
@@ -2259,20 +2261,20 @@ impl ChatWidget<'_> {
                 let exec_label = |e: &history_cell::ExecCell| -> &'static str {
                     let action = history_cell::action_from_parsed(&e.parsed);
                     match (&e.output, action) {
-                        (None, "read") => "Reading...",
-                        (None, "search") => "Searching...",
-                        (None, "list") => "Listing...",
+                        (None, "read") => "Read",
+                        (None, "search") => "Searched",
+                        (None, "list") => "List Files",
                         (None, _) => "Running...",
                         (Some(o), "read") if o.exit_code == 0 => "Read",
                         (Some(o), "search") if o.exit_code == 0 => "Searched",
-                        (Some(o), "list") if o.exit_code == 0 => "Listed",
+                        (Some(o), "list") if o.exit_code == 0 => "List Files",
                         (Some(o), _) if o.exit_code == 0 => "Ran",
                         _ => "",
                     }
                 };
                 let last_label = exec_label(last_exec);
                 let new_label = exec_label(new_exec);
-                let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "Listed" | "Ran" | "Reading..." | "Searching..." | "Listing..." | "Running...");
+                let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "List Files" | "Ran" | "Running...");
                 if !last_label.is_empty() && last_label == new_label && is_joinable_label(last_label) {
                     // Merge as a styled MergedExecCell to preserve per-exec formatting
                     let mut merged = history_cell::MergedExecCell::from_exec(last_exec);
@@ -2699,7 +2701,7 @@ impl ChatWidget<'_> {
                 }
 
                 // Reflect status in the input border
-                self.bottom_pane.update_status_text("Searching...".to_string());
+                self.bottom_pane.update_status_text("Searched".to_string());
                 self.mark_needs_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
@@ -3377,6 +3379,78 @@ impl ChatWidget<'_> {
 
     pub(crate) fn add_prompts_output(&mut self) {
         self.add_to_history(history_cell::new_prompts_output());
+    }
+
+    pub(crate) fn add_agents_output(&mut self) {
+        use ratatui::text::Line;
+
+        // Gather active agents from current UI state
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from("/agents".magenta()));
+        lines.push(Line::from(""));
+
+        // Section: Active agents
+        lines.push(Line::from(vec!["🤖 ".into(), "Active Agents".bold()]));
+        if self.active_agents.is_empty() {
+            if self.agents_ready_to_start {
+                lines.push(Line::from("  • preparing agents…"));
+            } else {
+                lines.push(Line::from("  • No active agents"));
+            }
+        } else {
+            for a in &self.active_agents {
+                let status = match a.status {
+                    AgentStatus::Pending => "pending",
+                    AgentStatus::Running => "running",
+                    AgentStatus::Completed => "completed",
+                    AgentStatus::Failed => "failed",
+                };
+                lines.push(Line::from(format!("  • {} — {}", a.name, status)));
+            }
+        }
+
+        lines.push(Line::from(""));
+
+        // Section: Availability
+        lines.push(Line::from(vec!["🧭 ".into(), "Availability".bold()]));
+
+        // Determine which agents to check: configured (enabled) or defaults
+        let mut to_check: Vec<(String, String, bool)> = Vec::new();
+        if !self.config.agents.is_empty() {
+            for a in &self.config.agents {
+                if !a.enabled { continue; }
+                let name = a.name.clone();
+                let cmd = a.command.clone();
+                let builtin = matches!(cmd.as_str(), "code" | "codex");
+                to_check.push((name, cmd, builtin));
+            }
+        } else {
+            to_check.push(("claude".to_string(), "claude".to_string(), false));
+            to_check.push(("gemini".to_string(), "gemini".to_string(), false));
+            to_check.push(("code".to_string(), "code".to_string(), true));
+        }
+
+        // Helper: PATH presence
+        let command_exists = |cmd: &str| -> bool { which::which(cmd).map(|p| p.is_file()).unwrap_or(false) };
+
+        for (name, cmd, builtin) in to_check {
+            if builtin {
+                lines.push(Line::from(format!("  • {} — available (built-in)", name)));
+            } else if command_exists(&cmd) {
+                lines.push(Line::from(format!("  • {} — available ({} in PATH)", name, cmd)));
+            } else {
+                lines.push(Line::from(format!("  • {} — not found (command: {})", name, cmd)));
+                // Short cross-platform hint
+                lines.push(Line::from("      Debug: ensure the CLI is installed and on PATH"));
+                lines.push(Line::from("      Windows: run `where <cmd>`; macOS/Linux: `which <cmd>`"));
+            }
+        }
+
+        self.add_to_history(crate::history_cell::PlainHistoryCell {
+            lines,
+            kind: crate::history_cell::HistoryCellType::Notice,
+        });
+        self.request_redraw();
     }
 
     pub(crate) fn show_diffs_popup(&mut self) {
@@ -6694,9 +6768,10 @@ impl WidgetRef for &ChatWidget<'_> {
         let has_active_animation = self.history_cells.iter().any(|cell| cell.is_animating());
 
         if has_active_animation {
-            tracing::debug!("Active animation detected, requesting redraw");
-            self.app_event_tx.send(AppEvent::RequestRedraw);
-        } else {
+            tracing::debug!("Active animation detected, scheduling next frame");
+            // Schedule next frame after debounce window to avoid dropped requests.
+            // Using 20ms ensures we're past the 16ms debounce and maintain smooth animation.
+            self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(20)));
         }
 
         // Calculate scroll position and vertical alignment

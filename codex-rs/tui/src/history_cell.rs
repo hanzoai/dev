@@ -1815,9 +1815,9 @@ fn exec_render_parts_parsed(
                 String::new()
             };
             let header = match action {
-                "read" => "Reading...".to_string(),
-                "search" => "Searching...".to_string(),
-                "list" => "Listing files...".to_string(),
+                "read" => "Read".to_string(),
+                "search" => "Searched".to_string(),
+                "list" => "List Files".to_string(),
                 _ => match &ctx_path {
                     Some(p) => format!("Running... in {}", p),
                     None => "Running...".to_string(),
@@ -1896,7 +1896,7 @@ fn exec_render_parts_parsed(
     let expected_label: Option<&'static str> = match action {
         "read" => Some("Read"),
         "search" => Some("Search"),
-        "list" => Some("List"),
+        "list" => Some("List Files"),
         _ => None, // run: allow a set of labels
     };
     for parsed in parsed_commands.iter() {
@@ -1918,10 +1918,10 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("List".to_string(), display_p)
+                        ("List Files".to_string(), display_p)
                     }
                 }
-                None => ("List".to_string(), cmd.clone()),
+                None => ("List Files".to_string(), cmd.clone()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Make search terms human-readable:
@@ -4277,9 +4277,9 @@ fn new_parsed_command(
             };
             // Running state per action
             let header = match action {
-                "read" => "Reading...".to_string(),
-                "search" => "Searching...".to_string(),
-                "list" => "Listing files...".to_string(),
+                "read" => "Read".to_string(),
+                "search" => "Searched".to_string(),
+                "list" => "List Files".to_string(),
                 _ => match &ctx_path {
                     Some(p) => format!("Running... in {p}"),
                     None => "Running...".to_string(),
@@ -4366,7 +4366,7 @@ fn new_parsed_command(
     let expected_label: Option<&'static str> = match action {
         "read" => Some("Read"),
         "search" => Some("Search"),
-        "list" => Some("List"),
+        "list" => Some("List Files"),
         _ => None,
     };
 
@@ -4390,10 +4390,10 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("List".to_string(), display_p)
+                        ("List Files".to_string(), display_p)
                     }
                 }
-                None => ("List".to_string(), cmd.clone()),
+                None => ("List Files".to_string(), cmd.clone()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
@@ -4604,7 +4604,7 @@ fn new_parsed_command(
                     }
                 }
                 // List Files: highlight directory names
-                "List" => {
+                "List Files" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
