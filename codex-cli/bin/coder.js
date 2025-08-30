@@ -293,34 +293,7 @@ if (existsSync(binaryPath)) {
 }
 
 // Lightweight header validation to provide clearer errors before spawn
-const validateBinary = (p) => {
-  try {
-    const st = statSync(p);
-    if (!st.isFile() || st.size === 0) {
-      return { ok: false, reason: "empty or not a regular file" };
-    }
-    const fd = openSync(p, "r");
-    try {
-      const buf = Buffer.alloc(4);
-      const n = readSync(fd, buf, 0, 4, 0);
-      if (n < 2) return { ok: false, reason: "too short" };
-      if (platform === "win32") {
-        if (!(buf[0] === 0x4d && buf[1] === 0x5a)) return { ok: false, reason: "invalid PE header (missing MZ)" };
-      } else if (platform === "linux" || platform === "android") {
-        if (!(buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46)) return { ok: false, reason: "invalid ELF header" };
-      } else if (platform === "darwin") {
-        const isMachO = (buf[0] === 0xcf && buf[1] === 0xfa && buf[2] === 0xed && buf[3] === 0xfe) ||
-                        (buf[0] === 0xca && buf[1] === 0xfe && buf[2] === 0xba && buf[3] === 0xbe);
-        if (!isMachO) return { ok: false, reason: "invalid Mach-O header" };
-      }
-    } finally {
-      closeSync(fd);
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: e.message };
-  }
-};
+// Reuse the validateBinary helper defined above in the bootstrap section.
 
 const validation = validateBinary(binaryPath);
 if (!validation.ok) {
