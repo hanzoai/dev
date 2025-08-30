@@ -163,7 +163,7 @@ const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
   });
 });
 
-const tryBootstrapBinary = () => {
+const tryBootstrapBinary = async () => {
   try {
     // 1) Read our published version
     const pkg = JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
