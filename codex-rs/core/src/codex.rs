@@ -4605,38 +4605,109 @@ async fn handle_container_exec_with_params(
     }
 
     fn looks_like_branch_change(script: &str) -> bool {
-        // Conservatively flag common branch-changing invocations.
-        let s = script.trim();
-        // Normalize whitespace for simpler substring checks; do not allocate excessively.
-        let s_lower = s.to_lowercase();
-        // Quick allow for file checkout pattern `git checkout -- <path>`
-        if s_lower.contains("git checkout") && s_lower.contains(" -- ") {
-            return false;
-        }
-        // Patterns to watch: checkout -b/-B/--orphan/--detach, checkout <name>, switch -c, switch <name>
-        let patterns = [
-            "git checkout -b ",
-            "git checkout -B ",
-            "git checkout --orphan ",
-            "git checkout --detach",
-            "git switch -c ",
-        ];
-        if patterns.iter().any(|p| s_lower.contains(p)) {
-            return true;
-        }
-        // `git switch <name>` without leading dash
-        if let Some(idx) = s_lower.find("git switch ") {
-            // ensure next token does not start with '-'
-            let rest = &s_lower[idx + "git switch ".len()..];
-            if !rest.trim_start().starts_with('-') {
-                return true;
+        // Goal: detect branch-changing git invocations while avoiding false
+        // positives from commit messages or other quoted strings. We do a
+        // lightweight scan that strips quoted regions before token analysis.
+
+        // 1) Strip single- and double-quoted segments (keep length with spaces).
+        let mut cleaned = String::with_capacity(script.len());
+        let mut in_squote = false;
+        let mut in_dquote = false;
+        let mut prev_was_backslash = false;
+        for ch in script.chars() {
+            let mut emit_space = false;
+            match ch {
+                '\\' => {
+                    // Track escapes inside double quotes; in single quotes, backslash has no special meaning in POSIX sh.
+                    prev_was_backslash = !prev_was_backslash;
+                }
+                '\'' if !in_dquote => {
+                    in_squote = !in_squote;
+                    emit_space = true;
+                    prev_was_backslash = false;
+                }
+                '"' if !in_squote && !prev_was_backslash => {
+                    in_dquote = !in_dquote;
+                    emit_space = true;
+                    prev_was_backslash = false;
+                }
+                _ => {
+                    prev_was_backslash = false;
+                }
+            }
+            if in_squote || in_dquote || emit_space {
+                cleaned.push(' ');
+            } else {
+                cleaned.push(ch);
             }
         }
-        // `git checkout <name>` (best-effort: treat as branch change if first arg not starting with '-')
-        if let Some(idx) = s_lower.find("git checkout ") {
-            let rest = &s_lower[idx + "git checkout ".len()..];
-            if !rest.trim_start().starts_with('-') {
-                return true;
+
+        // 2) Split into simple commands at common separators.
+        for chunk in cleaned.split(|c| matches!(c, ';' | '\n' | '\r')) {
+            // Further split on conditional operators while keeping order.
+            for part in chunk.split(|c| matches!(c, '|' | '&')) {
+                let s = part.trim();
+                if s.is_empty() { continue; }
+                // Tokenize on whitespace.
+                let mut it = s.split_whitespace();
+                // Skip leading env assignments (FOO=bar) and `env`.
+                let mut first = None;
+                while let Some(tok) = it.next() {
+                    if tok.contains('=') && !tok.starts_with('=') && !tok.starts_with('-') {
+                        continue;
+                    }
+                    if tok == "env" { continue; }
+                    first = Some(tok);
+                    break;
+                }
+                let Some(cmd) = first else { continue };
+                // Identify `git` executable (allow path prefixes).
+                let is_git = cmd.ends_with("/git") || cmd == "git";
+                if !is_git { continue; }
+                // Next token is the subcommand.
+                let Some(sub) = it.next() else { continue; };
+                match sub {
+                    "checkout" => {
+                        // If any of the strong branch-changing flags are present, flag it.
+                        let mut saw_branch_change_flag = false;
+                        let mut args: Vec<&str> = Vec::new();
+                        for a in it.clone() { args.push(a); }
+                        for a in &args {
+                            if matches!(*a, "-b" | "-B" | "--orphan" | "--detach") {
+                                saw_branch_change_flag = true;
+                                break;
+                            }
+                        }
+                        if saw_branch_change_flag { return true; }
+                        // If `--` is present, this is a path checkout, not branch.
+                        if args.iter().any(|a| *a == "--") { continue; }
+                        // Heuristic: a single non-flag argument likely denotes a branch.
+                        // To reduce false positives (e.g. `git checkout .`), only flag
+                        // when the first arg does not start with '-' and is not a solitary '.' or '..'.
+                        if let Some(first_arg) = args.first() {
+                            let a = *first_arg;
+                            if !a.starts_with('-') && a != "." && a != ".." {
+                                return true;
+                            }
+                        }
+                    }
+                    "switch" => {
+                        // `git switch -c <name>` creates; `git switch <name>` changes.
+                        let mut args = it;
+                        let mut saw_c = false;
+                        let mut first_non_flag: Option<&str> = None;
+                        while let Some(a) = args.next() {
+                            if a == "-c" { saw_c = true; break; }
+                            if a.starts_with('-') { continue; }
+                            first_non_flag = Some(a);
+                            break;
+                        }
+                        if saw_c || first_non_flag.is_some() { return true; }
+                    }
+                    // Future: consider `git branch -D/-m` as branch‑modifying, but keep
+                    // this minimal to avoid over‑blocking normal workflows.
+                    _ => {}
+                }
             }
         }
         false
