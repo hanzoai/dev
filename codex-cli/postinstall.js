@@ -468,8 +468,8 @@ async function main() {
       const list = Array.from(installedCmds).sort().join(', ');
       console.log(`Commands installed (bun): ${list}`);
       if (skippedCmds.length) {
-        for (const s of skippedCmds) console.log(`Commands skipped: ${s.name} (${s.reason})`);
-        console.log('→ Use `coder` to run this tool.');
+        for (const s of skippedCmds) console.error(`Commands skipped: ${s.name} (${s.reason})`);
+        console.error('→ Use `coder` to run this tool.');
       }
       // Final friendly usage hint
       if (installedCmds.has('code')) {
@@ -513,19 +513,19 @@ async function main() {
       ensureWrapper('code-exec', 'exec');
 
       if (collision) {
-        console.log('⚠ Detected existing `code` on PATH:');
-        for (const p of others) console.log(`   - ${p}`);
+        console.error('⚠ Detected existing `code` on PATH:');
+        for (const p of others) console.error(`   - ${p}`);
         if (globalBin) {
           try {
             if (existsSync(ourShim)) {
               unlinkSync(ourShim);
-              console.log(`✓ Skipped global 'code' shim (removed ${ourShim})`);
+              console.error(`✓ Skipped global 'code' shim (removed ${ourShim})`);
               skippedCmds.push({ name: 'code', reason: `existing: ${others[0]}` });
             }
           } catch (e) {
-            console.log(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
+            console.error(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
           }
-          console.log('→ Use `coder` to run this tool.');
+          console.error('→ Use `coder` to run this tool.');
         } else {
           console.log('Note: could not determine npm global bin; skipping alias creation.');
         }
