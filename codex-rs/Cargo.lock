@@ -1130,6 +1130,7 @@ dependencies = [
  "url",
  "uuid",
  "vt100",
+ "which",
 ]
 
 [[package]]
