@@ -22,6 +22,11 @@ use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
+// Colorize strings printed to stderr for the release‑mode update banner.
+// Gate the import so we don't trigger an unused‑import warning in debug builds.
+#[cfg(not(debug_assertions))]
+use color_eyre::owo_colors::OwoColorize;
+
 mod app;
 mod app_event;
 mod app_event_sender;
