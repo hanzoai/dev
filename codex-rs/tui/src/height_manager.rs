@@ -115,6 +115,9 @@ impl HeightManager {
         hud_present: bool,
         bottom_desired_height: u16,
         font_cell: (u16, u16),
+        // Optional target height for HUD computed by caller (e.g., stacked/collapsed layout).
+        // When None, a default aspect-based calculation is used.
+        hud_target_override: Option<u16>,
     ) -> Vec<Rect> {
         #[cfg(debug_assertions)]
         {
@@ -174,19 +177,17 @@ impl HeightManager {
         // Determine HUD height if present.
         let mut hud_h: u16;
         if hud_present {
-            // This mirrors the existing preview logic while centralizing its decision.
-            // Compute HUD target height using 16:9 aspect on inner width.
-            let padded_area = Rect { x: area.x + 1, y: area.y, width: area.width.saturating_sub(2), height: area.height };
-            let right = Layout::horizontal([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ]).split(padded_area)[1];
-            let inner_cols = right.width.saturating_sub(2);
-            let (cw, ch) = font_cell;
-            let number = (inner_cols as u32) * 3 * (cw as u32);
-            let denom = 4 * (ch as u32);
-            let mut target = ((number / denom) as u16).saturating_add(2); // add borders
-            target = target.saturating_sub(1); // tighten by one line as in current code
+            // Use caller-provided target when available; otherwise fall back to
+            // an aspect-based estimate similar to the older preview logic.
+            let mut target = if let Some(t) = hud_target_override { t } else {
+                // Compute HUD target height using 16:9 aspect on full inner width.
+                let padded_area = Rect { x: area.x + 1, y: area.y, width: area.width.saturating_sub(2), height: area.height };
+                let inner_cols = padded_area.width.saturating_sub(2);
+                let (cw, ch) = font_cell;
+                let number = (inner_cols as u32) * 3 * (cw as u32);
+                let denom = 4 * (ch as u32);
+                ((number / denom) as u16).saturating_add(1) // include borders budget
+            };
 
             // Keep within budget: reserve space for status + bottom + >=1 row history.
             let vertical_budget = area

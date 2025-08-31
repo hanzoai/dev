@@ -942,6 +942,62 @@ impl BrowserManager {
             // Continue even if cursor injection fails
         }
 
+        // Ensure console capture is installed immediately for the current document.
+        // Without this, connecting to an already-loaded tab would only register
+        // the bootstrap for future documents, and an initial Browser Console read
+        // would return no logs. This eagerly hooks console methods now.
+        let console_hook = r#"(function(){
+            try {
+                if (!window.__codex_console_logs) {
+                    window.__codex_console_logs = [];
+                    const push = (level, message) => {
+                        try {
+                            window.__codex_console_logs.push({ timestamp: new Date().toISOString(), level, message });
+                            if (window.__codex_console_logs.length > 2000) window.__codex_console_logs.shift();
+                        } catch (_) {}
+                    };
+
+                    ['log','warn','error','info','debug'].forEach(function(method) {
+                        try {
+                            const orig = console[method];
+                            console[method] = function() {
+                                try {
+                                    var args = Array.prototype.slice.call(arguments);
+                                    var msg = args.map(function(a) {
+                                        try {
+                                            if (a && typeof a === 'object') return JSON.stringify(a);
+                                            return String(a);
+                                        } catch (_) { return String(a); }
+                                    }).join(' ');
+                                    push(method, msg);
+                                } catch(_) {}
+                                if (orig) return orig.apply(console, arguments);
+                            };
+                        } catch(_) {}
+                    });
+
+                    window.addEventListener('error', function(e) {
+                        try {
+                            var msg = e && e.message ? e.message : 'Script error';
+                            var stack = e && e.error && e.error.stack ? ('\n' + e.error.stack) : '';
+                            push('exception', msg + stack);
+                        } catch(_) {}
+                    });
+                    window.addEventListener('unhandledrejection', function(e) {
+                        try {
+                            var reason = e && e.reason;
+                            if (reason && typeof reason === 'object') { try { reason = JSON.stringify(reason); } catch(_) {} }
+                            push('unhandledrejection', String(reason));
+                        } catch(_) {}
+                    });
+                }
+                return true;
+            } catch (_) { return false; }
+        })()"#;
+        if let Err(e) = page.inject_js(console_hook).await {
+            warn!("Failed to install console capture on page creation: {}", e);
+        }
+
         // Start navigation monitoring for this page
         self.start_navigation_monitor(Arc::clone(&page)).await;
         // Start viewport monitor (low-frequency, non-invasive)
@@ -1492,6 +1548,13 @@ impl BrowserManager {
     pub async fn get_console_logs(&self, lines: Option<usize>) -> Result<serde_json::Value> {
         let page = self.get_or_create_page().await?;
 
+        // 1) Prefer CDP-captured buffer (event-based). If we have entries, return them.
+        let cdp_logs = page.get_console_logs_tail(lines).await;
+        if cdp_logs.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+            return Ok(cdp_logs);
+        }
+
+        // 2) Fallback to JS-installed hook (ensures capture on pages where events are unavailable).
         let requested = lines.unwrap_or(0);
         let script = format!(
             r#"(function() {{
@@ -1505,7 +1568,6 @@ impl BrowserManager {
                             }} catch (_) {{}}
                         }};
 
-                        // Override console methods once
                         ['log','warn','error','info','debug'].forEach(function(method) {{
                             try {{
                                 const orig = console[method];
@@ -1513,10 +1575,8 @@ impl BrowserManager {
                                     try {{
                                         var args = Array.prototype.slice.call(arguments);
                                         var msg = args.map(function(a) {{
-                                            try {{
-                                                if (a && typeof a === 'object') return JSON.stringify(a);
-                                                return String(a);
-                                            }} catch (_) {{ return String(a); }}
+                                            try {{ if (a && typeof a === 'object') return JSON.stringify(a); return String(a); }}
+                                            catch (_) {{ return String(a); }}
                                         }}).join(' ');
                                         push(method, msg);
                                     }} catch(_) {{}}
@@ -1525,7 +1585,6 @@ impl BrowserManager {
                             }} catch(_) {{}}
                         }});
 
-                        // Capture uncaught errors
                         window.addEventListener('error', function(e) {{
                             try {{
                                 var msg = e && e.message ? e.message : 'Script error';
@@ -1533,13 +1592,10 @@ impl BrowserManager {
                                 push('exception', msg + stack);
                             }} catch(_) {{}}
                         }});
-                        // Capture unhandled promise rejections
                         window.addEventListener('unhandledrejection', function(e) {{
                             try {{
                                 var reason = e && e.reason;
-                                if (reason && typeof reason === 'object') {{
-                                    try {{ reason = JSON.stringify(reason); }} catch(_) {{}}
-                                }}
+                                if (reason && typeof reason === 'object') {{ try {{ reason = JSON.stringify(reason); }} catch(_) {{}} }}
                                 push('unhandledrejection', String(reason));
                             }} catch(_) {{}}
                         }});
@@ -1554,10 +1610,6 @@ impl BrowserManager {
             }})()"#
         );
 
-        // Use raw JS injection so our console hooks persist beyond the
-        // temporary wrapper used by execute_javascript(). This ensures
-        // console.* overrides remain active and logs accumulate across
-        // page interactions until explicitly cleared.
         page.inject_js(&script).await
     }
 

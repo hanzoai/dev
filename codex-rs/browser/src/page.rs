@@ -17,6 +17,9 @@ use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocument
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotParams;
 use chromiumoxide::page::Page as CdpPage;
+use chromiumoxide::cdp::js_protocol::runtime as cdp_runtime;
+use chromiumoxide::cdp::browser_protocol::log as cdp_log;
+use futures::StreamExt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -46,6 +49,8 @@ pub struct Page {
     current_url: Arc<RwLock<Option<String>>>,
     // Add cursor state tracking (New)
     cursor_state: Arc<Mutex<CursorState>>,
+    // Buffer for CDP-captured console logs
+    console_logs: Arc<Mutex<Vec<serde_json::Value>>>,
     // Screenshot path preflight cache:
     // - We strongly prefer compositor captures via from_surface(false) to avoid visible flashes in the
     //   user's real Chrome window. However, that path can be flaky or unavailable when the window is not
@@ -73,6 +78,7 @@ impl Page {
             current_url: Arc::new(RwLock::new(None)),
             cursor_state: Arc::new(Mutex::new(initial_cursor)),
             preflight_cache: Arc::new(Mutex::new(None)),
+            console_logs: Arc::new(Mutex::new(Vec::new())),
         };
 
         // Register a unified bootstrap (runs on every new document):
@@ -85,6 +91,68 @@ impl Page {
                 warn!("Failed to inject unified bootstrap script: {}", e);
             } else {
                 debug!("Unified bootstrap script registered for new documents");
+            }
+        });
+
+        // Enable CDP Runtime/Log and start capturing console events into an internal buffer.
+        // This complements the JS hook and works even if the page overwrites console later.
+        let cdp_page_events = page.cdp_page.clone();
+        let logs_buf = page.console_logs.clone();
+        tokio::spawn(async move {
+            // Best-effort enable; ignore failures silently to avoid breaking page creation.
+            let _ = cdp_page_events.execute(cdp_runtime::EnableParams::default()).await;
+            let _ = cdp_page_events.execute(cdp_log::EnableParams::default()).await;
+
+            // Listen for Runtime.consoleAPICalled
+            if let Ok(mut stream) = cdp_page_events
+                .event_listener::<cdp_runtime::EventConsoleApiCalled>()
+                .await
+            {
+                while let Some(evt) = stream.next().await {
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i128)
+                        .unwrap_or(0);
+                    // Join args into a readable string; also keep raw values
+                    let text = match serde_json::to_string(&evt.args) {
+                        Ok(s) => s,
+                        Err(_) => String::new(),
+                    };
+                    let item = serde_json::json!({
+                        "ts_unix_ms": ts,
+                        "level": format!("{:?}", evt.r#type),
+                        "message": text,
+                        "source": "cdp:runtime"
+                    });
+                    let mut buf = logs_buf.lock().await;
+                    buf.push(item);
+                    if buf.len() > 2000 { buf.remove(0); }
+                }
+            }
+
+            // Also listen for Log.entryAdded (browser-side logs)
+            if let Ok(mut stream) = cdp_page_events
+                .event_listener::<cdp_log::EventEntryAdded>()
+                .await
+            {
+                while let Some(evt) = stream.next().await {
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i128)
+                        .unwrap_or(0);
+                    let entry = &evt.entry;
+                    let item = serde_json::json!({
+                        "ts_unix_ms": ts,
+                        "level": format!("{:?}", entry.level),
+                        "message": entry.text,
+                        "source": "cdp:log",
+                        "url": entry.url,
+                        "line": entry.line_number
+                    });
+                    let mut buf = logs_buf.lock().await;
+                    buf.push(item);
+                    if buf.len() > 2000 { buf.remove(0); }
+                }
             }
         });
 
@@ -1293,6 +1361,21 @@ impl Page {
         // Note: chromiumoxide's close() takes ownership, so we can't call it on Arc<Page>
         // The page will be closed when the Arc is dropped
         Ok(())
+    }
+
+    /// Return a snapshot (tail) of the CDP-captured console buffer.
+    pub async fn get_console_logs_tail(&self, lines: Option<usize>) -> serde_json::Value {
+        let buf = self.console_logs.lock().await;
+        if buf.is_empty() {
+            return serde_json::Value::Array(vec![]);
+        }
+        let n = lines.unwrap_or(0);
+        let slice: Vec<serde_json::Value> = if n > 0 && n < buf.len() {
+            buf[buf.len() - n..].to_vec()
+        } else {
+            buf.clone()
+        };
+        serde_json::Value::Array(slice)
     }
 
     pub async fn get_url(&self) -> Result<String> {
