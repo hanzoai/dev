@@ -14,7 +14,7 @@ use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
 use crossterm::style::SetColors;
-use crossterm::style::{Color as CtColor, SetBackgroundColor, SetForegroundColor, ResetColor};
+use crossterm::style::{Color as CtColor, SetBackgroundColor, SetForegroundColor};
 use crossterm::style::Print;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
@@ -110,8 +110,10 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         for y in 0..rows {
             execute!(stdout(), MoveTo(0, y), Print(&blank))?;
         }
-        // Restore cursor to home and leave colors configured for subsequent drawing.
-        execute!(stdout(), MoveTo(0, 0), ResetColor, SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
+        // Restore cursor to home and keep our colors configured for subsequent drawing.
+        // Avoid ResetColor here to prevent some terminals from flashing to their
+        // profile default background (e.g., white) between frames.
+        execute!(stdout(), MoveTo(0, 0), SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
     }
 
     // Wrap stdout in a BufWriter to reduce syscalls during rendering.
