@@ -59,7 +59,9 @@ enum AppState<'a> {
 pub(crate) struct App<'a> {
     _server: Arc<ConversationManager>,
     app_event_tx: AppEventSender,
-    app_event_rx: Receiver<AppEvent>,
+    // Split event receivers: high‑priority (input) and bulk (streaming)
+    app_event_rx_high: Receiver<AppEvent>,
+    app_event_rx_bulk: Receiver<AppEvent>,
     app_state: AppState<'a>,
 
     /// Config is stored here so we can recreate ChatWidgets as needed.
@@ -120,8 +122,10 @@ impl App<'_> {
             AuthMode::ApiKey,
         )));
 
-        let (app_event_tx, app_event_rx) = channel();
-        let app_event_tx = AppEventSender::new(app_event_tx);
+        // Split queues so interactive input never waits behind bulk updates.
+        let (high_tx, app_event_rx_high) = channel();
+        let (bulk_tx, app_event_rx_bulk) = channel();
+        let app_event_tx = AppEventSender::new_dual(high_tx.clone(), bulk_tx.clone());
         let pending_redraw = Arc::new(AtomicBool::new(false));
 
         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
@@ -223,7 +227,8 @@ impl App<'_> {
         Self {
             _server: conversation_manager,
             app_event_tx,
-            app_event_rx,
+            app_event_rx_high,
+            app_event_rx_bulk,
             app_state,
             config,
             file_search,
@@ -278,10 +283,15 @@ impl App<'_> {
         let app_event_tx = self.app_event_tx.clone();
         app_event_tx.send(AppEvent::RequestRedraw);
 
-        while let Ok(event) = self.app_event_rx.recv() {
+        'main: loop {
+            let event = match self.next_event_priority() { Some(e) => e, None => break 'main };
             match event {
-                AppEvent::InsertHistory(lines) => match &mut self.app_state {
+                AppEvent::InsertHistory(mut lines) => match &mut self.app_state {
                     AppState::Chat { widget } => {
+                        // Coalesce consecutive InsertHistory events to reduce redraw churn.
+                        while let Ok(AppEvent::InsertHistory(mut more)) = self.app_event_rx_bulk.try_recv() {
+                            lines.append(&mut more);
+                        }
                         tracing::debug!("app: InsertHistory lines={}", lines.len());
                         widget.insert_history_lines(lines)
                     },
@@ -327,6 +337,7 @@ impl App<'_> {
                     self.commit_anim_running.store(false, Ordering::Release);
                 }
                 AppEvent::CommitTick => {
+                    if self.pending_redraw.load(Ordering::Relaxed) { continue; }
                     // Advance streaming animation: commit at most one queued line
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.on_commit_tick();
@@ -427,12 +438,8 @@ impl App<'_> {
                             kind: KeyEventKind::Press,
                             ..
                         } => match &mut self.app_state {
-                            AppState::Chat { widget } => {
-                                widget.on_ctrl_c();
-                            }
-                            AppState::Onboarding { .. } => {
-                                self.app_event_tx.send(AppEvent::ExitRequest);
-                            }
+                            AppState::Chat { widget } => { widget.on_ctrl_c(); }
+                            AppState::Onboarding { .. } => { self.app_event_tx.send(AppEvent::ExitRequest); }
                         },
                         KeyEvent {
                             code: KeyCode::Char('z'),
@@ -498,9 +505,7 @@ impl App<'_> {
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
-                AppEvent::ExitRequest => {
-                    break;
-                }
+                AppEvent::ExitRequest => { break 'main; }
                 AppEvent::CodexOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
@@ -556,14 +561,10 @@ impl App<'_> {
                                 self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
                             }
                         }
-                        SlashCommand::Quit => {
-                            break;
-                        }
+                        SlashCommand::Quit => { break 'main; }
                         SlashCommand::Logout => {
-                            if let Err(e) = codex_login::logout(&self.config.codex_home) {
-                                tracing::error!("failed to logout: {e}");
-                            }
-                            break;
+                            if let Err(e) = codex_login::logout(&self.config.codex_home) { tracing::error!("failed to logout: {e}"); }
+                            break 'main;
                         }
                         SlashCommand::Diff => {
                             let tx = self.app_event_tx.clone();
@@ -919,6 +920,23 @@ impl App<'_> {
         terminal.clear()?;
 
         Ok(())
+    }
+
+    /// Pull the next event with priority for interactive input.
+    /// Never returns None due to idleness; only returns None if both channels disconnect.
+    fn next_event_priority(&self) -> Option<AppEvent> {
+        use std::sync::mpsc::RecvTimeoutError::{Timeout, Disconnected};
+        loop {
+            if let Ok(ev) = self.app_event_rx_high.try_recv() { return Some(ev); }
+            if let Ok(ev) = self.app_event_rx_bulk.try_recv() { return Some(ev); }
+            match self.app_event_rx_high.recv_timeout(Duration::from_millis(20)) {
+                Ok(ev) => return Some(ev),
+                Err(Timeout) => continue,
+                Err(Disconnected) => break,
+            }
+        }
+        // High channel disconnected; try blocking on bulk as a last resort
+        self.app_event_rx_bulk.recv().ok()
     }
 
     #[cfg(unix)]
