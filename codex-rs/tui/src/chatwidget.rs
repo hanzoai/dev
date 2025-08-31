@@ -218,6 +218,13 @@ pub(crate) struct ChatWidget<'a> {
     // Track prior HUD visibility to emit toggle events to HeightManager
     last_hud_present: std::cell::Cell<bool>,
 
+    // HUD panel expansion state (stacked layout): only one expands at a time
+    browser_hud_expanded: bool,
+    agents_hud_expanded: bool,
+
+    // True when connected to external Chrome via CDP; affects HUD titles
+    browser_is_external: bool,
+
     // Prefix sums of content heights (including spacing) for fast scroll range
     prefix_sums: std::cell::RefCell<Vec<u16>>,
     // Cache key for prefix_sums to avoid rebuilding on pure scroll frames
@@ -1546,7 +1553,32 @@ impl ChatWidget<'_> {
             self.last_hud_present.set(hud_present);
         }
 
-        hm.begin_frame(area, hud_present, bottom_desired, font_cell)
+        // Compute a target HUD height for stacked layout with collapsible headers.
+        // - Collapsed header uses 1 content line + borders = 3 rows
+        // - When both are collapsed: 2 headers (Agents above Browser) => 6 rows
+        // - When one is expanded: expanded gets remaining height budget above/below the other header
+        let collapsed_unit: u16 = 3;
+        let present_count: u16 = (has_active_agents as u16) + (has_browser_screenshot as u16);
+
+        // Estimate expanded content preferred height using a 16:9 aspect based on full width
+        let (cw, ch) = font_cell;
+        let inner_cols = area.width.saturating_sub(4); // account for padding + borders
+        let number = (inner_cols as u32) * 3 * (cw as u32);
+        let denom = 4 * (ch as u32);
+        let preferred_expanded: u16 = ((number / denom) as u16).saturating_add(2); // include borders
+
+        let hud_target: Option<u16> = if !hud_present || present_count == 0 {
+            None
+        } else {
+            let base_collapsed = collapsed_unit
+                * ((has_active_agents as u16) + (has_browser_screenshot as u16))
+                .max(1);
+            let any_expanded = self.browser_hud_expanded || self.agents_hud_expanded;
+            let target = if any_expanded { base_collapsed.saturating_add(preferred_expanded) } else { base_collapsed };
+            Some(target)
+        };
+
+        hm.begin_frame(area, hud_present, bottom_desired, font_cell, hud_target)
     }
     fn finalize_active_stream(&mut self) {
         let sink = AppEventHistorySink(self.app_event_tx.clone());
@@ -1692,6 +1724,8 @@ impl ChatWidget<'_> {
                 crate::height_manager::HeightManagerConfig::default(),
             )),
         last_hud_present: std::cell::Cell::new(false),
+            browser_hud_expanded: false,
+            agents_hud_expanded: false,
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
@@ -1704,6 +1738,7 @@ impl ChatWidget<'_> {
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
+            browser_is_external: false,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1806,6 +1841,8 @@ impl ChatWidget<'_> {
                 crate::height_manager::HeightManagerConfig::default(),
             )),
         last_hud_present: std::cell::Cell::new(false),
+            browser_hud_expanded: false,
+            agents_hud_expanded: false,
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
@@ -1818,6 +1855,7 @@ impl ChatWidget<'_> {
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
+            browser_is_external: false,
         }
     }
 
@@ -2031,6 +2069,69 @@ impl ChatWidget<'_> {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
 
+        // Global HUD toggles (avoid conflicting with common editor keys):
+        // - Ctrl+B: toggle Browser panel (expand/collapse)
+        // - Ctrl+G: toggle Agents panel (expand/collapse)
+        if let KeyEvent {
+            code: crossterm::event::KeyCode::Char('b'),
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            self.toggle_browser_hud();
+            return;
+        }
+        if let KeyEvent {
+            code: crossterm::event::KeyCode::Char('p'),
+            modifiers: crossterm::event::KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            self.toggle_agents_hud();
+            return;
+        }
+
+        // Fast-path PageUp/PageDown to scroll the transcript by a viewport at a time.
+        if let crossterm::event::KeyEvent {
+            code: crossterm::event::KeyCode::PageUp,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            let step = self.last_history_viewport_height.get().max(1);
+            let new_offset = self
+                .scroll_offset
+                .saturating_add(step)
+                .min(self.last_max_scroll.get());
+            self.scroll_offset = new_offset;
+            self.bottom_pane.set_compact_compose(true);
+            self.flash_scrollbar();
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+            self.height_manager.borrow_mut().record_event(HeightEvent::UserScroll);
+            return;
+        }
+        if let crossterm::event::KeyEvent {
+            code: crossterm::event::KeyCode::PageDown,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            let step = self.last_history_viewport_height.get().max(1);
+            if self.scroll_offset > step {
+                self.scroll_offset = self.scroll_offset.saturating_sub(step);
+            } else {
+                self.scroll_offset = 0;
+                // At bottom: restore normal composer spacing
+                self.bottom_pane.set_compact_compose(false);
+            }
+            self.flash_scrollbar();
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+            self.height_manager.borrow_mut().record_event(HeightEvent::UserScroll);
+            return;
+        }
+
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
                 // Commit pending jump-back (make trimming permanent) before submission
@@ -2114,6 +2215,22 @@ impl ChatWidget<'_> {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
         }
+    }
+
+    fn toggle_browser_hud(&mut self) {
+        let new_state = !self.browser_hud_expanded;
+        self.browser_hud_expanded = new_state;
+        if new_state { self.agents_hud_expanded = false; }
+        self.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
+        self.request_redraw();
+    }
+
+    fn toggle_agents_hud(&mut self) {
+        let new_state = !self.agents_hud_expanded;
+        self.agents_hud_expanded = new_state;
+        if new_state { self.browser_hud_expanded = false; }
+        self.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
+        self.request_redraw();
     }
 
     // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
@@ -5313,6 +5430,9 @@ impl ChatWidget<'_> {
                 url.clone()
             };
 
+                // We are navigating with the internal browser
+                self.browser_is_external = false;
+
                 // Navigate to URL and wait for it to load
                 let latest_screenshot = self.latest_browser_screenshot.clone();
                 let app_event_tx = self.app_event_tx.clone();
@@ -5660,6 +5780,7 @@ impl ChatWidget<'_> {
     #[allow(dead_code)]
     fn switch_to_internal_browser(&mut self) {
         // Switch to internal browser mode
+        self.browser_is_external = false;
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
 
@@ -5744,6 +5865,7 @@ impl ChatWidget<'_> {
 
     fn handle_chrome_connection(&mut self, port: Option<u16>) {
         tracing::info!("[cdp] handle_chrome_connection begin, port={:?}", port);
+        self.browser_is_external = true;
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
@@ -5812,6 +5934,10 @@ impl ChatWidget<'_> {
             if !handled_disconnect {
                 // Switch to external Chrome mode with default/auto-detected port
                 self.handle_chrome_connection(None);
+            } else {
+                // We just disconnected; reflect in title immediately
+                self.browser_is_external = false;
+                self.request_redraw();
             }
             return;
         }
@@ -6145,7 +6271,7 @@ impl ChatWidget<'_> {
         let picker = cached_picker.as_ref().unwrap();
 
         // quantize step by protocol to avoid rounding bias
-        let (qx, qy): (u16, u16) = match picker.protocol_type() {
+        let (_qx, _qy): (u16, u16) = match picker.protocol_type() {
             ProtocolType::Halfblocks => (1, 2), // half-block cell = 1 col x 2 half-rows
             _ => (1, 1),                        // pixel protocols (Kitty/iTerm2/Sixel)
         };
@@ -6167,39 +6293,38 @@ impl ChatWidget<'_> {
             cols_by_h = 1;
         }
 
-        let (used_cols, used_rows) = if rows_by_w <= rows {
+        let (_used_cols, _used_rows) = if rows_by_w <= rows {
             (cols, rows_by_w)
         } else {
             (cols_by_h, rows)
         };
 
-        // quantize to protocol grid
-        let mut used_cols_u16 = used_cols as u16;
-        let mut used_rows_u16 = used_rows as u16;
-        if qx > 1 {
-            let rem = used_cols_u16 % qx;
-            if rem != 0 {
-                used_cols_u16 = used_cols_u16.saturating_sub(rem).max(qx);
-            }
+        // Compute a centered target rect based on image aspect and font cell size
+        let (cell_w, cell_h) = self.measured_font_size();
+        let area_px_w = (area.width as u32) * (cell_w as u32);
+        let area_px_h = (area.height as u32) * (cell_h as u32);
+        // If either dimension is zero, bail to placeholder
+        if area.width == 0 || area.height == 0 || area_px_w == 0 || area_px_h == 0 {
+            self.render_screenshot_placeholder(path, area, buf);
+            return;
         }
-        if qy > 1 {
-            let rem = used_rows_u16 % qy;
-            if rem != 0 {
-                used_rows_u16 = used_rows_u16.saturating_sub(rem).max(qy);
-            }
-        }
-        used_cols_u16 = used_cols_u16.min(area.width).max(1);
-        used_rows_u16 = used_rows_u16.min(area.height).max(1);
-
-        // center both axes
-        let hpad = (area.width.saturating_sub(used_cols_u16)) / 2;
-        let vpad = (area.height.saturating_sub(used_rows_u16)) / 2;
-        let target = Rect {
-            x: area.x + hpad,
-            y: area.y + vpad,
-            width: used_cols_u16,
-            height: used_rows_u16,
+        let (img_w, img_h) = match image::image_dimensions(path) {
+            Ok(dim) => dim,
+            Err(_) => { self.render_screenshot_placeholder(path, area, buf); return; }
         };
+        let scale_num_w = area_px_w;
+        let scale_num_h = area_px_h;
+        let scale_w = scale_num_w as f64 / img_w as f64;
+        let scale_h = scale_num_h as f64 / img_h as f64;
+        let scale = scale_w.min(scale_h).max(0.0);
+        // Compute target size in cells
+        let target_w_cells = ((img_w as f64 * scale) / (cell_w as f64)).floor() as u16;
+        let target_h_cells = ((img_h as f64 * scale) / (cell_h as f64)).floor() as u16;
+        let target_w = target_w_cells.clamp(1, area.width);
+        let target_h = target_h_cells.clamp(1, area.height);
+        let target_x = area.x + (area.width.saturating_sub(target_w)) / 2;
+        let target_y = area.y + (area.height.saturating_sub(target_h)) / 2;
+        let target = Rect { x: target_x, y: target_y, width: target_w, height: target_h };
 
         // cache by (path, target)
         let needs_recreate = {
@@ -6278,7 +6403,7 @@ impl ChatWidget<'_> {
 }
 
 impl ChatWidget<'_> {
-    /// Render the combined HUD with browser and/or agent panels based on what's active
+    /// Render the combined HUD with browser and/or agent panels (stacked full-width)
     fn render_hud(&self, area: Rect, buf: &mut Buffer) {
         // Check what's active
         let has_browser_screenshot = self
@@ -6297,31 +6422,65 @@ impl ChatWidget<'_> {
             height: area.height,
         };
 
-        // Determine layout based on what's active
-        if has_browser_screenshot && has_active_agents {
-            // Both panels: 50/50 split
-            let chunks =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas::<2>(padded_area);
+        // Determine layout based on what's active (stacked, full width)
+        let header_h: u16 = 3;
+        match (has_active_agents, has_browser_screenshot) {
+            (true, true) => {
+                let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16; // 30%
+                let (top_h, bottom_h) = if self.agents_hud_expanded && !self.browser_hud_expanded {
+                    (padded_area.height.saturating_sub(header_h).min(max_expanded.max(header_h + 2)), header_h)
+                } else if self.browser_hud_expanded && !self.agents_hud_expanded {
+                    (header_h, padded_area.height.saturating_sub(header_h).min(max_expanded.max(header_h + 2)))
+                } else {
+                    let top = header_h.min(padded_area.height);
+                    let bottom = padded_area.height.saturating_sub(top).min(header_h);
+                    (top, bottom)
+                };
+                let chunks = Layout::vertical([
+                    Constraint::Length(top_h),
+                    Constraint::Length(bottom_h),
+                ]).areas::<2>(padded_area);
 
-            self.render_browser_panel(chunks[0], buf);
-            self.render_agent_panel(chunks[1], buf);
-        } else if has_browser_screenshot {
-            // Only browser: 50% width on the left side
-            let chunks =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas::<2>(padded_area);
-
-            self.render_browser_panel(chunks[0], buf);
-            // Right side remains empty
-        } else if has_active_agents {
-            // Only agents: 50% width on the left side
-            let chunks =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .areas::<2>(padded_area);
-
-            self.render_agent_panel(chunks[0], buf);
-            // Right side remains empty
+                // Agents on top
+                if self.agents_hud_expanded {
+                    self.render_agent_panel(chunks[0], buf);
+                } else {
+                    self.render_agents_header(chunks[0], buf);
+                }
+                // Browser on bottom
+                if self.browser_hud_expanded {
+                    self.render_browser_panel(chunks[1], buf);
+                } else {
+                    self.render_browser_header(chunks[1], buf);
+                }
+            }
+            (true, false) => {
+                if self.agents_hud_expanded {
+                    let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16;
+                    let h = padded_area.height.min(max_expanded.max(header_h + 2));
+                    let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
+                    self.render_agent_panel(a, buf);
+                }
+                else {
+                    let h = header_h.min(padded_area.height);
+                    let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
+                    self.render_agents_header(a, buf);
+                }
+            }
+            (false, true) => {
+                if self.browser_hud_expanded {
+                    let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16;
+                    let h = padded_area.height.min(max_expanded.max(header_h + 2));
+                    let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
+                    self.render_browser_panel(a, buf);
+                }
+                else {
+                    let h = header_h.min(padded_area.height);
+                    let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
+                    self.render_browser_header(a, buf);
+                }
+            }
+            (false, false) => {}
         }
     }
 
@@ -6333,19 +6492,183 @@ impl ChatWidget<'_> {
 
         if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
             if let Some((screenshot_path, url)) = &*screenshot_lock {
+                use ratatui::layout::Margin;
+                use ratatui::text::{Line as RLine, Span};
                 // Use the full area for the browser preview
                 let screenshot_block = Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(" {} ", url))
+                    .title(format!(" {} ", self.browser_title()))
                     .border_style(Style::default().fg(crate::colors::border()));
 
-                let inner_screenshot = screenshot_block.inner(area);
+                let inner = screenshot_block.inner(area);
                 screenshot_block.render(area, buf);
 
-                // Render the screenshot using the full inner area
-                self.render_screenshot_highlevel(screenshot_path, inner_screenshot, buf);
+                // Render a one-line collapsed header inside (with padding), right hint = Collapse
+                let line_area = inner.inner(Margin::new(1, 0));
+                let header_line = Rect { x: line_area.x, y: line_area.y, width: line_area.width, height: 1 };
+                let key_hint_style = Style::default().fg(crate::colors::function());
+                let label_style = Style::default().dim();
+                let is_active = true;
+                let dot_style = if is_active { Style::default().fg(crate::colors::success_green()) } else { Style::default().fg(crate::colors::text_dim()) };
+                let mut left_spans: Vec<Span> = Vec::new();
+                left_spans.push(Span::styled("•", dot_style));
+                // no status text; dot conveys status
+                // Spaces between status and URL; no label
+                left_spans.push(Span::raw(" "));
+                left_spans.push(Span::raw(url.clone()));
+                let right_spans: Vec<Span> = vec![
+                    Span::styled("Collapse: ", label_style),
+                    Span::from("Ctrl+B").style(key_hint_style),
+                ];
+                let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+                let left_len = measure(&left_spans);
+                let right_len = measure(&right_spans);
+                let total_width = line_area.width as usize;
+                if total_width > left_len + right_len {
+                    let spacer = " ".repeat(total_width - left_len - right_len);
+                    left_spans.push(Span::from(spacer));
+                }
+                let mut spans = left_spans;
+                spans.extend(right_spans);
+                Paragraph::new(RLine::from(spans)).render(header_line, buf);
+
+                // Leave one blank spacer line, then render the screenshot
+                let body = Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: inner.height.saturating_sub(2) };
+                self.render_screenshot_highlevel(screenshot_path, body, buf);
             }
         }
+    }
+
+    /// Render a collapsed header for the browser HUD with status (1 line + border)
+    fn render_browser_header(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::widgets::{Block, Borders, Paragraph};
+        use ratatui::text::{Line as RLine, Span};
+        use ratatui::layout::Margin;
+
+        let (url_opt, status_str) = {
+            let url = self
+                .latest_browser_screenshot
+                .lock()
+                .ok()
+                .and_then(|g| g.as_ref().map(|(_, u)| u.clone()));
+            let status = self.get_browser_status_string();
+            (url, status)
+        };
+        let title = format!(" {} ", self.browser_title());
+        let is_active = url_opt.is_some();
+        let summary = match url_opt {
+            Some(u) if !u.is_empty() => format!("{}", u),
+            _ => status_str,
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()))
+            .title(title);
+        let inner = block.inner(area);
+        block.render(area, buf);
+        let content = inner.inner(Margin::new(1, 0)); // 1 space padding inside border
+
+        let key_hint_style = Style::default().fg(crate::colors::function());
+        let label_style = Style::default().dim(); // match top status bar label
+
+        // Left side: status dot + text (no label) and URL
+        let mut left_spans: Vec<Span> = Vec::new();
+        let dot_style = if is_active { Style::default().fg(crate::colors::success_green()) } else { Style::default().fg(crate::colors::text_dim()) };
+        left_spans.push(Span::styled("•", dot_style));
+        // Choose status text: Active if we have a URL/screenshot, else Idle
+        // no status text; dot conveys status
+        // Spaces between status and URL; no label
+        left_spans.push(Span::raw(" "));
+        left_spans.push(Span::raw(summary));
+
+        // Right side: Expand hint
+        let right_spans: Vec<Span> = vec![
+            Span::styled("Expand: ", label_style),
+            Span::from("Ctrl+B").style(key_hint_style),
+        ];
+
+        let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+        let left_len = measure(&left_spans);
+        let right_len = measure(&right_spans);
+        let total_width = content.width as usize;
+        let trailing_pad = 0usize; // Paragraph will draw to edge; we already padded left/right
+        if total_width > left_len + right_len + trailing_pad {
+            let spacer = " ".repeat(total_width - left_len - right_len - trailing_pad);
+            left_spans.push(Span::from(spacer));
+        }
+        let mut spans = left_spans;
+        spans.extend(right_spans);
+        Paragraph::new(RLine::from(spans)).render(content, buf);
+    }
+
+    /// Render a collapsed header for the agents HUD with counts/list (1 line + border)
+    fn render_agents_header(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::widgets::{Block, Borders, Paragraph};
+        use ratatui::text::{Line as RLine, Span};
+        use ratatui::layout::Margin;
+
+        let count = self.active_agents.len();
+        let summary = if count == 0 && self.agents_ready_to_start {
+            "preparing context".to_string()
+        } else if count == 0 {
+            "no active agents".to_string()
+        } else {
+            let mut parts: Vec<String> = Vec::new();
+            for a in self.active_agents.iter().take(3) {
+                let s = match a.status { AgentStatus::Pending => "pending", AgentStatus::Running => "running", AgentStatus::Completed => "done", AgentStatus::Failed => "failed" };
+                parts.push(format!("{} ({})", a.name, s));
+            }
+            let extra = if count > 3 { format!(" +{}", count - 3) } else { String::new() };
+            format!("{}{}", parts.join(", "), extra)
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()))
+            .title(" Agents ");
+        let inner = block.inner(area);
+        block.render(area, buf);
+        let content = inner.inner(Margin::new(1, 0)); // 1 space padding inside border
+
+        let key_hint_style = Style::default().fg(crate::colors::function());
+        let label_style = Style::default().dim(); // match top status bar label
+
+        // Left side: status dot + text (no label) and Agents summary
+        let mut left_spans: Vec<Span> = Vec::new();
+        let is_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
+        let dot_style = if is_active { Style::default().fg(crate::colors::success_green()) } else { Style::default().fg(crate::colors::text_dim()) };
+        left_spans.push(Span::styled("•", dot_style));
+        // no status text; dot conveys status
+        left_spans.push(Span::styled("  ·  ", Style::default().fg(crate::colors::text())));
+        // Spaces between status and summary; no label
+        left_spans.push(Span::raw(" "));
+        left_spans.push(Span::raw(summary));
+
+        // Right side: Expand hint
+        let right_spans: Vec<Span> = vec![
+            Span::styled("Expand: ", label_style),
+            Span::from("Ctrl+P").style(key_hint_style),
+        ];
+
+        let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+        let left_len = measure(&left_spans);
+        let right_len = measure(&right_spans);
+        let total_width = content.width as usize;
+        let trailing_pad = 0usize;
+        if total_width > left_len + right_len + trailing_pad {
+            let spacer = " ".repeat(total_width - left_len - right_len - trailing_pad);
+            left_spans.push(Span::from(spacer));
+        }
+        let mut spans = left_spans;
+        spans.extend(right_spans);
+        Paragraph::new(RLine::from(spans)).render(content, buf);
+    }
+
+    fn get_browser_status_string(&self) -> String { "Browser".to_string() }
+
+    fn browser_title(&self) -> &'static str {
+        if self.browser_is_external { "Chrome" } else { "Browser" }
     }
 
     /// Render the agent status panel in the HUD
@@ -6374,6 +6697,46 @@ impl ChatWidget<'_> {
 
         let inner_agent = agent_block.inner(area);
         agent_block.render(area, buf);
+        // Render a one-line collapsed header inside expanded panel
+        use ratatui::layout::Margin;
+        let header_pad = inner_agent.inner(Margin::new(1, 0));
+        let header_line = Rect { x: header_pad.x, y: header_pad.y, width: header_pad.width, height: 1 };
+        let key_hint_style = Style::default().fg(crate::colors::function());
+        let label_style = Style::default().dim();
+        let is_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
+        let dot_style = if is_active { Style::default().fg(crate::colors::success_green()) } else { Style::default().fg(crate::colors::text_dim()) };
+        // Build summary like collapsed header
+        let count = self.active_agents.len();
+        let summary = if count == 0 && self.agents_ready_to_start { "preparing context".to_string() } else if count == 0 { "no active agents".to_string() } else {
+            let mut parts: Vec<String> = Vec::new();
+            for a in self.active_agents.iter().take(3) {
+                let s = match a.status { AgentStatus::Pending => "pending", AgentStatus::Running => "running", AgentStatus::Completed => "done", AgentStatus::Failed => "failed" };
+                parts.push(format!("{} ({})", a.name, s));
+            }
+            let extra = if count > 3 { format!(" +{}", count - 3) } else { String::new() };
+            format!("{}{}", parts.join(", "), extra)
+        };
+        let mut left_spans: Vec<Span> = Vec::new();
+        left_spans.push(Span::styled("•", dot_style));
+        // no status text; dot conveys status
+        left_spans.push(Span::styled("  ·  ", Style::default().fg(crate::colors::text())));
+        // Spaces between status and summary; no label
+        left_spans.push(Span::raw(" "));
+        left_spans.push(Span::raw(summary));
+        let right_spans: Vec<Span> = vec![
+            Span::styled("Collapse: ", label_style),
+            Span::from("Ctrl+P").style(key_hint_style),
+        ];
+        let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
+        let left_len = measure(&left_spans);
+        let right_len = measure(&right_spans);
+        let total_width = header_line.width as usize;
+        if total_width > left_len + right_len { left_spans.push(Span::from(" ".repeat(total_width - left_len - right_len))); }
+        let mut spans = left_spans; spans.extend(right_spans);
+        Paragraph::new(RLine::from(spans)).render(header_line, buf);
+
+        // Body area excludes the header line and a spacer line
+        let inner_agent = Rect { x: inner_agent.x, y: inner_agent.y + 2, width: inner_agent.width, height: inner_agent.height.saturating_sub(2) };
 
         // Dynamically calculate sparkline height based on agent activity
         // More agents = taller sparkline area
