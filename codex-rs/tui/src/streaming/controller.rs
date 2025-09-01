@@ -507,11 +507,33 @@ impl StreamController {
         if self.current_stream == Some(kind) {
             let state = self.state(kind);
             let has_delta = state.has_seen_delta;
-            
+
             if has_delta {
-                // This is the final event for content we've been streaming via deltas
-                // Just finalize what we have, don't inject the full message
-                tracing::debug!("Already streaming {:?} via deltas, finalizing without injection", kind);
+                // Many providers send a final reasoning/message that may include
+                // text not present in prior deltas. For Reasoning, prefer to
+                // merge the final message into the collector to avoid losing
+                // content, preserving the number of already committed lines so
+                // we don't duplicate what the user already saw.
+                if matches!(kind, StreamKind::Reasoning) && !message.is_empty() {
+                    tracing::debug!(
+                        "Merging final {:?} content into collector before finalize (len={})",
+                        kind,
+                        message.len()
+                    );
+                    let committed = state.collector.committed_count();
+                    let mut msg = message.to_owned();
+                    if !msg.ends_with('\n') { msg.push('\n'); }
+                    let state_mut = self.state_mut(kind);
+                    state_mut
+                        .collector
+                        .replace_with_and_mark_committed(&msg, committed);
+                    return self.finalize(kind, immediate, sink);
+                }
+                // For Answer (or empty message), finalize existing streamed content.
+                tracing::debug!(
+                    "Already streaming {:?} via deltas, finalizing without injection",
+                    kind
+                );
                 return self.finalize(kind, immediate, sink);
             } else if self.finishing_after_drain {
                 // We're already in the process of finishing this stream (animation phase)
