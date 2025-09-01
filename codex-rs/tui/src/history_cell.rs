@@ -2722,28 +2722,12 @@ impl CollapsibleReasoningCell {
                 continue;
             }
 
-            // Title heuristics:
-            // 1) Entire line bold
+            // Heading rule (per product): entire line bold only.
             let all_bold = !l.spans.is_empty()
                 && l.spans.iter().all(|s| {
                     s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty()
                 });
-            // 2) Starts with one or more bold spans and ends with ':'
-            let mut leading_bold = true;
-            for s in &l.spans {
-                if s.content.trim().is_empty() {
-                    continue;
-                }
-                leading_bold &= s.style.add_modifier.contains(Modifier::BOLD);
-                break;
-            }
-            let ends_colon = trimmed.ends_with(':');
-
-            // 3) Markdown heading (begins with '#') - renderer includes hashes in content
-            let is_md_heading = trimmed.starts_with('#');
-
-            // Keep detection strict and formatting-driven only.
-            if all_bold || (leading_bold && ends_colon) || is_md_heading {
+            if all_bold {
                 titles.push(l.clone());
             }
         }
