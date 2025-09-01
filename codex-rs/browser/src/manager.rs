@@ -644,6 +644,7 @@ impl BrowserManager {
         builder = builder.window_size(config.viewport.width, config.viewport.height);
 
         // Add browser launch flags (keep minimal set for screenshot functionality)
+        let log_file = format!("{}/code-chrome.log", std::env::temp_dir().display());
         builder = builder
             .arg("--disable-blink-features=AutomationControlled")
             .arg("--no-first-run")
@@ -659,10 +660,7 @@ impl BrowserManager {
             // Redirect Chrome logging to a file to keep terminal clean
             .arg("--enable-logging")
             .arg("--log-level=1") // 0 = INFO, 1 = WARNING, 2 = ERROR, 3 = FATAL (1 to reduce verbosity)
-            .arg(format!(
-                "--log-file={}/code-chrome.log",
-                std::env::temp_dir().display()
-            ))
+            .arg(format!("--log-file={}", log_file))
             // Suppress console output
             .arg("--silent-launch")
             // Set a longer timeout for CDP requests (60 seconds instead of default 30)
@@ -671,7 +669,29 @@ impl BrowserManager {
         let browser_config = builder
             .build()
             .map_err(|e| BrowserError::CdpError(e.to_string()))?;
-        let (browser, mut handler) = Browser::launch(browser_config).await?;
+        let (browser, mut handler) = match Browser::launch(browser_config).await {
+            Ok(v) => v,
+            Err(e) => {
+                // Provide clearer diagnostics for internal browser launch failures
+                let base = format!("Failed to launch internal browser: {}", e);
+                #[cfg(target_os = "macos")]
+                let hint = "Ensure Google Chrome or Chromium is installed and runnable (e.g., /Applications/Google Chrome.app).";
+                #[cfg(target_os = "linux")]
+                let hint = "Ensure google-chrome or chromium is installed and available on PATH.";
+                #[cfg(target_os = "windows")]
+                let hint = "Ensure Chrome is installed and chrome.exe is available (typically in Program Files).";
+                #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+                let hint = "Ensure Chrome/Chromium is installed and available on PATH.";
+
+                let msg = format!(
+                    "{}. Hint: {}. Chrome log: {}",
+                    base,
+                    hint,
+                    log_file
+                );
+                return Err(BrowserError::CdpError(msg));
+            }
+        };
         // Optionally: browser.fetch_targets().await.ok();
 
         let task = tokio::spawn(async move {
