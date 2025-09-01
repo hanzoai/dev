@@ -5,6 +5,7 @@ use tempfile::Builder;
 pub enum PasteImageError {
     ClipboardUnavailable(String),
     NoImage(String),
+    DecodeFailed(String),
     EncodeFailed(String),
     IoError(String),
 }
@@ -14,6 +15,7 @@ impl std::fmt::Display for PasteImageError {
         match self {
             PasteImageError::ClipboardUnavailable(msg) => write!(f, "clipboard unavailable: {msg}"),
             PasteImageError::NoImage(msg) => write!(f, "no image on clipboard: {msg}"),
+            PasteImageError::DecodeFailed(msg) => write!(f, "could not decode image: {msg}"),
             PasteImageError::EncodeFailed(msg) => write!(f, "could not encode image: {msg}"),
             PasteImageError::IoError(msg) => write!(f, "io error: {msg}"),
         }
@@ -87,6 +89,72 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
 
 // Clipboard image helpers removed from default build to keep dependencies and warnings minimal.
 // If clipboard image pasting is needed, reintroduce using arboard + image crates.
+
+/// Try to interpret pasted text as an image (data URL or raw base64),
+/// decode it, convert to PNG, and write to a temp file.
+///
+/// Supports common forms:
+/// - data:image/png;base64,AAAA...
+/// - data:image/jpeg;base64,/9j/...
+/// - Raw base64 for PNG (starts with iVBORw0K...) or JPEG (/9j/), GIF (R0lGODlh / R0lGODdh)
+pub fn try_decode_base64_image_to_temp_png(pasted: &str) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
+    let s = pasted.trim();
+    if s.is_empty() { return Err(PasteImageError::DecodeFailed("empty".into())); }
+
+    // Extract base64 payload and remember mime if present
+    let (maybe_mime, b64) = if let Some(rest) = s.strip_prefix("data:") {
+        // data:[mime];base64,....  We only handle base64-encoded payloads
+        if let Some(idx) = rest.find(",") {
+            let (head, tail) = rest.split_at(idx);
+            let b64 = &tail[1..];
+            if !head.contains(";base64") {
+                return Err(PasteImageError::DecodeFailed("data URL without base64".into()));
+            }
+            let mime = head.split(';').next().unwrap_or("").to_string();
+            (Some(mime), b64)
+        } else {
+            return Err(PasteImageError::DecodeFailed("malformed data URL".into()));
+        }
+    } else {
+        // Raw base64 – heuristically accept if it looks like an image
+        let looks_imagey = s.starts_with("iVBORw0K") // PNG
+            || s.starts_with("/9j/")               // JPEG
+            || s.starts_with("R0lGODlh")           // GIF87a
+            || s.starts_with("R0lGODdh");          // GIF89a
+        if !looks_imagey { return Err(PasteImageError::DecodeFailed("not image-like base64".into())); }
+        (None, s)
+    };
+
+    // Remove whitespace that might be wrapped by terminals
+    let compact: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::decode(compact).map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
+
+    // Load via `image` crate to get dimensions and normalize to PNG
+    let dyn_img = image::load_from_memory(&bytes)
+        .map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
+    let (w, h) = (dyn_img.width(), dyn_img.height());
+
+    let mut png: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut png);
+        dyn_img
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
+    }
+
+    // Persist to temp file
+    let tmp = Builder::new()
+        .prefix("codex-clipboard-")
+        .suffix(".png")
+        .tempfile()
+        .map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    std::fs::write(tmp.path(), &png).map_err(|e| PasteImageError::IoError(e.to_string()))?;
+    let (_file, path) = tmp.keep().map_err(|e| PasteImageError::IoError(e.error.to_string()))?;
+
+    let _mime_dbg = maybe_mime.unwrap_or_else(|| "image/*".to_string());
+    tracing::debug!("decoded pasted base64 image to {w}x{h} PNG at {}", path.to_string_lossy());
+    Ok((path, PastedImageInfo { width: w, height: h, encoded_format: EncodedImageFormat::Png }))
+}
 
 /// Normalize pasted text that may represent a filesystem path.
 ///

@@ -32,6 +32,7 @@ use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::paste_image_to_temp_png;
+use crate::clipboard_paste::try_decode_base64_image_to_temp_png;
 use codex_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -412,7 +413,13 @@ impl ChatComposer {
 
     pub fn handle_paste(&mut self, pasted: String) -> bool {
         let char_count = pasted.chars().count();
-        if char_count > LARGE_PASTE_CHAR_THRESHOLD {
+        // If the pasted text looks like a base64/data-URI image, decode it and insert as a path.
+        if let Ok((path, info)) = try_decode_base64_image_to_temp_png(&pasted) {
+            let path_str = path.to_string_lossy();
+            self.textarea.insert_str(&path_str);
+            self.textarea.insert_str(" ");
+            self.flash_footer_notice(format!("Added image {}x{} (PNG)", info.width, info.height));
+        } else if char_count > LARGE_PASTE_CHAR_THRESHOLD {
             let placeholder = format!("[Pasted Content {char_count} chars]");
             self.textarea.insert_str(&placeholder);
             self.pending_pastes.push((placeholder, pasted));
