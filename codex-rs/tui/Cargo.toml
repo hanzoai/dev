@@ -94,4 +94,7 @@ chrono = { version = "0.4", features = ["serde"] }
 insta = "1.43.1"
 pretty_assertions = "1"
 rand = "0.9"
-vt100 = "0.16.2"
+# Downgrade vt100 to avoid a hard requirement on unicode-width 0.2.1,
+# which conflicts with ratatui 0.29.x pinning 0.2.0. This crate is
+# only used in tests.
+vt100 = "0.15.0"

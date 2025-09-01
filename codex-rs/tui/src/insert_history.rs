@@ -4,7 +4,7 @@ use std::io::Write;
 
 use crate::tui;
 use crossterm::Command;
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{MoveTo, MoveToNextLine};
 use crossterm::queue;
 use crossterm::style::Color as CColor;
 use crossterm::style::Colors;
@@ -13,6 +13,7 @@ use crossterm::style::SetAttribute;
 use crossterm::style::SetBackgroundColor;
 use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
+use crossterm::terminal::{Clear, ClearType};
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -63,14 +64,15 @@ pub fn insert_history_lines_to_writer<B, W>(
         queue!(writer, SetScrollRegion(top_1based..screen_size.height)).ok();
         queue!(writer, MoveTo(0, area.top())).ok();
         for _ in 0..scroll_amount {
-            // Reverse Index (RI): ESC M
-            queue!(writer, Print("\x1bM")).ok();
+            // Reverse Index (RI)
+            queue!(writer, ReverseIndex).ok();
         }
         queue!(writer, ResetScrollRegion).ok();
 
         let cursor_top = area.top().saturating_sub(1);
+        // Adjust our local notion of area to account for the pre-scroll,
+        // but avoid touching ratatui::Terminal internals (set_viewport_area is private).
         area.y += scroll_amount;
-        terminal.set_viewport_area(area);
         cursor_top
     } else {
         area.top().saturating_sub(1)
@@ -108,10 +110,10 @@ pub fn insert_history_lines_to_writer<B, W>(
     queue!(writer, MoveTo(0, cursor_top)).ok();
 
     for line in wrapped {
-        queue!(writer, Print("\r\n")).ok();
-        queue!(writer, Print("\x1b[K")).ok(); // Clear to end of line with current bg
+        queue!(writer, MoveToNextLine(1)).ok();
+        queue!(writer, Clear(ClearType::UntilNewLine)).ok(); // Clear to end of line with current bg
         write_spans(writer, line.iter()).ok();
-        queue!(writer, Print("\x1b[K")).ok(); // Clear remainder of line after content
+        queue!(writer, Clear(ClearType::UntilNewLine)).ok(); // Clear remainder of line after content
     }
 
     queue!(writer, ResetScrollRegion).ok();
@@ -122,6 +124,27 @@ pub fn insert_history_lines_to_writer<B, W>(
     }
 
     writer.flush().ok();
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReverseIndex;
+
+impl Command for ReverseIndex {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        // RI (Reverse Index): ESC M
+        write!(f, "\x1bM")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        // Use ANSI path through ConPTY; WinAPI equivalent isn't exposed.
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
