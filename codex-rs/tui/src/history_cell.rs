@@ -318,6 +318,91 @@ impl HistoryCell for Box<dyn HistoryCell> {
     }
 }
 
+// ==================== ReadAggregationCell ====================
+// Aggregates multiple Read preamble entries into a single history cell while
+// commands are still running, then flips to a finalized state without changing
+// position in the history. This prevents flicker where multiple transient
+// "Read" sections appear and later merge.
+
+pub(crate) struct ReadAggregationCell {
+    // Aggregated preamble lines (each line typically starts with "└ " or two spaces)
+    lines: Vec<Line<'static>>,
+    // When true, render as a finalized "Read" section (ExecStatus::Success);
+    // otherwise render with a running header style (ExecStatus::Running).
+    finalized: bool,
+}
+
+impl ReadAggregationCell {
+    pub(crate) fn new() -> Self {
+        Self { lines: Vec::new(), finalized: false }
+    }
+
+    pub(crate) fn push_lines(&mut self, mut more: Vec<Line<'static>>) {
+        // Trim completely empty prefix/suffix lines from the chunk to keep the block compact
+        more = trim_empty_lines(more);
+        if more.is_empty() { return; }
+        self.lines.extend(more);
+    }
+
+    pub(crate) fn finalize(&mut self) {
+        self.finalized = true;
+    }
+
+    // Build a normalized copy of aggregated lines where only the very first
+    // visible line uses the corner connector "└ "; subsequent lines use two
+    // spaces. Also coalesce adjacent read ranges for the same file.
+    fn normalized_lines(&self) -> Vec<Line<'static>> {
+        let mut v = self.lines.clone();
+        // Ensure only the first content line shows the corner
+        let mut seen_first = false;
+        for line in v.iter_mut() {
+            if let Some(sp0) = line.spans.get_mut(0) {
+                let s = sp0.content.as_ref();
+                if s == "└ " || s == "  └ " {
+                    if seen_first {
+                        sp0.content = "  ".into();
+                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
+                    } else {
+                        // First occurrence keeps the corner but dim it consistently
+                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
+                        seen_first = true;
+                    }
+                }
+            }
+        }
+        // Merge overlapping/touching ranges per file to keep the list succinct
+        coalesce_read_ranges_in_lines_local(&mut v);
+        v
+    }
+}
+
+impl HistoryCell for ReadAggregationCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } }
+    }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        let mut out: Vec<Line<'static>> = Vec::new();
+        // Header: match Exec running/success styling for informational actions
+        let header = if self.finalized {
+            Line::styled("Read", Style::default().fg(crate::colors::text()))
+        } else {
+            Line::styled("Read", Style::default().fg(crate::colors::info()))
+        };
+        out.push(header);
+        out.extend(self.normalized_lines());
+        out
+    }
+    fn desired_height(&self, width: u16) -> u16 {
+        Paragraph::new(Text::from(self.display_lines_trimmed()))
+            .wrap(Wrap { trim: false })
+            .line_count(width)
+            .try_into()
+            .unwrap_or(0)
+    }
+}
+
 // ==================== PlainHistoryCell ====================
 // For simple cells that just store lines
 
