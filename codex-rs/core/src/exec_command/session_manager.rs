@@ -239,6 +239,13 @@ impl SessionManager {
             output,
         })
     }
+
+    /// Kill all running exec sessions by dropping their session objects.
+    /// This is invoked on user interrupts to ensure no child processes remain.
+    pub async fn kill_all(&self) {
+        let mut sessions = self.sessions.lock().await;
+        sessions.clear(); // dropping ExecCommandSession triggers ChildKiller::kill in Drop
+    }
 }
 
 /// Spawn PTY and child process per spawn_exec_command_session logic.
