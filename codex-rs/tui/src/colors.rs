@@ -121,11 +121,56 @@ fn color_to_rgb(c: Color) -> (u8, u8, u8) {
         Color::LightBlue => (102, 153, 255),
         Color::LightMagenta => (255, 102, 255),
         Color::LightCyan => (102, 255, 255),
-        Color::Indexed(i) => (i, i, i),
+        // Correct mapping for ANSI-256 indexes used when we quantize themes.
+        // This avoids treating all Indexed colors as grayscale and fixes
+        // luminance decisions (e.g., mistaking light themes for dark) on
+        // terminals that don’t advertise truecolor, including some Windows setups.
+        Color::Indexed(i) => ansi256_to_rgb(i),
         // When theme background is Color::Reset (to use terminal default),
         // avoid recursion by treating Reset as pure white in RGB space.
         Color::Reset => (255, 255, 255),
     }
+}
+
+// Convert an ANSI-256 color index into an approximate RGB triple using the
+// standard xterm 256-color palette: 0–15 ANSI, 16–231 6×6×6 cube, 232–255 grayscale.
+fn ansi256_to_rgb(i: u8) -> (u8, u8, u8) {
+    // ANSI 16 base colors
+    const ANSI16: [(u8, u8, u8); 16] = [
+        (0, 0, 0),       // 0 black
+        (205, 0, 0),     // 1 red
+        (0, 205, 0),     // 2 green
+        (205, 205, 0),   // 3 yellow
+        (0, 0, 205),     // 4 blue
+        (205, 0, 205),   // 5 magenta
+        (0, 205, 205),   // 6 cyan
+        (229, 229, 229), // 7 gray
+        (127, 127, 127), // 8 dark gray
+        (255, 102, 102), // 9 light red
+        (102, 255, 178), // 10 light green
+        (255, 255, 102), // 11 light yellow
+        (102, 153, 255), // 12 light blue
+        (255, 102, 255), // 13 light magenta
+        (102, 255, 255), // 14 light cyan
+        (255, 255, 255), // 15 white
+    ];
+
+    if i < 16 {
+        return ANSI16[i as usize];
+    }
+    if (16..=231).contains(&i) {
+        // 6×6×6 color cube
+        let idx = i - 16;
+        let r = idx / 36;
+        let g = (idx % 36) / 6;
+        let b = idx % 6;
+        let step = [0, 95, 135, 175, 215, 255];
+        return (step[r as usize], step[g as usize], step[b as usize]);
+    }
+    // Grayscale ramp 232–255 maps to 8,18,28,...,238
+    let level = i.saturating_sub(232);
+    let v = 8 + 10 * level;
+    (v, v, v)
 }
 
 fn blend_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {

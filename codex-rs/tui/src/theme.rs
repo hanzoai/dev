@@ -246,6 +246,11 @@ fn needs_ansi256_fallback() -> bool {
     if term_program == "Apple_Terminal" {
         return true;
     }
+    // Windows Terminal reliably supports truecolor; avoid unnecessary fallback.
+    // It sets TERM_PROGRAM=Windows_Terminal and WT_SESSION in the env.
+    if term_program == "Windows_Terminal" || std::env::var("WT_SESSION").is_ok() {
+        return false;
+    }
     let colorterm = std::env::var("COLORTERM").unwrap_or_default().to_lowercase();
     let has_truecolor = colorterm.contains("truecolor") || colorterm.contains("24bit");
     // Known good terminals
