@@ -259,6 +259,12 @@ pub(crate) struct ChatWidget<'a> {
     next_seq: u64,
     // Sequence marker for the final assistant message in the current turn
     seq_answer_final: Option<u64>,
+
+    // When true, drop any further streaming deltas for the current turn.
+    // Set as soon as the user interrupts (Esc/Ctrl+C) to ensure UI stops
+    // showing additional output immediately, even if the backend takes a
+    // moment to propagate cancellation.
+    drop_streaming: bool,
 }
 
 struct PendingJumpBack {
@@ -860,6 +866,12 @@ impl ChatWidget<'_> {
     
     /// Handle streaming delta for both answer and reasoning
     fn handle_streaming_delta(&mut self, kind: StreamKind, id: String, delta: String) {
+        if self.drop_streaming {
+            // Ignore any post‑cancel deltas. The stream will be finalized or
+            // cleared once the backend surfaces the interrupt/complete event.
+            tracing::debug!("dropping streaming delta after cancel (kind={:?}, id={})", kind, id);
+            return;
+        }
         tracing::debug!("handle_streaming_delta kind={:?}, delta={:?}", kind, delta);
         // Remember which stream is currently active so we can group inserts
         self.current_stream_kind = Some(kind);
@@ -1018,23 +1030,47 @@ impl ChatWidget<'_> {
         for cell in &self.history_cells {
             cell.trigger_fade();
         }
-        // Create a new exec cell for the command and insert directly into history
-        // so its position remains stable. This avoids showing a completed
-        // command above a still-visible running overlay.
+        // Determine the high-level action (read/search/list/run) and avoid
+        // inserting running history cells for informational actions. This
+        // eliminates the brief flash of multiple "Read" sections while
+        // consecutive reads are executing; they will now appear only once
+        // completed and merge immediately with prior Read output.
         let parsed_command = ev.parsed_cmd.clone();
+        let action = history_cell::action_from_parsed(&parsed_command);
+
+        // Still track run lifecycle for layout/metrics
+        self.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
+
+        // For read/search/list actions: don't insert a running cell in history.
+        // Track the command so End can append the finalized result (and merge).
+        if matches!(action, "read" | "search" | "list") {
+            self.running_commands.insert(
+                ev.call_id.clone(),
+                RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: None },
+            );
+            // Update concise status text without creating a history section
+            let status = match action {
+                "read" => "reading files…",
+                "search" => "searching…",
+                "list" => "listing files…",
+                _ => "working…",
+            };
+            self.bottom_pane.update_status_text(status.to_string());
+            return;
+        }
+
+        // For generic run/test/lint/etc: insert a running exec cell so users see
+        // the command context immediately; these are not merged during running.
         let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
         // Push to history and remember the index
         let before_len = self.history_cells.len();
         self.add_to_history(cell);
         let idx = if self.history_cells.len() > 0 { self.history_cells.len() - 1 } else { before_len };
 
-        // Still track run lifecycle for layout/metrics
-        self.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
-
         // Store in running commands with history index
         self.running_commands.insert(
             ev.call_id.clone(),
-            RunningCommand { command: ev.command, parsed: parsed_command, history_index: Some(idx) },
+            RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: Some(idx) },
         );
 
         // Update status: show that a command is running
@@ -1211,6 +1247,13 @@ impl ChatWidget<'_> {
             }
         };
         let new_kind = to_kind(new_exec);
+
+        // Do NOT merge generic "run" execs. Merging "Ran" blocks across steps can
+        // pull later command output above intervening content and confuse chronology.
+        // We still allow merging of Read/Search/List summaries where grouping is helpful.
+        if matches!(new_kind, history_cell::ExecKind::Run) {
+            return;
+        }
 
         // Case 1: previous is also a completed ExecCell with same header -> merge into MergedExecCell preserving styling
         if let Some(prev_exec) = self.history_cells[idx - 1]
@@ -1556,6 +1599,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_task_running(false);
         self.running_commands.clear();
         self.stream.clear_all();
+        self.drop_streaming = false;
         self.agents_ready_to_start = false;
         self.active_task_ids.clear();
         self.maybe_hide_spinner();
@@ -1568,6 +1612,9 @@ impl ChatWidget<'_> {
             // Finalize any visible running indicators as interrupted (Exec/Web/Custom)
             self.finalize_all_running_as_interrupted();
             self.bottom_pane.clear_ctrl_c_quit_hint();
+            // Stop any active UI streams immediately so output ceases at once.
+            self.finalize_active_stream();
+            self.drop_streaming = true;
             self.submit_op(Op::Interrupt);
             // If nothing else is active, drop spinner; otherwise status already updated.
             if self.active_task_ids.is_empty() {
@@ -1791,6 +1838,7 @@ impl ChatWidget<'_> {
             browser_is_external: false,
             next_seq: 1,
             seq_answer_final: None,
+            drop_streaming: false,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1911,6 +1959,7 @@ impl ChatWidget<'_> {
             browser_is_external: false,
             next_seq: 1,
             seq_answer_final: None,
+            drop_streaming: false,
         }
     }
 
@@ -3064,6 +3113,8 @@ impl ChatWidget<'_> {
                 self.closed_reasoning_ids.clear();
                 self.ended_call_ids.clear();
                 self.bottom_pane.clear_ctrl_c_quit_hint();
+                // Accept streaming again for this turn
+                self.drop_streaming = false;
                 // Mark this task id as active and ensure the status stays visible
                 self.active_task_ids.insert(id.clone());
                 self.bottom_pane.set_task_running(true);
@@ -4583,9 +4634,8 @@ impl ChatWidget<'_> {
         // If that impl is removed, downcast_ref will fail and we won't find the streaming cell,
         // causing the final to append a new Assistant cell (duplicate).
         let streaming_idx = if let Some(ref want) = id {
-            // Prefer an exact id match
-            let by_id = self
-                .history_cells
+            // Only replace a streaming cell if its id matches this final.
+            self.history_cells
                 .iter()
                 .rposition(|c| {
                     if let Some(sc) = c.as_any().downcast_ref::<history_cell::StreamingContentCell>() {
@@ -4593,17 +4643,9 @@ impl ChatWidget<'_> {
                     } else {
                         false
                     }
-                });
-            // Fallback: use the latest streaming cell regardless of id if no exact match
-            by_id.or_else(|| {
-                self.history_cells
-                    .iter()
-                    .rposition(|c| c.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some())
-            })
+                })
         } else {
-            self.history_cells
-                .iter()
-                .rposition(|c| c.as_any().downcast_ref::<history_cell::StreamingContentCell>().is_some())
+            None
         };
         if let Some(idx) = streaming_idx {
             tracing::debug!("final-answer: replacing StreamingContentCell at idx={} by id match", idx);
