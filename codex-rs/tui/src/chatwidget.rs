@@ -147,6 +147,8 @@ pub(crate) struct ChatWidget<'a> {
     running_custom_tools: HashMap<String, usize>,
     // Track running web searches by call_id -> (history index, query)
     running_web_search: HashMap<String, (usize, Option<String>)>,
+    // Single live aggregation block for consecutive Read actions
+    running_read_agg_index: Option<usize>,
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
@@ -579,6 +581,19 @@ impl ChatWidget<'_> {
         if !any_tasks_active {
             self.bottom_pane.set_task_running(false);
         }
+        // Finalize a running Read aggregation if present to avoid dangling "Read" running block
+        if let Some(idx) = self.running_read_agg_index.take() {
+            if idx < self.history_cells.len() {
+                if let Some(agg) = self.history_cells[idx]
+                    .as_any_mut()
+                    .downcast_mut::<history_cell::ReadAggregationCell>()
+                {
+                    agg.finalize();
+                    self.invalidate_height_cache();
+                    self.request_redraw();
+                }
+            }
+        }
         // Re-check global idle state
         self.maybe_hide_spinner();
     }
@@ -653,6 +668,19 @@ impl ChatWidget<'_> {
                     }
                 }
                 self.running_web_search.remove(&call_id);
+            }
+        }
+        // Also finalize a running Read aggregation block, if any
+        if let Some(idx) = self.running_read_agg_index.take() {
+            if idx < self.history_cells.len() {
+                if let Some(agg) = self.history_cells[idx]
+                    .as_any_mut()
+                    .downcast_mut::<history_cell::ReadAggregationCell>()
+                {
+                    agg.finalize();
+                    self.invalidate_height_cache();
+                    self.request_redraw();
+                }
             }
         }
     }
@@ -1041,21 +1069,49 @@ impl ChatWidget<'_> {
         // Still track run lifecycle for layout/metrics
         self.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
 
-        // For read/search/list actions: don't insert a running cell in history.
-        // Track the command so End can append the finalized result (and merge).
-        if matches!(action, "read" | "search" | "list") {
+        // For read actions: maintain a single live aggregation cell that gets
+        // updated as individual read commands begin, then flip it to a finalized
+        // state when the last read completes.
+        if action == "read" {
+            // Track this call without placing an individual running cell
             self.running_commands.insert(
                 ev.call_id.clone(),
-                RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: None },
+                RunningCommand { command: ev.command.clone(), parsed: parsed_command.clone(), history_index: None },
             );
-            // Update concise status text without creating a history section
-            let status = match action {
-                "read" => "reading files…",
-                "search" => "searching…",
-                "list" => "listing files…",
-                _ => "working…",
+
+            // Ensure aggregation cell exists
+            let agg_index = match self.running_read_agg_index {
+                Some(idx) if idx < self.history_cells.len()
+                    && self.history_cells[idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::ReadAggregationCell>()
+                        .is_some() => Some(idx),
+                _ => None,
             };
-            self.bottom_pane.update_status_text(status.to_string());
+            let idx = if let Some(i) = agg_index {
+                i
+            } else {
+                let before_len = self.history_cells.len();
+                self.add_to_history(history_cell::ReadAggregationCell::new());
+                let i = if self.history_cells.len() > 0 { self.history_cells.len() - 1 } else { before_len };
+                self.running_read_agg_index = Some(i);
+                i
+            };
+
+            // Derive preamble lines for this read from a temp running ExecCell and drop header
+            let tmp = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
+            let mut lines = tmp.display_lines();
+            if !lines.is_empty() { lines.remove(0); }
+            if let Some(agg) = self.history_cells[idx]
+                .as_any_mut()
+                .downcast_mut::<history_cell::ReadAggregationCell>()
+            {
+                agg.push_lines(lines);
+                self.invalidate_height_cache();
+                self.request_redraw();
+            }
+
+            self.bottom_pane.update_status_text("reading files…".to_string());
             return;
         }
 
@@ -1116,6 +1172,38 @@ impl ChatWidget<'_> {
         let (command, parsed, history_index) = cmd
             .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index))
             .unwrap_or_else(|| (vec![call_id.clone()], vec![], None));
+
+        // Handle completed Read commands by finalizing the aggregation cell
+        let action = history_cell::action_from_parsed(&parsed);
+        if action == "read" {
+            // Flip aggregation to finalized if this was the last active read
+            let any_read_running = self
+                .running_commands
+                .values()
+                .any(|rc| history_cell::action_from_parsed(&rc.parsed) == "read");
+            if !any_read_running {
+                if let Some(idx) = self.running_read_agg_index.take() {
+                    if idx < self.history_cells.len() {
+                        if let Some(agg) = self.history_cells[idx]
+                            .as_any_mut()
+                            .downcast_mut::<history_cell::ReadAggregationCell>()
+                        {
+                            agg.finalize();
+                            self.invalidate_height_cache();
+                            self.request_redraw();
+                        }
+                    }
+                }
+            }
+            // Update status and drop spinner if idle
+            if exit_code == 0 {
+                self.bottom_pane.update_status_text("files read".to_string());
+            } else {
+                self.bottom_pane.update_status_text(format!("read failed (exit {})", exit_code));
+            }
+            self.maybe_hide_spinner();
+            return;
+        }
 
         // Build the completed cell
         let mut completed_opt = Some(history_cell::new_completed_exec_command(
@@ -1781,6 +1869,7 @@ impl ChatWidget<'_> {
             running_commands: HashMap::new(),
             running_custom_tools: HashMap::new(),
             running_web_search: HashMap::new(),
+            running_read_agg_index: None,
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -1904,6 +1993,7 @@ impl ChatWidget<'_> {
             running_commands: HashMap::new(),
             running_custom_tools: HashMap::new(),
             running_web_search: HashMap::new(),
+            running_read_agg_index: None,
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
             pending_files: HashMap::new(),
