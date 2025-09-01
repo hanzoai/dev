@@ -1071,11 +1071,16 @@ impl ChatWidget<'_> {
                     if let Some(c) = completed_opt.take() {
                         self.history_cells[idx] = Box::new(c);
                     }
+                    // Defer redraw until after potential merge to avoid a flash
                     self.invalidate_height_cache();
-                    self.request_redraw();
+                    let pre_len = self.history_cells.len();
                     replaced = true;
                     // Try to merge with previous history cell if they are the same kind (e.g., Searched, Read)
                     self.try_merge_completed_exec_at(idx);
+                    // If no merge occurred (length unchanged), request a redraw now
+                    if self.history_cells.len() == pre_len {
+                        self.request_redraw();
+                    }
                 }
             }
             if !replaced {
@@ -1094,11 +1099,16 @@ impl ChatWidget<'_> {
                     if let Some(c) = completed_opt.take() {
                         self.history_cells[i] = Box::new(c);
                     }
+                    // Defer redraw until after potential merge to avoid a flash
                     self.invalidate_height_cache();
-                    self.request_redraw();
+                    let pre_len = self.history_cells.len();
                     replaced = true;
                     // Try to merge with previous history cell if they are the same kind (e.g., Searched, Read)
                     self.try_merge_completed_exec_at(i);
+                    // If no merge occurred (length unchanged), request a redraw now
+                    if self.history_cells.len() == pre_len {
+                        self.request_redraw();
+                    }
                 }
             }
         }
@@ -1557,7 +1567,7 @@ impl ChatWidget<'_> {
 
         // Compute HUD target per spec using full terminal height:
         // - Base collapsed height = one 3-row header per present panel
-        // - Expanded contribution = 30% of terminal height; if < 15, bump to min(15, 60% of terminal)
+        // - Expanded contribution = 30% of terminal height; if < 25, bump to min(25, 60% of terminal)
         let collapsed_unit: u16 = 3;
         let present_count: u16 = (has_active_agents as u16) + (has_browser_screenshot as u16);
         let hud_target: Option<u16> = if !hud_present || present_count == 0 {
@@ -1567,7 +1577,7 @@ impl ChatWidget<'_> {
             let term_h = self.last_frame_height.get().max(1);
             let thirty = ((term_h as u32) * 30 / 100) as u16;
             let sixty = ((term_h as u32) * 60 / 100) as u16;
-            let mut expanded = if thirty < 15 { 15.min(sixty) } else { thirty };
+            let mut expanded = if thirty < 25 { 25.min(sixty) } else { thirty };
             // Ensure room for header + spacer inside expanded panel
             expanded = expanded.max(collapsed_unit.saturating_add(2));
             let any_expanded = self.browser_hud_expanded || self.agents_hud_expanded;
@@ -4876,6 +4886,8 @@ impl ChatWidget<'_> {
                         ),
                     }),
                 }));
+                // Offer launch options popup to help recover quickly
+                app_event_tx.send(AppEvent::ShowChromeOptions(port));
                 return;
             }
             Ok(result) => match result {
@@ -5189,6 +5201,8 @@ impl ChatWidget<'_> {
                                         ),
                                     }),
                                 }));
+                                // Also surface the Chrome launch options UI to assist the user
+                                app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
                             }
                             Err(_) => {
@@ -5203,6 +5217,8 @@ impl ChatWidget<'_> {
                                         ),
                                     }),
                                 }));
+                                // Also surface the Chrome launch options UI to assist the user
+                                app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
                             }
                         }
@@ -5215,6 +5231,8 @@ impl ChatWidget<'_> {
                                 message: format!("❌ Failed to connect to Chrome: {}", err_msg),
                             }),
                         }));
+                        // Offer launch options popup to help recover quickly
+                        app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
                     }
                 }
@@ -6427,7 +6445,7 @@ impl ChatWidget<'_> {
         let term_h = self.last_frame_height.get().max(1);
         let thirty = ((term_h as u32) * 30 / 100) as u16;
         let sixty = ((term_h as u32) * 60 / 100) as u16;
-        let mut expanded_target = if thirty < 15 { 15.min(sixty) } else { thirty };
+        let mut expanded_target = if thirty < 25 { 25.min(sixty) } else { thirty };
         // Make sure expanded chunk includes space for header + spacer
         let min_expanded = header_h.saturating_add(2);
         if expanded_target < min_expanded { expanded_target = min_expanded; }
