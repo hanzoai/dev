@@ -221,6 +221,8 @@ pub(crate) struct ChatWidget<'a> {
     // HUD panel expansion state (stacked layout): only one expands at a time
     browser_hud_expanded: bool,
     agents_hud_expanded: bool,
+    // Last full frame height (terminal rows), set each render; used for HUD sizing
+    last_frame_height: std::cell::Cell<u16>,
 
     // True when connected to external Chrome via CDP; affects HUD titles
     browser_is_external: bool,
@@ -1553,28 +1555,23 @@ impl ChatWidget<'_> {
             self.last_hud_present.set(hud_present);
         }
 
-        // Compute a target HUD height for stacked layout with collapsible headers.
-        // - Collapsed header uses 1 content line + borders = 3 rows
-        // - When both are collapsed: 2 headers (Agents above Browser) => 6 rows
-        // - When one is expanded: expanded gets remaining height budget above/below the other header
+        // Compute HUD target per spec using full terminal height:
+        // - Base collapsed height = one 3-row header per present panel
+        // - Expanded contribution = 30% of terminal height; if < 15, bump to min(15, 60% of terminal)
         let collapsed_unit: u16 = 3;
         let present_count: u16 = (has_active_agents as u16) + (has_browser_screenshot as u16);
-
-        // Estimate expanded content preferred height using a 16:9 aspect based on full width
-        let (cw, ch) = font_cell;
-        let inner_cols = area.width.saturating_sub(4); // account for padding + borders
-        let number = (inner_cols as u32) * 3 * (cw as u32);
-        let denom = 4 * (ch as u32);
-        let preferred_expanded: u16 = ((number / denom) as u16).saturating_add(2); // include borders
-
         let hud_target: Option<u16> = if !hud_present || present_count == 0 {
             None
         } else {
-            let base_collapsed = collapsed_unit
-                * ((has_active_agents as u16) + (has_browser_screenshot as u16))
-                .max(1);
+            let base_collapsed = collapsed_unit * present_count.max(1);
+            let term_h = self.last_frame_height.get().max(1);
+            let thirty = ((term_h as u32) * 30 / 100) as u16;
+            let sixty = ((term_h as u32) * 60 / 100) as u16;
+            let mut expanded = if thirty < 15 { 15.min(sixty) } else { thirty };
+            // Ensure room for header + spacer inside expanded panel
+            expanded = expanded.max(collapsed_unit.saturating_add(2));
             let any_expanded = self.browser_hud_expanded || self.agents_hud_expanded;
-            let target = if any_expanded { base_collapsed.saturating_add(preferred_expanded) } else { base_collapsed };
+            let target = if any_expanded { base_collapsed.saturating_add(expanded) } else { base_collapsed };
             Some(target)
         };
 
@@ -1726,6 +1723,7 @@ impl ChatWidget<'_> {
         last_hud_present: std::cell::Cell::new(false),
             browser_hud_expanded: false,
             agents_hud_expanded: false,
+            last_frame_height: std::cell::Cell::new(0),
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
@@ -1843,6 +1841,7 @@ impl ChatWidget<'_> {
         last_hud_present: std::cell::Cell::new(false),
             browser_hud_expanded: false,
             agents_hud_expanded: false,
+            last_frame_height: std::cell::Cell::new(0),
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
@@ -2083,7 +2082,7 @@ impl ChatWidget<'_> {
             return;
         }
         if let KeyEvent {
-            code: crossterm::event::KeyCode::Char('p'),
+            code: crossterm::event::KeyCode::Char('a'),
             modifiers: crossterm::event::KeyModifiers::CONTROL,
             kind: KeyEventKind::Press | KeyEventKind::Repeat,
             ..
@@ -6424,13 +6423,20 @@ impl ChatWidget<'_> {
 
         // Determine layout based on what's active (stacked, full width)
         let header_h: u16 = 3;
+        // Expanded target based on full terminal height per spec
+        let term_h = self.last_frame_height.get().max(1);
+        let thirty = ((term_h as u32) * 30 / 100) as u16;
+        let sixty = ((term_h as u32) * 60 / 100) as u16;
+        let mut expanded_target = if thirty < 15 { 15.min(sixty) } else { thirty };
+        // Make sure expanded chunk includes space for header + spacer
+        let min_expanded = header_h.saturating_add(2);
+        if expanded_target < min_expanded { expanded_target = min_expanded; }
         match (has_active_agents, has_browser_screenshot) {
             (true, true) => {
-                let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16; // 30%
                 let (top_h, bottom_h) = if self.agents_hud_expanded && !self.browser_hud_expanded {
-                    (padded_area.height.saturating_sub(header_h).min(max_expanded.max(header_h + 2)), header_h)
+                    (expanded_target.min(padded_area.height.saturating_sub(0)), header_h)
                 } else if self.browser_hud_expanded && !self.agents_hud_expanded {
-                    (header_h, padded_area.height.saturating_sub(header_h).min(max_expanded.max(header_h + 2)))
+                    (header_h, expanded_target.min(padded_area.height.saturating_sub(0)))
                 } else {
                     let top = header_h.min(padded_area.height);
                     let bottom = padded_area.height.saturating_sub(top).min(header_h);
@@ -6456,8 +6462,7 @@ impl ChatWidget<'_> {
             }
             (true, false) => {
                 if self.agents_hud_expanded {
-                    let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16;
-                    let h = padded_area.height.min(max_expanded.max(header_h + 2));
+                    let h = expanded_target.min(padded_area.height);
                     let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
                     self.render_agent_panel(a, buf);
                 }
@@ -6469,8 +6474,7 @@ impl ChatWidget<'_> {
             }
             (false, true) => {
                 if self.browser_hud_expanded {
-                    let max_expanded = ((padded_area.height as u32) * 30 / 100) as u16;
-                    let h = padded_area.height.min(max_expanded.max(header_h + 2));
+                    let h = expanded_target.min(padded_area.height);
                     let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
                     self.render_browser_panel(a, buf);
                 }
@@ -6517,8 +6521,8 @@ impl ChatWidget<'_> {
                 left_spans.push(Span::raw(" "));
                 left_spans.push(Span::raw(url.clone()));
                 let right_spans: Vec<Span> = vec![
-                    Span::styled("Collapse: ", label_style),
                     Span::from("Ctrl+B").style(key_hint_style),
+                    Span::styled(" collapse", label_style),
                 ];
                 let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
                 let left_len = measure(&left_spans);
@@ -6582,10 +6586,11 @@ impl ChatWidget<'_> {
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
 
-        // Right side: Expand hint
+        // Right side: toggle hint based on state
+        let action = if self.browser_hud_expanded { " collapse" } else { " expand" };
         let right_spans: Vec<Span> = vec![
-            Span::styled("Expand: ", label_style),
             Span::from("Ctrl+B").style(key_hint_style),
+            Span::styled(action, label_style),
         ];
 
         let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
@@ -6640,15 +6645,15 @@ impl ChatWidget<'_> {
         let dot_style = if is_active { Style::default().fg(crate::colors::success_green()) } else { Style::default().fg(crate::colors::text_dim()) };
         left_spans.push(Span::styled("•", dot_style));
         // no status text; dot conveys status
-        left_spans.push(Span::styled("  ·  ", Style::default().fg(crate::colors::text())));
-        // Spaces between status and summary; no label
+        // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
 
-        // Right side: Expand hint
+        // Right side: toggle hint based on state (Ctrl+A)
+        let action = if self.agents_hud_expanded { " collapse" } else { " expand" };
         let right_spans: Vec<Span> = vec![
-            Span::styled("Expand: ", label_style),
-            Span::from("Ctrl+P").style(key_hint_style),
+            Span::from("Ctrl+A").style(key_hint_style),
+            Span::styled(action, label_style),
         ];
 
         let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
@@ -6719,13 +6724,12 @@ impl ChatWidget<'_> {
         let mut left_spans: Vec<Span> = Vec::new();
         left_spans.push(Span::styled("•", dot_style));
         // no status text; dot conveys status
-        left_spans.push(Span::styled("  ·  ", Style::default().fg(crate::colors::text())));
-        // Spaces between status and summary; no label
+        // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
         let right_spans: Vec<Span> = vec![
-            Span::styled("Collapse: ", label_style),
-            Span::from("Ctrl+P").style(key_hint_style),
+            Span::from("Ctrl+A").style(key_hint_style),
+            Span::styled(" collapse", label_style),
         ];
         let measure = |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
         let left_len = measure(&left_spans);
@@ -6993,6 +6997,9 @@ impl WidgetRef for &ChatWidget<'_> {
                 buf[(x, y)].set_style(bg_style);
             }
         }
+
+        // Remember full frame height for HUD sizing logic
+        self.last_frame_height.set(area.height);
 
         let layout_areas = self.layout_areas(area);
         let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4
