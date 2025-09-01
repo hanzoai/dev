@@ -2973,6 +2973,13 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
                 tracing::debug!("AgentReasoning event with text: {:?}...", text.chars().take(100).collect::<String>());
+                // Guard: duplicate final Reasoning for the same id can arrive due to provider
+                // retries or thread replays. If we've already finalized this id in the current
+                // turn, ignore to avoid duplicating reasoning content in history.
+                if self.closed_reasoning_ids.contains(&id) {
+                    tracing::warn!("Ignoring duplicate AgentReasoning for closed id={}", id);
+                    return;
+                }
                 // Fallback: if any tools/execs are still marked running, complete them now.
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
@@ -3106,20 +3113,27 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.mark_needs_redraw();
             }
-            EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
-                delta,
-            }) => {
+            EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }) => {
                 // Treat raw reasoning content the same as summarized reasoning
+                if self.closed_reasoning_ids.contains(&id) {
+                    tracing::debug!("Ignoring RawContent delta for closed id={}", id);
+                    return;
+                }
                 self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 tracing::debug!("AgentReasoningRawContent event with text: {:?}...", text.chars().take(100).collect::<String>());
+                if self.closed_reasoning_ids.contains(&id) {
+                    tracing::warn!("Ignoring duplicate AgentReasoningRawContent for closed id={}", id);
+                    return;
+                }
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 self.current_stream_kind = Some(StreamKind::Reasoning);
                 self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
+                self.closed_reasoning_ids.insert(id.clone());
                 self.mark_needs_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
