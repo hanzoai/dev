@@ -100,20 +100,38 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
 
     // Some terminals (notably macOS Terminal.app with certain profiles)
     // clear to the terminal's default background color instead of the
-    // currently set background attribute. Proactively paint the entire
-    // screen area with our theme background to ensure consistent visuals.
-    if let Ok((cols, rows)) = crossterm::terminal::size() {
-        // Build a single line of spaces once to reduce allocations.
-        let blank = " ".repeat(cols as usize);
-        // Set explicit fg/bg to the theme's colors while painting.
-        execute!(stdout(), SetForegroundColor(CtColor::from(theme_fg)), SetBackgroundColor(CtColor::from(theme_bg)))?;
-        for y in 0..rows {
-            execute!(stdout(), MoveTo(0, y), Print(&blank))?;
+    // currently set background attribute. Proactively painting the full
+    // screen with our theme bg fixes that — but doing so on Windows Terminal
+    // has been reported to cause broken colors/animation for some users.
+    //
+    // Restrict the explicit paint to terminals that benefit from it and skip
+    // it on Windows Terminal (TERM_PROGRAM=Windows_Terminal or WT_SESSION set).
+    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
+    let is_windows_terminal = term_program == "Windows_Terminal" || std::env::var("WT_SESSION").is_ok();
+    let should_paint_bg = if term_program == "Apple_Terminal" {
+        true
+    } else if is_windows_terminal {
+        false
+    } else {
+        // For other terminals, be conservative and skip unless a user opts in
+        // via CODE_FORCE_FULL_BG_PAINT=1.
+        std::env::var("CODE_FORCE_FULL_BG_PAINT").map(|v| v == "1").unwrap_or(false)
+    };
+
+    if should_paint_bg {
+        if let Ok((cols, rows)) = crossterm::terminal::size() {
+            // Build a single line of spaces once to reduce allocations.
+            let blank = " ".repeat(cols as usize);
+            // Set explicit fg/bg to the theme's colors while painting.
+            execute!(stdout(), SetForegroundColor(CtColor::from(theme_fg)), SetBackgroundColor(CtColor::from(theme_bg)))?;
+            for y in 0..rows {
+                execute!(stdout(), MoveTo(0, y), Print(&blank))?;
+            }
+            // Restore cursor to home and keep our colors configured for subsequent drawing.
+            // Avoid ResetColor here to prevent some terminals from flashing to their
+            // profile default background (e.g., white) between frames.
+            execute!(stdout(), MoveTo(0, 0), SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
         }
-        // Restore cursor to home and keep our colors configured for subsequent drawing.
-        // Avoid ResetColor here to prevent some terminals from flashing to their
-        // profile default background (e.g., white) between frames.
-        execute!(stdout(), MoveTo(0, 0), SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())))?;
     }
 
     // Wrap stdout in a BufWriter to reduce syscalls during rendering.
