@@ -39,7 +39,6 @@ impl AppEventSender {
                 | AppEvent::Paste(_)
                 | AppEvent::RequestRedraw
                 | AppEvent::Redraw
-                | AppEvent::ScheduleFrameIn(_)
                 | AppEvent::ExitRequest
         );
 
