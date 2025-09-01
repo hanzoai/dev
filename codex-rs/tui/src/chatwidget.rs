@@ -3164,9 +3164,13 @@ impl ChatWidget<'_> {
                 self.defer_or_handle(
                     |interrupts| interrupts.push_exec_begin(ev),
                     |this| {
+                        // Finalize any active streaming sections, then establish
+                        // the running Exec cell before flushing queued interrupts.
+                        // This prevents an out‑of‑order ExecCommandEnd from being
+                        // applied first (which would fall back to showing call_id).
                         this.finalize_active_stream();
-                        this.flush_interrupt_queue();
                         this.handle_exec_begin_now(ev2);
+                        this.flush_interrupt_queue();
                     },
                 );
             }
