@@ -4908,6 +4908,72 @@ pub(crate) fn new_completed_custom_tool_call(
     }
 }
 
+/// Completed web_fetch tool call with markdown rendering of the `markdown` field.
+pub(crate) fn new_completed_web_fetch_tool_call(
+    cfg: &Config,
+    args: Option<String>,
+    duration: Duration,
+    success: bool,
+    result: String,
+) -> ToolCallCell {
+    let duration = format_duration(duration);
+    let status_str = if success { "Complete" } else { "Error" };
+    let title_line = if success {
+        Line::from(vec![
+            Span::styled(status_str, Style::default().fg(crate::colors::success())),
+            format!(", duration: {duration}").dim(),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(status_str, Style::default().fg(crate::colors::error())),
+            format!(", duration: {duration}").dim(),
+        ])
+    };
+
+    let invocation_str = if let Some(args) = args {
+        format!("{}({})", "web_fetch", args)
+    } else {
+        format!("{}()", "web_fetch")
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(title_line);
+    lines.push(Line::styled(
+        invocation_str,
+        Style::default()
+            .fg(crate::colors::text_dim())
+            .add_modifier(Modifier::ITALIC),
+    ));
+
+    // Try to parse JSON and extract the markdown field
+    let mut appended_markdown = false;
+    if !result.is_empty() {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&result) {
+            if let Some(md) = value.get("markdown").and_then(|v| v.as_str()) {
+                lines.push(Line::from(""));
+                crate::markdown::append_markdown(md, &mut lines, cfg);
+                appended_markdown = true;
+            }
+        }
+    }
+
+    // Fallback: compact preview if JSON parse failed or no markdown present
+    if !appended_markdown && !result.is_empty() {
+        lines.push(Line::from(""));
+        let preview = build_preview_lines(&result, true)
+            .into_iter()
+            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+            .collect::<Vec<_>>();
+        lines.extend(preview);
+    }
+
+    lines.push(Line::from(""));
+    ToolCallCell {
+        lines,
+        state: if success { ToolState::Success } else { ToolState::Failed },
+    }
+}
+
 // Map `browser_*` tool names to friendly titles
 fn browser_tool_title(tool_name: &str) -> &'static str {
     match tool_name {

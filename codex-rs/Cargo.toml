@@ -65,5 +65,4 @@ lto = "fat"  # Maximum link-time optimization
 strip = "debuginfo"  # Fully strip debug info in production artifacts
 
 [patch.crates-io]
-# ratatui = { path = "../../ratatui" }
-ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.29.0-patch" }
+# No overrides; use crates.io ratatui release
