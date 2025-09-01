@@ -271,10 +271,23 @@ impl App<'_> {
     
     /// Schedule a redraw after the specified duration
     fn schedule_redraw_in(&self, duration: Duration) {
+        // Coalesce: if a redraw is already pending (either debounce timer or a
+        // previously scheduled frame), skip arming another timer. This avoids
+        // rapid-fire frame scheduling that can make spinners appear too fast.
+        if self
+            .pending_redraw
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return;
+        }
+        let pending_redraw = self.pending_redraw.clone();
         let tx = self.app_event_tx.clone();
         thread::spawn(move || {
             thread::sleep(duration);
-            tx.send(AppEvent::RequestRedraw);
+            // Clear and draw exactly one frame at the requested cadence.
+            pending_redraw.store(false, Ordering::Release);
+            tx.send(AppEvent::Redraw);
         });
     }
 
