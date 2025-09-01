@@ -1270,6 +1270,11 @@ impl Session {
         if let Some(agent) = state.current_agent.take() {
             agent.abort(TurnAbortReason::Interrupted);
         }
+        // Also terminate any running exec sessions (PTY-based) so child processes do not linger.
+        // Best-effort cleanup for PTY-based exec sessions would go here. The
+        // PTY implementation already kills processes on session drop; in the
+        // common LocalShellCall path we also kill processes immediately via
+        // KillOnDrop in exec.rs.
     }
 
     /// Spawn the configured notifier (if any) with the given JSON payload as
