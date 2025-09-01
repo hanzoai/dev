@@ -454,6 +454,11 @@ struct SseEvent {
     // Present on delta events from the Responses API; used to correlate
     // streaming chunks with the final OutputItemDone.
     item_id: Option<String>,
+    // Optional ordering metadata from the Responses API; used to filter
+    // duplicates and out‑of‑order reasoning deltas.
+    sequence_number: Option<u64>,
+    output_index: Option<u32>,
+    content_index: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -513,6 +518,12 @@ async fn process_sse<S>(
     let mut response_error: Option<CodexErr> = None;
     // Track the current item_id to include with delta events
     let mut current_item_id: Option<String> = None;
+
+    // Monotonic sequence guards to drop duplicate/out‑of‑order deltas.
+    // Keys are item_id strings.
+    use std::collections::HashMap;
+    let mut last_seq_reasoning_summary: HashMap<String, u64> = HashMap::new();
+    let mut last_seq_reasoning_content: HashMap<String, u64> = HashMap::new();
 
     loop {
         let sse = match timeout(idle_timeout, stream.next()).await {
@@ -672,7 +683,18 @@ async fn process_sse<S>(
                     if let Some(ref id) = event.item_id {
                         current_item_id = Some(id.clone());
                     }
-                    tracing::debug!("sse.delta reasoning_summary id={:?} len={}", current_item_id, delta.len());
+                    // Drop duplicates/out‑of‑order by sequence_number when available
+                    if let (Some(ref id), Some(sn)) = (current_item_id.as_ref(), event.sequence_number) {
+                        let last = last_seq_reasoning_summary.entry(id.to_string()).or_insert(0);
+                        if *last >= sn { continue; }
+                        *last = sn;
+                    }
+                    tracing::debug!(
+                        "sse.delta reasoning_summary id={:?} len={} seq={:?}",
+                        current_item_id,
+                        delta.len(),
+                        event.sequence_number
+                    );
                     let ev = ResponseEvent::ReasoningSummaryDelta {
                         delta,
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
@@ -687,7 +709,18 @@ async fn process_sse<S>(
                     if let Some(ref id) = event.item_id {
                         current_item_id = Some(id.clone());
                     }
-                    tracing::debug!("sse.delta reasoning_content id={:?} len={}", current_item_id, delta.len());
+                    // Drop duplicates/out‑of‑order by sequence_number when available
+                    if let (Some(ref id), Some(sn)) = (current_item_id.as_ref(), event.sequence_number) {
+                        let last = last_seq_reasoning_content.entry(id.to_string()).or_insert(0);
+                        if *last >= sn { continue; }
+                        *last = sn;
+                    }
+                    tracing::debug!(
+                        "sse.delta reasoning_content id={:?} len={} seq={:?}",
+                        current_item_id,
+                        delta.len(),
+                        event.sequence_number
+                    );
                     let ev = ResponseEvent::ReasoningContentDelta {
                         delta,
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
