@@ -14,6 +14,7 @@ use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use codex_protocol::models::ResponseItem;
 use std::fmt;
+use std::path::PathBuf;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -127,5 +128,9 @@ pub(crate) enum AppEvent {
         prefix_items: Vec<ResponseItem>,
         prefill: String,
     },
+
+    /// Register an image placeholder inserted by the composer with its backing path
+    /// so ChatWidget can resolve it to a LocalImage on submit.
+    RegisterPastedImage { placeholder: String, path: PathBuf },
     
 }

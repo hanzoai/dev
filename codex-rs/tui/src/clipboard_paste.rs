@@ -127,7 +127,10 @@ pub fn try_decode_base64_image_to_temp_png(pasted: &str) -> Result<(PathBuf, Pas
 
     // Remove whitespace that might be wrapped by terminals
     let compact: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
-    let bytes = base64::decode(compact).map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(compact)
+        .map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
 
     // Load via `image` crate to get dimensions and normalize to PNG
     let dyn_img = image::load_from_memory(&bytes)
