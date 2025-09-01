@@ -254,6 +254,11 @@ pub(crate) struct ChatWidget<'a> {
     // Track active task ids so we don't drop the working status while any
     // agent/sub‑agent is still running (long‑running sessions can interleave).
     active_task_ids: HashSet<String>,
+
+    // Event sequencing to preserve original order across streaming/tool events
+    next_seq: u64,
+    // Sequence marker for the final assistant message in the current turn
+    seq_answer_final: Option<u64>,
 }
 
 struct PendingJumpBack {
@@ -875,11 +880,43 @@ impl ChatWidget<'_> {
         F1: FnOnce(&mut interrupts::InterruptManager),
         F2: FnOnce(&mut Self),
     {
-        if self.is_write_cycle_active() {
-            defer_fn(&mut self.interrupts);
-        } else {
-            handle_fn(self);
-        }
+        if self.is_write_cycle_active() { defer_fn(&mut self.interrupts); } else { handle_fn(self); }
+    }
+
+    fn next_sequence(&mut self) -> u64 {
+        let s = self.next_seq; self.next_seq = self.next_seq.saturating_add(1); s
+    }
+
+    fn index_of_final_assistant(&self) -> Option<usize> {
+        self.history_cells.iter().rposition(|c| c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>().is_some())
+    }
+
+    fn maybe_move_last_before_final_assistant_exec(&mut self, call_id: &str) {
+        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
+        if self.history_cells.is_empty() { return; }
+        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
+        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
+        if let Some(rc) = self.running_commands.get_mut(call_id) { rc.history_index = Some(assistant_idx); }
+        self.invalidate_height_cache(); self.request_redraw();
+    }
+
+    fn maybe_move_last_before_final_assistant_tool(&mut self, call_id: &str) {
+        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
+        if self.history_cells.is_empty() { return; }
+        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
+        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
+        if let Some(idx) = self.running_custom_tools.get_mut(call_id) { *idx = assistant_idx; }
+        self.invalidate_height_cache(); self.request_redraw();
+    }
+
+    fn maybe_move_last_before_final_assistant(&mut self, seq: u64) {
+        let ans_seq = match self.seq_answer_final { Some(s) => s, None => return };
+        if seq >= ans_seq { return; }
+        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
+        if self.history_cells.is_empty() { return; }
+        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
+        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
+        self.invalidate_height_cache(); self.request_redraw();
     }
 
 
@@ -1752,6 +1789,8 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
+            next_seq: 1,
+            seq_answer_final: None,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1870,6 +1909,8 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
+            next_seq: 1,
+            seq_answer_final: None,
         }
     }
 
@@ -2836,6 +2877,8 @@ impl ChatWidget<'_> {
                 self.mark_needs_redraw();
             }
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                // Record sequence for the final assistant message
+                self.seq_answer_final = Some(self.next_sequence());
                 tracing::debug!(
                     "AgentMessage final id={} bytes={} preview={:?}",
                     id,
@@ -3153,7 +3196,8 @@ impl ChatWidget<'_> {
                 // If a stream is active, defer until the stream finalizes so
                 // the plan block doesn't split a heading and its content.
                 if self.is_write_cycle_active() {
-                    self.interrupts.push_plan_update(update);
+                    let seq = self.next_sequence();
+                    self.interrupts.push_plan_update(seq, update);
                 } else {
                     self.add_to_history(history_cell::new_plan_update(update));
                 }
@@ -3161,8 +3205,9 @@ impl ChatWidget<'_> {
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_exec_approval(id, ev),
+                    move |interrupts| interrupts.push_exec_approval(seq, id, ev),
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
@@ -3174,8 +3219,9 @@ impl ChatWidget<'_> {
             EventMsg::ApplyPatchApprovalRequest(ev) => {
                 let id2 = id.clone();
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_apply_patch_approval(id, ev),
+                    move |interrupts| interrupts.push_apply_patch_approval(seq, id, ev),
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
@@ -3186,8 +3232,9 @@ impl ChatWidget<'_> {
             }
             EventMsg::ExecCommandBegin(ev) => {
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_exec_begin(ev),
+                    move |interrupts| interrupts.push_exec_begin(seq, ev),
                     |this| {
                         // Finalize any active streaming sections, then establish
                         // the running Exec cell before flushing queued interrupts.
@@ -3241,22 +3288,25 @@ impl ChatWidget<'_> {
             }
             EventMsg::PatchApplyEnd(ev) => {
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_patch_end(ev),
+                    move |interrupts| interrupts.push_patch_end(seq, ev),
                     |this| this.handle_patch_apply_end_now(ev2),
                 );
             }
             EventMsg::ExecCommandEnd(ev) => {
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_exec_end(ev),
+                    move |interrupts| interrupts.push_exec_end(seq, ev),
                     |this| this.handle_exec_end_now(ev2),
                 );
             }
             EventMsg::McpToolCallBegin(ev) => {
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_mcp_begin(ev),
+                    move |interrupts| interrupts.push_mcp_begin(seq, ev),
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
@@ -3266,8 +3316,9 @@ impl ChatWidget<'_> {
             }
             EventMsg::McpToolCallEnd(ev) => {
                 let ev2 = ev.clone();
+                let seq = self.next_sequence();
                 self.defer_or_handle(
-                    |interrupts| interrupts.push_mcp_end(ev),
+                    move |interrupts| interrupts.push_mcp_end(seq, ev),
                     |this| this.handle_mcp_end_now(ev2),
                 );
             }
@@ -3319,6 +3370,32 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
+                // Special-case web_fetch to render returned markdown nicely.
+                if tool_name == "web_fetch" {
+                    let completed = history_cell::new_completed_web_fetch_tool_call(
+                        &self.config,
+                        params_string,
+                        duration,
+                        success,
+                        content,
+                    );
+                    if let Some(idx) = self.running_custom_tools.remove(&call_id) {
+                        if idx < self.history_cells.len() {
+                            self.history_cells[idx] = Box::new(completed);
+                            self.invalidate_height_cache();
+                            self.request_redraw();
+                        } else {
+                            self.add_to_history(completed);
+                        }
+                    } else {
+                        self.add_to_history(completed);
+                    }
+
+                    // After tool completes, likely transitioning to response
+                    self.bottom_pane.update_status_text("responding".to_string());
+                    self.maybe_hide_spinner();
+                    return;
+                }
                 let completed = history_cell::new_completed_custom_tool_call(
                     tool_name,
                     params_string,
