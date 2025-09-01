@@ -238,27 +238,46 @@ fn apply_custom_colors(theme: &mut Theme, colors: &ThemeColors) {
 /// - Otherwise, allow truecolor when `COLORTERM` advertises it or when running
 ///   in modern terminals known to support it well.
 fn needs_ansi256_fallback() -> bool {
-    let force = std::env::var("CODE_FORCE_ANSI256").map(|v| v == "1").unwrap_or(false);
-    if force {
+    // Hard overrides first
+    if std::env::var("CODE_FORCE_TRUECOLOR").map(|v| v == "1").unwrap_or(false) {
+        return false;
+    }
+    if std::env::var("CODE_FORCE_ANSI256").map(|v| v == "1").unwrap_or(false) {
         return true;
     }
+
     let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
+    // Apple Terminal profiles are known to misrender truecolor in alt-screen.
     if term_program == "Apple_Terminal" {
         return true;
     }
-    // Windows Terminal reliably supports truecolor; avoid unnecessary fallback.
-    // It sets TERM_PROGRAM=Windows_Terminal and WT_SESSION in the env.
+    // Windows Terminal (conpty) supports truecolor; avoid fallback.
     if term_program == "Windows_Terminal" || std::env::var("WT_SESSION").is_ok() {
         return false;
     }
+
+    // Environment advertisement
     let colorterm = std::env::var("COLORTERM").unwrap_or_default().to_lowercase();
-    let has_truecolor = colorterm.contains("truecolor") || colorterm.contains("24bit");
+    let has_truecolor_env = colorterm.contains("truecolor") || colorterm.contains("24bit");
+
     // Known good terminals
     let known_truecolor = matches!(
         term_program.as_str(),
         "iTerm.app" | "WezTerm" | "Ghostty" | "Alacritty" | "kitty" | "vscode"
     );
-    !(has_truecolor || known_truecolor)
+
+    // Library-based probe as a final signal (may be conservative on Windows).
+    let has_truecolor_probe = supports_color::on_cached(supports_color::Stream::Stdout)
+        .map(|lvl| lvl.has_16m)
+        .unwrap_or(false);
+
+    !(has_truecolor_env || known_truecolor || has_truecolor_probe)
+}
+
+/// Return true if the current terminal supports truecolor rendering.
+/// Mirrors `needs_ansi256_fallback` but inverted and with the same overrides.
+pub(crate) fn has_truecolor_terminal() -> bool {
+    !needs_ansi256_fallback()
 }
 
 /// Quantize all theme colors to the ANSI-256 palette so backends that do not
