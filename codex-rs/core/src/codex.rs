@@ -1777,6 +1777,11 @@ async fn submission_loop(
             Op::Shutdown => {
                 info!("Shutting down Codex instance");
 
+                // Ensure any running agent is aborted so streaming stops promptly.
+                if let Some(sess_arc) = sess.as_ref() {
+                    sess_arc.abort();
+                }
+
                 // Gracefully flush and shutdown rollout recorder on session end so tests
                 // that inspect the rollout file do not race with the background writer.
                 if let Some(sess_arc) = sess {

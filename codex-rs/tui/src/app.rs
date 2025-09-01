@@ -482,7 +482,13 @@ impl App<'_> {
                             kind: KeyEventKind::Press,
                             ..
                         } => match &mut self.app_state {
-                            AppState::Chat { widget } => { widget.on_ctrl_c(); }
+                            AppState::Chat { widget } => {
+                                // Exit immediately on the second Ctrl+C instead of
+                                // waiting for the backend ShutdownComplete (which
+                                // can be delayed behind streaming events).
+                                let handled = matches!(widget.on_ctrl_c(), crate::bottom_pane::CancellationEvent::Handled);
+                                if handled { self.app_event_tx.send(AppEvent::ExitRequest); }
+                            }
                             AppState::Onboarding { .. } => { self.app_event_tx.send(AppEvent::ExitRequest); }
                         },
                         KeyEvent {
