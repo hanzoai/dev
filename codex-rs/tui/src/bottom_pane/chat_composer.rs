@@ -186,7 +186,7 @@ impl ChatComposer {
                 thread::spawn(move || {
                     while animation_flag_clone.load(Ordering::Relaxed) {
                         thread::sleep(Duration::from_millis(200)); // Slower animation
-                        app_event_tx_clone.send(AppEvent::RequestRedraw);
+                        app_event_tx_clone.send(crate::app_event::AppEvent::RequestRedraw);
                     }
                 });
 
@@ -423,7 +423,7 @@ impl ChatComposer {
             self.textarea.insert_str(&placeholder);
             self.textarea.insert_str(" ");
             self.app_event_tx
-                .send(AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
+                .send(crate::app_event::AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
             self.flash_footer_notice(format!("Added image {}x{} (PNG)", info.width, info.height));
         } else if char_count > LARGE_PASTE_CHAR_THRESHOLD {
             let placeholder = format!("[Pasted Content {char_count} chars]");
@@ -443,7 +443,7 @@ impl ChatComposer {
                     self.textarea.insert_str(&placeholder);
                     self.textarea.insert_str(" ");
                     self.app_event_tx
-                        .send(AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
+                        .send(crate::app_event::AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
                     // Give a small visual confirmation in the footer.
                     self.flash_footer_notice(format!(
                         "Added image {}x{} (PNG)",
@@ -668,11 +668,11 @@ impl ChatComposer {
                         CommandItem::Builtin(cmd) => {
                             // Check if this is a prompt-expanding command that will trigger agents
                             if cmd.is_prompt_expanding() {
-                                self.app_event_tx.send(AppEvent::PrepareAgents);
+                                self.app_event_tx.send(crate::app_event::AppEvent::PrepareAgents);
                             }
                             // Send command to the app layer with full text.
                             self.app_event_tx
-                                .send(AppEvent::DispatchCommand(cmd, command_text.clone()));
+                                .send(crate::app_event::AppEvent::DispatchCommand(cmd, command_text.clone()));
                             // Clear textarea and dismiss popup
                             self.textarea.set_text("");
                             self.active_popup = ActivePopup::None;
@@ -1027,7 +1027,7 @@ impl ChatComposer {
                 kind: KeyEventKind::Press,
                 ..
             } if self.is_empty() => {
-                self.app_event_tx.send(AppEvent::ExitRequest);
+                self.app_event_tx.send(crate::app_event::AppEvent::ExitRequest);
                 (InputResult::None, true)
             }
             // -------------------------------------------------------------
@@ -1056,7 +1056,7 @@ impl ChatComposer {
                 if let Some(tok) = Self::current_generic_token(&self.textarea) {
                     if !tok.is_empty() {
                         self.pending_tab_file_query = Some(tok.clone());
-                        self.app_event_tx.send(AppEvent::StartFileSearch(tok));
+                        self.app_event_tx.send(crate::app_event::AppEvent::StartFileSearch(tok));
                         // Do not show a popup yet; wait for results and only
                         // show if there are matches to avoid flicker.
                         return (InputResult::None, true);
@@ -1170,7 +1170,7 @@ impl ChatComposer {
                         || trimmed.starts_with("/solve ")
                         || trimmed.starts_with("/code ")
                     {
-                        self.app_event_tx.send(AppEvent::PrepareAgents);
+                        self.app_event_tx.send(crate::app_event::AppEvent::PrepareAgents);
                     }
 
                     self.history.record_local_submission(&original_text);
@@ -1262,7 +1262,7 @@ impl ChatComposer {
                     command_popup.on_composer_text_change(first_line.to_string());
                     self.active_popup = ActivePopup::Command(command_popup);
                     // Notify app: composer expanded due to slash popup
-                    self.app_event_tx.send(AppEvent::ComposerExpanded);
+                    self.app_event_tx.send(crate::app_event::AppEvent::ComposerExpanded);
                 }
             }
         }
@@ -1297,7 +1297,7 @@ impl ChatComposer {
         // The popup shows an idle hint for an empty query handled above.
         if query.chars().count() >= 1 {
             self.app_event_tx
-                .send(AppEvent::StartFileSearch(query.clone()));
+                .send(crate::app_event::AppEvent::StartFileSearch(query.clone()));
         }
 
         match &mut self.active_popup {
