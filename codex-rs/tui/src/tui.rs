@@ -53,21 +53,18 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     // Initialize syntax highlighting preference from config
     crate::syntax_highlight::init_highlight_from_config(&config.tui.highlight);
 
-    // Query terminal capabilities BEFORE entering the alternate screen.
-    // On Windows Terminal (ConPTY), sending/reading terminal queries from the
-    // alt‑screen can be flaky and cause state corruption. Doing this first
-    // avoids timing issues and ensures we know capabilities up front.
-    let terminal_info = query_terminal_info();
-
-    // Now set up the terminal for full‑screen TUI.
-    execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
     execute!(stdout(), EnableBracketedPaste)?;
-    // Enable focus change notifications where they are known to behave.
-    // Skip on Windows to avoid potential event stream issues under ConPTY.
-    #[cfg(not(windows))]
-    {
-        let _ = execute!(stdout(), EnableFocusChange);
-    }
+    // Enable focus change events so we can detect when the terminal window/tab
+    // regains focus and proactively repaint the UI (helps terminals that clear
+    // their alt‑screen buffer while unfocused).
+    let _ = execute!(stdout(), EnableFocusChange);
+
+    // Enter alternate screen mode for full screen TUI
+    execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
+
+    // Query terminal capabilities and font size after entering alternate screen
+    // but before enabling raw mode
+    let terminal_info = query_terminal_info();
 
     enable_raw_mode()?;
     // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.

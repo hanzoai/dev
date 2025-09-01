@@ -33,11 +33,7 @@ async fn discover_ws_via_port(port: u16) -> Result<String> {
     debug!("Requesting Chrome version info from: {}", url);
 
     let client_start = tokio::time::Instant::now();
-    // Do not respect system proxy env vars for local CDP discovery.
-    // Corporate proxies frequently intercept 127.0.0.1 and break discovery with
-    // opaque "error sending request" failures. We always talk to localhost here.
     let client = Client::builder()
-        .no_proxy()
         .timeout(Duration::from_secs(5)) // Allow Chrome time to bring up /json/version on fresh launch
         .build()
         .map_err(|e| BrowserError::CdpError(format!("Failed to build HTTP client: {}", e)))?;
@@ -124,9 +120,7 @@ async fn scan_for_chrome_debug_port() -> Option<u16> {
     for port in found_ports {
         let test_future = async move {
             let url = format!("http://127.0.0.1:{}/json/version", port);
-            // Skip proxy env for localhost checks; see note above.
             let client = Client::builder()
-                .no_proxy()
                 .timeout(Duration::from_millis(200)) // Shorter timeout for parallel tests
                 .build()
                 .ok()?;
