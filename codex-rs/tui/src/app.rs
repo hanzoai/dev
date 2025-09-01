@@ -420,6 +420,37 @@ impl App<'_> {
                             }
                             // Otherwise fall through
                         }
+                        // Fallback: attempt clipboard image paste on common shortcuts.
+                        // Many terminals (e.g., iTerm2) do not emit Event::Paste for raw-image
+                        // clipboards. When the user presses paste shortcuts, try an image read
+                        // by dispatching a paste with an empty string. The composer will then
+                        // attempt `paste_image_to_temp_png()` and no-op if no image exists.
+                        KeyEvent {
+                            code: KeyCode::Char('v'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                            ..
+                        } => {
+                            self.dispatch_paste_event(String::new());
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('v'),
+                            modifiers: m,
+                            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                            ..
+                        } if m.contains(crossterm::event::KeyModifiers::CONTROL)
+                            && m.contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            self.dispatch_paste_event(String::new());
+                        }
+                        KeyEvent {
+                            code: KeyCode::Insert,
+                            modifiers: crossterm::event::KeyModifiers::SHIFT,
+                            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                            ..
+                        } => {
+                            self.dispatch_paste_event(String::new());
+                        }
                         KeyEvent {
                             code: KeyCode::Char('m'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
