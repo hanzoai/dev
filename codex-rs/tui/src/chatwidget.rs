@@ -1322,6 +1322,11 @@ impl ChatWidget<'_> {
         self.bottom_pane.insert_str(s);
     }
 
+    pub(crate) fn register_pasted_image(&mut self, placeholder: String, path: std::path::PathBuf) {
+        self.pending_images.insert(placeholder, path);
+        self.request_redraw();
+    }
+
     fn parse_message_with_images(&mut self, text: String) -> UserMessage {
         use std::path::Path;
 
