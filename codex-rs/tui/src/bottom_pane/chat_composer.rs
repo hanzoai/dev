@@ -26,11 +26,9 @@ use super::paste_burst::PasteBurst;
 use crate::slash_command::SlashCommand;
 use codex_protocol::custom_prompts::CustomPrompt;
 
-use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
-use crate::app_event::AppEvent;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_paste::try_decode_base64_image_to_temp_png;
