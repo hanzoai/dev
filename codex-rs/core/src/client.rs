@@ -522,8 +522,13 @@ async fn process_sse<S>(
     // Monotonic sequence guards to drop duplicate/out‑of‑order deltas.
     // Keys are item_id strings.
     use std::collections::HashMap;
-    let mut last_seq_reasoning_summary: HashMap<String, u64> = HashMap::new();
-    let mut last_seq_reasoning_content: HashMap<String, u64> = HashMap::new();
+    // Track last sequence_number per (item_id, output_index[, content_index])
+    // Default indices to 0 when absent for robustness across providers.
+    let mut last_seq_reasoning_summary: HashMap<(String, u32), u64> = HashMap::new();
+    let mut last_seq_reasoning_content: HashMap<(String, u32, u32), u64> = HashMap::new();
+    // Best-effort duplicate text guard when sequence_number is unavailable.
+    let mut last_text_reasoning_summary: HashMap<(String, u32), String> = HashMap::new();
+    let mut last_text_reasoning_content: HashMap<(String, u32, u32), String> = HashMap::new();
 
     loop {
         let sse = match timeout(idle_timeout, stream.next()).await {
@@ -683,15 +688,26 @@ async fn process_sse<S>(
                     if let Some(ref id) = event.item_id {
                         current_item_id = Some(id.clone());
                     }
-                    // Drop duplicates/out‑of‑order by sequence_number when available
-                    if let (Some(ref id), Some(sn)) = (current_item_id.as_ref(), event.sequence_number) {
-                        let last = last_seq_reasoning_summary.entry(id.to_string()).or_insert(0);
-                        if *last >= sn { continue; }
-                        *last = sn;
+                    // Compose key using item_id + output_index
+                    let out_idx: u32 = event.output_index.unwrap_or(0);
+                    if let Some(ref id) = current_item_id {
+                        // Drop duplicates/out‑of‑order by sequence_number when available
+                        if let Some(sn) = event.sequence_number {
+                            let last = last_seq_reasoning_summary.entry((id.clone(), out_idx)).or_insert(0);
+                            if *last >= sn { continue; }
+                            *last = sn;
+                        } else {
+                            // Best-effort: drop exact duplicate text for same key when seq is missing
+                            let key = (id.clone(), out_idx);
+                            if last_text_reasoning_summary.get(&key).map_or(false, |prev| prev == &delta) {
+                                continue;
+                            }
+                            last_text_reasoning_summary.insert(key, delta.clone());
+                        }
                     }
                     tracing::debug!(
-                        "sse.delta reasoning_summary id={:?} len={} seq={:?}",
-                        current_item_id,
+                        "sse.delta reasoning_summary id={:?} out_idx={} len={} seq={:?}",
+                        current_item_id, out_idx,
                         delta.len(),
                         event.sequence_number
                     );
@@ -709,15 +725,27 @@ async fn process_sse<S>(
                     if let Some(ref id) = event.item_id {
                         current_item_id = Some(id.clone());
                     }
-                    // Drop duplicates/out‑of‑order by sequence_number when available
-                    if let (Some(ref id), Some(sn)) = (current_item_id.as_ref(), event.sequence_number) {
-                        let last = last_seq_reasoning_content.entry(id.to_string()).or_insert(0);
-                        if *last >= sn { continue; }
-                        *last = sn;
+                    // Compose key using item_id + output_index + content_index
+                    let out_idx: u32 = event.output_index.unwrap_or(0);
+                    let content_idx: u32 = event.content_index.unwrap_or(0);
+                    if let Some(ref id) = current_item_id {
+                        // Drop duplicates/out‑of‑order by sequence_number when available
+                        if let Some(sn) = event.sequence_number {
+                            let last = last_seq_reasoning_content.entry((id.clone(), out_idx, content_idx)).or_insert(0);
+                            if *last >= sn { continue; }
+                            *last = sn;
+                        } else {
+                            // Best-effort: drop exact duplicate text for same key when seq is missing
+                            let key = (id.clone(), out_idx, content_idx);
+                            if last_text_reasoning_content.get(&key).map_or(false, |prev| prev == &delta) {
+                                continue;
+                            }
+                            last_text_reasoning_content.insert(key, delta.clone());
+                        }
                     }
                     tracing::debug!(
-                        "sse.delta reasoning_content id={:?} len={} seq={:?}",
-                        current_item_id,
+                        "sse.delta reasoning_content id={:?} out_idx={} content_idx={} len={} seq={:?}",
+                        current_item_id, out_idx, content_idx,
                         delta.len(),
                         event.sequence_number
                     );
