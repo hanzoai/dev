@@ -2742,17 +2742,33 @@ impl CollapsibleReasoningCell {
             // 3) Markdown heading (begins with '#') - renderer includes hashes in content
             let is_md_heading = trimmed.starts_with('#');
 
-            // 4) Title-like plain line: reasonably short, no terminal punctuation, and
-            //    either first line or preceded by a blank separator.
+            // 4) Title-like plain line: reasonably short, not a meta/instructional preamble,
+            //    no terminal punctuation (including ':'), and either first line or preceded
+            //    by a blank separator.
             let prev_blank = idx == 0
                 || lines
                     .get(idx.saturating_sub(1))
                     .map(|pl| pl.spans.iter().all(|s| s.content.trim().is_empty()))
                     .unwrap_or(true);
             let len_ok = trimmed.chars().count() >= 3 && trimmed.chars().count() <= 80;
-            let no_terminal_punct =
-                !trimmed.ends_with('.') && !trimmed.ends_with('!') && !trimmed.ends_with('?');
-            let plain_title_like = prev_blank && len_ok && no_terminal_punct;
+            // Consider quotes/closing brackets at the end when checking punctuation
+            let mut tail = trimmed;
+            while let Some(last) = tail.chars().last() {
+                if matches!(last, '"' | '\'' | '”' | '’' | ')' | ']' | '}') {
+                    tail = &tail[..tail.len()-last.len_utf8()];
+                } else { break; }
+            }
+            let no_terminal_punct = !tail.ends_with('.') && !tail.ends_with('!') && !tail.ends_with('?') && !tail.ends_with(':');
+            let lowered = trimmed.to_ascii_lowercase();
+            let is_meta_intro = lowered.starts_with("here are ")
+                || lowered.starts_with("i need to ")
+                || lowered.starts_with("i plan to ")
+                || lowered.starts_with("let's ")
+                || lowered.starts_with("we should ")
+                || lowered.starts_with("i'll ")
+                || lowered.starts_with("next, ")
+                || lowered.starts_with("now, ");
+            let plain_title_like = prev_blank && len_ok && no_terminal_punct && !is_meta_intro;
 
             if all_bold || (leading_bold && ends_colon) || is_md_heading || plain_title_like {
                 titles.push(l.clone());
