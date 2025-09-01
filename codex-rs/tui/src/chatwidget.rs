@@ -3149,8 +3149,14 @@ impl ChatWidget<'_> {
                 self.on_error(message);
             }
             EventMsg::PlanUpdate(update) => {
-                // Commit plan updates directly to history (no status-line preview).
-                self.add_to_history(history_cell::new_plan_update(update));
+                // Avoid interleaving plan updates inside streaming sections.
+                // If a stream is active, defer until the stream finalizes so
+                // the plan block doesn't split a heading and its content.
+                if self.is_write_cycle_active() {
+                    self.interrupts.push_plan_update(update);
+                } else {
+                    self.add_to_history(history_cell::new_plan_update(update));
+                }
             }
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
