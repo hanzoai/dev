@@ -318,91 +318,6 @@ impl HistoryCell for Box<dyn HistoryCell> {
     }
 }
 
-// ==================== ReadAggregationCell ====================
-// Aggregates multiple Read preamble entries into a single history cell while
-// commands are still running, then flips to a finalized state without changing
-// position in the history. This prevents flicker where multiple transient
-// "Read" sections appear and later merge.
-
-pub(crate) struct ReadAggregationCell {
-    // Aggregated preamble lines (each line typically starts with "└ " or two spaces)
-    lines: Vec<Line<'static>>,
-    // When true, render as a finalized "Read" section (ExecStatus::Success);
-    // otherwise render with a running header style (ExecStatus::Running).
-    finalized: bool,
-}
-
-impl ReadAggregationCell {
-    pub(crate) fn new() -> Self {
-        Self { lines: Vec::new(), finalized: false }
-    }
-
-    pub(crate) fn push_lines(&mut self, mut more: Vec<Line<'static>>) {
-        // Trim completely empty prefix/suffix lines from the chunk to keep the block compact
-        more = trim_empty_lines(more);
-        if more.is_empty() { return; }
-        self.lines.extend(more);
-    }
-
-    pub(crate) fn finalize(&mut self) {
-        self.finalized = true;
-    }
-
-    // Build a normalized copy of aggregated lines where only the very first
-    // visible line uses the corner connector "└ "; subsequent lines use two
-    // spaces. Also coalesce adjacent read ranges for the same file.
-    fn normalized_lines(&self) -> Vec<Line<'static>> {
-        let mut v = self.lines.clone();
-        // Ensure only the first content line shows the corner
-        let mut seen_first = false;
-        for line in v.iter_mut() {
-            if let Some(sp0) = line.spans.get_mut(0) {
-                let s = sp0.content.as_ref();
-                if s == "└ " || s == "  └ " {
-                    if seen_first {
-                        sp0.content = "  ".into();
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                    } else {
-                        // First occurrence keeps the corner but dim it consistently
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                        seen_first = true;
-                    }
-                }
-            }
-        }
-        // Merge overlapping/touching ranges per file to keep the list succinct
-        coalesce_read_ranges_in_lines_local(&mut v);
-        v
-    }
-}
-
-impl HistoryCell for ReadAggregationCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } }
-    }
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        let mut out: Vec<Line<'static>> = Vec::new();
-        // Header: match Exec running/success styling for informational actions
-        let header = if self.finalized {
-            Line::styled("Read", Style::default().fg(crate::colors::text()))
-        } else {
-            Line::styled("Read", Style::default().fg(crate::colors::info()))
-        };
-        out.push(header);
-        out.extend(self.normalized_lines());
-        out
-    }
-    fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(self.display_lines_trimmed()))
-            .wrap(Wrap { trim: false })
-            .line_count(width)
-            .try_into()
-            .unwrap_or(0)
-    }
-}
-
 // ==================== PlainHistoryCell ====================
 // For simple cells that just store lines
 
@@ -2734,12 +2649,64 @@ impl CollapsibleReasoningCell {
         self.in_progress.set(in_progress);
     }
 
-    /// Normalized lines for reasoning.
-    ///
-    /// Robust mode: do not split lines. We keep provider output verbatim to
-    /// avoid mid‑word truncation and accidental title/body separation. Collapsed
-    /// view still extracts titles using the entire-line-bold rule below.
-    fn normalized_lines(&self) -> Vec<Line<'static>> { self.lines.clone() }
+    /// Normalize reasoning content lines by splitting any line that begins
+    /// with a bold "section title" followed immediately by regular text.
+    /// This produces a separate title line and keeps following text on a new line,
+    /// improving section detection and spacing.
+    fn normalized_lines(&self) -> Vec<Line<'static>> {
+        let mut out: Vec<Line<'static>> = Vec::new();
+        for line in &self.lines {
+            // Skip unchanged if empty or single span
+            if line.spans.len() <= 1 {
+                out.push(line.clone());
+                continue;
+            }
+
+            // Determine length of the leading bold run
+            let mut idx = 0usize;
+            while idx < line.spans.len() {
+                let s = &line.spans[idx];
+                // Treat heading-style titles (often bold) as bold too
+                let is_bold = s.style.add_modifier.contains(Modifier::BOLD);
+                if idx == 0 && s.content.trim().is_empty() {
+                    // allow leading spaces in the bold run
+                    idx += 1;
+                    continue;
+                }
+                if is_bold {
+                    idx += 1;
+                    continue;
+                }
+                break;
+            }
+
+            // If no leading bold run or the entire line is bold, keep as-is
+            if idx == 0 || idx >= line.spans.len() {
+                out.push(line.clone());
+                continue;
+            }
+
+            // Create a separate title line from the leading bold spans
+            let mut title_spans = Vec::new();
+            let mut rest_spans = Vec::new();
+            for (i, s) in line.spans.iter().enumerate() {
+                if i < idx {
+                    title_spans.push(s.clone());
+                } else {
+                    rest_spans.push(s.clone());
+                }
+            }
+
+            // Push title line
+            out.push(Line::from(title_spans));
+            // Insert a spacer if the rest is non-empty and not already a blank line
+            let rest_is_blank = rest_spans.iter().all(|s| s.content.trim().is_empty());
+            if !rest_is_blank {
+                out.push(Line::from(rest_spans));
+            }
+        }
+        out
+    }
 
     /// Extracts section titles for collapsed display: any line that appears to
     /// be a heading or starts with a leading bold run. Returns at least the
