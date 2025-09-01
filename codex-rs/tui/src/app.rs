@@ -546,6 +546,11 @@ impl App<'_> {
                 AppEvent::Paste(text) => {
                     self.dispatch_paste_event(text);
                 }
+                AppEvent::RegisterPastedImage { placeholder, path } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.register_pasted_image(placeholder, path);
+                    }
+                }
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
