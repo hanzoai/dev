@@ -4256,18 +4256,7 @@ fn exec_command_lines(
     }
 }
 
-pub(crate) fn action_from_parsed(parsed_commands: &[ParsedCommand]) -> &'static str {
-    for parsed in parsed_commands.iter() {
-        match parsed {
-            ParsedCommand::Search { .. } => return "search",
-            ParsedCommand::Read { .. } => return "read",
-            ParsedCommand::ListFiles { .. } => return "list",
-            ParsedCommand::Noop { .. } => continue,
-            _ => return "run",
-        }
-    }
-    "run"
-}
+// Legacy helper removed in favor of ExecAction (action_enum_from_parsed)
 
 fn first_context_path(parsed_commands: &[ParsedCommand]) -> Option<String> {
     for parsed in parsed_commands.iter() {
