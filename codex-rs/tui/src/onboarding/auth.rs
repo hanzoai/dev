@@ -107,7 +107,7 @@ impl AuthModeWidget {
             Line::from(vec![
                 Span::raw("> "),
                 Span::styled(
-                    "Sign in with ChatGPT to use Codex as part of your paid plan",
+                    "Sign in with ChatGPT to use your paid OpenAI plan",
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]),
@@ -125,18 +125,18 @@ impl AuthModeWidget {
         // preferred auth method, show a brief explanation.
         if let LoginStatus::AuthMode(current) = self.login_status {
             if current != self.preferred_auth_method {
-            let to_label = |mode: AuthMode| match mode {
-                AuthMode::ApiKey => "API key",
-                AuthMode::ChatGPT => "ChatGPT",
-            };
-            let msg = format!(
-                "  You’re currently using {} while your preferred method is {}.",
-                to_label(current),
-                to_label(self.preferred_auth_method)
-            );
-            lines.push(Line::from(msg).style(Style::default()));
-            lines.push(Line::from(""));
-        }
+                let to_label = |mode: AuthMode| match mode {
+                    AuthMode::ApiKey => "API key",
+                    AuthMode::ChatGPT => "ChatGPT",
+                };
+                let msg = format!(
+                    "  You’re currently using {} while your preferred method is {}.",
+                    to_label(current),
+                    to_label(self.preferred_auth_method)
+                );
+                lines.push(Line::from(msg).style(Style::default()));
+                lines.push(Line::from(""));
+            }
         }
 
         let create_mode_item = |idx: usize,
