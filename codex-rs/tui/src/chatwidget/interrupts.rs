@@ -10,6 +10,7 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 
 use super::ChatWidget;
+use super::tools;
 
 #[derive(Debug)]
 pub(crate) enum QueuedInterrupt {
@@ -91,16 +92,16 @@ impl InterruptManager {
                 QueuedInterrupt::ExecEnd { ev, .. } => chat.handle_exec_end_now(ev),
                 QueuedInterrupt::McpBegin { ev, .. } => {
                     let call_id = ev.call_id.clone();
-                    chat.handle_mcp_begin_now(ev);
+                    tools::mcp_begin(chat, ev);
                     chat.maybe_move_last_before_final_assistant_tool(&call_id);
                 }
-                QueuedInterrupt::McpEnd { ev, .. } => chat.handle_mcp_end_now(ev),
+                QueuedInterrupt::McpEnd { ev, .. } => tools::mcp_end(chat, ev),
                 QueuedInterrupt::PatchEnd { seq, ev, .. } => {
                     chat.handle_patch_apply_end_now(ev);
                     chat.maybe_move_last_before_final_assistant(seq);
                 }
                 QueuedInterrupt::PlanUpdate { seq, ev, .. } => {
-                    chat.add_to_history(crate::history_cell::new_plan_update(ev));
+                    chat.history_push(crate::history_cell::new_plan_update(ev));
                     chat.maybe_move_last_before_final_assistant(seq);
                 }
             }

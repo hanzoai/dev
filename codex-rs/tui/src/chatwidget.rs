@@ -14,6 +14,14 @@ use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 
 mod interrupts;
+mod streaming;
+mod exec_tools;
+mod tools;
+mod layout_scroll;
+mod diff_handlers;
+mod perf;
+mod diff_ui;
+mod message;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -36,8 +44,7 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::InputItem;
-use codex_core::protocol::McpToolCallBeginEvent;
-use codex_core::protocol::McpToolCallEndEvent;
+// MCP tool call handlers moved into chatwidget::tools
 use codex_core::protocol::Op;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
@@ -68,7 +75,6 @@ use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
 use crate::history_cell;
-use crate::history_cell::CommandOutput;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use codex_protocol::models::{ContentItem, ResponseItem};
@@ -142,13 +148,8 @@ pub(crate) struct ChatWidget<'a> {
     last_assistant_message: Option<String>,
     // Track the ID of the current streaming message to prevent duplicates
     // Track the ID of the current streaming reasoning to prevent duplicates
-    running_commands: HashMap<String, RunningCommand>,
-    // Track active custom tool cells by call_id so we can replace them on completion
-    running_custom_tools: HashMap<String, usize>,
-    // Track running web searches by call_id -> (history index, query)
-    running_web_search: HashMap<String, (usize, Option<String>)>,
-    // Single live aggregation block for consecutive Read actions
-    running_read_agg_index: Option<usize>,
+    exec: ExecState,
+    tools_state: ToolState,
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
@@ -168,10 +169,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // Terminal information from startup
     terminal_info: crate::tui::TerminalInfo,
-    // Scroll offset from bottom (0 = at bottom, positive = scrolled up)
-    scroll_offset: u16,
-    // Cached max scroll from last render to prevent overscroll artifacts
-    last_max_scroll: std::cell::Cell<u16>,
     // Agent tracking for multi-agent tasks
     active_agents: Vec<AgentInfo>,
     agents_ready_to_start: bool,
@@ -185,46 +182,28 @@ pub(crate) struct ChatWidget<'a> {
     last_sparkline_update: std::cell::RefCell<std::time::Instant>,
     // Stream controller for managing streaming content
     stream: crate::streaming::controller::StreamController,
-    // Track which stream kind is currently active for grouping history inserts
-    current_stream_kind: Option<StreamKind>,
+    // Stream lifecycle state (kind, closures, sequencing, cancel)
+    stream_state: StreamState,
     // Interrupt manager for handling cancellations
     interrupts: interrupts::InterruptManager,
 
-    // Track ids that have produced a finalized Answer/Reasoning in the current turn.
-    // Any further deltas for these ids should be ignored to avoid post-final updates.
-    closed_answer_ids: HashSet<String>,
-    closed_reasoning_ids: HashSet<String>,
     // Guard for out-of-order exec events: track call_ids that already ended
     ended_call_ids: HashSet<String>,
 
-
-    // Accumulated patch change sets for this session (latest last)
-    session_patch_sets: Vec<HashMap<PathBuf, codex_core::protocol::FileChange>>,
-    // Baseline original contents captured when a file first appears in a change set
-    baseline_file_contents: HashMap<PathBuf, String>,
-    diff_overlay: Option<DiffOverlay>,
-    diff_confirm: Option<DiffConfirm>,
+    // Accumulated diff/session state
+    diffs: DiffsState,
 
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
     // Track last width used to opportunistically clear cache when layout changes
     height_cache_last_width: std::cell::Cell<u16>,
-    // Track last viewport height of the history content area to stabilize scrolling
-    last_history_viewport_height: std::cell::Cell<u16>,
-    // Cached visible rows for the diff overlay body to clamp scrolling
-    diff_body_visible_rows: std::cell::Cell<u16>,
+    // Cached visible rows for the diff overlay body to clamp scrolling (kept within diffs)
 
     // Centralized height manager (always enabled)
     height_manager: RefCell<HeightManager>,
 
-    // Track prior HUD visibility to emit toggle events to HeightManager
-    last_hud_present: std::cell::Cell<bool>,
-
-    // HUD panel expansion state (stacked layout): only one expands at a time
-    browser_hud_expanded: bool,
-    agents_hud_expanded: bool,
-    // Last full frame height (terminal rows), set each render; used for HUD sizing
-    last_frame_height: std::cell::Cell<u16>,
+    // Aggregated layout and scroll state
+    layout: LayoutState,
 
     // True when connected to external Chrome via CDP; affects HUD titles
     browser_is_external: bool,
@@ -236,17 +215,11 @@ pub(crate) struct ChatWidget<'a> {
     last_prefix_count: std::cell::Cell<usize>,
     prefix_valid: std::cell::Cell<bool>,
 
-    // Stateful vertical scrollbar for history view
-    vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
-    // Auto-hide scrollbar timer; when Some(t), keep visible until t
-    scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
-
     // Most recent theme snapshot used to retint pre-rendered lines
     last_theme: crate::theme::Theme,
 
     // Performance tracing (opt-in via /perf)
-    perf_enabled: bool,
-    perf: std::cell::RefCell<PerfStats>,
+    perf_state: PerfState,
     // Current session id (from SessionConfigured)
     session_id: Option<uuid::Uuid>,
 
@@ -258,15 +231,7 @@ pub(crate) struct ChatWidget<'a> {
     active_task_ids: HashSet<String>,
 
     // Event sequencing to preserve original order across streaming/tool events
-    next_seq: u64,
-    // Sequence marker for the final assistant message in the current turn
-    seq_answer_final: Option<u64>,
-
-    // When true, drop any further streaming deltas for the current turn.
-    // Set as soon as the user interrupts (Esc/Ctrl+C) to ensure UI stops
-    // showing additional output immediately, even if the backend takes a
-    // moment to propagate cancellation.
-    drop_streaming: bool,
+    // and stream-related flags moved into stream_state
 }
 
 struct PendingJumpBack {
@@ -277,160 +242,11 @@ struct PendingJumpBack {
 static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 static BG_SHOT_LAST_START_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
-struct DiffOverlay {
-    tabs: Vec<(String, Vec<DiffBlock>)>,
-    selected: usize,
-    scroll_offsets: Vec<u16>,
-}
+use self::diff_ui::{DiffBlock, DiffConfirm, DiffOverlay};
 
-impl DiffOverlay {
-    fn new(tabs: Vec<(String, Vec<DiffBlock>)>) -> Self {
-        let n = tabs.len();
-        Self { tabs, selected: 0, scroll_offsets: vec![0; n] }
-    }
-}
+use self::message::UserMessage;
 
-#[derive(Clone)]
-struct DiffBlock {
-    lines: Vec<ratatui::text::Line<'static>>,
-}
-
-struct DiffConfirm {
-    text_to_submit: String,
-}
-
-struct UserMessage {
-    /// What to show in the chat history (keeps placeholders like "[image: name.png]")
-    display_text: String,
-    /// Items to send to the core/model in the correct order, with inline
-    /// markers preceding images so the LLM knows placement.
-    ordered_items: Vec<InputItem>,
-}
-
-#[derive(Default, Clone, Debug)]
-struct PerfStats {
-    frames: u64,
-    prefix_rebuilds: u64,
-    height_hits_total: u64,
-    height_misses_total: u64,
-    height_hits_render: u64,
-    height_misses_render: u64,
-    ns_total_height: u128,
-    ns_render_loop: u128,
-    // Hotspots: time spent computing heights on cache misses
-    hot_total: std::collections::HashMap<(usize, u16), ItemStat>,
-    hot_render: std::collections::HashMap<(usize, u16), ItemStat>,
-    // Aggregation by cell kind/label
-    per_kind_total: std::collections::HashMap<String, ItemStat>,
-    per_kind_render: std::collections::HashMap<String, ItemStat>,
-}
-
-impl PerfStats {
-    fn reset(&mut self) { *self = PerfStats::default(); }
-    fn summary(&self) -> String {
-        let ms_total_height = (self.ns_total_height as f64) / 1_000_000.0;
-        let ms_render = (self.ns_render_loop as f64) / 1_000_000.0;
-        let mut out = String::new();
-        out.push_str(&format!(
-            "perf: frames={}\n  prefix_rebuilds={}\n  height_cache: total hits={} misses={}\n  height_cache (render): hits={} misses={}\n  time: total_height={:.2}ms render_visible={:.2}ms",
-            self.frames,
-            self.prefix_rebuilds,
-            self.height_hits_total,
-            self.height_misses_total,
-            self.height_hits_render,
-            self.height_misses_render,
-            ms_total_height,
-            ms_render,
-        ));
-
-        // Top hotspots by (index,width)
-        let mut top_total: Vec<(&(usize, u16), &ItemStat)> = self.hot_total.iter().collect();
-        top_total.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
-        let mut top_render: Vec<(&(usize, u16), &ItemStat)> = self.hot_render.iter().collect();
-        top_render.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
-
-        if !top_total.is_empty() {
-            out.push_str("\n\n  hot items (total height, cache misses):\n");
-            for ((idx, w), stat) in top_total.into_iter().take(5) {
-                out.push_str(&format!(
-                    "    (idx={}, width={}) calls={} time={:.2}ms\n",
-                    idx,
-                    w,
-                    stat.calls,
-                    (stat.ns as f64) / 1_000_000.0,
-                ));
-            }
-        }
-
-        if !top_render.is_empty() {
-            out.push_str("\n  hot items (render visible, cache misses):\n");
-            for ((idx, w), stat) in top_render.into_iter().take(5) {
-                out.push_str(&format!(
-                    "    (idx={}, width={}) calls={} time={:.2}ms\n",
-                    idx,
-                    w,
-                    stat.calls,
-                    (stat.ns as f64) / 1_000_000.0,
-                ));
-            }
-        }
-
-        // Per-kind aggregation
-        if !self.per_kind_total.is_empty() {
-            let mut v: Vec<(&String, &ItemStat)> = self.per_kind_total.iter().collect();
-            v.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
-            out.push_str("\n  by kind (total height):\n");
-            for (k, s) in v.into_iter().take(5) {
-                out.push_str(&format!(
-                    "    {} calls={} time={:.2}ms\n",
-                    k,
-                    s.calls,
-                    (s.ns as f64) / 1_000_000.0,
-                ));
-            }
-        }
-
-        if !self.per_kind_render.is_empty() {
-            let mut v: Vec<(&String, &ItemStat)> = self.per_kind_render.iter().collect();
-            v.sort_by_key(|(_, s)| std::cmp::Reverse(s.ns));
-            out.push_str("\n  by kind (render visible):\n");
-            for (k, s) in v.into_iter().take(5) {
-                out.push_str(&format!(
-                    "    {} calls={} time={:.2}ms\n",
-                    k,
-                    s.calls,
-                    (s.ns as f64) / 1_000_000.0,
-                ));
-            }
-        }
-
-        out
-    }
-
-    fn record_total(&mut self, key: (usize, u16), kind: &str, ns: u128) {
-        let e = self.hot_total.entry(key).or_insert_with(ItemStat::default);
-        e.calls = e.calls.saturating_add(1);
-        e.ns = e.ns.saturating_add(ns);
-        let ek = self.per_kind_total.entry(kind.to_string()).or_insert_with(ItemStat::default);
-        ek.calls = ek.calls.saturating_add(1);
-        ek.ns = ek.ns.saturating_add(ns);
-    }
-
-    fn record_render(&mut self, key: (usize, u16), kind: &str, ns: u128) {
-        let e = self.hot_render.entry(key).or_insert_with(ItemStat::default);
-        e.calls = e.calls.saturating_add(1);
-        e.ns = e.ns.saturating_add(ns);
-        let ek = self.per_kind_render.entry(kind.to_string()).or_insert_with(ItemStat::default);
-        ek.calls = ek.calls.saturating_add(1);
-        ek.ns = ek.ns.saturating_add(ns);
-    }
-}
-
-#[derive(Default, Clone, Debug)]
-struct ItemStat {
-    calls: u64,
-    ns: u128,
-}
+use self::perf::PerfStats;
 
 #[derive(Debug, Clone)]
 struct AgentInfo {
@@ -446,39 +262,14 @@ enum AgentStatus {
     Failed,
 }
 
-impl From<String> for UserMessage {
-    fn from(text: String) -> Self {
-        let mut ordered = Vec::new();
-        if !text.trim().is_empty() {
-            ordered.push(InputItem::Text { text: text.clone() });
-        }
-        Self { display_text: text, ordered_items: ordered }
-    }
-}
-
-fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> Option<UserMessage> {
-    if text.is_empty() && image_paths.is_empty() {
-        None
-    } else {
-        let mut ordered: Vec<InputItem> = Vec::new();
-        if !text.trim().is_empty() {
-            ordered.push(InputItem::Text { text: text.clone() });
-        }
-        for path in image_paths {
-            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
-            ordered.push(InputItem::Text { text: format!("[image: {}]", filename) });
-            ordered.push(InputItem::LocalImage { path });
-        }
-        Some(UserMessage { display_text: text, ordered_items: ordered })
-    }
-}
+use self::message::create_initial_user_message;
 
 impl ChatWidget<'_> {
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
-        let any_tools_running = !self.running_commands.is_empty()
-            || !self.running_custom_tools.is_empty()
-            || !self.running_web_search.is_empty();
+        let any_tools_running = !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty();
         let any_streaming = self.stream.is_write_cycle_active();
         let any_agents_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
         let any_tasks_active = !self.active_task_ids.is_empty();
@@ -486,204 +277,11 @@ impl ChatWidget<'_> {
             self.bottom_pane.set_task_running(false);
         }
     }
-    fn finalize_exec_cell_at(&mut self, idx: usize, exit_code: i32, stdout: String, stderr: String) {
-        if idx >= self.history_cells.len() { return; }
-        if let Some(exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
-            if exec.output.is_none() {
-                let completed = history_cell::new_completed_exec_command(
-                    exec.command.clone(),
-                    exec.parsed.clone(),
-                    CommandOutput { exit_code, stdout, stderr },
-                );
-                self.history_cells[idx] = Box::new(completed);
-                self.invalidate_height_cache();
-                self.request_redraw();
-            }
-        }
-    }
+    
 
-    fn finalize_all_running_as_interrupted(&mut self) {
-        // Mark running Exec cells as interrupted (SIGINT semantics 130)
-        let interrupted_msg = "Interrupted by user".to_string();
-        let stdout_empty = String::new();
-        // Snapshot keys to avoid borrow issues
-        let running: Vec<(String, Option<usize>)> = self
-            .running_commands
-            .iter()
-            .map(|(k, v)| (k.clone(), v.history_index))
-            .collect();
-        for (_call_id, maybe_idx) in running {
-            if let Some(idx) = maybe_idx { self.finalize_exec_cell_at(idx, 130, stdout_empty.clone(), interrupted_msg.clone()); }
-        }
-        self.running_commands.clear();
+    fn finalize_all_running_as_interrupted(&mut self) { exec_tools::finalize_all_running_as_interrupted(self); }
 
-        // Custom tools: replace running cells with a failed completion note
-        if !self.running_custom_tools.is_empty() {
-            let entries: Vec<(String, usize)> = self.running_custom_tools.iter().map(|(k, i)| (k.clone(), *i)).collect();
-            for (_k, idx) in entries {
-                if idx < self.history_cells.len() {
-                    // Create a synthetic completion with failure
-                    let completed = history_cell::new_completed_custom_tool_call(
-                        "custom".to_string(),
-                        None,
-                        std::time::Duration::from_millis(0),
-                        false,
-                        "Interrupted by user".to_string(),
-                    );
-                    self.history_cells[idx] = Box::new(completed);
-                }
-            }
-            self.running_custom_tools.clear();
-            self.invalidate_height_cache();
-            self.request_redraw();
-        }
-
-        // Web searches: finalize as unsuccessful
-        if !self.running_web_search.is_empty() {
-            let entries: Vec<(String, (usize, Option<String>))> = self.running_web_search.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            for (call_id, (idx, query_opt)) in entries {
-                let mut target_idx = None;
-                if idx < self.history_cells.len() {
-                    let is_ws = self.history_cells[idx]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                        .is_some_and(|rt| rt.has_title("Web Search..."));
-                    if is_ws { target_idx = Some(idx); }
-                }
-                if target_idx.is_none() {
-                    for i in (0..self.history_cells.len()).rev() {
-                        if let Some(rt) = self.history_cells[i]
-                            .as_any()
-                            .downcast_ref::<history_cell::RunningToolCallCell>()
-                        {
-                            if rt.has_title("Web Search...") { target_idx = Some(i); break; }
-                        }
-                    }
-                }
-                if let Some(i) = target_idx {
-                    if let Some(rt) = self.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        let completed = rt.finalize_web_search(false, query_opt);
-                        self.history_cells[i] = Box::new(completed);
-                        self.invalidate_height_cache();
-                        self.request_redraw();
-                    }
-                }
-                self.running_web_search.remove(&call_id);
-            }
-        }
-
-        // If nothing else is active, hide the spinner and show cancelled
-        self.bottom_pane.update_status_text("cancelled".to_string());
-        let any_tasks_active = !self.active_task_ids.is_empty();
-        if !any_tasks_active {
-            self.bottom_pane.set_task_running(false);
-        }
-        // Finalize a running Read aggregation if present to avoid dangling "Read" running block
-        if let Some(idx) = self.running_read_agg_index.take() {
-            if idx < self.history_cells.len() {
-                if let Some(agg) = self.history_cells[idx]
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::ReadAggregationCell>()
-                {
-                    agg.finalize();
-                    self.invalidate_height_cache();
-                    self.request_redraw();
-                }
-            }
-        }
-        // Re-check global idle state
-        self.maybe_hide_spinner();
-    }
-
-    fn finalize_all_running_due_to_answer(&mut self) {
-        // Convert any lingering running exec/tool cells to completed so the UI doesn't hang.
-        let note = "Completed (final answer received)".to_string();
-        let stdout_empty = String::new();
-        let running: Vec<(String, Option<usize>)> = self
-            .running_commands
-            .iter()
-            .map(|(k, v)| (k.clone(), v.history_index))
-            .collect();
-        for (_call_id, maybe_idx) in running {
-            if let Some(idx) = maybe_idx { self.finalize_exec_cell_at(idx, 0, stdout_empty.clone(), note.clone()); }
-        }
-        self.running_commands.clear();
-
-        if !self.running_custom_tools.is_empty() {
-            let entries: Vec<(String, usize)> = self.running_custom_tools.iter().map(|(k, i)| (k.clone(), *i)).collect();
-            for (_k, idx) in entries {
-                if idx < self.history_cells.len() {
-                    let completed = history_cell::new_completed_custom_tool_call(
-                        "custom".to_string(),
-                        None,
-                        std::time::Duration::from_millis(0),
-                        true,
-                        "Final answer received".to_string(),
-                    );
-                    self.history_cells[idx] = Box::new(completed);
-                }
-            }
-            self.running_custom_tools.clear();
-            self.invalidate_height_cache();
-            self.request_redraw();
-        }
-
-        if !self.running_web_search.is_empty() {
-            let entries: Vec<(String, (usize, Option<String>))> = self
-                .running_web_search
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            for (call_id, (idx, query_opt)) in entries {
-                let mut target_idx = None;
-                if idx < self.history_cells.len() {
-                    let is_ws = self.history_cells[idx]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                        .is_some_and(|rt| rt.has_title("Web Search..."));
-                    if is_ws { target_idx = Some(idx); }
-                }
-                if target_idx.is_none() {
-                    for i in (0..self.history_cells.len()).rev() {
-                        if let Some(rt) = self.history_cells[i]
-                            .as_any()
-                            .downcast_ref::<history_cell::RunningToolCallCell>()
-                        {
-                            if rt.has_title("Web Search...") { target_idx = Some(i); break; }
-                        }
-                    }
-                }
-                if let Some(i) = target_idx {
-                    if let Some(rt) = self.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        let completed = rt.finalize_web_search(true, query_opt);
-                        self.history_cells[i] = Box::new(completed);
-                        self.invalidate_height_cache();
-                        self.request_redraw();
-                    }
-                }
-                self.running_web_search.remove(&call_id);
-            }
-        }
-        // Also finalize a running Read aggregation block, if any
-        if let Some(idx) = self.running_read_agg_index.take() {
-            if idx < self.history_cells.len() {
-                if let Some(agg) = self.history_cells[idx]
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::ReadAggregationCell>()
-                {
-                    agg.finalize();
-                    self.invalidate_height_cache();
-                    self.request_redraw();
-                }
-            }
-        }
-    }
+    fn finalize_all_running_due_to_answer(&mut self) { exec_tools::finalize_all_running_due_to_answer(self); }
     fn perf_label_for_item(&self, item: &dyn HistoryCell) -> String {
         use crate::history_cell::{ExecKind, ExecStatus, HistoryCellType, PatchKind, ToolStatus};
         match item.kind() {
@@ -739,7 +337,7 @@ impl ChatWidget<'_> {
         let codex_home = self.config.codex_home.clone();
         let candidates = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home);
         if candidates.is_empty() {
-            self.add_to_history(crate::history_cell::new_background_event(
+            self.history_push(crate::history_cell::new_background_event(
                 "No past sessions found for this folder".to_string(),
             ));
             return;
@@ -813,21 +411,21 @@ impl ChatWidget<'_> {
                     use ratatui::text::Line as RLine;
                     let mut lines: Vec<RLine<'static>> = Vec::new();
                     crate::markdown::append_markdown(&text, &mut lines, &self.config);
-                    self.add_to_history(crate::history_cell::PlainHistoryCell {
+                    self.history_push(crate::history_cell::PlainHistoryCell {
                         lines,
                         kind: crate::history_cell::HistoryCellType::Notice,
                     });
                     return;
                 }
                 if role == "user" {
-                    self.add_to_history(crate::history_cell::new_user_prompt(text));
+                    self.history_push(crate::history_cell::new_user_prompt(text));
                 } else {
                     // Build a PlainHistoryCell with Assistant kind; header line hidden by renderer
                     use crate::history_cell::{PlainHistoryCell, HistoryCellType};
                     let mut lines = Vec::new();
                     lines.push(ratatui::text::Line::from("assistant"));
                     for l in text.lines() { lines.push(ratatui::text::Line::from(l.to_string())); }
-                    self.add_to_history(PlainHistoryCell { lines, kind: HistoryCellType::Assistant });
+                    self.history_push(PlainHistoryCell { lines, kind: HistoryCellType::Assistant });
                 }
             }
             ResponseItem::Reasoning { summary, .. } => {
@@ -835,7 +433,7 @@ impl ChatWidget<'_> {
                     let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s;
                     // Reasoning cell – use the existing reasoning output styling
                     let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
-                    self.current_stream_kind = Some(crate::streaming::StreamKind::Reasoning);
+                    self.stream_state.current_kind = Some(crate::streaming::StreamKind::Reasoning);
                     let _ = self.stream.apply_final_reasoning(&text, &sink);
                     // finalize immediately for static replay
                     self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
@@ -849,7 +447,7 @@ impl ChatWidget<'_> {
                         content = s.to_string();
                     }
                 }
-                self.add_to_history(crate::history_cell::new_background_event(content));
+                self.history_push(crate::history_cell::new_background_event(content));
             }
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
@@ -865,16 +463,7 @@ impl ChatWidget<'_> {
     }
     /// If the user is at or near the bottom, keep following new messages.
     /// We treat "near" as within 3 rows, matching our scroll step.
-    fn autoscroll_if_near_bottom(&mut self) {
-        if self.scroll_offset <= 3 {
-            self.scroll_offset = 0;
-            // Restore spacer above input when at bottom
-            self.bottom_pane.set_compact_compose(false);
-            self.height_manager
-                .borrow_mut()
-                .record_event(HeightEvent::ComposerModeChange);
-        }
-    }
+    fn autoscroll_if_near_bottom(&mut self) { layout_scroll::autoscroll_if_near_bottom(self); }
 
     fn clear_reasoning_in_progress(&mut self) {
         let mut changed = false;
@@ -893,26 +482,7 @@ impl ChatWidget<'_> {
     }
     
     /// Handle streaming delta for both answer and reasoning
-    fn handle_streaming_delta(&mut self, kind: StreamKind, id: String, delta: String) {
-        if self.drop_streaming {
-            // Ignore any post‑cancel deltas. The stream will be finalized or
-            // cleared once the backend surfaces the interrupt/complete event.
-            tracing::debug!("dropping streaming delta after cancel (kind={:?}, id={})", kind, id);
-            return;
-        }
-        tracing::debug!("handle_streaming_delta kind={:?}, delta={:?}", kind, delta);
-        // Remember which stream is currently active so we can group inserts
-        self.current_stream_kind = Some(kind);
-        let sink = AppEventHistorySink(self.app_event_tx.clone());
-        
-        // Always begin the correct stream for this delta's kind
-        // This will switch streams if needed or no-op if already active
-        self.stream.begin_with_id(kind, Some(id), &sink);
-        
-        // Append delta to the stream
-        self.stream.push_and_maybe_commit(&delta, &sink);
-        self.mark_needs_redraw();
-    }
+    fn handle_streaming_delta(&mut self, kind: StreamKind, id: String, delta: String) { streaming::handle_streaming_delta(self, kind, id, delta); }
 
     /// Defer or handle an interrupt based on whether we're streaming
     fn defer_or_handle<F1, F2>(&mut self, defer_fn: F1, handle_fn: F2)
@@ -924,40 +494,20 @@ impl ChatWidget<'_> {
     }
 
     fn next_sequence(&mut self) -> u64 {
-        let s = self.next_seq; self.next_seq = self.next_seq.saturating_add(1); s
+        let s = self.stream_state.next_seq;
+        self.stream_state.next_seq = self.stream_state.next_seq.saturating_add(1);
+        s
     }
 
     fn index_of_final_assistant(&self) -> Option<usize> {
         self.history_cells.iter().rposition(|c| c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>().is_some())
     }
 
-    fn maybe_move_last_before_final_assistant_exec(&mut self, call_id: &str) {
-        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
-        if self.history_cells.is_empty() { return; }
-        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
-        if let Some(rc) = self.running_commands.get_mut(call_id) { rc.history_index = Some(assistant_idx); }
-        self.invalidate_height_cache(); self.request_redraw();
-    }
+    fn maybe_move_last_before_final_assistant_exec(&mut self, call_id: &str) { exec_tools::maybe_move_last_before_final_assistant_exec(self, call_id); }
 
-    fn maybe_move_last_before_final_assistant_tool(&mut self, call_id: &str) {
-        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
-        if self.history_cells.is_empty() { return; }
-        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
-        if let Some(idx) = self.running_custom_tools.get_mut(call_id) { *idx = assistant_idx; }
-        self.invalidate_height_cache(); self.request_redraw();
-    }
+    fn maybe_move_last_before_final_assistant_tool(&mut self, call_id: &str) { exec_tools::maybe_move_last_before_final_assistant_tool(self, call_id); }
 
-    fn maybe_move_last_before_final_assistant(&mut self, seq: u64) {
-        let ans_seq = match self.seq_answer_final { Some(s) => s, None => return };
-        if seq >= ans_seq { return; }
-        let assistant_idx = match self.index_of_final_assistant() { Some(i) => i, None => return };
-        if self.history_cells.is_empty() { return; }
-        let last_idx = self.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-        let cell = self.history_cells.remove(last_idx); self.history_cells.insert(assistant_idx, cell);
-        self.invalidate_height_cache(); self.request_redraw();
-    }
+    fn maybe_move_last_before_final_assistant(&mut self, seq: u64) { exec_tools::maybe_move_last_before_final_assistant(self, seq); }
 
 
 
@@ -1006,30 +556,30 @@ impl ChatWidget<'_> {
         // Clone for session storage before moving into history
         let changes_clone = changes.clone();
         // Surface the patch summary in the main conversation
-        self.add_to_history(history_cell::new_patch_event(
+        self.history_push(history_cell::new_patch_event(
             history_cell::PatchEventType::ApprovalRequest,
             changes,
         ));
         // Record change set for session diff popup (latest last)
-        self.session_patch_sets.push(changes_clone);
+        self.diffs.session_patch_sets.push(changes_clone);
         // For any new paths, capture an original baseline snapshot the first time we see them
-        if let Some(last) = self.session_patch_sets.last() {
+        if let Some(last) = self.diffs.session_patch_sets.last() {
             for (src_path, chg) in last.iter() {
                 match chg {
                     codex_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
-                        if let Some(baseline) = self.baseline_file_contents.get(src_path).cloned() {
+                        if let Some(baseline) = self.diffs.baseline_file_contents.get(src_path).cloned() {
                             // Mirror baseline under destination so tabs use the new path
-                            self.baseline_file_contents.entry(dest_path.clone()).or_insert(baseline);
-                        } else if !self.baseline_file_contents.contains_key(dest_path) {
+                            self.diffs.baseline_file_contents.entry(dest_path.clone()).or_insert(baseline);
+                        } else if !self.diffs.baseline_file_contents.contains_key(dest_path) {
                             // Snapshot from source (pre-apply)
                             let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                            self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                            self.diffs.baseline_file_contents.insert(dest_path.clone(), baseline);
                         }
                     }
                     _ => {
-                        if !self.baseline_file_contents.contains_key(src_path) {
+                        if !self.diffs.baseline_file_contents.contains_key(src_path) {
                             let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                            self.baseline_file_contents.insert(src_path.clone(), baseline);
+                            self.diffs.baseline_file_contents.insert(src_path.clone(), baseline);
                         }
                     }
                 }
@@ -1049,393 +599,17 @@ impl ChatWidget<'_> {
 
     /// Handle exec command begin immediately
     fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
-        // If we already saw an end for this call_id (out-of-order delivery),
-        // ignore the late begin to avoid creating a phantom running cell.
-        if self.ended_call_ids.contains(&ev.call_id) {
-            return;
-        }
-        // Ensure welcome animation fades out when a command starts
-        for cell in &self.history_cells {
-            cell.trigger_fade();
-        }
-        // Determine the high-level action (read/search/list/run) and avoid
-        // inserting running history cells for informational actions. This
-        // eliminates the brief flash of multiple "Read" sections while
-        // consecutive reads are executing; they will now appear only once
-        // completed and merge immediately with prior Read output.
-        let parsed_command = ev.parsed_cmd.clone();
-        let action = history_cell::action_from_parsed(&parsed_command);
-
-        // Still track run lifecycle for layout/metrics
-        self.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
-
-        // For read actions: maintain a single live aggregation cell that gets
-        // updated as individual read commands begin, then flip it to a finalized
-        // state when the last read completes.
-        if action == "read" {
-            // Track this call without placing an individual running cell
-            self.running_commands.insert(
-                ev.call_id.clone(),
-                RunningCommand { command: ev.command.clone(), parsed: parsed_command.clone(), history_index: None },
-            );
-
-            // Ensure aggregation cell exists
-            let agg_index = match self.running_read_agg_index {
-                Some(idx) if idx < self.history_cells.len()
-                    && self.history_cells[idx]
-                        .as_any()
-                        .downcast_ref::<history_cell::ReadAggregationCell>()
-                        .is_some() => Some(idx),
-                _ => None,
-            };
-            let idx = if let Some(i) = agg_index {
-                i
-            } else {
-                let before_len = self.history_cells.len();
-                self.add_to_history(history_cell::ReadAggregationCell::new());
-                let i = if self.history_cells.len() > 0 { self.history_cells.len() - 1 } else { before_len };
-                self.running_read_agg_index = Some(i);
-                i
-            };
-
-            // Derive preamble lines for this read from a temp running ExecCell and drop header
-            let tmp = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
-            let mut lines = tmp.display_lines();
-            if !lines.is_empty() { lines.remove(0); }
-            if let Some(agg) = self.history_cells[idx]
-                .as_any_mut()
-                .downcast_mut::<history_cell::ReadAggregationCell>()
-            {
-                agg.push_lines(lines);
-                self.invalidate_height_cache();
-                self.request_redraw();
-            }
-
-            self.bottom_pane.update_status_text("reading files…".to_string());
-            return;
-        }
-
-        // For generic run/test/lint/etc: insert a running exec cell so users see
-        // the command context immediately; these are not merged during running.
-        let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
-        // Push to history and remember the index
-        let before_len = self.history_cells.len();
-        self.add_to_history(cell);
-        let idx = if self.history_cells.len() > 0 { self.history_cells.len() - 1 } else { before_len };
-
-        // Store in running commands with history index
-        self.running_commands.insert(
-            ev.call_id.clone(),
-            RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: Some(idx) },
-        );
-
-        // Update status: show that a command is running
-        if !self.running_web_search.is_empty() {
-            self.bottom_pane.update_status_text("Searched".to_string());
-        } else {
-            let preview = self
-                .running_commands
-                .get(&ev.call_id)
-                .map(|rc| rc.command.join(" "))
-                .unwrap_or_else(|| "command".to_string());
-            // Truncate preview safely at char boundaries (avoid slicing in the middle of UTF-8 like '❯')
-            let preview_short = if preview.chars().count() > 40 {
-                let mut truncated: String = preview.chars().take(40).collect();
-                truncated.push('…');
-                truncated
-            } else {
-                preview
-            };
-            self.bottom_pane
-                .update_status_text(format!("running command: {}", preview_short));
-        }
+        exec_tools::handle_exec_begin_now(self, ev);
     }
 
     /// Handle exec command end immediately
-    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent) {
-        // Record that this call has ended so a late Begin can be ignored.
-        self.ended_call_ids.insert(ev.call_id.clone());
-        let ExecCommandEndEvent {
-            call_id,
-            exit_code,
-            duration: _,
-            stdout,
-            stderr,
-        } = ev;
-        
-        // Get command info and remove from tracking
-        let cmd = self.running_commands.remove(&call_id);
-        // Still mark run end for layout/metrics
-        self.height_manager.borrow_mut().record_event(HeightEvent::RunEnd);
-
-        // Determine command/parsed and where to render
-        let (command, parsed, history_index) = cmd
-            .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index))
-            .unwrap_or_else(|| (vec![call_id.clone()], vec![], None));
-
-        // Handle completed Read commands by finalizing the aggregation cell
-        let action = history_cell::action_from_parsed(&parsed);
-        if action == "read" {
-            // Flip aggregation to finalized if this was the last active read
-            let any_read_running = self
-                .running_commands
-                .values()
-                .any(|rc| history_cell::action_from_parsed(&rc.parsed) == "read");
-            if !any_read_running {
-                if let Some(idx) = self.running_read_agg_index.take() {
-                    if idx < self.history_cells.len() {
-                        if let Some(agg) = self.history_cells[idx]
-                            .as_any_mut()
-                            .downcast_mut::<history_cell::ReadAggregationCell>()
-                        {
-                            agg.finalize();
-                            self.invalidate_height_cache();
-                            self.request_redraw();
-                        }
-                    }
-                }
-            }
-            // Update status and drop spinner if idle
-            if exit_code == 0 {
-                self.bottom_pane.update_status_text("files read".to_string());
-            } else {
-                self.bottom_pane.update_status_text(format!("read failed (exit {})", exit_code));
-            }
-            self.maybe_hide_spinner();
-            return;
-        }
-
-        // Build the completed cell
-        let mut completed_opt = Some(history_cell::new_completed_exec_command(
-            command,
-            parsed,
-            CommandOutput { exit_code, stdout, stderr },
-        ));
-
-        // Try to replace the placeholder running cell in place to preserve order.
-        let mut replaced = false;
-        if let Some(idx) = history_index {
-            if idx < self.history_cells.len() {
-                // Sanity check: ensure it's a running exec cell for the same command
-                let is_match = self.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::ExecCell>()
-                    .map(|e| {
-                        if let Some(ref c) = completed_opt {
-                            e.output.is_none() && e.command == c.command
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if is_match {
-                    if let Some(c) = completed_opt.take() {
-                        self.history_cells[idx] = Box::new(c);
-                    }
-                    // Defer redraw until after potential merge to avoid a flash
-                    self.invalidate_height_cache();
-                    let pre_len = self.history_cells.len();
-                    replaced = true;
-                    // Try to merge with previous history cell if they are the same kind (e.g., Searched, Read)
-                    self.try_merge_completed_exec_at(idx);
-                    // If no merge occurred (length unchanged), request a redraw now
-                    if self.history_cells.len() == pre_len {
-                        self.request_redraw();
-                    }
-                }
-            }
-            if !replaced {
-                // Index may have shifted due to animation cleanup. Search from the end
-                let mut found: Option<usize> = None;
-                for i in (0..self.history_cells.len()).rev() {
-                    if let Some(exec) = self.history_cells[i].as_any().downcast_ref::<history_cell::ExecCell>() {
-                        let is_same = if let Some(ref c) = completed_opt { exec.command == c.command } else { false };
-                        if exec.output.is_none() && is_same {
-                            found = Some(i);
-                            break;
-                        }
-                    }
-                }
-                if let Some(i) = found {
-                    if let Some(c) = completed_opt.take() {
-                        self.history_cells[i] = Box::new(c);
-                    }
-                    // Defer redraw until after potential merge to avoid a flash
-                    self.invalidate_height_cache();
-                    let pre_len = self.history_cells.len();
-                    replaced = true;
-                    // Try to merge with previous history cell if they are the same kind (e.g., Searched, Read)
-                    self.try_merge_completed_exec_at(i);
-                    // If no merge occurred (length unchanged), request a redraw now
-                    if self.history_cells.len() == pre_len {
-                        self.request_redraw();
-                    }
-                }
-            }
-        }
-
-        if !replaced {
-            // No known placeholder; append
-            if let Some(c) = completed_opt.take() {
-                self.add_to_history(c);
-            }
-        }
-
-        // Reflect command completion status in the input border
-        if exit_code == 0 {
-            self.bottom_pane.update_status_text("command completed".to_string());
-        } else {
-            self.bottom_pane
-                .update_status_text(format!("command failed (exit {})", exit_code));
-        }
-        // Drop spinner if we're now idle
-        self.maybe_hide_spinner();
-    }
+    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent) { exec_tools::handle_exec_end_now(self, ev); }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
     /// previous cell when they represent the same action header (e.g., Searched, Read).
-    fn try_merge_completed_exec_at(&mut self, idx: usize) {
-        // removed unused import of HistoryCellType
-        if idx == 0 || idx >= self.history_cells.len() {
-            return;
-        }
+    
 
-        // Helper to compute the header label used by exec cells
-        let _exec_label = |e: &history_cell::ExecCell| -> &'static str {
-            let action = history_cell::action_from_parsed(&e.parsed);
-            match (&e.output, action) {
-                (None, "read") => "Read",
-                (None, "search") => "Searched",
-                (None, "list") => "List Files",
-                (None, _) => "Running...",
-                (Some(o), "read") if o.exit_code == 0 => "Read",
-                (Some(o), "search") if o.exit_code == 0 => "Searched",
-                (Some(o), "list") if o.exit_code == 0 => "List Files",
-                (Some(o), _) if o.exit_code == 0 => "Ran",
-                _ => "",
-            }
-        };
-        let _is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "List Files" | "Ran" | "Running...");
-
-        // New cell must be an ExecCell with completed output
-        let new_exec = match self.history_cells[idx]
-            .as_any()
-            .downcast_ref::<history_cell::ExecCell>()
-        {
-            Some(e) if e.output.is_some() => e,
-            _ => return,
-        };
-        // Compare kinds rather than labels to avoid string drift
-        let to_kind = |e: &history_cell::ExecCell| -> history_cell::ExecKind {
-            match history_cell::action_from_parsed(&e.parsed) {
-                "read" => history_cell::ExecKind::Read,
-                "search" => history_cell::ExecKind::Search,
-                "list" => history_cell::ExecKind::List,
-                _ => history_cell::ExecKind::Run,
-            }
-        };
-        let new_kind = to_kind(new_exec);
-
-        // Do NOT merge generic "run" execs. Merging "Ran" blocks across steps can
-        // pull later command output above intervening content and confuse chronology.
-        // We still allow merging of Read/Search/List summaries where grouping is helpful.
-        if matches!(new_kind, history_cell::ExecKind::Run) {
-            return;
-        }
-
-        // Case 1: previous is also a completed ExecCell with same header -> merge into MergedExecCell preserving styling
-        if let Some(prev_exec) = self.history_cells[idx - 1]
-            .as_any()
-            .downcast_ref::<history_cell::ExecCell>()
-        {
-            if prev_exec.output.is_some() {
-                if to_kind(prev_exec) == new_kind {
-                    let mut merged = history_cell::MergedExecCell::from_exec(prev_exec);
-                    if let Some(current_exec) = self.history_cells[idx].as_any().downcast_ref::<history_cell::ExecCell>() {
-                        merged.push_exec(current_exec);
-                    }
-                    self.history_cells[idx - 1] = Box::new(merged);
-                    // Remove the now-merged current cell
-                    self.history_cells.remove(idx);
-                    self.invalidate_height_cache();
-                    self.autoscroll_if_near_bottom();
-                    self.bottom_pane.set_has_chat_history(true);
-                    self.process_animation_cleanup();
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                    return;
-                }
-            }
-        }
-
-        // Case 2: previous is a MergedExecCell produced by a prior merge with same header
-        // Fetch new cell lines before borrowing previous mutably to satisfy the borrower
-        // Borrow previous and current as non-overlapping slices to satisfy the borrow checker
-        let mut did_merge_into_prev = false;
-        if idx < self.history_cells.len() {
-            let (left, right) = self.history_cells.split_at_mut(idx);
-            if let Some(prev_merged) = left[idx - 1]
-                .as_any_mut()
-                .downcast_mut::<history_cell::MergedExecCell>()
-            {
-                if prev_merged.exec_kind() == new_kind {
-                    if let Some(current_exec) = right[0]
-                        .as_any()
-                        .downcast_ref::<history_cell::ExecCell>()
-                    {
-                        prev_merged.push_exec(current_exec);
-                        did_merge_into_prev = true;
-                    }
-                }
-            }
-        }
-        if did_merge_into_prev {
-            self.history_cells.remove(idx);
-            self.invalidate_height_cache();
-            self.autoscroll_if_near_bottom();
-            self.bottom_pane.set_has_chat_history(true);
-            self.process_animation_cleanup();
-            self.app_event_tx.send(AppEvent::RequestRedraw);
-            return;
-        }
-    }
-
-    /// Handle MCP tool call begin immediately
-    fn handle_mcp_begin_now(&mut self, ev: McpToolCallBeginEvent) {
-        // Fade out welcome animation on tool begin as well
-        for cell in &self.history_cells {
-            cell.trigger_fade();
-        }
-        let McpToolCallBeginEvent { call_id, invocation } = ev;
-        // Add animated running MCP tool call to history and track index
-        let cell = history_cell::new_running_mcp_tool_call(invocation);
-        self.add_to_history(cell);
-        if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-            self.running_custom_tools.insert(call_id, last_idx);
-        }
-    }
-
-    /// Handle MCP tool call end immediately
-    fn handle_mcp_end_now(&mut self, ev: McpToolCallEndEvent) {
-        let McpToolCallEndEvent { call_id, duration, invocation, result } = ev;
-        // Determine success from result
-        let success = !result.as_ref().map(|r| r.is_error.unwrap_or(false)).unwrap_or(false);
-        let completed = history_cell::new_completed_mcp_tool_call(
-            80, // TODO: use actual terminal width
-            invocation,
-            duration,
-            success,
-            result,
-        );
-        if let Some(idx) = self.running_custom_tools.remove(&call_id) {
-            if idx < self.history_cells.len() {
-                self.history_cells[idx] = completed;
-                self.invalidate_height_cache();
-                self.request_redraw();
-                return;
-            }
-        }
-        self.add_to_history(completed);
-    }
+    // MCP tool call handlers now live in chatwidget::tools
 
     /// Handle patch apply end immediately
     fn handle_patch_apply_end_now(&mut self, ev: PatchApplyEndEvent) {
@@ -1475,7 +649,7 @@ impl ChatWidget<'_> {
             }
             // Fallback: if no prior cell found, do nothing (avoid extra section)
         } else {
-            self.add_to_history(history_cell::new_patch_apply_failure(ev.stderr));
+            self.history_push(history_cell::new_patch_apply_failure(ev.stderr));
         }
         // After patch application completes, re-evaluate idle state
         self.maybe_hide_spinner();
@@ -1667,14 +841,8 @@ impl ChatWidget<'_> {
 
     /// Periodic tick to commit at most one queued line to history,
     /// animating the output.
-    pub(crate) fn on_commit_tick(&mut self) {
-        let sink = AppEventHistorySink(self.app_event_tx.clone());
-        let _finished = self.stream.on_commit_tick(&sink);
-        // Stream finishing is handled by StreamController
-    }
-    fn is_write_cycle_active(&self) -> bool {
-        self.stream.is_write_cycle_active()
-    }
+    pub(crate) fn on_commit_tick(&mut self) { streaming::on_commit_tick(self); }
+    fn is_write_cycle_active(&self) -> bool { streaming::is_write_cycle_active(self) }
 
     fn flush_interrupt_queue(&mut self) {
         let mut mgr = std::mem::take(&mut self.interrupts);
@@ -1683,11 +851,11 @@ impl ChatWidget<'_> {
     }
 
     fn on_error(&mut self, message: String) {
-        self.add_to_history(history_cell::new_error_event(message));
+        self.history_push(history_cell::new_error_event(message));
         self.bottom_pane.set_task_running(false);
-        self.running_commands.clear();
+        self.exec.running_commands.clear();
         self.stream.clear_all();
-        self.drop_streaming = false;
+        self.stream_state.drop_streaming = false;
         self.agents_ready_to_start = false;
         self.active_task_ids.clear();
         self.maybe_hide_spinner();
@@ -1702,7 +870,7 @@ impl ChatWidget<'_> {
             self.bottom_pane.clear_ctrl_c_quit_hint();
             // Stop any active UI streams immediately so output ceases at once.
             self.finalize_active_stream();
-            self.drop_streaming = true;
+            self.stream_state.drop_streaming = true;
             self.submit_op(Op::Interrupt);
             // If nothing else is active, drop spinner; otherwise status already updated.
             if self.active_task_ids.is_empty() {
@@ -1720,65 +888,8 @@ impl ChatWidget<'_> {
             self.request_redraw();
         }
     }
-    fn layout_areas(&self, area: Rect) -> Vec<Rect> {
-        // Determine HUD presence based on browser screenshot or active agents
-        let has_browser_screenshot = self
-            .latest_browser_screenshot
-            .lock()
-            .map(|lock| lock.is_some())
-            .unwrap_or(false);
-        let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
-        let hud_present = has_browser_screenshot || has_active_agents;
-
-        // Centralized layout path (always enabled)
-        let bottom_desired = self.bottom_pane.desired_height(area.width);
-        let font_cell = self.measured_font_size();
-        let mut hm = self.height_manager.borrow_mut();
-
-        // Emit HUD toggle event if visibility changed
-        let last = self.last_hud_present.get();
-        if last != hud_present {
-            hm.record_event(HeightEvent::HudToggle(hud_present));
-            self.last_hud_present.set(hud_present);
-        }
-
-        // Compute HUD target per spec using full terminal height:
-        // - Base collapsed height = one 3-row header per present panel
-        // - Expanded contribution = 30% of terminal height; if < 25, bump to min(25, 60% of terminal)
-        let collapsed_unit: u16 = 3;
-        let present_count: u16 = (has_active_agents as u16) + (has_browser_screenshot as u16);
-        let hud_target: Option<u16> = if !hud_present || present_count == 0 {
-            None
-        } else {
-            let base_collapsed = collapsed_unit * present_count.max(1);
-            let term_h = self.last_frame_height.get().max(1);
-            let thirty = ((term_h as u32) * 30 / 100) as u16;
-            let sixty = ((term_h as u32) * 60 / 100) as u16;
-            let mut expanded = if thirty < 25 { 25.min(sixty) } else { thirty };
-            // Ensure room for header + spacer inside expanded panel
-            expanded = expanded.max(collapsed_unit.saturating_add(2));
-            let any_expanded = self.browser_hud_expanded || self.agents_hud_expanded;
-            let target = if any_expanded { base_collapsed.saturating_add(expanded) } else { base_collapsed };
-            Some(target)
-        };
-
-        hm.begin_frame(area, hud_present, bottom_desired, font_cell, hud_target)
-    }
-    fn finalize_active_stream(&mut self) {
-        let sink = AppEventHistorySink(self.app_event_tx.clone());
-        // Finalize both reasoning and answer streams if active
-        if self.stream.is_write_cycle_active() {
-            self.current_stream_kind = Some(StreamKind::Reasoning);
-            self.stream.finalize(StreamKind::Reasoning, true, &sink);
-            self.current_stream_kind = Some(StreamKind::Answer);
-            self.stream.finalize(StreamKind::Answer, true, &sink);
-            self.height_manager
-                .borrow_mut()
-                .record_event(HeightEvent::HistoryFinalize);
-        }
-        // Clear active stream marker after finalization
-        self.current_stream_kind = None;
-    }
+    fn layout_areas(&self, area: Rect) -> Vec<Rect> { layout_scroll::layout_areas(self, area) }
+    fn finalize_active_stream(&mut self) { streaming::finalize_active_stream(self); }
     pub(crate) fn new(
         config: Config,
         app_event_tx: AppEventSender,
@@ -1866,10 +977,8 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            running_commands: HashMap::new(),
-            running_custom_tools: HashMap::new(),
-            running_web_search: HashMap::new(),
-            running_read_agg_index: None,
+            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None },
+            tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -1881,8 +990,6 @@ impl ChatWidget<'_> {
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
             terminal_info,
-            scroll_offset: 0,
-            last_max_scroll: std::cell::Cell::new(0),
             active_agents: Vec::new(),
             agents_ready_to_start: false,
             last_agent_prompt: None,
@@ -1892,42 +999,36 @@ impl ChatWidget<'_> {
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
-            current_stream_kind: None,
+            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), next_seq: 1, seq_answer_final: None, drop_streaming: false },
             interrupts: interrupts::InterruptManager::new(),
-            closed_answer_ids: HashSet::new(),
-            closed_reasoning_ids: HashSet::new(),
             ended_call_ids: HashSet::new(),
-            session_patch_sets: Vec::new(),
-            baseline_file_contents: HashMap::new(),
-            diff_overlay: None,
-            diff_confirm: None,
+            diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
-            last_history_viewport_height: std::cell::Cell::new(0),
-            diff_body_visible_rows: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
-        last_hud_present: std::cell::Cell::new(false),
-            browser_hud_expanded: false,
-            agents_hud_expanded: false,
-            last_frame_height: std::cell::Cell::new(0),
+            layout: LayoutState {
+                scroll_offset: 0,
+                last_max_scroll: std::cell::Cell::new(0),
+                last_history_viewport_height: std::cell::Cell::new(0),
+                vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+                scrollbar_visible_until: std::cell::Cell::new(None),
+                last_hud_present: std::cell::Cell::new(false),
+                browser_hud_expanded: false,
+                agents_hud_expanded: false,
+                last_frame_height: std::cell::Cell::new(0),
+            },
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
             prefix_valid: std::cell::Cell::new(false),
-        vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
-            scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
-            perf_enabled: false,
-            perf: std::cell::RefCell::new(PerfStats::default()),
+            perf_state: PerfState { enabled: false, stats: std::cell::RefCell::new(PerfStats::default()) },
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
-            next_seq: 1,
-            seq_answer_final: None,
-            drop_streaming: false,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1990,10 +1091,8 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            running_commands: HashMap::new(),
-            running_custom_tools: HashMap::new(),
-            running_web_search: HashMap::new(),
-            running_read_agg_index: None,
+            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None },
+            tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
             pending_files: HashMap::new(),
@@ -2003,8 +1102,6 @@ impl ChatWidget<'_> {
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
             terminal_info,
-            scroll_offset: 0,
-            last_max_scroll: std::cell::Cell::new(0),
             active_agents: Vec::new(),
             agents_ready_to_start: false,
             last_agent_prompt: None,
@@ -2014,42 +1111,37 @@ impl ChatWidget<'_> {
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
-            current_stream_kind: None,
+            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), next_seq: 1, seq_answer_final: None, drop_streaming: false },
             interrupts: interrupts::InterruptManager::new(),
-            closed_answer_ids: HashSet::new(),
-            closed_reasoning_ids: HashSet::new(),
             ended_call_ids: HashSet::new(),
-            session_patch_sets: Vec::new(),
-            baseline_file_contents: HashMap::new(),
-            diff_overlay: None,
-            diff_confirm: None,
+            diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
-            last_history_viewport_height: std::cell::Cell::new(0),
-            diff_body_visible_rows: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
-        last_hud_present: std::cell::Cell::new(false),
-            browser_hud_expanded: false,
-            agents_hud_expanded: false,
-            last_frame_height: std::cell::Cell::new(0),
+            layout: LayoutState {
+                scroll_offset: 0,
+                last_max_scroll: std::cell::Cell::new(0),
+                last_history_viewport_height: std::cell::Cell::new(0),
+                vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
+                scrollbar_visible_until: std::cell::Cell::new(None),
+                last_hud_present: std::cell::Cell::new(false),
+                browser_hud_expanded: false,
+                agents_hud_expanded: false,
+                last_frame_height: std::cell::Cell::new(0),
+            },
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
             last_prefix_count: std::cell::Cell::new(0),
             prefix_valid: std::cell::Cell::new(false),
-        vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
-            scrollbar_visible_until: std::cell::Cell::new(None),
             last_theme: crate::theme::current_theme(),
-            perf_enabled: false,
-            perf: std::cell::RefCell::new(PerfStats::default()),
+            perf_state: PerfState { enabled: false, stats: std::cell::RefCell::new(PerfStats::default()) },
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
-            next_seq: 1,
-            seq_answer_final: None,
-            drop_streaming: false,
+            
         }
     }
 
@@ -2116,149 +1208,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         // Intercept keys for diff overlay when active
-        if let Some(ref mut overlay) = self.diff_overlay {
-            use crossterm::event::KeyCode;
-            // Handle confirmation dialog if active
-            if let Some(confirm) = self.diff_confirm.take() {
-                match key_event.code {
-                    KeyCode::Enter => {
-                        self.submit_user_message(confirm.text_to_submit.into());
-                        // Keep the diff overlay open so the user can continue browsing
-                        self.request_redraw();
-                        return;
-                    }
-                    KeyCode::Esc => {
-                        // Cancel confirmation
-                        self.diff_confirm = None;
-                        self.request_redraw();
-                        return;
-                    }
-                    _ => {
-                        // Put it back for other keys
-                        self.diff_confirm = Some(confirm);
-                    }
-                }
-            }
-            match key_event.code {
-                KeyCode::Left => {
-                    if overlay.selected > 0 { overlay.selected -= 1; }
-                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) { *off = 0; }
-                    self.request_redraw();
-                    return;
-                }
-                KeyCode::Right => {
-                    if overlay.selected + 1 < overlay.tabs.len() { overlay.selected += 1; }
-                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) { *off = 0; }
-                    self.request_redraw();
-                    return;
-                }
-                KeyCode::Up => {
-                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) {
-                        // Clamp to current max offset
-                        let visible_rows = self.diff_body_visible_rows.get() as usize;
-                        let total_lines: usize = overlay
-                            .tabs
-                            .get(overlay.selected)
-                            .map(|(_, blocks)| blocks.iter().map(|b| b.lines.len()).sum())
-                            .unwrap_or(0);
-                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
-                        // Ensure we don't keep overscrolled values
-                        let cur = (*off).min(max_off as u16);
-                        *off = cur.saturating_sub(1);
-                    }
-                    self.request_redraw();
-                    return;
-                }
-                KeyCode::Down => {
-                    if let Some(off) = overlay.scroll_offsets.get_mut(overlay.selected) {
-                        let visible_rows = self.diff_body_visible_rows.get() as usize;
-                        let total_lines: usize = overlay
-                            .tabs
-                            .get(overlay.selected)
-                            .map(|(_, blocks)| blocks.iter().map(|b| b.lines.len()).sum())
-                            .unwrap_or(0);
-                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
-                        let next = (*off as usize).saturating_add(1).min(max_off);
-                        *off = next as u16;
-                    }
-                    self.request_redraw();
-                    return;
-                }
-                KeyCode::Char('u') => {
-                    if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
-                        // Determine selected block from scroll position
-                        let visible_rows = self.diff_body_visible_rows.get() as usize;
-                        let total_lines: usize = blocks.iter().map(|b| b.lines.len()).sum();
-                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
-                        let skip_raw = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
-                        let skip = skip_raw.min(max_off);
-                        let mut start = 0usize;
-                        let mut chosen: Option<&DiffBlock> = None;
-                        for b in blocks {
-                            let len = b.lines.len();
-                            if start <= skip && skip < start + len {
-                                chosen = Some(b);
-                            }
-                            start += len;
-                        }
-                        if let Some(block) = chosen {
-                            let mut diff_text = String::new();
-                            for l in &block.lines {
-                                let s: String = l.spans.iter().map(|sp| sp.content.clone()).collect();
-                                diff_text.push_str(&s);
-                                diff_text.push('\n');
-                            }
-                            // Keep only the final command for submission, show simple confirm UI in render
-                            let submit_text = format!("Please undo this:\n{}", diff_text);
-                            self.diff_confirm = Some(DiffConfirm { text_to_submit: submit_text });
-                            self.request_redraw();
-                        }
-                    }
-                    return;
-                }
-                KeyCode::Char('e') => {
-                    if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
-                        let visible_rows = self.diff_body_visible_rows.get() as usize;
-                        let total_lines: usize = blocks.iter().map(|b| b.lines.len()).sum();
-                        let max_off = total_lines.saturating_sub(visible_rows.max(1));
-                        let skip_raw = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
-                        let skip = skip_raw.min(max_off);
-                        let mut start = 0usize;
-                        let mut chosen: Option<&DiffBlock> = None;
-                        for b in blocks {
-                            let len = b.lines.len();
-                            if start <= skip && skip < start + len {
-                                chosen = Some(b);
-                            }
-                            start += len;
-                        }
-                        if let Some(block) = chosen {
-                            let mut diff_text = String::new();
-                            for l in &block.lines {
-                                let s: String = l.spans.iter().map(|sp| sp.content.clone()).collect();
-                                diff_text.push_str(&s);
-                                diff_text.push('\n');
-                            }
-                            let prompt = format!(
-                                "Can you please explain what this diff does and the reason behind it?\n\n{}",
-                                diff_text
-                            );
-                            self.submit_user_message(prompt.into());
-                            // Keep the diff overlay open after explain
-                            self.request_redraw();
-                        }
-                    }
-                    return;
-                }
-                KeyCode::Esc => {
-                    self.diff_overlay = None;
-                    self.diff_confirm = None;
-                    self.request_redraw();
-                    return;
-                }
-                _ => {}
-            }
-        }
+        if diff_handlers::handle_diff_key(self, key_event) { return; }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
@@ -2288,41 +1238,12 @@ impl ChatWidget<'_> {
         }
 
         // Fast-path PageUp/PageDown to scroll the transcript by a viewport at a time.
-        if let crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::PageUp,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            let step = self.last_history_viewport_height.get().max(1);
-            let new_offset = self
-                .scroll_offset
-                .saturating_add(step)
-                .min(self.last_max_scroll.get());
-            self.scroll_offset = new_offset;
-            self.bottom_pane.set_compact_compose(true);
-            self.flash_scrollbar();
-            self.app_event_tx.send(AppEvent::RequestRedraw);
-            self.height_manager.borrow_mut().record_event(HeightEvent::UserScroll);
+        if let crossterm::event::KeyEvent { code: crossterm::event::KeyCode::PageUp, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } = key_event {
+            layout_scroll::page_up(self);
             return;
         }
-        if let crossterm::event::KeyEvent {
-            code: crossterm::event::KeyCode::PageDown,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            let step = self.last_history_viewport_height.get().max(1);
-            if self.scroll_offset > step {
-                self.scroll_offset = self.scroll_offset.saturating_sub(step);
-            } else {
-                self.scroll_offset = 0;
-                // At bottom: restore normal composer spacing
-                self.bottom_pane.set_compact_compose(false);
-            }
-            self.flash_scrollbar();
-            self.app_event_tx.send(AppEvent::RequestRedraw);
-            self.height_manager.borrow_mut().record_event(HeightEvent::UserScroll);
+        if let crossterm::event::KeyEvent { code: crossterm::event::KeyCode::PageDown, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } = key_event {
+            layout_scroll::page_down(self);
             return;
         }
 
@@ -2342,19 +1263,19 @@ impl ChatWidget<'_> {
             InputResult::ScrollUp => {
                 // Only allow Up to navigate command history when the top view
                 // cannot be scrolled at all (no scrollback available).
-                if self.last_max_scroll.get() == 0 {
+                if self.layout.last_max_scroll.get() == 0 {
                     if self.bottom_pane.try_history_up() { return; }
                 }
                 // Scroll up in chat history (increase offset, towards older content)
                 // Use last_max_scroll computed during the previous render to avoid overshoot
                 let new_offset = self
-                    .scroll_offset
+                    .layout.scroll_offset
                     .saturating_add(3)
-                    .min(self.last_max_scroll.get());
-                self.scroll_offset = new_offset;
+                    .min(self.layout.last_max_scroll.get());
+                self.layout.scroll_offset = new_offset;
                 self.flash_scrollbar();
                 // Enable compact mode so history can use the spacer line
-                if self.scroll_offset > 0 {
+                if self.layout.scroll_offset > 0 {
                     self.bottom_pane.set_compact_compose(true);
                     self.height_manager
                         .borrow_mut()
@@ -2370,11 +1291,11 @@ impl ChatWidget<'_> {
             InputResult::ScrollDown => {
                 // Only allow Down to navigate command history when the top view
                 // cannot be scrolled at all (no scrollback available).
-                if self.last_max_scroll.get() == 0 && self.bottom_pane.history_is_browsing() {
+                if self.layout.last_max_scroll.get() == 0 && self.bottom_pane.history_is_browsing() {
                     if self.bottom_pane.try_history_down() { return; }
                 }
                 // Scroll down in chat history (decrease offset, towards bottom)
-                if self.scroll_offset == 0 {
+                if self.layout.scroll_offset == 0 {
                     // Already at bottom: ensure spacer above input is enabled.
                     self.bottom_pane.set_compact_compose(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -2384,19 +1305,19 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::ComposerModeChange);
-                } else if self.scroll_offset >= 3 {
+                } else if self.layout.scroll_offset >= 3 {
                     // Move towards bottom but do NOT toggle spacer yet; wait until
                     // the user confirms by pressing Down again at bottom.
-                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                    self.layout.scroll_offset = self.layout.scroll_offset.saturating_sub(3);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
-                } else if self.scroll_offset > 0 {
+                } else if self.layout.scroll_offset > 0 {
                     // Land exactly at bottom without toggling spacer yet; require
                     // a subsequent Down to re-enable the spacer so the input
                     // doesn't move when scrolling into the line above it.
-                    self.scroll_offset = 0;
+                    self.layout.scroll_offset = 0;
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                     self.height_manager
                         .borrow_mut()
@@ -2411,21 +1332,9 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn toggle_browser_hud(&mut self) {
-        let new_state = !self.browser_hud_expanded;
-        self.browser_hud_expanded = new_state;
-        if new_state { self.agents_hud_expanded = false; }
-        self.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
-        self.request_redraw();
-    }
+    fn toggle_browser_hud(&mut self) { layout_scroll::toggle_browser_hud(self); }
 
-    fn toggle_agents_hud(&mut self) {
-        let new_state = !self.agents_hud_expanded;
-        self.agents_hud_expanded = new_state;
-        if new_state { self.browser_hud_expanded = false; }
-        self.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
-        self.request_redraw();
-    }
+    fn toggle_agents_hud(&mut self) { layout_scroll::toggle_agents_hud(self); }
 
     // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
 
@@ -2531,17 +1440,7 @@ impl ChatWidget<'_> {
     }
 
     /// Briefly show the vertical scrollbar and schedule a redraw to hide it.
-    fn flash_scrollbar(&self) {
-        use std::time::{Duration, Instant};
-        let until = Instant::now() + Duration::from_millis(1200);
-        self.scrollbar_visible_until.set(Some(until));
-        // Schedule a redraw after it expires to clear the bar without further input
-        let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(1300)).await;
-            tx.send(crate::app_event::AppEvent::RequestRedraw);
-        });
-    }
+    fn flash_scrollbar(&self) { layout_scroll::flash_scrollbar(self); }
 
     fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
         // Debug: trace cell being added
@@ -2674,6 +1573,25 @@ impl ChatWidget<'_> {
         self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 
+    // History helper shim: centralize history mutations
+    fn history_push(&mut self, cell: impl HistoryCell + 'static) { self.add_to_history(cell); }
+
+    fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
+        if idx < self.history_cells.len() {
+            self.history_cells[idx] = cell;
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+    }
+
+    fn history_remove_at(&mut self, idx: usize) {
+        if idx < self.history_cells.len() {
+            self.history_cells.remove(idx);
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+    }
+
     /// Clean up faded-out animation cells
     fn process_animation_cleanup(&mut self) {
         // With trait-based cells, we can't easily detect and clean up specific cell types
@@ -2716,7 +1634,7 @@ impl ChatWidget<'_> {
             }
             crate::slash_command::ProcessedCommand::Error(error_msg) => {
                 // Show error in history
-                self.add_to_history(history_cell::new_error_event(error_msg));
+                self.history_push(history_cell::new_error_event(error_msg));
                 return;
             }
             crate::slash_command::ProcessedCommand::NotCommand(_) => {
@@ -2912,7 +1830,7 @@ impl ChatWidget<'_> {
             
             // Keep the welcome cell's light version; do not trigger fade-out.
             
-            self.add_to_history(history_cell::new_user_prompt(original_text.clone()));
+            self.history_push(history_cell::new_user_prompt(original_text.clone()));
         }
     }
 
@@ -2933,35 +1851,8 @@ impl ChatWidget<'_> {
         }
 
         match mouse_event.kind {
-            MouseEventKind::ScrollUp => {
-                // Scroll up with proper bounds using last_max_scroll from render
-                let new_offset = self
-                    .scroll_offset
-                    .saturating_add(3)
-                    .min(self.last_max_scroll.get());
-                self.scroll_offset = new_offset;
-                self.flash_scrollbar();
-                // Use compact mode when scrolled up
-                if self.scroll_offset > 0 {
-                    self.bottom_pane.set_compact_compose(true);
-                }
-                self.app_event_tx.send(AppEvent::RequestRedraw);
-            }
-            MouseEventKind::ScrollDown => {
-                // Scroll down in chat history (decrease offset, towards bottom)
-                if self.scroll_offset >= 3 {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                } else if self.scroll_offset > 0 {
-                    self.scroll_offset = 0;
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                }
-                self.flash_scrollbar();
-                // If we reached the bottom, re-enable the spacer row
-                if self.scroll_offset == 0 {
-                    self.bottom_pane.set_compact_compose(false);
-                }
-            }
+            MouseEventKind::ScrollUp => layout_scroll::mouse_scroll(self, true),
+            MouseEventKind::ScrollDown => layout_scroll::mouse_scroll(self, false),
             _ => {
                 // Ignore other mouse events for now
             }
@@ -2986,7 +1877,7 @@ impl ChatWidget<'_> {
                 if is_first {
                     self.welcome_shown = true;
                 }
-                self.add_to_history(history_cell::new_session_info(&self.config, event, is_first));
+                self.history_push(history_cell::new_session_info(&self.config, event, is_first));
 
                 if let Some(user_message) = self.initial_user_message.take() {
                     // If the user provided an initial message, add it to the
@@ -2996,28 +1887,10 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
-            EventMsg::WebSearchBegin(ev) => {
-                // Fade out welcome, end any active streams, then surface running web search
-                for cell in &self.history_cells { cell.trigger_fade(); }
-                self.finalize_active_stream();
-                self.flush_interrupt_queue();
-
-                // Show an active Web Search entry with live timer and query (if present)
-                let cell = history_cell::new_running_web_search(ev.query.clone());
-                self.add_to_history(cell);
-
-                // Track by call_id so we can mark complete later
-                if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-                    self.running_web_search.insert(ev.call_id, (last_idx, ev.query));
-                }
-
-                // Reflect status in the input border
-                self.bottom_pane.update_status_text("Searched".to_string());
-                self.mark_needs_redraw();
-            }
+            EventMsg::WebSearchBegin(ev) => tools::web_search_begin(self, ev.call_id, ev.query),
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
                 // Record sequence for the final assistant message
-                self.seq_answer_final = Some(self.next_sequence());
+                self.stream_state.seq_answer_final = Some(self.next_sequence());
                 tracing::debug!(
                     "AgentMessage final id={} bytes={} preview={:?}",
                     id,
@@ -3028,14 +1901,14 @@ impl ChatWidget<'_> {
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final answer
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.current_stream_kind = Some(StreamKind::Answer);
+                self.stream_state.current_kind = Some(StreamKind::Answer);
                 // Seed the controller with this id so finalize targets the right streaming cell
                 self.stream.begin_with_id(StreamKind::Answer, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_answer(&message, &sink);
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
                 // Mark this id closed for further answer deltas in this turn
-                self.closed_answer_ids.insert(id.clone());
+                self.stream_state.closed_answer_ids.insert(id.clone());
                 // Defensive: this turn's task should be considered complete for UI purposes
                 self.active_task_ids.remove(&id);
                 // Defensive: clear transient agents-preparing state unless we see real updates
@@ -3051,100 +1924,11 @@ impl ChatWidget<'_> {
                 }
                 self.request_redraw();
             }
-            EventMsg::WebSearchComplete(ev) => {
-                // Replace the specific running web search cell with a completed one
-                if let Some((idx, maybe_query)) = self.running_web_search.remove(&ev.call_id) {
-                    // If index is still valid and is a running web search, replace it
-                    let mut target_idx = None;
-                    if idx < self.history_cells.len() {
-                        let is_ws = self.history_cells[idx]
-                            .as_any()
-                            .downcast_ref::<history_cell::RunningToolCallCell>()
-                            .is_some_and(|rt| rt.has_title("Web Search..."));
-                        if is_ws { target_idx = Some(idx); }
-                    }
-                    if target_idx.is_none() {
-                        for i in (0..self.history_cells.len()).rev() {
-                            if let Some(rt) = self.history_cells[i]
-                                .as_any()
-                                .downcast_ref::<history_cell::RunningToolCallCell>()
-                            {
-                                if rt.has_title("Web Search...") {
-                                    target_idx = Some(i);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if let Some(i) = target_idx {
-                        if let Some(rt) = self.history_cells[i]
-                            .as_any()
-                            .downcast_ref::<history_cell::RunningToolCallCell>()
-                        {
-                            let query = ev.query.or(maybe_query);
-                            let completed = rt.finalize_web_search(true, query);
-                            self.history_cells[i] = Box::new(completed);
-                            // Try to merge with previous item if same header (e.g., multiple Web Search blocks)
-                            // Reuse the same logic as add_to_history by converting the completed
-                            // tool cell into a transient and merging with the previous cell.
-                            if i > 0 {
-                                // Snapshot new lines for comparison
-                                let new_lines = self.history_cells[i].display_lines();
-                                let new_header = new_lines
-                                    .first()
-                                    .and_then(|l| l.spans.get(0))
-                                    .map(|s| s.content.clone().to_string())
-                                    .unwrap_or_default();
-                                // Previous cell header (if any)
-                                let prev_lines = self.history_cells[i - 1].display_lines();
-                                let prev_header = prev_lines
-                                    .first()
-                                    .and_then(|l| l.spans.get(0))
-                                    .map(|s| s.content.clone().to_string())
-                                    .unwrap_or_default();
-                                if !new_header.is_empty() && new_header == prev_header {
-                                    // Merge previous and current into Plain
-                                    let mut combined = prev_lines.clone();
-                                    while combined
-                                        .last()
-                                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                                        .unwrap_or(false)
-                                    {
-                                        combined.pop();
-                                    }
-                                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                        body.remove(0);
-                                    }
-                                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                                        body.pop();
-                                    }
-                                    if let Some(first_line) = body.first_mut() {
-                                        if let Some(first_span) = first_line.spans.get_mut(0) {
-                                            if first_span.content == "  └ " || first_span.content == "└ " {
-                                                first_span.content = "  ".into();
-                                            }
-                                        }
-                                    }
-                                    combined.extend(body);
-                                    self.history_cells[i - 1] = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
-                                    self.history_cells.remove(i);
-                                }
-                            }
-                            self.invalidate_height_cache();
-                            self.request_redraw();
-                        }
-                    }
-                }
-                // Update status to reflect we're done searching
-                self.bottom_pane.update_status_text("responding".to_string());
-                // Re-evaluate spinner visibility
-                self.maybe_hide_spinner();
-            }
+            EventMsg::WebSearchComplete(ev) => tools::web_search_complete(self, ev.call_id, ev.query),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
-                if self.closed_answer_ids.contains(&id) {
+                if self.stream_state.closed_answer_ids.contains(&id) {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
                     return;
                 }
@@ -3158,7 +1942,7 @@ impl ChatWidget<'_> {
                 // Guard: duplicate final Reasoning for the same id can arrive due to provider
                 // retries or thread replays. If we've already finalized this id in the current
                 // turn, ignore to avoid duplicating reasoning content in history.
-                if self.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&id) {
                     tracing::warn!("Ignoring duplicate AgentReasoning for closed id={}", id);
                     return;
                 }
@@ -3166,7 +1950,7 @@ impl ChatWidget<'_> {
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.current_stream_kind = Some(StreamKind::Reasoning);
+                self.stream_state.current_kind = Some(StreamKind::Reasoning);
                 self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 
                 // The StreamController now properly handles duplicate detection and prevents
@@ -3174,13 +1958,13 @@ impl ChatWidget<'_> {
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
                 // Mark this id closed for further reasoning deltas in this turn
-                self.closed_reasoning_ids.insert(id.clone());
+                self.stream_state.closed_reasoning_ids.insert(id.clone());
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
-                if self.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&id) {
                     tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
                     return;
                 }
@@ -3197,14 +1981,14 @@ impl ChatWidget<'_> {
             EventMsg::TaskStarted => {
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
-                self.current_stream_kind = None;
+                self.stream_state.current_kind = None;
                 // New turn: clear closed id guards
-                self.closed_answer_ids.clear();
-                self.closed_reasoning_ids.clear();
+                self.stream_state.closed_answer_ids.clear();
+                self.stream_state.closed_reasoning_ids.clear();
                 self.ended_call_ids.clear();
                 self.bottom_pane.clear_ctrl_c_quit_hint();
                 // Accept streaming again for this turn
-                self.drop_streaming = false;
+                self.stream_state.drop_streaming = false;
                 // Mark this task id as active and ensure the status stays visible
                 self.active_task_ids.insert(id.clone());
                 self.bottom_pane.set_task_running(true);
@@ -3220,9 +2004,9 @@ impl ChatWidget<'_> {
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams
-                    self.current_stream_kind = Some(StreamKind::Reasoning);
+                    self.stream_state.current_kind = Some(StreamKind::Reasoning);
                     self.stream.finalize(StreamKind::Reasoning, true, &sink);
-                    self.current_stream_kind = Some(StreamKind::Answer);
+                    self.stream_state.current_kind = Some(StreamKind::Answer);
                     self.stream.finalize(StreamKind::Answer, true, &sink);
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
@@ -3232,11 +2016,11 @@ impl ChatWidget<'_> {
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
                 self.finalize_all_running_due_to_answer();
                 // Mark any running web searches as completed
-                if !self.running_web_search.is_empty() {
+                if !self.tools_state.running_web_search.is_empty() {
                     // Replace each running web search cell in-place with a completed one
                     // Iterate over a snapshot of keys to avoid borrow issues
                     let entries: Vec<(String, (usize, Option<String>))> = self
-                        .running_web_search
+                        .tools_state.running_web_search
                         .iter()
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect();
@@ -3270,21 +2054,20 @@ impl ChatWidget<'_> {
                                 .downcast_ref::<history_cell::RunningToolCallCell>()
                             {
                                 let completed = rt.finalize_web_search(true, query_opt);
-                                self.history_cells[i] = Box::new(completed);
-                                self.invalidate_height_cache();
+                                self.history_replace_at(i, Box::new(completed));
                             }
                         }
                         // Remove from running set
-                        self.running_web_search.remove(&call_id);
+                        self.tools_state.running_web_search.remove(&call_id);
                     }
                 }
                 // Now that streaming is complete, flush any queued interrupts
                 self.flush_interrupt_queue();
 
                 // Only drop the working status if nothing is actually running.
-                let any_tools_running = !self.running_commands.is_empty()
-                    || !self.running_custom_tools.is_empty()
-                    || !self.running_web_search.is_empty();
+                let any_tools_running = !self.exec.running_commands.is_empty()
+                    || !self.tools_state.running_custom_tools.is_empty()
+                    || !self.tools_state.running_web_search.is_empty();
                 let any_streaming = self.stream.is_write_cycle_active();
                 let any_agents_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
                 let any_tasks_active = !self.active_task_ids.is_empty();
@@ -3292,14 +2075,14 @@ impl ChatWidget<'_> {
                 if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
                     self.bottom_pane.set_task_running(false);
                 }
-                self.current_stream_kind = None;
+                self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }) => {
                 // Treat raw reasoning content the same as summarized reasoning
-                if self.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&id) {
                     tracing::debug!("Ignoring RawContent delta for closed id={}", id);
                     return;
                 }
@@ -3307,17 +2090,17 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 tracing::debug!("AgentReasoningRawContent event with text: {:?}...", text.chars().take(100).collect::<String>());
-                if self.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&id) {
                     tracing::warn!("Ignoring duplicate AgentReasoningRawContent for closed id={}", id);
                     return;
                 }
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.current_stream_kind = Some(StreamKind::Reasoning);
+                self.stream_state.current_kind = Some(StreamKind::Reasoning);
                 self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
-                self.closed_reasoning_ids.insert(id.clone());
+                self.stream_state.closed_reasoning_ids.insert(id.clone());
                 self.mark_needs_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
@@ -3340,7 +2123,7 @@ impl ChatWidget<'_> {
                     let seq = self.next_sequence();
                     self.interrupts.push_plan_update(seq, update);
                 } else {
-                    self.add_to_history(history_cell::new_plan_update(update));
+                    self.history_push(history_cell::new_plan_update(update));
                 }
             }
             EventMsg::ExecApprovalRequest(ev) => {
@@ -3396,25 +2179,25 @@ impl ChatWidget<'_> {
                 changes,
             }) => {
                 // Store for session diff popup (clone before moving into history)
-                self.session_patch_sets.push(changes.clone());
+                self.diffs.session_patch_sets.push(changes.clone());
                 // Capture/adjust baselines, including rename moves
-                if let Some(last) = self.session_patch_sets.last() {
+                if let Some(last) = self.diffs.session_patch_sets.last() {
                     for (src_path, chg) in last.iter() {
                         match chg {
                             codex_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
                                 // Prefer to carry forward existing baseline from src to dest.
-                                if let Some(baseline) = self.baseline_file_contents.remove(src_path) {
-                                    self.baseline_file_contents.insert(dest_path.clone(), baseline);
-                                } else if !self.baseline_file_contents.contains_key(dest_path) {
+                                if let Some(baseline) = self.diffs.baseline_file_contents.remove(src_path) {
+                                    self.diffs.baseline_file_contents.insert(dest_path.clone(), baseline);
+                                } else if !self.diffs.baseline_file_contents.contains_key(dest_path) {
                                     // Fallback: snapshot current contents of src (pre-apply) under dest key.
                                     let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                                    self.baseline_file_contents.insert(dest_path.clone(), baseline);
+                                    self.diffs.baseline_file_contents.insert(dest_path.clone(), baseline);
                                 }
                             }
                             _ => {
-                                if !self.baseline_file_contents.contains_key(src_path) {
+                                if !self.diffs.baseline_file_contents.contains_key(src_path) {
                                     let baseline = std::fs::read_to_string(src_path).unwrap_or_default();
-                                    self.baseline_file_contents.insert(src_path.clone(), baseline);
+                                    self.diffs.baseline_file_contents.insert(src_path.clone(), baseline);
                                 }
                             }
                         }
@@ -3422,7 +2205,7 @@ impl ChatWidget<'_> {
                 }
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
-                self.add_to_history(history_cell::new_patch_event(
+                self.history_push(history_cell::new_patch_event(
                     PatchEventType::ApplyBegin { auto_approved },
                     changes,
                 ));
@@ -3451,7 +2234,7 @@ impl ChatWidget<'_> {
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
-                        this.handle_mcp_begin_now(ev2);
+                        tools::mcp_begin(this, ev2);
                     },
                 );
             }
@@ -3460,7 +2243,7 @@ impl ChatWidget<'_> {
                 let seq = self.next_sequence();
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_mcp_end(seq, ev),
-                    |this| this.handle_mcp_end_now(ev2),
+                    |this| tools::mcp_end(this, ev2),
                 );
             }
             EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
@@ -3481,10 +2264,10 @@ impl ChatWidget<'_> {
                 } else {
                     history_cell::new_running_custom_tool_call(tool_name.clone(), params_string.clone())
                 };
-                self.add_to_history(cell);
+                self.history_push(cell);
                 // Track index so we can replace it on completion
                 if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-                    self.running_custom_tools.insert(call_id.clone(), last_idx);
+                    self.tools_state.running_custom_tools.insert(call_id.clone(), last_idx);
                 }
 
                 // Update border status based on tool
@@ -3520,16 +2303,14 @@ impl ChatWidget<'_> {
                         success,
                         content,
                     );
-                    if let Some(idx) = self.running_custom_tools.remove(&call_id) {
+                    if let Some(idx) = self.tools_state.running_custom_tools.remove(&call_id) {
                         if idx < self.history_cells.len() {
-                            self.history_cells[idx] = Box::new(completed);
-                            self.invalidate_height_cache();
-                            self.request_redraw();
+                            self.history_replace_at(idx, Box::new(completed));
                         } else {
-                            self.add_to_history(completed);
+                            self.history_push(completed);
                         }
                     } else {
-                        self.add_to_history(completed);
+                        self.history_push(completed);
                     }
 
                     // After tool completes, likely transitioning to response
@@ -3544,16 +2325,14 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = self.running_custom_tools.remove(&call_id) {
+                if let Some(idx) = self.tools_state.running_custom_tools.remove(&call_id) {
                     if idx < self.history_cells.len() {
-                        self.history_cells[idx] = Box::new(completed);
-                        self.invalidate_height_cache();
-                        self.request_redraw();
+                        self.history_replace_at(idx, Box::new(completed));
                     } else {
-                        self.add_to_history(completed);
+                        self.history_push(completed);
                     }
                 } else {
-                    self.add_to_history(completed);
+                    self.history_push(completed);
                 }
 
                 // After tool completes, likely transitioning to response
@@ -3581,7 +2360,7 @@ impl ChatWidget<'_> {
                 info!("BackgroundEvent: {message}");
                 // Surface lightweight background events in the history feed
                 // so users see confirmations (e.g., CDP connect success).
-                self.add_to_history(history_cell::new_background_event(message.clone()));
+                self.history_push(history_cell::new_background_event(message.clone()));
 
                 // Also reflect CDP connect success in the status line.
                 if message.starts_with("✅ Connected to Chrome via CDP") {
@@ -3705,19 +2484,19 @@ impl ChatWidget<'_> {
         let arg = args.trim().to_lowercase();
         match arg.as_str() {
             "on" => {
-                self.perf_enabled = true;
+                self.perf_state.enabled = true;
                 self.add_perf_output("performance tracing: on".to_string());
             }
             "off" => {
-                self.perf_enabled = false;
+                self.perf_state.enabled = false;
                 self.add_perf_output("performance tracing: off".to_string());
             }
             "reset" => {
-                self.perf.borrow_mut().reset();
+                self.perf_state.stats.borrow_mut().reset();
                 self.add_perf_output("performance stats reset".to_string());
             }
             "show" | "" => {
-                let summary = self.perf.borrow().summary();
+                let summary = self.perf_state.stats.borrow().summary();
                 self.add_perf_output(summary);
             }
             _ => {
@@ -3733,25 +2512,25 @@ impl ChatWidget<'_> {
         for l in text.lines() {
             lines.push(ratatui::text::Line::from(l.to_string()))
         }
-        self.add_to_history(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell {
             lines,
             kind: crate::history_cell::HistoryCellType::Notice,
         });
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
-        self.add_to_history(history_cell::new_diff_output(diff_output.clone()));
+        self.history_push(history_cell::new_diff_output(diff_output.clone()));
     }
 
     pub(crate) fn add_status_output(&mut self) {
-        self.add_to_history(history_cell::new_status_output(
+        self.history_push(history_cell::new_status_output(
             &self.config,
             &self.total_token_usage,
         ));
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
-        self.add_to_history(history_cell::new_prompts_output());
+        self.history_push(history_cell::new_prompts_output());
     }
 
     pub(crate) fn add_agents_output(&mut self) {
@@ -3857,7 +2636,7 @@ impl ChatWidget<'_> {
         lines.push(Line::from("- Built-in 'code' runs even without global shims."));
         lines.push(Line::from("- External CLIs must be in PATH; restart terminal after install."));
 
-        self.add_to_history(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell {
             lines,
             kind: crate::history_cell::HistoryCellType::Notice,
         });
@@ -3869,7 +2648,7 @@ impl ChatWidget<'_> {
         // Build a latest-first unique file list
         let mut order: Vec<PathBuf> = Vec::new();
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        for changes in self.session_patch_sets.iter().rev() {
+        for changes in self.diffs.session_patch_sets.iter().rev() {
             for (path, change) in changes.iter() {
                 // If this change represents a move/rename, show the destination path in the tabs
                 let display_path: PathBuf = match change {
@@ -3886,7 +2665,7 @@ impl ChatWidget<'_> {
         for path in order {
             // Resolve baseline (first-seen content) and current (on-disk) content
             let baseline = self
-                .baseline_file_contents
+                .diffs.baseline_file_contents
                 .get(&path)
                 .cloned()
                 .unwrap_or_default();
@@ -3960,14 +2739,14 @@ impl ChatWidget<'_> {
             self.bottom_pane.flash_footer_notice("No diffs recorded this session".to_string());
             return;
         }
-        self.diff_overlay = Some(DiffOverlay::new(tabs));
-        self.diff_confirm = None;
+        self.diffs.overlay = Some(DiffOverlay::new(tabs));
+        self.diffs.confirm = None;
         self.request_redraw();
     }
 
     pub(crate) fn toggle_diffs_popup(&mut self) {
-        if self.diff_overlay.is_some() {
-            self.diff_overlay = None;
+        if self.diffs.overlay.is_some() {
+            self.diffs.overlay = None;
             self.request_redraw();
         } else {
             self.show_diffs_popup();
@@ -3993,7 +2772,7 @@ impl ChatWidget<'_> {
                         "Invalid reasoning level: '{}'. Use: minimal, low, medium, or high",
                         trimmed
                     );
-                    self.add_to_history(history_cell::new_error_event(message));
+                    self.history_push(history_cell::new_error_event(message));
                     return;
                 }
             };
@@ -4010,7 +2789,7 @@ impl ChatWidget<'_> {
         // Verbosity is not supported with ChatGPT auth
         if self.config.using_chatgpt_auth {
             let message = "Text verbosity is not available when using Sign in with ChatGPT".to_string();
-            self.add_to_history(history_cell::new_error_event(message));
+            self.history_push(history_cell::new_error_event(message));
             return;
         }
         
@@ -4029,7 +2808,7 @@ impl ChatWidget<'_> {
                         "Invalid verbosity level: '{}'. Use: low, medium, or high",
                         trimmed
                     );
-                    self.add_to_history(history_cell::new_error_event(message));
+                    self.history_push(history_cell::new_error_event(message));
                     return;
                 }
             };
@@ -4039,7 +2818,7 @@ impl ChatWidget<'_> {
 
             // Display success message
             let message = format!("Text verbosity set to: {}", new_verbosity);
-            self.add_to_history(history_cell::new_background_event(message));
+            self.history_push(history_cell::new_background_event(message));
 
             // Send the update to the backend
             let op = Op::ConfigureSession {
@@ -4185,7 +2964,7 @@ impl ChatWidget<'_> {
         self.submit_op(op);
 
         // Add status message to history
-        self.add_to_history(history_cell::new_reasoning_output(&new_effort));
+        self.history_push(history_cell::new_reasoning_output(&new_effort));
     }
 
     pub(crate) fn set_text_verbosity(&mut self, new_verbosity: TextVerbosity) {
@@ -4213,7 +2992,7 @@ impl ChatWidget<'_> {
 
         // Add status message to history  
         let message = format!("Text verbosity set to: {}", new_verbosity);
-        self.add_to_history(history_cell::new_background_event(message));
+        self.history_push(history_cell::new_background_event(message));
     }
 
     /// Forward file-search results to the bottom pane.
@@ -4266,7 +3045,7 @@ impl ChatWidget<'_> {
             codex_core::config_types::ThemeName::Custom => "Custom",
         };
         let message = format!("✓ Theme changed to {}", theme_name);
-        self.add_to_history(history_cell::new_background_event(message));
+        self.history_push(history_cell::new_background_event(message));
     }
 
     fn restyle_history_after_theme_change(&mut self) {
@@ -4470,7 +3249,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
-        let kind = self.current_stream_kind.unwrap_or(StreamKind::Answer);
+        let kind = self.stream_state.current_kind.unwrap_or(StreamKind::Answer);
         self.insert_history_lines_with_kind(kind, None, lines);
     }
 
@@ -4687,7 +3466,7 @@ impl ChatWidget<'_> {
         // If we already finalized this id in the current turn with identical content,
         // drop this event to avoid duplicates (belt-and-suspenders against upstream repeats).
         if let Some(ref want) = id {
-            if self.closed_answer_ids.contains(want) {
+            if self.stream_state.closed_answer_ids.contains(want) {
                 if let Some(existing_idx) = self
                     .history_cells
                     .iter()
@@ -4741,10 +3520,8 @@ impl ChatWidget<'_> {
             tracing::debug!("final-answer: replacing StreamingContentCell at idx={} by id match", idx);
             // Replace the matching streaming cell in-place, preserving the id
             let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
-            self.history_cells[idx] = Box::new(cell);
-            self.invalidate_height_cache();
+            self.history_replace_at(idx, Box::new(cell));
             self.autoscroll_if_near_bottom();
-            self.request_redraw();
             return;
         }
 
@@ -4765,10 +3542,8 @@ impl ChatWidget<'_> {
             {
                 tracing::debug!("final-answer: replacing existing AssistantMarkdownCell at idx={} by id match", idx);
                 let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
-                self.history_cells[idx] = Box::new(cell);
-                self.invalidate_height_cache();
+                self.history_replace_at(idx, Box::new(cell));
                 self.autoscroll_if_near_bottom();
-                self.request_redraw();
                 return;
             }
         }
@@ -4803,10 +3578,8 @@ impl ChatWidget<'_> {
             if should_replace {
                 tracing::debug!("final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset");
                 let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
-                self.history_cells[idx] = Box::new(cell);
-                self.invalidate_height_cache();
+                self.history_replace_at(idx, Box::new(cell));
                 self.autoscroll_if_near_bottom();
-                self.request_redraw();
                 return;
             }
         }
@@ -4814,7 +3587,7 @@ impl ChatWidget<'_> {
         // Fallback: no prior assistant cell found; append as new.
         tracing::debug!("final-answer: append new AssistantMarkdownCell (no prior cell) id={:?}", id);
         let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
-        self.add_to_history(cell);
+        self.history_push(cell);
     }
 
     /// Normalize text for duplicate detection (trim trailing whitespace and normalize newlines)
@@ -5038,7 +3811,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.add_to_history(history_cell::PlainHistoryCell { 
+        self.history_push(history_cell::PlainHistoryCell { 
             lines: vec![Line::from("✅ Chrome launched with user profile")],
             kind: history_cell::HistoryCellType::BackgroundEvent,
         });
@@ -5574,7 +4347,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.add_to_history(history_cell::PlainHistoryCell {
+        self.history_push(history_cell::PlainHistoryCell {
             lines: vec![Line::from(format!(
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
@@ -5695,7 +4468,7 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.add_to_history(history_cell::PlainHistoryCell {
+                self.history_push(history_cell::PlainHistoryCell {
                     lines: vec![Line::from(status_msg)],
                     kind: history_cell::HistoryCellType::BackgroundEvent,
                 });
@@ -6029,7 +4802,7 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
+        self.history_push(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
     }
 
     #[allow(dead_code)]
@@ -6130,7 +4903,7 @@ impl ChatWidget<'_> {
             "🔗 Connecting to Chrome DevTools Protocol (port: {})...",
             port_display
         );
-        self.add_to_history(history_cell::new_background_event(status_msg));
+        self.history_push(history_cell::new_background_event(status_msg));
 
         // Connect in background with a single, unified flow (no double-connect)
         tokio::spawn(async move {
@@ -6215,7 +4988,7 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.add_to_history(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
+            self.history_push(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
             return;
         }
 
@@ -6680,7 +5453,7 @@ impl ChatWidget<'_> {
         // Determine layout based on what's active (stacked, full width)
         let header_h: u16 = 3;
         // Expanded target based on full terminal height per spec
-        let term_h = self.last_frame_height.get().max(1);
+        let term_h = self.layout.last_frame_height.get().max(1);
         let thirty = ((term_h as u32) * 30 / 100) as u16;
         let sixty = ((term_h as u32) * 60 / 100) as u16;
         let mut expanded_target = if thirty < 25 { 25.min(sixty) } else { thirty };
@@ -6689,9 +5462,9 @@ impl ChatWidget<'_> {
         if expanded_target < min_expanded { expanded_target = min_expanded; }
         match (has_active_agents, has_browser_screenshot) {
             (true, true) => {
-                let (top_h, bottom_h) = if self.agents_hud_expanded && !self.browser_hud_expanded {
+                let (top_h, bottom_h) = if self.layout.agents_hud_expanded && !self.layout.browser_hud_expanded {
                     (expanded_target.min(padded_area.height.saturating_sub(0)), header_h)
-                } else if self.browser_hud_expanded && !self.agents_hud_expanded {
+                } else if self.layout.browser_hud_expanded && !self.layout.agents_hud_expanded {
                     (header_h, expanded_target.min(padded_area.height.saturating_sub(0)))
                 } else {
                     let top = header_h.min(padded_area.height);
@@ -6704,20 +5477,20 @@ impl ChatWidget<'_> {
                 ]).areas::<2>(padded_area);
 
                 // Agents on top
-                if self.agents_hud_expanded {
+                if self.layout.agents_hud_expanded {
                     self.render_agent_panel(chunks[0], buf);
                 } else {
                     self.render_agents_header(chunks[0], buf);
                 }
                 // Browser on bottom
-                if self.browser_hud_expanded {
+                if self.layout.browser_hud_expanded {
                     self.render_browser_panel(chunks[1], buf);
                 } else {
                     self.render_browser_header(chunks[1], buf);
                 }
             }
             (true, false) => {
-                if self.agents_hud_expanded {
+                if self.layout.agents_hud_expanded {
                     let h = expanded_target.min(padded_area.height);
                     let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
                     self.render_agent_panel(a, buf);
@@ -6729,7 +5502,7 @@ impl ChatWidget<'_> {
                 }
             }
             (false, true) => {
-                if self.browser_hud_expanded {
+                if self.layout.browser_hud_expanded {
                     let h = expanded_target.min(padded_area.height);
                     let [a] = Layout::vertical([Constraint::Length(h)]).areas::<1>(padded_area);
                     self.render_browser_panel(a, buf);
@@ -6843,7 +5616,7 @@ impl ChatWidget<'_> {
         left_spans.push(Span::raw(summary));
 
         // Right side: toggle hint based on state
-        let action = if self.browser_hud_expanded { " collapse" } else { " expand" };
+        let action = if self.layout.browser_hud_expanded { " collapse" } else { " expand" };
         let right_spans: Vec<Span> = vec![
             Span::from("Ctrl+B").style(key_hint_style),
             Span::styled(action, label_style),
@@ -6906,7 +5679,7 @@ impl ChatWidget<'_> {
         left_spans.push(Span::raw(summary));
 
         // Right side: toggle hint based on state (Ctrl+A)
-        let action = if self.agents_hud_expanded { " collapse" } else { " expand" };
+        let action = if self.layout.agents_hud_expanded { " collapse" } else { " expand" };
         let right_spans: Vec<Span> = vec![
             Span::from("Ctrl+A").style(key_hint_style),
             Span::styled(action, label_style),
@@ -7255,7 +6028,7 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Remember full frame height for HUD sizing logic
-        self.last_frame_height.set(area.height);
+        self.layout.last_frame_height.set(area.height);
 
         let layout_areas = self.layout_areas(area);
         let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4
@@ -7332,8 +6105,8 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         // Perf: count a frame
-        if self.perf_enabled {
-            let mut p = self.perf.borrow_mut();
+        if self.perf_state.enabled {
+            let mut p = self.perf_state.stats.borrow_mut();
             p.frames = p.frames.saturating_add(1);
         }
 
@@ -7346,14 +6119,14 @@ impl WidgetRef for &ChatWidget<'_> {
             || has_active_animation_early;
 
         let total_height: u16 = if must_rebuild_prefix {
-            let perf_enabled = self.perf_enabled;
+            let perf_enabled = self.perf_state.enabled;
             let total_start = if perf_enabled { Some(std::time::Instant::now()) } else { None };
             let mut ps = self.prefix_sums.borrow_mut();
             ps.clear();
             ps.push(0);
             let mut acc = 0u16;
             if perf_enabled {
-                let mut p = self.perf.borrow_mut();
+                let mut p = self.perf_state.stats.borrow_mut();
                 p.prefix_rebuilds = p.prefix_rebuilds.saturating_add(1);
             }
             for (idx, item) in all_content.iter().enumerate() {
@@ -7381,13 +6154,13 @@ impl WidgetRef for &ChatWidget<'_> {
                     };
                     if let Some(cached) = cached_val {
                         if perf_enabled {
-                            let mut p = self.perf.borrow_mut();
+                            let mut p = self.perf_state.stats.borrow_mut();
                             p.height_hits_total = p.height_hits_total.saturating_add(1);
                         }
                         cached
                     } else {
                         if perf_enabled {
-                            let mut p = self.perf.borrow_mut();
+                            let mut p = self.perf_state.stats.borrow_mut();
                             p.height_misses_total = p.height_misses_total.saturating_add(1);
                         }
                         let label = if perf_enabled { Some(self.perf_label_for_item(*item)) } else { None };
@@ -7395,7 +6168,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         let computed = item.desired_height(content_width);
                         if let (true, Some(start)) = (perf_enabled, t0) {
                             let dt = start.elapsed().as_nanos();
-                            let mut p = self.perf.borrow_mut();
+                            let mut p = self.perf_state.stats.borrow_mut();
                             p.record_total((idx, content_width), label.as_deref().unwrap_or("unknown"), dt);
                         }
                         // Now take a mutable borrow to insert
@@ -7413,8 +6186,8 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             let total = *ps.last().unwrap_or(&0);
             if let Some(start) = total_start {
-                if self.perf_enabled {
-                    let mut p = self.perf.borrow_mut();
+                if self.perf_state.enabled {
+                    let mut p = self.perf_state.stats.borrow_mut();
                     p.ns_total_height = p.ns_total_height.saturating_add(start.elapsed().as_nanos());
                 }
             }
@@ -7440,17 +6213,17 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
-        let prev_viewport_h = self.last_history_viewport_height.get();
+        let prev_viewport_h = self.layout.last_history_viewport_height.get();
         if prev_viewport_h == 0 {
             // Initialize on first render
-            self.last_history_viewport_height.set(content_area.height);
+            self.layout.last_history_viewport_height.set(content_area.height);
         }
 
         let (start_y, scroll_pos) = if total_height <= content_area.height {
             // Content fits - always align to bottom so "Popular commands" stays at the bottom
             let start_y = content_area.y + content_area.height.saturating_sub(total_height);
             // Update last_max_scroll cache
-            self.last_max_scroll.set(0);
+            self.layout.last_max_scroll.set(0);
             (start_y, 0u16) // No scrolling needed
         } else {
             // Content overflows - calculate scroll position
@@ -7458,8 +6231,8 @@ impl WidgetRef for &ChatWidget<'_> {
             // Convert to distance from the top for rendering math.
             let max_scroll = total_height.saturating_sub(content_area.height);
             // Update cache and clamp for display only
-            self.last_max_scroll.set(max_scroll);
-            let clamped_scroll_offset = self.scroll_offset.min(max_scroll);
+            self.layout.last_max_scroll.set(max_scroll);
+            let clamped_scroll_offset = self.layout.scroll_offset.min(max_scroll);
             let mut scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
 
             // Viewport stabilization: when user is scrolled up (offset > 0) and the
@@ -7481,7 +6254,7 @@ impl WidgetRef for &ChatWidget<'_> {
         };
 
         // Record current viewport height for the next frame
-        self.last_history_viewport_height.set(content_area.height);
+        self.layout.last_history_viewport_height.set(content_area.height);
 
         // Clear the entire history region (including left/right padding), not just
         // the inner content area. This avoids occasional artifacts at the margins
@@ -7513,7 +6286,7 @@ impl WidgetRef for &ChatWidget<'_> {
         // Extend end_idx by one to include the next item when the viewport cuts into spacing
         end_idx = end_idx.saturating_add(1).min(all_content.len());
 
-        let render_loop_start = if self.perf_enabled { Some(std::time::Instant::now()) } else { None };
+        let render_loop_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
         for idx in start_idx..end_idx {
             let item = all_content[idx];
             // Calculate height with reduced width due to gutter
@@ -7536,22 +6309,22 @@ impl WidgetRef for &ChatWidget<'_> {
             let item_height = if is_cacheable {
                 let key = (idx, content_width);
                 if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
-                    if self.perf_enabled {
-                        let mut p = self.perf.borrow_mut();
+                    if self.perf_state.enabled {
+                        let mut p = self.perf_state.stats.borrow_mut();
                         p.height_hits_render = p.height_hits_render.saturating_add(1);
                     }
                     cached
                 } else {
-                    if self.perf_enabled {
-                        let mut p = self.perf.borrow_mut();
+                    if self.perf_state.enabled {
+                        let mut p = self.perf_state.stats.borrow_mut();
                         p.height_misses_render = p.height_misses_render.saturating_add(1);
                     }
-                    let label = if self.perf_enabled { Some(self.perf_label_for_item(item)) } else { None };
-                    let t0 = if self.perf_enabled { Some(std::time::Instant::now()) } else { None };
+                    let label = if self.perf_state.enabled { Some(self.perf_label_for_item(item)) } else { None };
+                    let t0 = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
                     let computed = item.desired_height(content_width);
-                    if let (true, Some(start)) = (self.perf_enabled, t0) {
+                    if let (true, Some(start)) = (self.perf_state.enabled, t0) {
                         let dt = start.elapsed().as_nanos();
-                        let mut p = self.perf.borrow_mut();
+                        let mut p = self.perf_state.stats.borrow_mut();
                         p.record_render((idx, content_width), label.as_deref().unwrap_or("unknown"), dt);
                     }
                     self.height_cache.borrow_mut().insert(key, computed);
@@ -7714,8 +6487,8 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
         if let Some(start) = render_loop_start {
-            if self.perf_enabled {
-                let mut p = self.perf.borrow_mut();
+            if self.perf_state.enabled {
+                let mut p = self.perf_state.stats.borrow_mut();
                 p.ns_render_loop = p.ns_render_loop.saturating_add(start.elapsed().as_nanos());
             }
         }
@@ -7725,12 +6498,12 @@ impl WidgetRef for &ChatWidget<'_> {
         let now = std::time::Instant::now();
         let show_scrollbar = total_height > content_area.height
             && self
-                .scrollbar_visible_until
+                .layout.scrollbar_visible_until
                 .get()
                 .map(|t| now < t)
                 .unwrap_or(false);
         if show_scrollbar {
-            let mut sb_state = self.vertical_scrollbar_state.borrow_mut();
+            let mut sb_state = self.layout.vertical_scrollbar_state.borrow_mut();
             // Scrollbar expects number of scroll positions, not total rows.
             // For a viewport of H rows and content of N rows, there are
             // max_scroll = N - H positions; valid positions = [0, max_scroll].
@@ -7769,7 +6542,7 @@ impl WidgetRef for &ChatWidget<'_> {
         // The welcome animation is no longer rendered as an overlay.
 
         // Render diff overlay (covering the history area, aligned with padding) if active
-        if let Some(overlay) = &self.diff_overlay {
+        if let Some(overlay) = &self.diffs.overlay {
             // Global scrim: dim the whole background to draw focus to the viewer
             // We intentionally do this across the entire widget area rather than just the
             // history area so the viewer stands out even with browser HUD or status bars.
@@ -7956,7 +6729,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 let raw_skip = overlay.scroll_offsets.get(overlay.selected).copied().unwrap_or(0) as usize;
                 let visible_rows = body_area.height as usize;
                 // Cache visible rows so key handler can clamp
-                self.diff_body_visible_rows.set(body_area.height);
+                self.diffs.body_visible_rows.set(body_area.height);
                 let max_off = all_lines.len().saturating_sub(visible_rows.max(1));
                 let skip = raw_skip.min(max_off);
                 let body_inner = body_area;
@@ -7989,7 +6762,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 // No explicit current-block highlight for a cleaner look
 
                 // Render confirmation dialog if active
-                if self.diff_confirm.is_some() {
+                if self.diffs.confirm.is_some() {
                     // Centered small box
                     let w = (body_inner.width as i16 - 10).max(20) as u16;
                     let h = 5u16;
@@ -8111,4 +6884,57 @@ fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) 
         }
         i += 1;
     }
+}
+#[derive(Default)]
+struct ExecState {
+    running_commands: HashMap<String, RunningCommand>,
+    running_read_agg_index: Option<usize>,
+}
+
+#[derive(Default)]
+struct ToolState {
+    running_custom_tools: HashMap<String, usize>,
+    running_web_search: HashMap<String, (usize, Option<String>)>,
+}
+#[derive(Default)]
+struct StreamState {
+    current_kind: Option<StreamKind>,
+    closed_answer_ids: HashSet<String>,
+    closed_reasoning_ids: HashSet<String>,
+    next_seq: u64,
+    seq_answer_final: Option<u64>,
+    drop_streaming: bool,
+}
+
+#[derive(Default)]
+struct LayoutState {
+    // Scroll offset from bottom (0 = bottom)
+    scroll_offset: u16,
+    // Cached max scroll from last render
+    last_max_scroll: std::cell::Cell<u16>,
+    // Track last viewport height of the history content area
+    last_history_viewport_height: std::cell::Cell<u16>,
+    // Stateful vertical scrollbar for history view
+    vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
+    // Auto-hide scrollbar timer
+    scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
+    // HUD visibility and sizing
+    last_hud_present: std::cell::Cell<bool>,
+    browser_hud_expanded: bool,
+    agents_hud_expanded: bool,
+    last_frame_height: std::cell::Cell<u16>,
+}
+
+#[derive(Default)]
+struct DiffsState {
+    session_patch_sets: Vec<HashMap<PathBuf, codex_core::protocol::FileChange>>,
+    baseline_file_contents: HashMap<PathBuf, String>,
+    overlay: Option<DiffOverlay>,
+    confirm: Option<DiffConfirm>,
+    body_visible_rows: std::cell::Cell<u16>,
+}
+#[derive(Default)]
+struct PerfState {
+    enabled: bool,
+    stats: std::cell::RefCell<PerfStats>,
 }
