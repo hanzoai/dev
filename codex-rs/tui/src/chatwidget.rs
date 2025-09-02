@@ -1605,6 +1605,44 @@ impl ChatWidget<'_> {
         crate::chatwidget::exec_tools::try_merge_completed_exec_at(self, idx);
     }
 
+    // Merge adjacent tool cells with the same header (e.g., successive Web Search blocks)
+    fn history_maybe_merge_tool_with_previous(&mut self, idx: usize) {
+        if idx == 0 || idx >= self.history_cells.len() { return; }
+        let new_lines = self.history_cells[idx].display_lines();
+        let new_header = new_lines
+            .first()
+            .and_then(|l| l.spans.get(0))
+            .map(|s| s.content.clone().to_string())
+            .unwrap_or_default();
+        if new_header.is_empty() { return; }
+        let prev_lines = self.history_cells[idx - 1].display_lines();
+        let prev_header = prev_lines
+            .first()
+            .and_then(|l| l.spans.get(0))
+            .map(|s| s.content.clone().to_string())
+            .unwrap_or_default();
+        if new_header != prev_header { return; }
+        let mut combined = prev_lines.clone();
+        while combined
+            .last()
+            .map(|l| crate::render::line_utils::is_blank_line_trim(l))
+            .unwrap_or(false)
+        { combined.pop(); }
+        let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
+        while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) { body.remove(0); }
+        while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) { body.pop(); }
+        if let Some(first_line) = body.first_mut() {
+            if let Some(first_span) = first_line.spans.get_mut(0) {
+                if first_span.content == "  └ " || first_span.content == "└ " {
+                    first_span.content = "  ".into();
+                }
+            }
+        }
+        combined.extend(body);
+        self.history_replace_at(idx - 1, Box::new(crate::history_cell::PlainHistoryCell { lines: combined, kind: crate::history_cell::HistoryCellType::Plain }));
+        self.history_remove_at(idx);
+    }
+
     /// Clean up faded-out animation cells
     fn process_animation_cleanup(&mut self) {
         // With trait-based cells, we can't easily detect and clean up specific cell types

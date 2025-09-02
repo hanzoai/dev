@@ -301,10 +301,10 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
     if chat.ended_call_ids.contains(&ev.call_id) { return; }
     for cell in &chat.history_cells { cell.trigger_fade(); }
     let parsed_command = ev.parsed_cmd.clone();
-    let action = history_cell::action_from_parsed(&parsed_command);
+    let action = history_cell::action_enum_from_parsed(&parsed_command);
     chat.height_manager.borrow_mut().record_event(HeightEvent::RunBegin);
 
-    if action == "read" {
+    if matches!(action, history_cell::ExecAction::Read) {
         chat.exec.running_commands.insert(
             ev.call_id.clone(),
             super::RunningCommand { command: ev.command.clone(), parsed: parsed_command.clone(), history_index: None },
@@ -379,13 +379,13 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
         .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index))
         .unwrap_or_else(|| (vec![call_id.clone()], vec![], None));
 
-    let action = history_cell::action_from_parsed(&parsed);
-    if action == "read" {
+    let action = history_cell::action_enum_from_parsed(&parsed);
+    if matches!(action, history_cell::ExecAction::Read) {
         let any_read_running = chat
             .exec
             .running_commands
             .values()
-            .any(|rc| history_cell::action_from_parsed(&rc.parsed) == "read");
+            .any(|rc| matches!(history_cell::action_enum_from_parsed(&rc.parsed), history_cell::ExecAction::Read));
         if !any_read_running {
             if let Some(idx) = chat.exec.running_read_agg_index.take() {
                 if idx < chat.history_cells.len() {
