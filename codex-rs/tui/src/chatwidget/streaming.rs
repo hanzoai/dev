@@ -28,20 +28,36 @@ pub(super) fn handle_streaming_delta(
         return;
     }
     tracing::debug!("handle_streaming_delta kind={:?}, delta={:?}", kind, delta);
+    delta_text(chat, kind, id, delta);
+    chat.mark_needs_redraw();
+}
+
+// New facade: begin a stream for a kind, with optional id
+pub(super) fn begin(chat: &mut ChatWidget<'_>, kind: StreamKind, id: Option<String>) {
+    chat.stream_state.current_kind = Some(kind);
+    let sink = AppEventHistorySink(chat.app_event_tx.clone());
+    chat.stream.begin_with_id(kind, id, &sink);
+}
+
+// New facade: apply a delta (ensures begin is called for this id/kind)
+pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String, delta: String) {
     chat.stream_state.current_kind = Some(kind);
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
     chat.stream.begin_with_id(kind, Some(id), &sink);
     chat.stream.push_and_maybe_commit(&delta, &sink);
-    chat.mark_needs_redraw();
+}
+
+// New facade: finalize a specific kind and optionally follow bottom
+pub(super) fn finalize(chat: &mut ChatWidget<'_>, kind: StreamKind, follow_bottom: bool) {
+    let sink = AppEventHistorySink(chat.app_event_tx.clone());
+    chat.stream_state.current_kind = Some(kind);
+    chat.stream.finalize(kind, follow_bottom, &sink);
 }
 
 pub(super) fn finalize_active_stream(chat: &mut ChatWidget<'_>) {
-    let sink = AppEventHistorySink(chat.app_event_tx.clone());
     if chat.stream.is_write_cycle_active() {
-        chat.stream_state.current_kind = Some(StreamKind::Reasoning);
-        chat.stream.finalize(StreamKind::Reasoning, true, &sink);
-        chat.stream_state.current_kind = Some(StreamKind::Answer);
-        chat.stream.finalize(StreamKind::Answer, true, &sink);
+        finalize(chat, StreamKind::Reasoning, true);
+        finalize(chat, StreamKind::Answer, true);
         chat.height_manager
             .borrow_mut()
             .record_event(HeightEvent::HistoryFinalize);
