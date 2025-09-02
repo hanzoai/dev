@@ -79,15 +79,14 @@ Build + policy:
 - Replaced remaining ad-hoc `history_cells[idx] = …`, `remove(i)`, and `add_to_history` sites with `history_replace_at`, `history_remove_at`, `history_push` (kept direct remove+insert only for move-before-assistant helpers where the removed cell is reused).
 - Swept: `chatwidget.rs`, `chatwidget/tools.rs`, `chatwidget/exec_tools.rs`, `chatwidget/interrupts.rs`.
 
-2) History merge API consolidation — IN PROGRESS
-- Added `history_push_and_maybe_merge` and `history_replace_and_maybe_merge` on `ChatWidget`.
-- Adopted in exec completion paths; `replace_*` calls into `try_merge_completed_exec_at`.
-- Next: move remaining explicit merge sites (if any) to this API or delete once fully centralized.
+2) History merge API consolidation — DONE
+- Added `history_push_and_maybe_merge`, `history_replace_and_maybe_merge`, and `history_maybe_merge_tool_with_previous` on `ChatWidget`.
+- Adopted across exec completion and web search completion paths; explicit merge code removed from call sites.
 
-3) Enum-ize exec actions and newtype IDs
-- Replace string action tags from `action_from_parsed(&parsed)` with `ExecAction` enum { Read, Search, List, Run }.
-- Introduce newtypes for IDs: `ExecCallId(String)`, `ToolCallId(String)`, `StreamId(String)` to clarify map/set roles across modules.
-- Migrate `HashMap`/`HashSet` keys and helper signatures.
+3) Enum-ize exec actions and newtype IDs — IN PROGRESS
+- Added `ExecAction` enum + `action_enum_from_parsed()`; switched `exec_tools.rs` to use it.
+- Next: migrate remaining string-based action checks in `history_cell.rs` and `chatwidget.rs` to the enum.
+- Newtypes for IDs still TODO.
 
 4) Streaming API cleanup
 - In `streaming.rs`, expose: `begin(kind,id)`, `delta(text)`, `finalize(kind, follow_bottom: bool)`.
@@ -145,7 +144,9 @@ Build + policy:
 ## Todo Checklist
 
 - [x] Sweep remaining history mutations to use the shim
-- [ ] Consolidate history merge API (finish adoption across all call sites)
+- [x] Consolidate history merge API (adopt helpers across call sites)
+- [ ] Replace all action string checks with ExecAction enum
+- [ ] Add ID newtypes (Exec/Tool/Stream) and migrate maps
 - [ ] Replace action strings with `ExecAction` enum
 - [ ] Add ID newtypes (Exec/Tool/Stream)
 - [ ] Tighten streaming API (begin/delta/finalize facade)
