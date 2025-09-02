@@ -441,7 +441,7 @@ impl ChatWidget<'_> {
                     let codex_protocol::models::ReasoningItemReasoningSummary::SummaryText { text } = s;
                     // Reasoning cell – use the existing reasoning output styling
                     let sink = crate::streaming::controller::AppEventHistorySink(self.app_event_tx.clone());
-                    self.stream_state.current_kind = Some(crate::streaming::StreamKind::Reasoning);
+                    streaming::begin(self, StreamKind::Reasoning, None);
                     let _ = self.stream.apply_final_reasoning(&text, &sink);
                     // finalize immediately for static replay
                     self.stream.finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
@@ -1477,16 +1477,17 @@ impl ChatWidget<'_> {
                 } else {
                 // Compute header label based on parsed action and status
                 let exec_label = |e: &history_cell::ExecCell| -> &'static str {
-                    let action = history_cell::action_from_parsed(&e.parsed);
+                    use crate::history_cell::ExecAction as EA;
+                    let action = history_cell::action_enum_from_parsed(&e.parsed);
                     match (&e.output, action) {
-                        (None, "read") => "Read",
-                        (None, "search") => "Searched",
-                        (None, "list") => "List Files",
-                        (None, _) => "Running...",
-                        (Some(o), "read") if o.exit_code == 0 => "Read",
-                        (Some(o), "search") if o.exit_code == 0 => "Searched",
-                        (Some(o), "list") if o.exit_code == 0 => "List Files",
-                        (Some(o), _) if o.exit_code == 0 => "Ran",
+                        (None, EA::Read) => "Read",
+                        (None, EA::Search) => "Searched",
+                        (None, EA::List) => "List Files",
+                        (None, EA::Run) => "Running...",
+                        (Some(o), EA::Read) if o.exit_code == 0 => "Read",
+                        (Some(o), EA::Search) if o.exit_code == 0 => "Searched",
+                        (Some(o), EA::List) if o.exit_code == 0 => "List Files",
+                        (Some(o), EA::Run) if o.exit_code == 0 => "Ran",
                         _ => "",
                     }
                 };
@@ -1960,9 +1961,7 @@ impl ChatWidget<'_> {
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final answer
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.stream_state.current_kind = Some(StreamKind::Answer);
-                // Seed the controller with this id so finalize targets the right streaming cell
-                self.stream.begin_with_id(StreamKind::Answer, Some(id.clone()), &sink);
+                streaming::begin(self, StreamKind::Answer, Some(id.clone()));
                 let _finished = self.stream.apply_final_answer(&message, &sink);
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
@@ -1992,7 +1991,7 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Stream answer delta through StreamController
-                self.handle_streaming_delta(StreamKind::Answer, id.clone(), delta);
+                streaming::delta_text(self, StreamKind::Answer, id.clone(), delta);
                 // Show responding state while assistant streams
                 self.bottom_pane.update_status_text("responding".to_string());
             }
@@ -2009,8 +2008,7 @@ impl ChatWidget<'_> {
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.stream_state.current_kind = Some(StreamKind::Reasoning);
-                self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
+                streaming::begin(self, StreamKind::Reasoning, Some(id.clone()));
                 
                 // The StreamController now properly handles duplicate detection and prevents
                 // re-injecting content when we're already finishing a stream
@@ -2028,7 +2026,7 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Stream reasoning delta through StreamController
-                self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
+                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta);
                 // Show thinking state while reasoning streams
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
@@ -2060,13 +2058,10 @@ impl ChatWidget<'_> {
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: _ }) => {
                 // Finalize any active streams
-                let sink = AppEventHistorySink(self.app_event_tx.clone());
                 if self.stream.is_write_cycle_active() {
-                    // Finalize both streams
-                    self.stream_state.current_kind = Some(StreamKind::Reasoning);
-                    self.stream.finalize(StreamKind::Reasoning, true, &sink);
-                    self.stream_state.current_kind = Some(StreamKind::Answer);
-                    self.stream.finalize(StreamKind::Answer, true, &sink);
+                    // Finalize both streams via streaming facade
+                    streaming::finalize(self, StreamKind::Reasoning, true);
+                    streaming::finalize(self, StreamKind::Answer, true);
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
                 self.active_task_ids.remove(&id);
@@ -2155,8 +2150,7 @@ impl ChatWidget<'_> {
                 }
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
-                self.stream_state.current_kind = Some(StreamKind::Reasoning);
-                self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
+                streaming::begin(self, StreamKind::Reasoning, Some(id.clone()));
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
                 self.stream_state.closed_reasoning_ids.insert(StreamId(id.clone()));

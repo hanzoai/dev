@@ -4345,7 +4345,7 @@ fn new_parsed_command(
     output: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> Vec<Line<'static>> {
-    let action = action_from_parsed(parsed_commands);
+    let action = action_enum_from_parsed(&parsed_commands.to_vec());
     let ctx_path = first_context_path(parsed_commands);
     let mut lines: Vec<Line> = vec![match output {
         None => {
@@ -4357,16 +4357,16 @@ fn new_parsed_command(
             };
             // Running state per action
             let header = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Running... in {p}"),
                     None => "Running...".to_string(),
                 },
             };
             // Use non-bold styling for informational actions; use info color
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(
                     format!("{header}{duration_str}"),
                     Style::default().fg(crate::colors::info()),
@@ -4382,16 +4382,16 @@ fn new_parsed_command(
         }
         Some(o) if o.exit_code == 0 => {
             let done = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {p}"),
                     None => "Ran".to_string(),
                 },
             };
             // Color by action: informational (Read/Search/List) use normal text; execution uses primary
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(done, Style::default().fg(crate::colors::text()))
             } else {
                 Line::styled(
@@ -4407,16 +4407,16 @@ fn new_parsed_command(
             // can still see what operation was attempted. Error details are
             // rendered below via `output_lines`.
             let done = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {p}"),
                     None => "Ran".to_string(),
                 },
             };
             // Use the same styling as success to keep headers stable/recognizable.
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(done, Style::default().fg(crate::colors::text()))
             } else {
                 Line::styled(
@@ -4444,10 +4444,10 @@ fn new_parsed_command(
     // Restrict displayed entries to the primary action for this cell.
     // For the generic "run" header, allow Run/Test/Lint/Format entries.
     let expected_label: Option<&'static str> = match action {
-        "read" => Some("Read"),
-        "search" => Some("Search"),
-        "list" => Some("List Files"),
-        _ => None,
+        ExecAction::Read => Some("Read"),
+        ExecAction::Search => Some("Search"),
+        ExecAction::List => Some("List Files"),
+        ExecAction::Run => None,
     };
 
     for parsed in parsed_commands.iter() {
@@ -4727,7 +4727,7 @@ fn new_parsed_command(
     }
 
     // Show stdout for real run commands; keep read/search/list concise unless error
-    let show_stdout = action == "run";
+    let show_stdout = matches!(action, ExecAction::Run);
     let use_angle_pipe = show_stdout; // add "> " prefix for run output
     lines.extend(output_lines(output, !show_stdout, use_angle_pipe));
     lines.push(Line::from(""));
