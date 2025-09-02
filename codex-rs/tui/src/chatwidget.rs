@@ -1592,6 +1592,19 @@ impl ChatWidget<'_> {
         }
     }
 
+    // History merge API: consolidates exec/tool merge logic
+    fn history_push_and_maybe_merge(&mut self, cell: impl HistoryCell + 'static) {
+        // For push, add_to_history already contains merge heuristics for Exec/Tool cells.
+        self.add_to_history(cell);
+    }
+
+    fn history_replace_and_maybe_merge(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
+        // Replace at index, then attempt standard exec merge with previous cell.
+        self.history_replace_at(idx, cell);
+        // Merge only if the new cell is an Exec with output (completed) or a MergedExec.
+        crate::chatwidget::exec_tools::try_merge_completed_exec_at(self, idx);
+    }
+
     /// Clean up faded-out animation cells
     fn process_animation_cleanup(&mut self) {
         // With trait-based cells, we can't easily detect and clean up specific cell types
