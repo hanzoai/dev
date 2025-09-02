@@ -1427,6 +1427,80 @@ impl MergedExecCell {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_core::parse_command::ParsedCommand;
+
+    #[test]
+    fn action_enum_from_parsed_variants() {
+        // Read
+        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into(), path: Some("foo.txt".into()) }];
+        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Read));
+        // Search
+        let parsed = vec![ParsedCommand::Search { query: "term".into(), path: Some("src".into()), cmd: "rg term src".into() }];
+        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Search));
+        // List files
+        let parsed = vec![ParsedCommand::ListFiles { cmd: "ls -la".into(), path: Some(".".into()) }];
+        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::List));
+        // Default → Run
+        let parsed = vec![ParsedCommand::Unknown { cmd: "echo hi".into() }];
+        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Run));
+        // Empty → Run
+        let parsed: Vec<ParsedCommand> = vec![];
+        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Run));
+    }
+
+    #[test]
+    fn merged_exec_cell_push_and_kind() {
+        // Build two completed ExecCell instances for Read
+        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into(), path: Some("foo.txt".into()) }];
+        let e1 = new_completed_exec_command(
+            vec!["sed".into(), "-n".into(), "1,10p".into(), "foo.txt".into()],
+            parsed.clone(),
+            CommandOutput { exit_code: 0, stdout: "ok".into(), stderr: String::new() },
+        );
+        let e2 = new_completed_exec_command(
+            vec!["sed".into(), "-n".into(), "11,20p".into(), "foo.txt".into()],
+            parsed,
+            CommandOutput { exit_code: 0, stdout: "ok2".into(), stderr: String::new() },
+        );
+        let mut merged = MergedExecCell::from_exec(&e1);
+        assert!(matches!(merged.exec_kind(), ExecKind::Read));
+        // Push the second and ensure it keeps kind and adds a segment
+        let before = merged.segments.len();
+        merged.push_exec(&e2);
+        assert_eq!(merged.segments.len(), before + 1);
+        assert!(matches!(merged.exec_kind(), ExecKind::Read));
+    }
+
+    #[test]
+    fn parse_read_line_annotation_handles_common_tools() {
+        // sed -n 'A,Bp'
+        assert_eq!(
+            parse_read_line_annotation("sed -n '5,42p' foo.txt"),
+            Some("(lines 5 to 42)".into())
+        );
+        // head -n N
+        assert_eq!(
+            parse_read_line_annotation("head -n 100 foo.txt"),
+            Some("(lines 1 to 100)".into())
+        );
+        // tail -n +K
+        assert_eq!(
+            parse_read_line_annotation("tail -n +20 foo.txt"),
+            Some("(from 20 to end)".into())
+        );
+        // tail -n N
+        assert_eq!(
+            parse_read_line_annotation("tail -n 50 foo.txt"),
+            Some("(last 50 lines)".into())
+        );
+        // Unrelated command
+        assert_eq!(parse_read_line_annotation("cat foo.txt"), None);
+    }
+}
+
 impl HistoryCell for MergedExecCell {
     fn as_any(&self) -> &dyn std::any::Any {
         self
