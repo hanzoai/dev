@@ -428,13 +428,8 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
                 })
                 .unwrap_or(false);
             if is_match {
-                if let Some(c) = completed_opt.take() { chat.history_replace_at(idx, Box::new(c)); }
-                let pre_len = chat.history_cells.len();
+                if let Some(c) = completed_opt.take() { chat.history_replace_and_maybe_merge(idx, Box::new(c)); }
                 replaced = true;
-                try_merge_completed_exec_at(chat, idx);
-                if chat.history_cells.len() == pre_len {
-                    chat.request_redraw();
-                }
             }
         }
         if !replaced {
@@ -446,17 +441,14 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
                 }
             }
             if let Some(i) = found {
-                if let Some(c) = completed_opt.take() { chat.history_replace_at(i, Box::new(c)); }
-                let pre_len = chat.history_cells.len();
+                if let Some(c) = completed_opt.take() { chat.history_replace_and_maybe_merge(i, Box::new(c)); }
                 replaced = true;
-                try_merge_completed_exec_at(chat, i);
-                if chat.history_cells.len() == pre_len { chat.request_redraw(); }
             }
         }
     }
 
     if !replaced {
-                if let Some(c) = completed_opt.take() { chat.history_push(c); }
+                if let Some(c) = completed_opt.take() { chat.history_push_and_maybe_merge(c); }
     }
 
     if exit_code == 0 {
