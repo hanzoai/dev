@@ -75,16 +75,14 @@ Build + policy:
 
 ## Next Steps (Recommended Order)
 
-1) Finish History helper adoption
-- Replace remaining ad-hoc `history_cells[idx] = …`, `remove(i)`, and `add_to_history` sites with `history_replace_at`, `history_remove_at`, `history_push`.
-- Candidates to sweep: `chatwidget.rs` (render/patch flows), `tools.rs` (MCP end), `exec_tools.rs` (final merges), streaming paths if any remaining.
+1) Finish History helper adoption — DONE
+- Replaced remaining ad-hoc `history_cells[idx] = …`, `remove(i)`, and `add_to_history` sites with `history_replace_at`, `history_remove_at`, `history_push` (kept direct remove+insert only for move-before-assistant helpers where the removed cell is reused).
+- Swept: `chatwidget.rs`, `chatwidget/tools.rs`, `chatwidget/exec_tools.rs`, `chatwidget/interrupts.rs`.
 
-2) History merge API consolidation
-- Introduce a small `History` helper (or keep on `ChatWidget`) that encapsulates the “Exec/Search/List merges” currently inside `add_to_history`.
-- Public methods (draft):
-  - `push_and_maybe_merge(cell)`
-  - `replace_and_maybe_merge(idx, cell)`
-- Move the complex “merged exec cell” logic behind this boundary.
+2) History merge API consolidation — IN PROGRESS
+- Added `history_push_and_maybe_merge` and `history_replace_and_maybe_merge` on `ChatWidget`.
+- Adopted in exec completion paths; `replace_*` calls into `try_merge_completed_exec_at`.
+- Next: move remaining explicit merge sites (if any) to this API or delete once fully centralized.
 
 3) Enum-ize exec actions and newtype IDs
 - Replace string action tags from `action_from_parsed(&parsed)` with `ExecAction` enum { Read, Search, List, Run }.
@@ -146,8 +144,8 @@ Build + policy:
 
 ## Todo Checklist
 
-- [ ] Sweep remaining history mutations to use the shim
-- [ ] Consolidate history merge API
+- [x] Sweep remaining history mutations to use the shim
+- [ ] Consolidate history merge API (finish adoption across all call sites)
 - [ ] Replace action strings with `ExecAction` enum
 - [ ] Add ID newtypes (Exec/Tool/Stream)
 - [ ] Tighten streaming API (begin/delta/finalize facade)
