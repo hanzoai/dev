@@ -188,7 +188,7 @@ pub(crate) struct ChatWidget<'a> {
     interrupts: interrupts::InterruptManager,
 
     // Guard for out-of-order exec events: track call_ids that already ended
-    ended_call_ids: HashSet<String>,
+    ended_call_ids: HashSet<ExecCallId>,
 
     // Accumulated diff/session state
     diffs: DiffsState,
@@ -263,6 +263,14 @@ enum AgentStatus {
 }
 
 use self::message::create_initial_user_message;
+
+// Newtype IDs for clarity across exec/tools/streams
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct ExecCallId(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct ToolCallId(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct StreamId(pub String);
 
 impl ChatWidget<'_> {
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
@@ -1959,7 +1967,7 @@ impl ChatWidget<'_> {
                 // Stream finishing is handled by StreamController
                 self.last_assistant_message = Some(message);
                 // Mark this id closed for further answer deltas in this turn
-                self.stream_state.closed_answer_ids.insert(id.clone());
+                self.stream_state.closed_answer_ids.insert(StreamId(id.clone()));
                 // Defensive: this turn's task should be considered complete for UI purposes
                 self.active_task_ids.remove(&id);
                 // Defensive: clear transient agents-preparing state unless we see real updates
@@ -1979,7 +1987,7 @@ impl ChatWidget<'_> {
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
-                if self.stream_state.closed_answer_ids.contains(&id) {
+                if self.stream_state.closed_answer_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
                     return;
                 }
@@ -1993,7 +2001,7 @@ impl ChatWidget<'_> {
                 // Guard: duplicate final Reasoning for the same id can arrive due to provider
                 // retries or thread replays. If we've already finalized this id in the current
                 // turn, ignore to avoid duplicating reasoning content in history.
-                if self.stream_state.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::warn!("Ignoring duplicate AgentReasoning for closed id={}", id);
                     return;
                 }
@@ -2009,13 +2017,13 @@ impl ChatWidget<'_> {
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
                 // Mark this id closed for further reasoning deltas in this turn
-                self.stream_state.closed_reasoning_ids.insert(id.clone());
+                self.stream_state.closed_reasoning_ids.insert(StreamId(id.clone()));
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
-                if self.stream_state.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
                     return;
                 }
@@ -2070,7 +2078,7 @@ impl ChatWidget<'_> {
                 if !self.tools_state.running_web_search.is_empty() {
                     // Replace each running web search cell in-place with a completed one
                     // Iterate over a snapshot of keys to avoid borrow issues
-                    let entries: Vec<(String, (usize, Option<String>))> = self
+                    let entries: Vec<(ToolCallId, (usize, Option<String>))> = self
                         .tools_state.running_web_search
                         .iter()
                         .map(|(k, v)| (k.clone(), v.clone()))
@@ -2133,7 +2141,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }) => {
                 // Treat raw reasoning content the same as summarized reasoning
-                if self.stream_state.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring RawContent delta for closed id={}", id);
                     return;
                 }
@@ -2141,7 +2149,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 tracing::debug!("AgentReasoningRawContent event with text: {:?}...", text.chars().take(100).collect::<String>());
-                if self.stream_state.closed_reasoning_ids.contains(&id) {
+                if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::warn!("Ignoring duplicate AgentReasoningRawContent for closed id={}", id);
                     return;
                 }
@@ -2151,7 +2159,7 @@ impl ChatWidget<'_> {
                 self.stream.begin_with_id(StreamKind::Reasoning, Some(id.clone()), &sink);
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
-                self.stream_state.closed_reasoning_ids.insert(id.clone());
+                self.stream_state.closed_reasoning_ids.insert(StreamId(id.clone()));
                 self.mark_needs_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
@@ -2318,7 +2326,7 @@ impl ChatWidget<'_> {
                 self.history_push(cell);
                 // Track index so we can replace it on completion
                 if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-                    self.tools_state.running_custom_tools.insert(call_id.clone(), last_idx);
+                    self.tools_state.running_custom_tools.insert(ToolCallId(call_id.clone()), last_idx);
                 }
 
                 // Update border status based on tool
@@ -2354,7 +2362,7 @@ impl ChatWidget<'_> {
                         success,
                         content,
                     );
-                    if let Some(idx) = self.tools_state.running_custom_tools.remove(&call_id) {
+                    if let Some(idx) = self.tools_state.running_custom_tools.remove(&ToolCallId(call_id)) {
                         if idx < self.history_cells.len() {
                             self.history_replace_at(idx, Box::new(completed));
                         } else {
@@ -2376,7 +2384,7 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = self.tools_state.running_custom_tools.remove(&call_id) {
+                if let Some(idx) = self.tools_state.running_custom_tools.remove(&ToolCallId(call_id)) {
                     if idx < self.history_cells.len() {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
@@ -3517,7 +3525,7 @@ impl ChatWidget<'_> {
         // If we already finalized this id in the current turn with identical content,
         // drop this event to avoid duplicates (belt-and-suspenders against upstream repeats).
         if let Some(ref want) = id {
-            if self.stream_state.closed_answer_ids.contains(want) {
+            if self.stream_state.closed_answer_ids.contains(&StreamId(want.clone())) {
                 if let Some(existing_idx) = self
                     .history_cells
                     .iter()
@@ -6938,20 +6946,20 @@ fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) 
 }
 #[derive(Default)]
 struct ExecState {
-    running_commands: HashMap<String, RunningCommand>,
+    running_commands: HashMap<ExecCallId, RunningCommand>,
     running_read_agg_index: Option<usize>,
 }
 
 #[derive(Default)]
 struct ToolState {
-    running_custom_tools: HashMap<String, usize>,
-    running_web_search: HashMap<String, (usize, Option<String>)>,
+    running_custom_tools: HashMap<ToolCallId, usize>,
+    running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
 }
 #[derive(Default)]
 struct StreamState {
     current_kind: Option<StreamKind>,
-    closed_answer_ids: HashSet<String>,
-    closed_reasoning_ids: HashSet<String>,
+    closed_answer_ids: HashSet<StreamId>,
+    closed_reasoning_ids: HashSet<StreamId>,
     next_seq: u64,
     seq_answer_final: Option<u64>,
     drop_streaming: bool,

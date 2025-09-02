@@ -33,7 +33,7 @@ pub(super) fn finalize_exec_cell_at(
 pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
     let interrupted_msg = "Interrupted by user".to_string();
     let stdout_empty = String::new();
-    let running: Vec<(String, Option<usize>)> = chat
+    let running: Vec<(super::ExecCallId, Option<usize>)> = chat
         .exec
         .running_commands
         .iter()
@@ -47,7 +47,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
     chat.exec.running_commands.clear();
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(String, usize)> = chat
+        let entries: Vec<(super::ToolCallId, usize)> = chat
             .tools_state
             .running_custom_tools
             .iter()
@@ -71,7 +71,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(String, (usize, Option<String>))> = chat
+        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
             .tools_state
             .running_web_search
             .iter()
@@ -132,7 +132,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
 pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     let note = "Completed (final answer received)".to_string();
     let stdout_empty = String::new();
-    let running: Vec<(String, Option<usize>)> = chat
+    let running: Vec<(super::ExecCallId, Option<usize>)> = chat
         .exec
         .running_commands
         .iter()
@@ -146,7 +146,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     chat.exec.running_commands.clear();
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(String, usize)> = chat
+        let entries: Vec<(super::ToolCallId, usize)> = chat
             .tools_state
             .running_custom_tools
             .iter()
@@ -170,7 +170,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(String, (usize, Option<String>))> = chat
+        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
             .tools_state
             .running_web_search
             .iter()
@@ -298,7 +298,7 @@ pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize)
 }
 
 pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBeginEvent) {
-    if chat.ended_call_ids.contains(&ev.call_id) { return; }
+    if chat.ended_call_ids.contains(&super::ExecCallId(ev.call_id.clone())) { return; }
     for cell in &chat.history_cells { cell.trigger_fade(); }
     let parsed_command = ev.parsed_cmd.clone();
     let action = history_cell::action_enum_from_parsed(&parsed_command);
@@ -306,7 +306,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
 
     if matches!(action, history_cell::ExecAction::Read) {
         chat.exec.running_commands.insert(
-            ev.call_id.clone(),
+            super::ExecCallId(ev.call_id.clone()),
             super::RunningCommand { command: ev.command.clone(), parsed: parsed_command.clone(), history_index: None },
         );
             let agg_index = match chat.exec.running_read_agg_index {
@@ -346,7 +346,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
     chat.history_push(cell);
     let idx = if chat.history_cells.len() > 0 { chat.history_cells.len() - 1 } else { before_len };
     chat.exec.running_commands.insert(
-        ev.call_id.clone(),
+        super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: Some(idx) },
     );
     if !chat.tools_state.running_web_search.is_empty() {
@@ -355,7 +355,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
         let preview = chat
             .exec
             .running_commands
-            .get(&ev.call_id)
+            .get(&super::ExecCallId(ev.call_id.clone()))
             .map(|rc| rc.command.join(" "))
             .unwrap_or_else(|| "command".to_string());
         let preview_short = if preview.chars().count() > 40 {
@@ -371,9 +371,9 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
 }
 
 pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndEvent) {
-    chat.ended_call_ids.insert(ev.call_id.clone());
+    chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
     let ExecCommandEndEvent { call_id, exit_code, duration: _, stdout, stderr } = ev;
-    let cmd = chat.exec.running_commands.remove(&call_id);
+    let cmd = chat.exec.running_commands.remove(&super::ExecCallId(call_id.clone()));
     chat.height_manager.borrow_mut().record_event(HeightEvent::RunEnd);
     let (command, parsed, history_index) = cmd
         .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index))
@@ -464,7 +464,7 @@ pub(super) fn maybe_move_last_before_final_assistant_exec(chat: &mut ChatWidget<
     if chat.history_cells.is_empty() { return; }
     let last_idx = chat.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
     let cell = chat.history_cells.remove(last_idx); chat.history_cells.insert(assistant_idx, cell);
-    if let Some(rc) = chat.exec.running_commands.get_mut(call_id) { rc.history_index = Some(assistant_idx); }
+    if let Some(rc) = chat.exec.running_commands.get_mut(&super::ExecCallId(call_id.to_string())) { rc.history_index = Some(assistant_idx); }
     chat.invalidate_height_cache(); chat.request_redraw();
 }
 
@@ -473,7 +473,7 @@ pub(super) fn maybe_move_last_before_final_assistant_tool(chat: &mut ChatWidget<
     if chat.history_cells.is_empty() { return; }
     let last_idx = chat.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
     let cell = chat.history_cells.remove(last_idx); chat.history_cells.insert(assistant_idx, cell);
-    if let Some(idx) = chat.tools_state.running_custom_tools.get_mut(call_id) { *idx = assistant_idx; }
+    if let Some(idx) = chat.tools_state.running_custom_tools.get_mut(&super::ToolCallId(call_id.to_string())) { *idx = assistant_idx; }
     chat.invalidate_height_cache(); chat.request_redraw();
 }
 
