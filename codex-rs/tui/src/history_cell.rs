@@ -955,11 +955,11 @@ impl HistoryCell for ExecCell {
         self
     }
     fn kind(&self) -> HistoryCellType {
-        let kind = match action_from_parsed(&self.parsed) {
-            "read" => ExecKind::Read,
-            "search" => ExecKind::Search,
-            "list" => ExecKind::List,
-            _ => ExecKind::Run,
+        let kind = match action_enum_from_parsed(&self.parsed) {
+            ExecAction::Read => ExecKind::Read,
+            ExecAction::Search => ExecKind::Search,
+            ExecAction::List => ExecKind::List,
+            ExecAction::Run => ExecKind::Run,
         };
         let status = match &self.output {
             None => ExecStatus::Running,
@@ -1305,11 +1305,11 @@ impl MergedExecCell {
     }
     pub(crate) fn from_exec(exec: &ExecCell) -> Self {
         let (pre, out) = exec.exec_render_parts();
-        let kind = match action_from_parsed(&exec.parsed) {
-            "read" => ExecKind::Read,
-            "search" => ExecKind::Search,
-            "list" => ExecKind::List,
-            _ => ExecKind::Run,
+        let kind = match action_enum_from_parsed(&exec.parsed) {
+            ExecAction::Read => ExecKind::Read,
+            ExecAction::Search => ExecKind::Search,
+            ExecAction::List => ExecKind::List,
+            ExecAction::Run => ExecKind::Run,
         };
         Self {
             segments: vec![(pre, out)],
@@ -1911,7 +1911,7 @@ fn exec_render_parts_parsed(
     output: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let action = action_from_parsed(parsed_commands);
+    let action = action_enum_from_parsed(&parsed_commands.to_vec());
     let ctx_path = first_context_path(parsed_commands);
     let mut pre: Vec<Line<'static>> = vec![match output {
         None => {
@@ -1922,15 +1922,15 @@ fn exec_render_parts_parsed(
                 String::new()
             };
             let header = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Running... in {}", p),
                     None => "Running...".to_string(),
                 },
             };
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(
                     header + &duration_str,
                     Style::default().fg(crate::colors::info()),
@@ -1946,15 +1946,15 @@ fn exec_render_parts_parsed(
         }
         Some(o) if o.exit_code == 0 => {
             let done = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {}", p),
                     None => "Ran".to_string(),
                 },
             };
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(done, Style::default().fg(crate::colors::text()))
             } else {
                 Line::styled(
@@ -1967,15 +1967,15 @@ fn exec_render_parts_parsed(
         }
         Some(_) => {
             let done = match action {
-                "read" => "Read".to_string(),
-                "search" => "Searched".to_string(),
-                "list" => "List Files".to_string(),
-                _ => match &ctx_path {
+                ExecAction::Read => "Read".to_string(),
+                ExecAction::Search => "Searched".to_string(),
+                ExecAction::List => "List Files".to_string(),
+                ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {}", p),
                     None => "Ran".to_string(),
                 },
             };
-            if matches!(action, "read" | "search" | "list") {
+            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(done, Style::default().fg(crate::colors::text()))
             } else {
                 Line::styled(
@@ -1996,15 +1996,15 @@ fn exec_render_parts_parsed(
         }
     }
     // Compute output preview first to know whether to draw the downward corner.
-    let show_stdout = action == "run";
+    let show_stdout = matches!(action, ExecAction::Run);
     let out = output_lines(output, !show_stdout, false);
     let mut any_content_emitted = false;
     // Determine allowed label(s) for this cell's primary action
     let expected_label: Option<&'static str> = match action {
-        "read" => Some("Read"),
-        "search" => Some("Search"),
-        "list" => Some("List Files"),
-        _ => None, // run: allow a set of labels
+        ExecAction::Read => Some("Read"),
+        ExecAction::Search => Some("Search"),
+        ExecAction::List => Some("List Files"),
+        ExecAction::Run => None, // run: allow a set of labels
     };
     for parsed in parsed_commands.iter() {
         let (label, content) = match parsed {
