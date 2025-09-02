@@ -83,14 +83,14 @@ Build + policy:
 - Added `history_push_and_maybe_merge`, `history_replace_and_maybe_merge`, and `history_maybe_merge_tool_with_previous` on `ChatWidget`.
 - Adopted across exec completion and web search completion paths; explicit merge code removed from call sites.
 
-3) Enum-ize exec actions and newtype IDs — IN PROGRESS
-- Added `ExecAction` enum + `action_enum_from_parsed()`; switched `exec_tools.rs` to use it.
-- Next: migrate remaining string-based action checks in `history_cell.rs` and `chatwidget.rs` to the enum.
-- Newtypes for IDs still TODO.
+3) Enum-ize exec actions and newtype IDs — DONE
+- Added `ExecAction` enum + `action_enum_from_parsed()` and adopted across `history_cell`, `exec_tools`, and `chatwidget`.
+- Introduced ID newtypes: `ExecCallId`, `ToolCallId`, `StreamId`; migrated state maps/sets and call sites.
+- Removed legacy `action_from_parsed` helper.
 
-4) Streaming API cleanup
-- In `streaming.rs`, expose: `begin(kind,id)`, `delta(text)`, `finalize(kind, follow_bottom: bool)`.
-- Remove remaining external touches of `stream_state.current_kind` (already mostly contained) and push that responsibility into the streaming module.
+4) Streaming API cleanup — DONE
+- In `streaming.rs`, added `begin(kind,id)`, `delta_text(kind,id,text)`, `finalize(kind, follow_bottom)` facades.
+- Replaced direct `current_kind` mutations at call sites with the facade; kept internal control inside streaming module.
 
 5) Tests (valuable quick wins)
 - Unit tests
@@ -145,8 +145,8 @@ Build + policy:
 
 - [x] Sweep remaining history mutations to use the shim
 - [x] Consolidate history merge API (adopt helpers across call sites)
-- [ ] Replace all action string checks with ExecAction enum
-- [ ] Add ID newtypes (Exec/Tool/Stream) and migrate maps
+- [x] Replace all action string checks with ExecAction enum
+- [x] Add ID newtypes (Exec/Tool/Stream) and migrate maps
 - [ ] Replace action strings with `ExecAction` enum
 - [ ] Add ID newtypes (Exec/Tool/Stream)
 - [ ] Tighten streaming API (begin/delta/finalize facade)

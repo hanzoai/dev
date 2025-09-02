@@ -226,11 +226,11 @@ pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize)
         return;
     }
     let to_kind = |e: &history_cell::ExecCell| -> history_cell::ExecKind {
-        match history_cell::action_from_parsed(&e.parsed) {
-            "read" => history_cell::ExecKind::Read,
-            "search" => history_cell::ExecKind::Search,
-            "list" => history_cell::ExecKind::List,
-            _ => history_cell::ExecKind::Run,
+        match history_cell::action_enum_from_parsed(&e.parsed) {
+            history_cell::ExecAction::Read => history_cell::ExecKind::Read,
+            history_cell::ExecAction::Search => history_cell::ExecKind::Search,
+            history_cell::ExecAction::List => history_cell::ExecKind::List,
+            history_cell::ExecAction::Run => history_cell::ExecKind::Run,
         }
     };
 
