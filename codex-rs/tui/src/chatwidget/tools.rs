@@ -49,32 +49,7 @@ pub(super) fn web_search_complete(chat: &mut ChatWidget<'_>, call_id: String, qu
                 let final_query = query.or(maybe_query);
                 let completed = rt.finalize_web_search(true, final_query);
                 chat.history_replace_at(i, Box::new(completed));
-
-                // Merge adjacent Web Search blocks with same header
-                if i > 0 {
-                    let new_lines = chat.history_cells[i].display_lines();
-                    let new_header = new_lines.first().and_then(|l| l.spans.get(0)).map(|s| s.content.clone().to_string()).unwrap_or_default();
-                    let prev_lines = chat.history_cells[i - 1].display_lines();
-                    let prev_header = prev_lines.first().and_then(|l| l.spans.get(0)).map(|s| s.content.clone().to_string()).unwrap_or_default();
-                    if !new_header.is_empty() && new_header == prev_header {
-                        let mut combined = prev_lines.clone();
-                        while combined.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) { combined.pop(); }
-                        let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                        while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) { body.remove(0); }
-                        while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) { body.pop(); }
-                        if let Some(first_line) = body.first_mut() {
-                            if let Some(first_span) = first_line.spans.get_mut(0) {
-                                if first_span.content == "  └ " || first_span.content == "└ " {
-                                    first_span.content = "  ".into();
-                                }
-                            }
-                        }
-                        combined.extend(body);
-                        chat.history_replace_at(i - 1, Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain }));
-                        chat.history_remove_at(i);
-                    }
-                }
-                // history_replace_at already invalidates and redraws
+                chat.history_maybe_merge_tool_with_previous(i);
             }
         }
     }

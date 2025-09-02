@@ -81,6 +81,28 @@ pub(crate) enum ExecKind {
     Run,
 }
 
+// Unified action classification for exec commands
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExecAction {
+    Read,
+    Search,
+    List,
+    Run,
+}
+
+pub(crate) fn action_enum_from_parsed(parsed: &Vec<codex_core::parse_command::ParsedCommand>) -> ExecAction {
+    use codex_core::parse_command::ParsedCommand;
+    for p in parsed {
+        match p {
+            ParsedCommand::Read { .. } => return ExecAction::Read,
+            ParsedCommand::Search { .. } => return ExecAction::Search,
+            ParsedCommand::ListFiles { .. } => return ExecAction::List,
+            _ => {}
+        }
+    }
+    ExecAction::Run
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExecStatus {
     Running,
