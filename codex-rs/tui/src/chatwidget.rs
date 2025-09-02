@@ -272,6 +272,21 @@ pub(super) struct ToolCallId(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct StreamId(pub String);
 
+impl From<String> for ExecCallId { fn from(s: String) -> Self { ExecCallId(s) } }
+impl From<&str> for ExecCallId { fn from(s: &str) -> Self { ExecCallId(s.to_string()) } }
+impl std::fmt::Display for ExecCallId { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
+impl AsRef<str> for ExecCallId { fn as_ref(&self) -> &str { &self.0 } }
+
+impl From<String> for ToolCallId { fn from(s: String) -> Self { ToolCallId(s) } }
+impl From<&str> for ToolCallId { fn from(s: &str) -> Self { ToolCallId(s.to_string()) } }
+impl std::fmt::Display for ToolCallId { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
+impl AsRef<str> for ToolCallId { fn as_ref(&self) -> &str { &self.0 } }
+
+impl From<String> for StreamId { fn from(s: String) -> Self { StreamId(s) } }
+impl From<&str> for StreamId { fn from(s: &str) -> Self { StreamId(s.to_string()) } }
+impl std::fmt::Display for StreamId { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
+impl AsRef<str> for StreamId { fn as_ref(&self) -> &str { &self.0 } }
+
 impl ChatWidget<'_> {
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
