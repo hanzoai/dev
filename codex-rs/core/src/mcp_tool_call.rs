@@ -4,7 +4,6 @@ use std::time::Instant;
 use tracing::error;
 
 use crate::codex::Session;
-use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::McpInvocation;
 use crate::protocol::McpToolCallBeginEvent;
@@ -22,6 +21,8 @@ pub(crate) async fn handle_mcp_tool_call(
     tool_name: String,
     arguments: String,
     timeout: Option<Duration>,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
 ) -> ResponseInputItem {
     // Parse the `arguments` as JSON. An empty string is OK, but invalid JSON
     // is not.
@@ -49,11 +50,8 @@ pub(crate) async fn handle_mcp_tool_call(
         arguments: arguments_value.clone(),
     };
 
-    let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-        call_id: call_id.clone(),
-        invocation: invocation.clone(),
-    });
-    notify_mcp_tool_call_event(sess, sub_id, tool_call_begin_event).await;
+    let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent { call_id: call_id.clone(), invocation: invocation.clone() });
+    notify_mcp_tool_call_event(sess, sub_id, tool_call_begin_event, seq_hint, output_index).await;
 
     let start = Instant::now();
     // Perform the tool call.
@@ -61,18 +59,13 @@ pub(crate) async fn handle_mcp_tool_call(
         .call_tool(&server, &tool_name, arguments_value.clone(), timeout)
         .await
         .map_err(|e| format!("tool call error: {e}"));
-    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-        call_id: call_id.clone(),
-        invocation,
-        duration: start.elapsed(),
-        result: result.clone(),
-    });
+    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent { call_id: call_id.clone(), invocation, duration: start.elapsed(), result: result.clone() });
 
-    notify_mcp_tool_call_event(sess, sub_id, tool_call_end_event.clone()).await;
+    notify_mcp_tool_call_event(sess, sub_id, tool_call_end_event.clone(), seq_hint, output_index).await;
 
     ResponseInputItem::McpToolCallOutput { call_id, result }
 }
 
-async fn notify_mcp_tool_call_event(sess: &Session, sub_id: &str, event: EventMsg) {
-    sess.send_event(Event { id: sub_id.to_string(), event_seq: 0, msg: event, order: None }).await;
+async fn notify_mcp_tool_call_event(sess: &Session, sub_id: &str, event: EventMsg, seq_hint: Option<u64>, output_index: Option<u32>) {
+    sess.send_ordered_event(sub_id, event, seq_hint, output_index).await;
 }
