@@ -329,6 +329,8 @@ impl std::fmt::Display for StreamId { fn fmt(&self, f: &mut std::fmt::Formatter<
 impl AsRef<str> for StreamId { fn as_ref(&self) -> &str { &self.0 } }
 
 impl ChatWidget<'_> {
+    pub(crate) fn enable_perf(&mut self, enable: bool) { self.perf_state.enabled = enable; }
+    pub(crate) fn perf_summary(&self) -> String { self.perf_state.stats.borrow().summary() }
     // Build an ordered key from model-provided OrderMeta.
     // Layout: [63: ordered flag (0 = ordered, 1 = unordered)] [62..48: request_ordinal (16b)] [47..32: output_index (16b)] [31..0: sequence_number (32b)]
     fn order_key_from_order_meta(order: Option<&codex_core::protocol::OrderMeta>) -> Option<OrderKey> {

@@ -3,7 +3,7 @@
 use std::fs::File;
 use std::fs::{self};
 use std::io::Error as IoError;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -82,7 +82,7 @@ impl RolloutRecorder {
         uuid: Uuid,
         instructions: Option<String>,
     ) -> std::io::Result<Self> {
-        let LogFileInfo { file, session_id, timestamp } = create_log_file(config, uuid)?;
+        let LogFileInfo { file, session_id, timestamp, path } = create_log_file(config, uuid)?;
 
         let timestamp_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
@@ -92,15 +92,22 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
 
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
+        let index_ctx = Some(IndexContext::new(
+            config.codex_home.clone(),
+            config.cwd.clone(),
+            path,
+            Some(config.model.clone()),
+        ));
         tokio::task::spawn(rollout_writer(
             tokio::fs::File::from_std(file),
             rx,
             Some(SessionMeta { timestamp, id: session_id, instructions }),
+            index_ctx,
         ));
         Ok(Self { tx })
     }
 
-    pub async fn resume(path: &Path, _cwd: std::path::PathBuf) -> std::io::Result<(Self, SavedSession)> {
+    pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
         info!("Resuming rollout from {path:?}");
         let text = tokio::fs::read_to_string(path).await?;
         let mut lines = text.lines();
@@ -134,7 +141,18 @@ impl RolloutRecorder {
 
         let file = std::fs::OpenOptions::new().append(true).read(true).open(path)?;
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
-        tokio::task::spawn(rollout_writer(tokio::fs::File::from_std(file), rx, None));
+        let index_ctx = Some(IndexContext::new(
+            config.codex_home.clone(),
+            config.cwd.clone(),
+            path.to_path_buf(),
+            Some(config.model.clone()),
+        ));
+        tokio::task::spawn(rollout_writer(
+            tokio::fs::File::from_std(file),
+            rx,
+            None,
+            index_ctx,
+        ));
 
         let saved = SavedSession {
             session: meta.clone(),
@@ -222,6 +240,7 @@ struct LogFileInfo {
     file: File,
     session_id: Uuid,
     timestamp: OffsetDateTime,
+    path: PathBuf,
 }
 
 fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFileInfo> {
@@ -240,30 +259,79 @@ fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFile
     let filename = format!("rollout-{date_str}-{session_id}.jsonl");
     let path = dir.join(filename);
     let file = std::fs::OpenOptions::new().append(true).create(true).open(&path)?;
-    Ok(LogFileInfo { file, session_id, timestamp })
+    Ok(LogFileInfo { file, session_id, timestamp, path })
 }
 
 async fn rollout_writer(
     mut file: tokio::fs::File,
     mut rx: mpsc::Receiver<RolloutCmd>,
     mut meta: Option<SessionMeta>,
+    index_ctx: Option<IndexContext>,
 ) -> std::io::Result<()> {
     if let Some(session_meta) = meta.take() {
         let mut json = serde_json::to_string(&SessionMetaWithGit { meta: session_meta, git: None })?;
         json.push('\n');
         let _ = file.write_all(json.as_bytes()).await;
         file.flush().await?;
+
+        // Write initial index line so the session appears under /resume once messages arrive
+        if let Some(ctx) = index_ctx.as_ref() {
+            let _ = append_dir_index_line(ctx, Some("0"), Some(&ctx.get_timestamp_now()), None).await;
+        }
     }
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
             RolloutCmd::AddItems(items) => {
-                for item in items {
+                for item in &items {
                     let mut json = serde_json::to_string(&item)?;
                     json.push('\n');
                     let _ = file.write_all(json.as_bytes()).await;
                 }
                 file.flush().await?;
+
+                // Update the per-directory index with message deltas and optional last user snippet
+                if let Some(ctx) = index_ctx.as_ref() {
+                    use codex_protocol::models::{ContentItem, ResponseItem};
+                    let mut msg_count_delta: usize = 0;
+                    let mut last_user_snippet: Option<String> = None;
+                    for it in &items {
+                        if let ResponseItem::Message { role, content, .. } = it {
+                            if role == "user" || role == "assistant" {
+                                msg_count_delta = msg_count_delta.saturating_add(1);
+                            }
+                            if role == "user" {
+                                for c in content {
+                                    match c {
+                                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                                            if !text.trim().is_empty() {
+                                                // Keep a short, single-line snippet
+                                                let mut s = text.trim().replace('\n', " ");
+                                                const MAX: usize = 120;
+                                                if s.chars().count() > MAX {
+                                                    s = s.chars().take(MAX).collect::<String>() + "…";
+                                                }
+                                                last_user_snippet = Some(s);
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if msg_count_delta > 0 || last_user_snippet.is_some() {
+                        let ts = ctx.get_timestamp_now();
+                        let _ = append_dir_index_line(ctx, None, Some(&ts), last_user_snippet.as_deref())
+                            .await
+                            .ok();
+                        if msg_count_delta > 0 {
+                            // Separate line to carry the count delta so aggregator can sum
+                            let _ = append_dir_index_count_delta(ctx, msg_count_delta).await.ok();
+                        }
+                    }
+                }
             }
             RolloutCmd::UpdateState(state) => {
                 #[derive(Serialize)]
@@ -282,4 +350,138 @@ async fn rollout_writer(
     }
 
     Ok(())
+}
+
+// --- Fast per-directory index writing ---
+
+struct IndexContext {
+    codex_home: PathBuf,
+    cwd: PathBuf,
+    session_path: PathBuf,
+    model: Option<String>,
+}
+
+impl IndexContext {
+    fn new(codex_home: PathBuf, cwd: PathBuf, session_path: PathBuf, model: Option<String>) -> Self {
+        Self { codex_home, cwd, session_path, model }
+    }
+
+    fn index_file_path(&self) -> PathBuf {
+        // Mirror tui::resume::discovery::super_sanitize_dir_index_path
+        let mut name = self.cwd.to_string_lossy().to_string();
+        name = name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        if name.len() > 160 { name.truncate(160); }
+        let mut p = self.codex_home.clone();
+        p.push("sessions");
+        p.push("index");
+        p.push("by-dir");
+        p.push(format!("{}.jsonl", name));
+        p
+    }
+
+    fn get_timestamp_now(&self) -> String {
+        let now = OffsetDateTime::now_utc();
+        let fmt: &[FormatItem] = format_description!(
+            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+        );
+        now.format(fmt).unwrap_or_else(|e| format!("format error: {e}")).to_string()
+    }
+
+    fn git_branch(&self) -> Option<String> {
+        let head_path = self.cwd.join(".git/HEAD");
+        if let Ok(contents) = std::fs::read_to_string(&head_path) {
+            if let Some(rest) = contents.trim().strip_prefix("ref: ") {
+                if let Some(branch) = rest.trim().rsplit('/').next() {
+                    return Some(branch.to_string());
+                }
+            }
+        }
+        None
+    }
+}
+
+#[derive(Serialize)]
+struct DirIndexLine<'a> {
+    record_type: &'static str,
+    cwd: &'a str,
+    session_file: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_ts: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_ts: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_count_delta: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_user_snippet: Option<&'a str>,
+}
+
+async fn append_dir_index_line(
+    ctx: &IndexContext,
+    created_ts: Option<&str>,
+    modified_ts: Option<&str>,
+    last_user_snippet: Option<&str>,
+) -> std::io::Result<()> {
+    let index_path = ctx.index_file_path();
+    if let Some(parent) = index_path.parent() { tokio::fs::create_dir_all(parent).await.ok(); }
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_path)
+        .await?;
+    let cwd_str = ctx.cwd.to_string_lossy();
+    let path_str = ctx.session_path.to_string_lossy();
+    let model_str = ctx.model.as_deref();
+    let branch = ctx.git_branch();
+    let line = DirIndexLine {
+        record_type: "dir_index",
+        cwd: &cwd_str,
+        session_file: &path_str,
+        created_ts,
+        modified_ts,
+        message_count_delta: None,
+        model: model_str,
+        branch: branch.as_deref(),
+        last_user_snippet,
+    };
+    let mut json = serde_json::to_string(&line)?;
+    json.push('\n');
+    let _ = f.write_all(json.as_bytes()).await;
+    f.flush().await
+}
+
+async fn append_dir_index_count_delta(ctx: &IndexContext, delta: usize) -> std::io::Result<()> {
+    let index_path = ctx.index_file_path();
+    if let Some(parent) = index_path.parent() { tokio::fs::create_dir_all(parent).await.ok(); }
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&index_path)
+        .await?;
+    let cwd_str = ctx.cwd.to_string_lossy();
+    let path_str = ctx.session_path.to_string_lossy();
+    let ts = ctx.get_timestamp_now();
+    let model_str = ctx.model.as_deref();
+    let branch = ctx.git_branch();
+    let line = DirIndexLine {
+        record_type: "dir_index",
+        cwd: &cwd_str,
+        session_file: &path_str,
+        created_ts: None,
+        modified_ts: Some(&ts),
+        message_count_delta: Some(delta),
+        model: model_str,
+        branch: branch.as_deref(),
+        last_user_snippet: None,
+    };
+    let mut json = serde_json::to_string(&line)?;
+    json.push('\n');
+    let _ = f.write_all(json.as_bytes()).await;
+    f.flush().await
 }

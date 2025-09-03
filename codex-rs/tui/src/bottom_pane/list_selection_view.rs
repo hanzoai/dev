@@ -161,7 +161,8 @@ impl BottomPaneView<'_> for ListSelectionView {
         Clear.render(area, buf);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::light_blue()))
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()))
             .title(self.title.clone())
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
@@ -224,14 +225,16 @@ impl BottomPaneView<'_> for ListSelectionView {
             // Left pad footer by one column
             let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
             let line = Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
-                Span::raw(" Navigate  "),
+                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled("Enter", Style::default().fg(crate::colors::success())),
-                Span::raw(" Select  "),
+                Span::styled(" Select  ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                Span::raw(" Cancel"),
+                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
             ]);
-            Paragraph::new(line).render(footer_area, buf);
+            Paragraph::new(line)
+                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+                .render(footer_area, buf);
         }
     }
 }
