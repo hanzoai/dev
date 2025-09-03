@@ -216,6 +216,58 @@ impl MarkdownStreamCollector {
         out
     }
 
+    /// Soft-commit: emit newly rendered lines since the last commit, allowing the
+    /// trailing (incomplete) line when appropriate to improve perceived latency.
+    ///
+    /// - If `relax_code_holdback` is true and we're inside an unclosed fence,
+    ///   allow committing but drop the very last partial line to avoid jitter.
+    /// - If `relax_list_holdback` is true, only withhold truly bare list markers
+    ///   at the tail (e.g., "-", "- ", "*", "* ", or "1.").
+    pub fn commit_soft_lines(
+        &mut self,
+        config: &Config,
+        relax_list_holdback: bool,
+        relax_code_holdback: bool,
+    ) -> Vec<Line<'static>> {
+        let source = unwrap_markdown_language_fence_if_enabled(self.buffer.clone());
+        let source = strip_empty_fenced_code_blocks(&source);
+
+        let mut rendered: Vec<Line<'static>> = Vec::new();
+        if self.bold_first_sentence {
+            markdown::append_markdown_with_bold_first(&source, &mut rendered, config);
+        } else {
+            markdown::append_markdown(&source, &mut rendered, config);
+        }
+        if self.committed_line_count >= rendered.len() {
+            return Vec::new();
+        }
+
+        let in_open_fence = is_inside_unclosed_fence(&source);
+        if in_open_fence && !relax_code_holdback {
+            return Vec::new();
+        }
+        let mut end = rendered.len();
+        if in_open_fence && relax_code_holdback {
+            end = end.saturating_sub(1); // avoid partial last code line
+        }
+
+        if relax_list_holdback && end > self.committed_line_count {
+            let last = &rendered[end - 1];
+            let mut s = String::new();
+            for sp in &last.spans { s.push_str(&sp.content); }
+            if is_bare_list_marker(&s) {
+                end = end.saturating_sub(1);
+            }
+        }
+
+        if end <= self.committed_line_count {
+            return Vec::new();
+        }
+        let out = rendered[self.committed_line_count..end].to_vec();
+        self.committed_line_count = end;
+        out
+    }
+
     /// Finalize the stream: emit all remaining lines beyond the last commit.
     /// If the buffer does not end with a newline, a temporary one is appended
     /// for rendering. Optionally unwraps ```markdown language fences in
@@ -284,6 +336,25 @@ fn is_potentially_volatile_list_line(text: &str) -> bool {
         if it.peek() == Some(&' ') {
             return true;
         }
+    }
+    false
+}
+
+#[inline]
+fn is_bare_list_marker(text: &str) -> bool {
+    let t = text.trim();
+    if t == "-" || t == "-" || t == "*" || t == "*" { return true; }
+    if t == "-" || t == "- " || t == "*" || t == "* " { return true; }
+    // ordered like "1." possibly followed by a single space
+    let mut it = t.chars().peekable();
+    let mut saw_digit = false;
+    while let Some(&ch) = it.peek() {
+        if ch.is_ascii_digit() { saw_digit = true; it.next(); } else { break; }
+    }
+    if !saw_digit { return false; }
+    if it.peek() == Some(&'.') {
+        it.next();
+        return it.peek().is_none() || it.peek() == Some(&' ');
     }
     false
 }

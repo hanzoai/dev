@@ -70,6 +70,12 @@ pub struct Cli {
     #[arg(long = "order", default_value_t = false)]
     pub order: bool,
 
+    /// Enable lightweight in-app timing and print a summary report on exit.
+    /// This records render/measurement hotspots while the UI runs and writes a
+    /// short report to stderr when the program exits.
+    #[arg(long = "timing", default_value_t = false)]
+    pub timing: bool,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 }

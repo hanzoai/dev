@@ -14,6 +14,8 @@ pub(crate) struct StreamState {
     pub(crate) collector: MarkdownStreamCollector,
     pub(crate) streamer: AnimatedLineStreamer,
     pub(crate) has_seen_delta: bool,
+    pub(crate) last_commit_instant: Option<std::time::Instant>,
+    pub(crate) tail_chars_since_commit: usize,
 }
 
 impl StreamState {
@@ -22,6 +24,8 @@ impl StreamState {
             collector: MarkdownStreamCollector::new(),
             streamer: AnimatedLineStreamer::new(),
             has_seen_delta: false,
+            last_commit_instant: None,
+            tail_chars_since_commit: 0,
         }
     }
     
@@ -35,6 +39,8 @@ impl StreamState {
             collector,
             streamer: AnimatedLineStreamer::new(),
             has_seen_delta: false,
+            last_commit_instant: None,
+            tail_chars_since_commit: 0,
         }
     }
     pub(crate) fn clear(&mut self) {
@@ -42,6 +48,8 @@ impl StreamState {
         self.collector.clear();
         self.streamer.clear();
         self.has_seen_delta = false;
+        self.last_commit_instant = None;
+        self.tail_chars_since_commit = 0;
     }
     pub(crate) fn step(&mut self) -> crate::markdown_stream::StepResult {
         self.streamer.step()

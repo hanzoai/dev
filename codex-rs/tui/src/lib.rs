@@ -344,6 +344,7 @@ fn run_ratatui_app(
         images,
         debug,
         order,
+        timing,
         ..
     } = cli;
     let mut app = App::new(
@@ -354,14 +355,22 @@ fn run_ratatui_app(
         debug,
         order,
         terminal_info,
+        timing,
     );
 
     let app_result = app.run(&mut terminal);
     let usage = app.token_usage();
 
+    // Optionally print timing summary to stderr after restoring the terminal.
+    let timing_summary = app.perf_summary();
+
     restore();
     // Mark the end of the recorded session.
     session_log::log_session_end();
+    if let Some(summary) = timing_summary {
+        print_timing_summary(&summary);
+    }
+
     // ignore error when collecting usage – report underlying error instead
     app_result.map(|_| usage)
 }
@@ -376,6 +385,11 @@ fn restore() {
             "failed to restore terminal. Run `reset` or restart your terminal to recover: {err}"
         );
     }
+}
+
+#[allow(clippy::print_stderr)]
+fn print_timing_summary(summary: &str) {
+    eprintln!("\n== Timing Summary ==\n{}", summary);
 }
 
 /// Minimal login status indicator for onboarding flow.
