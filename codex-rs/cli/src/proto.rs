@@ -40,6 +40,7 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
     let conversation_manager = ConversationManager::new(AuthManager::shared(
         config.codex_home.clone(),
         codex_login::AuthMode::ApiKey,
+        config.responses_originator_header.clone(),
     ));
     let NewConversation {
         conversation_id: _,
