@@ -621,53 +621,12 @@ impl StreamController {
                         message.len()
                     );
                     let committed = state.collector.committed_count();
-                    // Heuristic fix: if the very first committed line looks like
-                    // a truncated title (prefix of the final first line), drop it
-                    // from the committed region so the final replaces it.
-                    let cfg = self.config.clone();
-                    // Render current buffer preview
-                    let prior_src = state.collector.full_render_source_preview();
-                    let mut prior_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                    crate::markdown::append_markdown(&prior_src, &mut prior_lines, &cfg);
-                    // Extract first non-blank among the already committed lines
-                    let committed_first = if committed > 0 {
-                        let mut out = String::new();
-                        for l in prior_lines.iter().take(committed) {
-                            if !crate::render::line_utils::is_blank_line_trim(l) {
-                                out = l.spans.iter().map(|s| s.content.clone()).collect::<Vec<_>>().join("");
-                                break;
-                            }
-                        }
-                        out
-                    } else { String::new() };
-                    // Render final message's first line
-                    let mut final_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                    let mut msg_preview = message.to_string();
-                    if !msg_preview.ends_with('\n') { msg_preview.push('\n'); }
-                    crate::markdown::append_markdown(&msg_preview, &mut final_lines, &cfg);
-                    let final_first = final_lines.iter()
-                        .find(|l| !crate::render::line_utils::is_blank_line_trim(l))
-                        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect::<Vec<_>>().join(""))
-                        .unwrap_or_default();
-                    let mut committed_adj = committed;
-                    if committed > 0
-                        && !committed_first.is_empty()
-                        && final_first.starts_with(&committed_first)
-                        && final_first.len() > committed_first.len()
-                        && committed_first.chars().count() <= 16
-                    {
-                        committed_adj = committed.saturating_sub(1);
-                        tracing::debug!(
-                            "reasoning prefix-upgrade: committed_first='{}' -> final_first='{}' (committed {}->{}))",
-                            committed_first, final_first, committed, committed_adj
-                        );
-                    }
                     let mut msg = message.to_owned();
                     if !msg.ends_with('\n') { msg.push('\n'); }
                     let state_mut = self.state_mut(kind);
                     state_mut
                         .collector
-                        .replace_with_and_mark_committed(&msg, committed_adj);
+                        .replace_with_and_mark_committed(&msg, committed);
                     return self.finalize(kind, immediate, sink);
                 }
                 // For Answer (or empty message), finalize existing streamed content.
