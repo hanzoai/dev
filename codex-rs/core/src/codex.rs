@@ -1546,7 +1546,7 @@ async fn submission_loop(
                 let mut restored_items: Option<Vec<ResponseItem>> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
-                        match RolloutRecorder::resume(path, cwd.clone()).await {
+                        match RolloutRecorder::resume(&config, path).await {
                             Ok((rec, saved)) => {
                                 session_id = saved.session_id;
                                 if !saved.items.is_empty() {
@@ -2440,9 +2440,10 @@ async fn try_run_turn(
                 // We deliberately do not scope by item_id to keep implementation simple.
                 sess.scratchpad_add_text_delta(&delta);
             }
-            ResponseEvent::ReasoningSummaryDelta { delta, item_id, sequence_number, output_index } => {
+            ResponseEvent::ReasoningSummaryDelta { delta, item_id, sequence_number, output_index, summary_index } => {
                 // Use the item_id if present, otherwise fall back to sub_id
-                let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
+                let mut event_id = item_id.unwrap_or_else(|| sub_id.to_string());
+                if let Some(si) = summary_index { event_id = format!("{}#s{}", event_id, si); }
                 let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
                 let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta: delta.clone() }), order, sequence_number);
                 sess.tx_event.send(stamped).await.ok();
@@ -2454,10 +2455,11 @@ async fn try_run_turn(
                 let stamped = sess.make_event(&sub_id, EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {}));
                 sess.tx_event.send(stamped).await.ok();
             }
-            ResponseEvent::ReasoningContentDelta { delta, item_id, sequence_number, output_index } => {
+            ResponseEvent::ReasoningContentDelta { delta, item_id, sequence_number, output_index, content_index } => {
                 if sess.show_raw_agent_reasoning {
                     // Use the item_id if present, otherwise fall back to sub_id
-                    let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
+                    let mut event_id = item_id.unwrap_or_else(|| sub_id.to_string());
+                    if let Some(ci) = content_index { event_id = format!("{}#c{}", event_id, ci); }
                     let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
                     let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }), order, sequence_number);
                     sess.tx_event.send(stamped).await.ok();
@@ -2586,12 +2588,13 @@ async fn handle_response_item(
             } else {
                 sub_id.to_string()
             };
-            for item in summary {
+            for (i, item) in summary.into_iter().enumerate() {
                 let text = match item {
                     ReasoningItemReasoningSummary::SummaryText { text } => text,
                 };
+                let eid = format!("{}#s{}", event_id, i);
                 let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
-                let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoning(AgentReasoningEvent { text }), order, seq_hint);
+                let stamped = sess.make_event_with_order(&eid, EventMsg::AgentReasoning(AgentReasoningEvent { text }), order, seq_hint);
                 sess.tx_event.send(stamped).await.ok();
             }
             if sess.show_raw_agent_reasoning && content.is_some() {
