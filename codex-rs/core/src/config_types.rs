@@ -8,8 +8,6 @@ use std::path::PathBuf;
 use wildmatch::WildMatchPattern;
 
 use serde::Deserialize;
-use serde::Serialize;
-use strum_macros::Display;
 
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
