@@ -465,6 +465,7 @@ struct SseEvent {
     sequence_number: Option<u64>,
     output_index: Option<u32>,
     content_index: Option<u32>,
+    summary_index: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,10 +531,10 @@ async fn process_sse<S>(
     use std::collections::HashMap;
     // Track last sequence_number per (item_id, output_index[, content_index])
     // Default indices to 0 when absent for robustness across providers.
-    let mut last_seq_reasoning_summary: HashMap<(String, u32), u64> = HashMap::new();
+    let mut last_seq_reasoning_summary: HashMap<(String, u32, u32), u64> = HashMap::new();
     let mut last_seq_reasoning_content: HashMap<(String, u32, u32), u64> = HashMap::new();
     // Best-effort duplicate text guard when sequence_number is unavailable.
-    let mut last_text_reasoning_summary: HashMap<(String, u32), String> = HashMap::new();
+    let mut last_text_reasoning_summary: HashMap<(String, u32, u32), String> = HashMap::new();
     let mut last_text_reasoning_content: HashMap<(String, u32, u32), String> = HashMap::new();
 
     loop {
@@ -698,15 +699,16 @@ async fn process_sse<S>(
                     }
                     // Compose key using item_id + output_index
                     let out_idx: u32 = event.output_index.unwrap_or(0);
+                    let sum_idx: u32 = event.summary_index.unwrap_or(0);
                     if let Some(ref id) = current_item_id {
                         // Drop duplicates/out‑of‑order by sequence_number when available
                         if let Some(sn) = event.sequence_number {
-                            let last = last_seq_reasoning_summary.entry((id.clone(), out_idx)).or_insert(0);
+                            let last = last_seq_reasoning_summary.entry((id.clone(), out_idx, sum_idx)).or_insert(0);
                             if *last >= sn { continue; }
                             *last = sn;
                         } else {
                             // Best-effort: drop exact duplicate text for same key when seq is missing
-                            let key = (id.clone(), out_idx);
+                            let key = (id.clone(), out_idx, sum_idx);
                             if last_text_reasoning_summary.get(&key).map_or(false, |prev| prev == &delta) {
                                 continue;
                             }
@@ -714,8 +716,8 @@ async fn process_sse<S>(
                         }
                     }
                     tracing::debug!(
-                        "sse.delta reasoning_summary id={:?} out_idx={} len={} seq={:?}",
-                        current_item_id, out_idx,
+                        "sse.delta reasoning_summary id={:?} out_idx={} sum_idx={} len={} seq={:?}",
+                        current_item_id, out_idx, sum_idx,
                         delta.len(),
                         event.sequence_number
                     );
@@ -724,6 +726,7 @@ async fn process_sse<S>(
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
                         sequence_number: event.sequence_number,
                         output_index: event.output_index,
+                        summary_index: event.summary_index,
                     };
                     if tx_event.send(Ok(ev)).await.is_err() {
                         return;
@@ -764,6 +767,7 @@ async fn process_sse<S>(
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
                         sequence_number: event.sequence_number,
                         output_index: event.output_index,
+                        content_index: event.content_index,
                     };
                     if tx_event.send(Ok(ev)).await.is_err() {
                         return;

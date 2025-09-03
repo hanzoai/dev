@@ -586,6 +586,7 @@ async fn process_chat_sse<S>(
                             item_id: current_item_id.clone(),
                             sequence_number: None,
                             output_index: None,
+                            content_index: None,
                         }))
                         .await;
                 }
@@ -604,6 +605,7 @@ async fn process_chat_sse<S>(
                                 item_id: current_item_id.clone(),
                                 sequence_number: None,
                                 output_index: None,
+                                content_index: None,
                             }))
                             .await;
                     }
@@ -621,6 +623,7 @@ async fn process_chat_sse<S>(
                                     item_id: current_item_id.clone(),
                                     sequence_number: None,
                                     output_index: None,
+                                    content_index: None,
                                 }))
                                 .await;
                         }
@@ -923,6 +926,7 @@ where
                             item_id,
                             sequence_number,
                             output_index: None,
+                            content_index: None,
                         })));
                     } else {
                         continue;
