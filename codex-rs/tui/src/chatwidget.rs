@@ -7572,14 +7572,20 @@ impl WidgetRef for &ChatWidget<'_> {
                     let dlg_block = Block::default()
                         .borders(Borders::ALL)
                         .title("Confirm Undo")
-                        .border_style(Style::default().fg(crate::colors::primary()));
+                        .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+                        .border_style(Style::default().fg(crate::colors::border()));
                     let dlg_inner = dlg_block.inner(dialog);
                     dlg_block.render(dialog, buf);
+                    // Fill dialog inner area with theme background for consistent look
+                    let dlg_bg = Style::default().bg(crate::colors::background());
+                    for y in dlg_inner.y..dlg_inner.y + dlg_inner.height { for x in dlg_inner.x..dlg_inner.x + dlg_inner.width { buf[(x, y)].set_style(dlg_bg); } }
                     let lines = vec![
                         ratatui::text::Line::from("Are you sure you want to undo this diff?"),
                         ratatui::text::Line::from("Press Enter to confirm • Esc to cancel".to_string().dim()),
                     ];
-                    let para = Paragraph::new(RtText::from(lines)).wrap(ratatui::widgets::Wrap { trim: true });
+                    let para = Paragraph::new(RtText::from(lines))
+                        .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+                        .wrap(ratatui::widgets::Wrap { trim: true });
                     ratatui::widgets::Widget::render(para, dlg_inner, buf);
                 }
             }
