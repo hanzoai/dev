@@ -906,11 +906,9 @@ fn simplify_once(commands: &[ParsedCommand]) -> Option<Vec<ParsedCommand>> {
         }
         _ => false,
     }) {
-        if commands
-            .iter()
-            .skip(idx + 1)
-            .any(|pc| matches!(pc, ParsedCommand::Test { .. }))
-        {
+        // If a `cd` is followed by any command, keep the following commands and
+        // drop the standalone `cd` entry from the summary stream.
+        if commands.len() > idx + 1 {
             let mut out = Vec::with_capacity(commands.len() - 1);
             out.extend_from_slice(&commands[..idx]);
             out.extend_from_slice(&commands[idx + 1..]);

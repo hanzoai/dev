@@ -3,7 +3,6 @@ use ratatui::layout::Rect;
 use ratatui::prelude::Constraint;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Cell;
@@ -34,13 +33,13 @@ pub(crate) fn render_rows(
     state: &ScrollState,
     max_results: usize,
     _dim_non_selected: bool,
-    empty_message: &str,
 ) {
     let mut rows: Vec<Row> = Vec::new();
     if rows_all.is_empty() {
-        rows.push(Row::new(vec![Cell::from(Line::from(
-            empty_message.dim().italic(),
-        ))]));
+        rows.push(Row::new(vec![Cell::from(Line::from(Span::styled(
+            "no matches",
+            Style::default().add_modifier(Modifier::ITALIC | Modifier::DIM),
+        )))]));
     } else {
         let max_rows_from_area = area.height as usize;
         let visible_rows = max_results
@@ -85,10 +84,9 @@ pub(crate) fn render_rows(
                     }
                     if idx_iter.peek().is_some_and(|next| **next == char_idx) {
                         idx_iter.next();
-                        spans.push(ch.to_string().bold());
-                    } else {
-                        spans.push(ch.to_string().into());
+                        style = style.add_modifier(Modifier::BOLD);
                     }
+                    spans.push(Span::styled(ch.to_string(), style));
                 }
             } else {
                 let mut style = Style::default();
@@ -99,8 +97,11 @@ pub(crate) fn render_rows(
             }
 
             if let Some(desc) = description.as_ref() {
-                spans.push("  ".into());
-                spans.push(desc.clone().dim());
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    desc.clone(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
             }
 
             let mut cell = Cell::from(Line::from(spans));
