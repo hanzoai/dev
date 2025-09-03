@@ -388,7 +388,7 @@ pub enum LoginStatus {
 /// Determine current login status based on auth.json presence.
 pub fn get_login_status(config: &Config) -> LoginStatus {
     let codex_home = config.codex_home.clone();
-    match CodexAuth::from_codex_home(&codex_home, AuthMode::ApiKey) {
+    match CodexAuth::from_codex_home(&codex_home, AuthMode::ApiKey, &config.responses_originator_header) {
         Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
         _ => LoginStatus::NotAuthenticated,
     }
