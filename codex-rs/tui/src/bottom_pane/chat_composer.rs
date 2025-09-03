@@ -1453,18 +1453,18 @@ impl WidgetRef for ChatComposer {
                     let mut spans: Vec<Span> = Vec::new();
                     if !self.ctrl_c_quit_hint {
                         if self.show_reasoning_hint && include_reasoning {
-                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
                             spans.push(Span::from("Ctrl+R").style(key_hint_style));
                             let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
                             spans.push(Span::from(label).style(label_style));
                         }
                         if self.show_diffs_hint && include_diff {
-                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
                             spans.push(Span::from("Ctrl+D").style(key_hint_style));
                             spans.push(Span::from(" diff viewer").style(label_style));
                         }
                         // Always show quit at the end of the command hints
-                        if !spans.is_empty() { spans.push(Span::from("  •  ").style(Style::default())); }
+                        if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
                         spans.push(Span::from("Ctrl+C").style(key_hint_style));
                         spans.push(Span::from(" quit").style(label_style));
                     }
@@ -1508,7 +1508,7 @@ impl WidgetRef for ChatComposer {
                 // Compose final right spans: hints, optional separator, then tokens
                 if !hint_spans.is_empty() { right_spans.extend(hint_spans); }
                 if !right_spans.is_empty() && !token_spans.is_empty() {
-                    right_spans.push(Span::from("  •  ").style(Style::default()));
+                    right_spans.push(Span::from("  •  ").style(label_style));
                 }
                 right_spans.extend(token_spans);
 
@@ -1524,7 +1524,7 @@ impl WidgetRef for ChatComposer {
                 line_spans.push(Span::from(" "));
 
                 Line::from(line_spans)
-                    .style(Style::default().dim())
+                    .style(Style::default().fg(crate::colors::text_dim()))
                     .render_ref(bottom_line_rect, buf);
             }
         }
@@ -1610,6 +1610,34 @@ impl WidgetRef for ChatComposer {
             Line::from(BASE_PLACEHOLDER_TEXT)
                 .style(Style::default().dim())
                 .render_ref(padded_textarea_rect, buf);
+        }
+
+        // Draw a high-contrast cursor overlay under the terminal cursor using the theme's
+        // `cursor` color. This improves visibility on dark themes where the terminal's own
+        // cursor color may be hard to see or user-defined.
+        //
+        // Implementation notes:
+        // - We compute the visible cursor position using the same `state` (scroll) used to
+        //   render the textarea so the overlay aligns with wrapped lines.
+        // - We paint the underlying cell with bg=theme.cursor and fg=theme.background.
+        //   This provides contrast regardless of light/dark theme.
+        // - The hardware cursor is still positioned via `frame.set_cursor_position` at the
+        //   app layer; this overlay ensures visibility independent of terminal settings.
+        drop(state); // release the borrow before computing position again
+        if let Some((cx, cy)) = self
+            .textarea
+            .cursor_pos_with_state(padded_textarea_rect, &self.textarea_state.borrow())
+        {
+            let overlay_style = Style::default()
+                .bg(crate::theme::current_theme().cursor)
+                .fg(crate::colors::background());
+            if cx < buf.area.width.saturating_add(buf.area.x)
+                && cy < buf.area.height.saturating_add(buf.area.y)
+            {
+                let cell = &mut buf[(cx, cy)];
+                // Preserve the displayed character but apply the overlay colors
+                cell.set_style(overlay_style);
+            }
         }
     }
 }

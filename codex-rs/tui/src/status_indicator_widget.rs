@@ -1,13 +1,14 @@
 //! A live status indicator that shows the *latest* log line emitted by the
 //! application while the agent is processing a long‑running task.
 
+use std::cell::Cell;
 use std::time::Duration;
 use std::time::Instant;
 
 use codex_core::protocol::Op;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
+use ratatui::style::{Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
@@ -26,6 +27,8 @@ pub(crate) struct StatusIndicatorWidget {
     queued_messages: Vec<String>,
 
     start_time: Instant,
+    /// Last time we scheduled a follow-up frame; used to throttle redraws.
+    last_schedule: Cell<Instant>,
     app_event_tx: AppEventSender,
     // We schedule frames via AppEventSender; no direct frame requester.
 }
@@ -37,6 +40,7 @@ impl StatusIndicatorWidget {
             header: String::from("Working"),
             queued_messages: Vec::new(),
             start_time: Instant::now(),
+            last_schedule: Cell::new(Instant::now()),
 
             app_event_tx,
         }
@@ -85,8 +89,8 @@ impl StatusIndicatorWidget {
     pub(crate) fn set_queued_messages(&mut self, queued: Vec<String>) {
         self.queued_messages = queued;
         // Ensure a redraw so changes are visible.
-        self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(16)));
+        // Use the app's debounced redraw path; no need to arm a fast timer here.
+        self.app_event_tx.send(AppEvent::RequestRedraw);
     }
 }
 
@@ -96,19 +100,38 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
-        // Schedule next animation frame.
-        self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(32)));
+        // Schedule next animation frame at a throttled cadence to reduce CPU.
+        // 100ms (~10 FPS) is sufficient for shimmer/time updates in terminals.
+        let now = Instant::now();
+        let last = self.last_schedule.get();
+        if now.duration_since(last) >= Duration::from_millis(100) {
+            self.last_schedule.set(now);
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(Duration::from_millis(100)));
+        }
         let elapsed = self.start_time.elapsed().as_secs();
 
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
-        let mut spans = vec![" ".into()];
-        spans.extend(shimmer_spans(&self.header));
+        // Theme-aware base styles
+        let bg = crate::colors::background();
+        let text = crate::colors::text();
+        let text_dim = crate::colors::text_dim();
+        let accent = crate::colors::info();
+
+        // Build header spans using theme colors (no terminal-default cyan/dim)
+        let mut spans = vec![ratatui::text::Span::raw(" ")];
+        // Shimmer uses spans; recolor them with the accent so it tracks theme
+        let mut shimmer = shimmer_spans(&self.header)
+            .into_iter()
+            .map(|s| s.style(Style::default().fg(accent)))
+            .collect::<Vec<_>>();
+        spans.append(&mut shimmer);
         spans.extend(vec![
-            " ".into(),
-            format!("({elapsed}s • ").dim(),
-            "Esc".dim().bold(),
-            " to interrupt)".dim(),
+            ratatui::text::Span::raw(" "),
+            // (12s • Esc to interrupt)
+            ratatui::text::Span::raw(format!("({elapsed}s • ")).style(Style::default().fg(text_dim)),
+            ratatui::text::Span::raw("Esc").style(Style::default().fg(accent).add_modifier(ratatui::style::Modifier::BOLD)),
+            ratatui::text::Span::raw(")").style(Style::default().fg(text_dim)),
         ]);
 
         // Build lines: status, then queued messages, then spacer.
@@ -124,17 +147,26 @@ impl WidgetRef for StatusIndicatorWidget {
             for (i, piece) in wrapped.iter().take(3).enumerate() {
                 let prefix = if i == 0 { " ↳ " } else { "   " };
                 let content = format!("{prefix}{piece}");
-                lines.push(Line::from(content.dim().italic()));
+                lines.push(Line::from(content).style(Style::default().fg(text_dim).italic()));
             }
             if wrapped.len() > 3 {
-                lines.push(Line::from("   …".dim().italic()));
+                lines.push(Line::from("   …").style(Style::default().fg(text_dim).italic()));
             }
         }
         if !self.queued_messages.is_empty() {
-            lines.push(Line::from(vec!["   ".into(), "Alt+↑".cyan(), " edit".into()]).dim());
+            lines.push(
+                Line::from(vec![
+                    ratatui::text::Span::raw("   "),
+                    // Key hint in accent, label in dim text
+                    ratatui::text::Span::raw("Alt+↑").style(Style::default().fg(accent)),
+                    ratatui::text::Span::raw(" edit").style(Style::default().fg(text_dim)),
+                ])
+                .style(Style::default()),
+            );
         }
 
-        let paragraph = Paragraph::new(lines);
+        // Ensure background/foreground reflect theme
+        let paragraph = Paragraph::new(lines).style(Style::default().bg(bg).fg(text));
         paragraph.render_ref(area, buf);
     }
 }

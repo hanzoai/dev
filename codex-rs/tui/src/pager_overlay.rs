@@ -56,7 +56,7 @@ const PAGER_KEY_HINTS: &[(&str, &str)] = &[
 
 // Render a single line of key hints from (key, description) pairs.
 fn render_key_hints(area: Rect, buf: &mut Buffer, pairs: &[(&str, &str)]) {
-    let key_hint_style = Style::default().fg(Color::Cyan);
+    let key_hint_style = Style::default().fg(crate::colors::info());
     let mut spans: Vec<Span<'static>> = vec![" ".into()];
     let mut first = true;
     for (key, desc) in pairs {

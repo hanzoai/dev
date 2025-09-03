@@ -31,7 +31,7 @@ pub(super) fn finalize_exec_cell_at(
 }
 
 pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
-    let interrupted_msg = "Interrupted by user".to_string();
+    let interrupted_msg = "Cancelled by user.".to_string();
     let stdout_empty = String::new();
     let running: Vec<(super::ExecCallId, Option<usize>)> = chat
         .exec
@@ -60,7 +60,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
                     None,
                     std::time::Duration::from_millis(0),
                     false,
-                    "Interrupted by user".to_string(),
+                    "Cancelled by user.".to_string(),
                 );
                 chat.history_replace_at(idx, Box::new(completed));
             }

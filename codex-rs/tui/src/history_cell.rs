@@ -2801,6 +2801,38 @@ impl CollapsibleReasoningCell {
         }
     }
 
+    /// Build a compact debug summary of detected section titles and line metrics
+    /// for on-screen overlays. Only used when the TUI `--order` overlay is active.
+    pub(crate) fn debug_title_overlay(&self) -> String {
+        use unicode_width::UnicodeWidthStr as _;
+        let lines = self.normalized_lines();
+        let mut title_idxs: Vec<usize> = Vec::new();
+        let mut title_previews: Vec<String> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            // Same rule as extract_section_titles: line is a heading if all spans are bold
+            // (ignoring spans that are purely whitespace when trimmed).
+            let is_title = !l.spans.is_empty()
+                && l
+                    .spans
+                    .iter()
+                    .all(|s| s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty());
+            if is_title {
+                title_idxs.push(i);
+                let mut text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                if text.len() > 60 { text.truncate(60); text.push_str("…"); }
+                title_previews.push(text);
+            }
+        }
+        let total = lines.len();
+        let titles = title_previews.len();
+        // Also record final line width to catch cut-offs
+        let lastw = lines.last().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().width()).unwrap_or(0);
+        format!(
+            "rtitles={} idx={:?} total_lines={} lastw={} prevs={:?}",
+            titles, title_idxs, total, lastw, title_previews
+        )
+    }
+
     pub fn toggle_collapsed(&self) {
         self.collapsed.set(!self.collapsed.get());
     }
@@ -4172,7 +4204,9 @@ pub(crate) fn new_session_info(
         }
     } else {
         let lines = vec![
-            Line::from("model changed:".magenta().bold()),
+        Line::from("model changed:")
+            .fg(crate::colors::keyword())
+            .bold(),
             Line::from(format!("requested: {}", config.model)),
             Line::from(format!("used: {model}")),
             // No empty line at end - trimming and spacing handled by renderer
@@ -5589,14 +5623,14 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
 
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
     // Parse the diff output into lines
-    let mut lines = vec![Line::from("/diff".magenta())];
+    let mut lines = vec![Line::from("/diff").fg(crate::colors::keyword())];
     for line in diff_output.lines() {
         if line.starts_with('+') && !line.starts_with("+++") {
-            lines.push(Line::from(line.to_string().green()));
+            lines.push(Line::from(line.to_string()).fg(crate::colors::success()));
         } else if line.starts_with('-') && !line.starts_with("---") {
-            lines.push(Line::from(line.to_string().red()));
+            lines.push(Line::from(line.to_string()).fg(crate::colors::error()));
         } else if line.starts_with("@@") {
-            lines.push(Line::from(line.to_string().cyan()));
+            lines.push(Line::from(line.to_string()).fg(crate::colors::info()));
         } else {
             lines.push(Line::from(line.to_string()));
         }
@@ -5608,7 +5642,7 @@ pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
     let lines = vec![
         Line::from(""),
-        Line::from("Reasoning Effort".magenta().bold()),
+        Line::from("Reasoning Effort").fg(crate::colors::keyword()).bold(),
         Line::from(format!("Value: {}", reasoning_effort)),
     ];
     PlainHistoryCell {
@@ -5622,7 +5656,7 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
 pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    lines.push(Line::from("/status".magenta()));
+    lines.push(Line::from("/status").fg(crate::colors::keyword()));
     lines.push(Line::from(""));
 
     // 🔧 Configuration
@@ -5715,7 +5749,7 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
     let lines: Vec<Line<'static>> = vec![
-        Line::from("/prompts".magenta()),
+        Line::from("/prompts").fg(crate::colors::keyword()),
         Line::from(""),
         Line::from(" 1. Explain this codebase"),
         Line::from(" 2. Summarize recent commits"),
@@ -5860,7 +5894,7 @@ pub(crate) fn new_patch_event(
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = vec![
-        Line::from("❌ Patch application failed".red().bold()),
+        Line::from("❌ Patch application failed").fg(crate::colors::error()).bold(),
         Line::from(""),
     ];
 
@@ -5868,7 +5902,7 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     let norm = expand_tabs_to_spaces(&norm, 4);
     for line in norm.lines() {
         if !line.is_empty() {
-            lines.push(ansi_escape_line(line).red());
+            lines.push(ansi_escape_line(line).fg(crate::colors::error()));
         }
     }
 
