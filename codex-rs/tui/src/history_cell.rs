@@ -3023,6 +3023,68 @@ impl HistoryCell for CollapsibleReasoningCell {
         // No gutter icon for reasoning/thinking
         None
     }
+
+    fn has_custom_render(&self) -> bool { true }
+
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        // Collapsed path: simple paragraph (titles only), already dimmed by extract_section_titles
+        if self.collapsed.get() {
+            // Clear background
+            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+            for y in area.y..area.y.saturating_add(area.height) {
+                for x in area.x..area.x.saturating_add(area.width) {
+                    buf[(x, y)].set_char(' ').set_style(bg_style);
+                }
+            }
+            let lines = self.display_lines_trimmed();
+            Paragraph::new(Text::from(lines))
+                .block(Block::default().style(Style::default().bg(crate::colors::background())))
+                .wrap(Wrap { trim: false })
+                .scroll((skip_rows, 0))
+                .style(Style::default().bg(crate::colors::background()))
+                .render(area, buf);
+            return;
+        }
+
+        // Expanded path: render full content with a subtle LEFT border and force dim color.
+        let dim = crate::colors::text_dim();
+        // Normalize and recolor all spans to dim so headings remain bold but not bright.
+        let mut lines = self.normalized_lines();
+        for line in &mut lines {
+            line.spans = line
+                .spans
+                .iter()
+                .map(|s| s.clone().style(Style::default().fg(dim)))
+                .collect();
+            // Also patch any line-level style fg so empty-span lines are dim
+            line.style = line.style.patch(Style::default().fg(dim));
+        }
+        let text = Text::from(trim_empty_lines(lines));
+
+        // Clear area
+        let bg = crate::colors::background();
+        let bg_style = Style::default().bg(bg).fg(dim);
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                buf[(x, y)].set_char(' ').set_style(bg_style);
+            }
+        }
+
+        // Left border like exec output: 1px border + 1px left padding
+        let block = Block::default()
+            .borders(Borders::LEFT)
+            .border_style(Style::default().fg(crate::colors::border_dim()).bg(bg))
+            .style(Style::default().bg(bg))
+            .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+
+        // Scroll across wrapped content considering reduced inner width (area.width - 2)
+        Paragraph::new(text)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((skip_rows, 0))
+            .style(Style::default().bg(bg).fg(dim))
+            .render(area, buf);
+    }
 }
 
 // ==================== StreamingContentCell ====================
@@ -3031,6 +3093,8 @@ impl HistoryCell for CollapsibleReasoningCell {
 pub(crate) struct StreamingContentCell {
     pub(crate) id: Option<String>,
     pub(crate) lines: Vec<Line<'static>>,
+    // Show an ellipsis on a new line while streaming is in progress
+    pub(crate) show_ellipsis: bool,
 }
 
 impl HistoryCell for StreamingContentCell {
@@ -3129,7 +3193,9 @@ impl HistoryCell for StreamingContentCell {
                 }
             }
         }
-        total.saturating_add(2)
+        let mut total = total.saturating_add(2);
+        if self.show_ellipsis { total = total.saturating_add(1); }
+        total
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render with a 1-row top and bottom padding, all using the assistant bg tint.
@@ -3189,6 +3255,10 @@ impl HistoryCell for StreamingContentCell {
             _is_first_output_line = false;
         }
         if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
+        // Append an ellipsis line as its own segment when streaming
+        if self.show_ellipsis {
+            segs.push(Seg::Text(vec![Line::from("…".dim())]));
+        }
 
         // Streaming-style top padding row
         let mut remaining_skip = skip_rows;
@@ -4280,14 +4350,14 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
 }
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell { id: None, lines }
+    StreamingContentCell { id: None, lines, show_ellipsis: true }
 }
 
 pub(crate) fn new_streaming_content_with_id(
     id: Option<String>,
     lines: Vec<Line<'static>>,
 ) -> StreamingContentCell {
-    StreamingContentCell { id, lines }
+    StreamingContentCell { id, lines, show_ellipsis: true }
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {

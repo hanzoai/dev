@@ -135,13 +135,14 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        // Clear the area first
+        // Clear the area and render a theme-aware box
         Clear.render(area, buf);
 
-        // Create a centered box
+        // Bordered container that matches the current theme
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::light_blue()))
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()))
             .title(" Select Reasoning Effort ")
             .title_alignment(Alignment::Center);
 
@@ -151,7 +152,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
         // Build the content
         let mut lines = vec![
             Line::from(vec![
-                Span::raw("Current: "),
+                Span::styled("Current: ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled(
                     format!("{}", self.current_effort),
                     Style::default()
@@ -167,7 +168,7 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
             let is_selected = effort == self.selected_effort;
             let is_current = effort == self.current_effort;
 
-            let mut style = Style::default();
+            let mut style = Style::default().fg(crate::colors::text());
             if is_selected {
                 style = style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
             }
@@ -201,7 +202,9 @@ impl<'a> BottomPaneView<'a> for ReasoningSelectionView {
             width: inner_area.width.saturating_sub(1),
             height: inner_area.height,
         };
-        let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
+        let paragraph = Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
         paragraph.render(padded, buf);
     }
 }
