@@ -10,6 +10,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
