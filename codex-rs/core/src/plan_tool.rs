@@ -79,10 +79,7 @@ pub(crate) async fn handle_update_plan(
                 },
             };
             session
-                .send_event(Event {
-                    id: sub_id.to_string(),
-                    msg: EventMsg::PlanUpdate(args),
-                })
+        .send_event(Event { id: sub_id.to_string(), event_seq: 0, msg: EventMsg::PlanUpdate(args), order: None })
                 .await;
             output
         }

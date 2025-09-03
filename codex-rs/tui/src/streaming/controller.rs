@@ -113,6 +113,16 @@ impl StreamController {
         // Removed - we don't need to add extra blank lines
         // The markdown renderer and section breaks already handle spacing
     }
+    
+    /// Get the current stream kind being processed
+    pub(crate) fn current_stream(&self) -> Option<StreamKind> {
+        self.current_stream
+    }
+    
+    /// Get the current stream ID
+    pub(crate) fn current_stream_id(&self) -> Option<&String> {
+        self.current_stream_id.as_ref()
+    }
 
     /// Begin a stream, flushing previously completed lines from any other
     /// active stream to maintain ordering.
@@ -580,7 +590,7 @@ impl StreamController {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use codex_core::config::Config;

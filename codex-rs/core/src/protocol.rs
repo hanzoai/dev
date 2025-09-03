@@ -369,8 +369,26 @@ pub enum InputItem {
 pub struct Event {
     /// Submission `id` that this event is correlated with.
     pub id: String,
+    /// Monotonic, per‑turn sequence for ordering within a submission id.
+    /// Resets to 0 at TaskStarted and increments for each subsequent event.
+    pub event_seq: u64,
     /// Payload
     pub msg: EventMsg,
+    /// Optional model-provided ordering metadata (when applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<OrderMeta>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OrderMeta {
+    /// 1-based ordinal of this request/turn in the session
+    pub request_ordinal: u64,
+    /// Model-provided output_index for the top-level item
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_index: Option<u32>,
+    /// Model-provided sequence_number within the output_index stream
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence_number: Option<u64>,
 }
 
 /// Response event from the agent
@@ -877,6 +895,7 @@ mod tests {
         let session_id: Uuid = uuid::uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8");
         let event = Event {
             id: "1234".to_string(),
+            event_seq: 0,
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id,
                 model: "codex-mini-latest".to_string(),
@@ -887,7 +906,7 @@ mod tests {
         let serialized = serde_json::to_string(&event).unwrap();
         assert_eq!(
             serialized,
-            r#"{"id":"1234","msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","history_log_id":0,"history_entry_count":0}}"#
+            r#"{"id":"1234","event_seq":0,"msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","history_log_id":0,"history_entry_count":0}}"#
         );
     }
 }

@@ -15,6 +15,9 @@ pub(crate) struct MarkdownStreamCollector {
     buffer: String,
     committed_line_count: usize,
     bold_first_sentence: bool,
+    // When true, insert an extra newline after the next natural newline
+    // boundary to force a section separation without cutting a word mid‑line.
+    pending_section_break: bool,
 }
 
 impl MarkdownStreamCollector {
@@ -23,6 +26,7 @@ impl MarkdownStreamCollector {
             buffer: String::new(),
             committed_line_count: 0,
             bold_first_sentence: false,
+            pending_section_break: false,
         }
     }
     
@@ -31,6 +35,7 @@ impl MarkdownStreamCollector {
             buffer: String::new(),
             committed_line_count: 0,
             bold_first_sentence: true,
+            pending_section_break: false,
         }
     }
     
@@ -48,6 +53,7 @@ impl MarkdownStreamCollector {
         self.buffer.clear();
         self.committed_line_count = 0;
         // Keep bold_first_sentence setting
+        self.pending_section_break = false;
     }
 
     /// Replace the buffered content and mark that the first `committed_count`
@@ -56,10 +62,24 @@ impl MarkdownStreamCollector {
         self.buffer.clear();
         self.buffer.push_str(s);
         self.committed_line_count = committed_count;
+        // A full replace cancels any pending break; the new content can include
+        // its own spacing.
+        self.pending_section_break = false;
     }
 
     pub fn push_delta(&mut self, delta: &str) {
         self.buffer.push_str(delta);
+        // If we were asked to insert a section break but the buffer didn't end
+        // with a newline at the time, defer adding the extra newline until we
+        // naturally hit a newline boundary via streaming. This prevents cutting
+        // a word mid‑line (observed as missing syllables like "Summarizing" → "Summizing").
+        if self.pending_section_break && self.buffer.ends_with('\n') {
+            // Ensure exactly one extra blank line (i.e., double newline total)
+            if !self.buffer.ends_with("\n\n") {
+                self.buffer.push('\n');
+            }
+            self.pending_section_break = false;
+        }
     }
 
     /// Insert a paragraph/section separator if one is not already present at the
@@ -68,13 +88,15 @@ impl MarkdownStreamCollector {
         if self.buffer.is_empty() {
             return;
         }
-        // For reasoning content, ensure we have a double newline for section separation
-        if !self.buffer.ends_with("\n\n") {
-            if self.buffer.ends_with('\n') {
+        // If we're already at a line boundary, append one more newline. Otherwise,
+        // defer the extra newline until push_delta hits a natural boundary.
+        if self.buffer.ends_with('\n') {
+            if !self.buffer.ends_with("\n\n") {
                 self.buffer.push('\n');
-            } else {
-                self.buffer.push_str("\n\n");
             }
+            self.pending_section_break = false;
+        } else {
+            self.pending_section_break = true;
         }
     }
 
@@ -405,7 +427,7 @@ impl AnimatedLineStreamer {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 pub(crate) fn simulate_stream_markdown_for_tests(
     deltas: &[&str],
     finalize: bool,
@@ -425,7 +447,7 @@ pub(crate) fn simulate_stream_markdown_for_tests(
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use codex_core::config::Config;

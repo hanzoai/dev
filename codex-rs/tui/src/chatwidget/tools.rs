@@ -10,10 +10,11 @@ pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query
     chat.flush_interrupt_queue();
 
     let cell = history_cell::new_running_web_search(query.clone());
-    chat.history_push(cell);
-    if let Some(last_idx) = chat.history_cells.len().checked_sub(1) {
-        chat.tools_state.running_web_search.insert(super::ToolCallId(call_id), (last_idx, query));
-    }
+    let idx = chat.push_cell_maybe_ordered(cell);
+    tracing::info!("[order] WebSearchBegin call_id={} idx={}", call_id, idx);
+    chat.tools_state
+        .running_web_search
+        .insert(super::ToolCallId(call_id), (idx, query));
     chat.bottom_pane.update_status_text("Searched".to_string());
     chat.mark_needs_redraw();
 }
@@ -50,6 +51,7 @@ pub(super) fn web_search_complete(chat: &mut ChatWidget<'_>, call_id: String, qu
                 let completed = rt.finalize_web_search(true, final_query);
                 chat.history_replace_at(i, Box::new(completed));
                 chat.history_maybe_merge_tool_with_previous(i);
+                tracing::info!("[order] WebSearchEnd replace at idx={}", i);
             }
         }
     }
@@ -61,10 +63,10 @@ pub(super) fn mcp_begin(chat: &mut ChatWidget<'_>, ev: McpToolCallBeginEvent) {
     for cell in &chat.history_cells { cell.trigger_fade(); }
     let McpToolCallBeginEvent { call_id, invocation } = ev;
     let cell = history_cell::new_running_mcp_tool_call(invocation);
-    chat.history_push(cell);
-    if let Some(last_idx) = chat.history_cells.len().checked_sub(1) {
-    chat.tools_state.running_custom_tools.insert(super::ToolCallId(call_id), last_idx);
-    }
+    let idx = chat.push_cell_maybe_ordered(cell);
+    chat.tools_state
+        .running_custom_tools
+        .insert(super::ToolCallId(call_id), idx);
 }
 
 pub(super) fn mcp_end(chat: &mut ChatWidget<'_>, ev: McpToolCallEndEvent) {
