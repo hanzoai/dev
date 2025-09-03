@@ -3093,7 +3093,7 @@ impl HistoryCell for CollapsibleReasoningCell {
 pub(crate) struct StreamingContentCell {
     pub(crate) id: Option<String>,
     pub(crate) lines: Vec<Line<'static>>,
-    // Show an ellipsis appended to the last line while streaming
+    // Show an ellipsis on a new line while streaming is in progress
     pub(crate) show_ellipsis: bool,
 }
 
@@ -3193,7 +3193,9 @@ impl HistoryCell for StreamingContentCell {
                 }
             }
         }
-        total.saturating_add(2)
+        let mut total = total.saturating_add(2);
+        if self.show_ellipsis { total = total.saturating_add(1); }
+        total
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Render with a 1-row top and bottom padding, all using the assistant bg tint.
@@ -3253,19 +3255,9 @@ impl HistoryCell for StreamingContentCell {
             _is_first_output_line = false;
         }
         if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-        // If streaming, append an ellipsis span to the last line of the last segment
+        // Append an ellipsis line as its own segment when streaming
         if self.show_ellipsis {
-            if let Some(last) = segs.last_mut() {
-                match last {
-                    Seg::Text(lines) | Seg::Bullet(lines) | Seg::Code(lines) => {
-                        if let Some(last_line) = lines.last_mut() {
-                            let mut spans = std::mem::take(&mut last_line.spans);
-                            spans.push(Span::styled(" …", Style::default().fg(crate::colors::text_dim())));
-                            last_line.spans = spans;
-                        }
-                    }
-                }
-            }
+            segs.push(Seg::Text(vec![Line::from("…".dim())]));
         }
 
         // Streaming-style top padding row
