@@ -608,6 +608,24 @@ pub(crate) struct Session {
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ToolCallCtx {
+    pub sub_id: String,
+    pub call_id: String,
+    pub seq_hint: Option<u64>,
+    pub output_index: Option<u32>,
+}
+
+impl ToolCallCtx {
+    pub fn new(sub_id: String, call_id: String, seq_hint: Option<u64>, output_index: Option<u32>) -> Self {
+        Self { sub_id, call_id, seq_hint, output_index }
+    }
+
+    pub fn order_meta(&self, req_ordinal: u64) -> crate::protocol::OrderMeta {
+        crate::protocol::OrderMeta { request_ordinal: req_ordinal, output_index: self.output_index, sequence_number: self.seq_hint }
+    }
+}
+
 impl Session {
     #[allow(dead_code)]
     pub(crate) fn get_writable_roots(&self) -> &[PathBuf] {
@@ -781,19 +799,11 @@ impl Session {
         ev
     }
 
-    pub(crate) async fn send_ordered_event(
-        &self,
-        sub_id: &str,
-        msg: EventMsg,
-        seq_hint: Option<u64>,
-        output_index: Option<u32>,
-    ) {
-        let order = crate::protocol::OrderMeta {
-            request_ordinal: self.current_request_ordinal(),
-            output_index,
-            sequence_number: seq_hint,
-        };
-        let ev = self.make_event_with_order(sub_id, msg, order, seq_hint);
+    // Kept private helpers focused on ctx-based flow to avoid misuse.
+
+    pub(crate) async fn send_ordered_from_ctx(&self, ctx: &ToolCallCtx, msg: EventMsg) {
+        let order = ctx.order_meta(self.current_request_ordinal());
+        let ev = self.make_event_with_order(&ctx.sub_id, msg, order, ctx.seq_hint);
         let _ = self.tx_event.send(ev).await;
     }
 
@@ -2732,6 +2742,7 @@ async fn handle_function_call(
     seq_hint: Option<u64>,
     output_index: Option<u32>,
 ) -> ResponseInputItem {
+    let ctx = ToolCallCtx::new(sub_id.clone(), call_id.clone(), seq_hint, output_index);
     match name.as_str() {
         "container.exec" | "shell" => {
             let params = match parse_container_exec_arguments(arguments, sess, &call_id) {
@@ -2743,36 +2754,36 @@ async fn handle_function_call(
             handle_container_exec_with_params(params, sess, turn_diff_tracker, sub_id, call_id, seq_hint, output_index)
                 .await
         }
-        "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
+        "update_plan" => handle_update_plan(sess, &ctx, arguments).await,
         // agent_* tools
-        "agent_run" => handle_run_agent(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "agent_check" => handle_check_agent_status(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "agent_result" => handle_get_agent_result(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "agent_cancel" => handle_cancel_agent(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "agent_wait" => handle_wait_for_agent(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "agent_list" => handle_list_agents(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
+        "agent_run" => handle_run_agent(sess, &ctx, arguments).await,
+        "agent_check" => handle_check_agent_status(sess, &ctx, arguments).await,
+        "agent_result" => handle_get_agent_result(sess, &ctx, arguments).await,
+        "agent_cancel" => handle_cancel_agent(sess, &ctx, arguments).await,
+        "agent_wait" => handle_wait_for_agent(sess, &ctx, arguments).await,
+        "agent_list" => handle_list_agents(sess, &ctx, arguments).await,
         // browser_* tools
-        "browser_open" => handle_browser_open(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_close" => handle_browser_close(sess, sub_id, call_id, seq_hint, output_index).await,
-        "browser_status" => handle_browser_status(sess, sub_id, call_id, seq_hint, output_index).await,
-        "browser_click" => handle_browser_click(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_move" => handle_browser_move(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_type" => handle_browser_type(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_key" => handle_browser_key(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_javascript" => handle_browser_javascript(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_scroll" => handle_browser_scroll(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_history" => handle_browser_history(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_console" => handle_browser_console(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_inspect" => handle_browser_inspect(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_cdp" => handle_browser_cdp(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
-        "browser_cleanup" => handle_browser_cleanup(sess, sub_id, call_id, seq_hint, output_index).await,
-        "web_fetch" => handle_web_fetch(sess, arguments, sub_id, call_id, seq_hint, output_index).await,
+        "browser_open" => handle_browser_open(sess, &ctx, arguments).await,
+        "browser_close" => handle_browser_close(sess, &ctx).await,
+        "browser_status" => handle_browser_status(sess, &ctx).await,
+        "browser_click" => handle_browser_click(sess, &ctx, arguments).await,
+        "browser_move" => handle_browser_move(sess, &ctx, arguments).await,
+        "browser_type" => handle_browser_type(sess, &ctx, arguments).await,
+        "browser_key" => handle_browser_key(sess, &ctx, arguments).await,
+        "browser_javascript" => handle_browser_javascript(sess, &ctx, arguments).await,
+        "browser_scroll" => handle_browser_scroll(sess, &ctx, arguments).await,
+        "browser_history" => handle_browser_history(sess, &ctx, arguments).await,
+        "browser_console" => handle_browser_console(sess, &ctx, arguments).await,
+        "browser_inspect" => handle_browser_inspect(sess, &ctx, arguments).await,
+        "browser_cdp" => handle_browser_cdp(sess, &ctx, arguments).await,
+        "browser_cleanup" => handle_browser_cleanup(sess, &ctx).await,
+        "web_fetch" => handle_web_fetch(sess, &ctx, arguments).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
                     // TODO(mbolin): Determine appropriate timeout for tool call.
                     let timeout = None;
-                    handle_mcp_tool_call(sess, &sub_id, call_id, server, tool_name, arguments, timeout, seq_hint, output_index)
+                    handle_mcp_tool_call(sess, &ctx, server, tool_name, arguments, timeout)
                     .await
                 }
                 None => {
@@ -2790,23 +2801,14 @@ async fn handle_function_call(
     }
 }
 
-async fn handle_browser_cleanup(
-    sess: &Session,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
-    let call_id_clone = call_id.clone();
+async fn handle_browser_cleanup(sess: &Session, ctx: &ToolCallCtx) -> ResponseInputItem {
+    let call_id_clone = ctx.call_id.clone();
     let _sess_clone = sess;
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_cleanup".to_string(),
         Some(serde_json::json!({})),
-        seq_hint,
-        output_index,
         || async move {
             if let Some(browser_manager) = get_browser_manager_for_session(_sess_clone).await {
                 match browser_manager.cleanup().await {
@@ -2829,27 +2831,17 @@ async fn handle_browser_cleanup(
     ).await
 }
 
-async fn handle_web_fetch(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     // Include raw params in begin event for observability
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "web_fetch".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
             #[derive(serde::Deserialize)]
             struct WebFetchParams {
@@ -3757,25 +3749,15 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
     params
 }
 
-async fn handle_run_agent(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_run".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
         Ok(params) => {
@@ -3958,25 +3940,15 @@ async fn handle_run_agent(
     ).await
 }
 
-async fn handle_check_agent_status(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_check".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<CheckAgentStatusParams>(&arguments_clone) {
         Ok(params) => {
@@ -4078,25 +4050,15 @@ async fn handle_check_agent_status(
     ).await
 }
 
-async fn handle_get_agent_result(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_get_agent_result(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_result".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<GetAgentResultParams>(&arguments_clone) {
         Ok(params) => {
@@ -4196,25 +4158,15 @@ async fn handle_get_agent_result(
     ).await
 }
 
-async fn handle_cancel_agent(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_cancel_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_cancel".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<CancelAgentParams>(&arguments_clone) {
         Ok(params) => {
@@ -4269,25 +4221,15 @@ async fn handle_cancel_agent(
     ).await
 }
 
-async fn handle_wait_for_agent(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_wait".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
         Ok(params) => {
@@ -4508,25 +4450,15 @@ async fn handle_wait_for_agent(
     ).await
 }
 
-async fn handle_list_agents(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "agent_list".to_string(),
         params_for_event,
-        seq_hint,
-        output_index,
         || async move {
     match serde_json::from_str::<ListAgentsParams>(&arguments_clone) {
         Ok(params) => {
@@ -5497,12 +5429,9 @@ fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
 /// Helper function to wrap custom tool calls with events
 async fn execute_custom_tool<F, Fut>(
     sess: &Session,
-    sub_id: &str,
-    call_id: String,
+    ctx: &ToolCallCtx,
     tool_name: String,
     parameters: Option<serde_json::Value>,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
     tool_fn: F,
 ) -> ResponseInputItem
 where
@@ -5514,12 +5443,12 @@ where
 
     // Send begin event with ordering
     let begin_msg = EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
-        call_id: call_id.clone(),
+        call_id: ctx.call_id.clone(),
         tool_name: tool_name.clone(),
         parameters: parameters.clone(),
     });
-    let begin_order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
-    let begin_event = sess.make_event_with_order(sub_id, begin_msg, begin_order, seq_hint);
+    let begin_order = ctx.order_meta(sess.current_request_ordinal());
+    let begin_event = sess.make_event_with_order(&ctx.sub_id, begin_msg, begin_order, ctx.seq_hint);
     sess.send_event(begin_event).await;
 
     // Execute the tool
@@ -5539,41 +5468,31 @@ where
 
     // Send end event with ordering
     let end_msg = EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
-        call_id: call_id.clone(),
+        call_id: ctx.call_id.clone(),
         tool_name,
         parameters,
         duration,
         result: if success { Ok(message) } else { Err(message) },
     });
-    let end_order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
-    let end_event = sess.make_event_with_order(sub_id, end_msg, end_order, seq_hint);
+    let end_order = ctx.order_meta(sess.current_request_ordinal());
+    let end_event = sess.make_event_with_order(&ctx.sub_id, end_msg, end_order, ctx.seq_hint);
     sess.send_event(end_event).await;
 
     result
 }
 
-async fn handle_browser_open(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_open(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     // Parse arguments as JSON for the event
     let params = serde_json::from_str(&arguments).ok();
 
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_open".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             // Parse the URL from arguments
             let args: Result<Value, _> = serde_json::from_str(&arguments_clone);
@@ -5666,24 +5585,15 @@ async fn get_browser_manager_for_session(
     codex_browser::global::get_browser_manager().await
 }
 
-async fn handle_browser_close(
-    sess: &Session,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_close(sess: &Session, ctx: &ToolCallCtx) -> ResponseInputItem {
     let sess_clone = sess;
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_close".to_string(),
         None,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -5725,24 +5635,15 @@ async fn handle_browser_close(
     .await
 }
 
-async fn handle_browser_status(
-    sess: &Session,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_status(sess: &Session, ctx: &ToolCallCtx) -> ResponseInputItem {
     let sess_clone = sess;
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_status".to_string(),
         None,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -5783,26 +5684,16 @@ async fn handle_browser_status(
     .await
 }
 
-async fn handle_browser_click(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_click(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str::<serde_json::Value>(&arguments).ok();
     let sess_clone = sess;
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_click".to_string(),
         params.clone(),
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
@@ -5907,27 +5798,17 @@ async fn handle_browser_click(
     .await
 }
 
-async fn handle_browser_move(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_move(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_move".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
 
@@ -6001,27 +5882,17 @@ async fn handle_browser_move(
     .await
 }
 
-async fn handle_browser_type(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_type(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_type".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6076,27 +5947,17 @@ async fn handle_browser_type(
     .await
 }
 
-async fn handle_browser_key(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_key(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_key".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6151,27 +6012,17 @@ async fn handle_browser_key(
     .await
 }
 
-async fn handle_browser_javascript(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_javascript(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_javascript".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6276,27 +6127,17 @@ async fn handle_browser_javascript(
     .await
 }
 
-async fn handle_browser_scroll(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_scroll(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_scroll".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6350,27 +6191,17 @@ async fn handle_browser_scroll(
     .await
 }
 
-async fn handle_browser_console(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_console(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_console".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6440,27 +6271,17 @@ async fn handle_browser_console(
     .await
 }
 
-async fn handle_browser_cdp(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_cdp(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_cdp".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6540,28 +6361,18 @@ async fn handle_browser_cdp(
     .await
 }
 
-async fn handle_browser_inspect(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_inspect(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     use serde_json::json;
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_inspect".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
@@ -6764,27 +6575,17 @@ async fn handle_browser_inspect(
     .await
 }
 
-async fn handle_browser_history(
-    sess: &Session,
-    arguments: String,
-    sub_id: String,
-    call_id: String,
-    seq_hint: Option<u64>,
-    output_index: Option<u32>,
-) -> ResponseInputItem {
+async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params = serde_json::from_str(&arguments).ok();
     let sess_clone = sess;
     let arguments_clone = arguments.clone();
-    let call_id_clone = call_id.clone();
+    let call_id_clone = ctx.call_id.clone();
 
     execute_custom_tool(
         sess,
-        &sub_id,
-        call_id,
+        ctx,
         "browser_history".to_string(),
         params,
-        seq_hint,
-        output_index,
         || async move {
             let browser_manager = get_browser_manager_for_session(sess_clone).await;
             if let Some(browser_manager) = browser_manager {
