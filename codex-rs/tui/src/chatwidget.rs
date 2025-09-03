@@ -3046,7 +3046,7 @@ impl ChatWidget<'_> {
         let arch = std::env::consts::ARCH;
         lines.push(Line::from(format!("  • Platform: {os}-{arch}")));
         lines.push(Line::from(format!("  • CWD: {}", self.config.cwd.display())));
-        let in_git = codex_core::util::is_inside_git_repo(&self.config.cwd);
+        let in_git = codex_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
         lines.push(Line::from(format!(
             "  • Git repo: {}",
             if in_git { "yes" } else { "no" }

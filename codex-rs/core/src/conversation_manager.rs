@@ -129,7 +129,7 @@ impl ConversationManager {
         &self,
         config: Config,
         rollout_path: PathBuf,
-        auth_manager: Arc<AuthManager>,
+        _auth_manager: Arc<AuthManager>,
     ) -> CodexResult<NewConversation> {
         let _initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         let CodexSpawnOk {

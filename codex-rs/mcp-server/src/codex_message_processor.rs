@@ -32,7 +32,6 @@ use codex_protocol::protocol::TurnAbortReason;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol as core_protocol;
-use codex_login::AuthManager;
 use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
 use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
@@ -516,7 +515,7 @@ async fn apply_bespoke_event_handling(
                             codex_protocol::protocol::FileChange::Add { content }
                         }
                         codex_core::protocol::FileChange::Delete => {
-                            codex_protocol::protocol::FileChange::Delete
+                            codex_protocol::protocol::FileChange::Delete { content: String::new() }
                         }
                         codex_core::protocol::FileChange::Update { unified_diff, move_path } => {
                             codex_protocol::protocol::FileChange::Update { unified_diff, move_path }

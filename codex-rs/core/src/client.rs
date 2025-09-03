@@ -1,6 +1,6 @@
 use std::io::BufRead;
 use std::path::Path;
-use std::sync::OnceLock;
+// use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::AuthManager;
@@ -9,7 +9,7 @@ use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
-use regex_lite::Regex;
+// use regex_lite::Regex;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
