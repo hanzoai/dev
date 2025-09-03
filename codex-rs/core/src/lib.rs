@@ -8,6 +8,7 @@
 
 mod agent_tool;
 mod apply_patch;
+pub mod auth;
 mod bash;
 mod chat_completions;
 mod client;
@@ -18,6 +19,7 @@ pub mod slash_commands;
 pub use codex::Codex;
 pub use codex::CodexSpawnOk;
 mod codex_conversation;
+pub mod token_data;
 pub use codex_conversation::CodexConversation;
 pub mod config;
 pub mod config_profile;
@@ -47,6 +49,9 @@ pub use model_provider_info::create_oss_provider_with_base_url;
 mod conversation_manager;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
+// Re-export common auth types for workspace consumers
+pub use auth::AuthManager;
+pub use auth::CodexAuth;
 pub mod model_family;
 mod openai_model_info;
 mod openai_tools;
@@ -61,6 +66,7 @@ pub mod terminal;
 mod tool_apply_patch;
 pub mod turn_diff_tracker;
 pub mod user_agent;
+pub use rollout::list::ConversationsPage;
 mod user_notification;
 pub mod util;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;

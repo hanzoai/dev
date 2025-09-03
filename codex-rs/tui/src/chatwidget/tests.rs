@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use codex_core::CodexAuth;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -32,7 +33,6 @@ use pretty_assertions::assert_eq;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use tokio::sync::mpsc::unbounded_channel;
@@ -142,7 +142,6 @@ fn make_chatwidget_manual() -> (
         stream: StreamController::new(cfg),
         last_stream_kind: None,
         running_commands: HashMap::new(),
-        pending_exec_completions: Vec::new(),
         task_complete_pending: false,
         interrupts: InterruptManager::new(),
         needs_redraw: false,
@@ -173,6 +172,56 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
     s
 }
 
+// --- Small helpers to tersely drive exec begin/end and snapshot active cell ---
+fn begin_exec(chat: &mut ChatWidget, call_id: &str, raw_cmd: &str) {
+    // Build the full command vec and parse it using core's parser,
+    // then convert to protocol variants for the event payload.
+    let command = vec!["bash".to_string(), "-lc".to_string(), raw_cmd.to_string()];
+    let parsed_cmd: Vec<codex_protocol::parse_command::ParsedCommand> =
+        codex_core::parse_command::parse_command(&command)
+            .into_iter()
+            .map(Into::into)
+            .collect();
+    chat.handle_codex_event(Event {
+        id: call_id.to_string(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.to_string(),
+            command,
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd,
+        }),
+    });
+}
+
+fn end_exec(chat: &mut ChatWidget, call_id: &str, stdout: &str, stderr: &str, exit_code: i32) {
+    let aggregated = if stderr.is_empty() {
+        stdout.to_string()
+    } else {
+        format!("{stdout}{stderr}")
+    };
+    chat.handle_codex_event(Event {
+        id: call_id.to_string(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.to_string(),
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+            aggregated_output: aggregated.clone(),
+            exit_code,
+            duration: std::time::Duration::from_millis(5),
+            formatted_output: aggregated,
+        }),
+    });
+}
+
+fn active_blob(chat: &ChatWidget) -> String {
+    let lines = chat
+        .active_exec_cell
+        .as_ref()
+        .expect("active exec cell present")
+        .display_lines(80);
+    lines_to_single_string(&lines)
+}
+
 fn open_fixture(name: &str) -> std::fs::File {
     // 1) Prefer fixtures within this crate
     {
@@ -195,6 +244,20 @@ fn open_fixture(name: &str) -> std::fs::File {
     }
     // 3) Last resort: CWD
     File::open(name).expect("open fixture file")
+}
+
+#[test]
+fn empty_enter_during_task_does_not_queue() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate running task so submissions would normally be queued.
+    chat.bottom_pane.set_task_running(true);
+
+    // Press Enter with an empty composer.
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    // Ensure nothing was queued.
+    assert!(chat.queued_user_messages.is_empty());
 }
 
 #[test]
@@ -311,6 +374,7 @@ fn exec_history_cell_shows_working_then_failed() {
         blob.contains("Failed (exit 2)"),
         "expected completed exec cell to show Failed header with exit code: {blob:?}"
     );
+    assert!(blob.to_lowercase().contains("bloop"), "expected error text");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -331,6 +395,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
     let reader = BufReader::new(file);
     let mut transcript = String::new();
     let mut ansi: Vec<u8> = Vec::new();
+    let mut has_emitted_history = false;
 
     for line in reader.lines() {
         let line = line.expect("read line");
@@ -481,6 +546,33 @@ fn approval_modal_exec_snapshot() {
         .draw(|f| f.render_widget_ref(&chat, f.area()))
         .expect("draw approval modal");
     assert_snapshot!("approval_modal_exec", terminal.backend());
+}
+
+// Snapshot test: command approval modal without a reason
+// Ensures spacing looks correct when no reason text is provided.
+#[test]
+fn approval_modal_exec_without_reason_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.config.approval_policy = codex_core::protocol::AskForApproval::OnRequest;
+
+    let ev = ExecApprovalRequestEvent {
+        call_id: "call-approve-cmd-noreason".into(),
+        command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        reason: None,
+    };
+    chat.handle_codex_event(Event {
+        id: "sub-approve-noreason".into(),
+        msg: EventMsg::ExecApprovalRequest(ev),
+    });
+
+    let height = chat.desired_height(80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw approval modal (no reason)");
+    assert_snapshot!("approval_modal_exec_no_reason", terminal.backend());
 }
 
 // Snapshot test: patch approval modal
@@ -704,11 +796,11 @@ fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected pending patch cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("proposed patch"),
-        "missing proposed patch header: {blob:?}"
+        blob.contains("Proposed Change"),
+        "missing proposed change header: {blob:?}"
     );
 
-    // 2) Begin apply -> applying patch cell
+    // 2) Begin apply -> per-file apply block cell (no global header)
     let mut changes2 = HashMap::new();
     changes2.insert(
         PathBuf::from("foo.txt"),
@@ -729,8 +821,8 @@ fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected applying patch cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Applying patch"),
-        "missing applying patch header: {blob:?}"
+        blob.contains("Added foo.txt") || blob.contains("Edited foo.txt"),
+        "expected single-file header with filename (Added/Edited): {blob:?}"
     );
 
     // 3) End apply success -> success cell
@@ -748,8 +840,63 @@ fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected applied patch cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Applied patch"),
-        "missing applied patch header: {blob:?}"
+        blob.contains("Change Approved foo.txt"),
+        "expected change approved summary: {blob:?}"
+    );
+}
+
+#[test]
+fn apply_patch_manual_flow_snapshot() {
+    use insta::assert_snapshot;
+
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    let mut proposed_changes = HashMap::new();
+    proposed_changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id: "c1".into(),
+            changes: proposed_changes,
+            reason: Some("Manual review required".into()),
+            grant_root: None,
+        }),
+    });
+    let proposed_lines = drain_insert_history(&mut rx)
+        .pop()
+        .expect("proposed patch cell");
+
+    let mut apply_changes = HashMap::new();
+    apply_changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    chat.handle_codex_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+            call_id: "c1".into(),
+            auto_approved: false,
+            changes: apply_changes,
+        }),
+    });
+    let approved_lines = drain_insert_history(&mut rx)
+        .pop()
+        .expect("approved patch cell");
+
+    assert_snapshot!(
+        "apply_patch_manual_flow_history_proposed",
+        lines_to_single_string(&proposed_lines)
+    );
+    assert_snapshot!(
+        "apply_patch_manual_flow_history_approved",
+        lines_to_single_string(&approved_lines)
     );
 }
 
@@ -946,7 +1093,7 @@ fn apply_patch_request_shows_diff_summary() {
 
     // Header should summarize totals
     assert!(
-        blob.contains("proposed patch to 1 file (+2 -0)"),
+        blob.contains("Proposed Change README.md (+2 -0)"),
         "missing or incorrect diff header: {blob:?}"
     );
 
@@ -985,7 +1132,7 @@ fn plan_update_renders_history_cell() {
     assert!(!cells.is_empty(), "expected plan update cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Update plan"),
+        blob.contains("Updated Plan"),
         "missing plan header: {blob:?}"
     );
     assert!(blob.contains("Explore codebase"));

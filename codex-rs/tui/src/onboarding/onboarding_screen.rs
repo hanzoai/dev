@@ -6,7 +6,7 @@ use ratatui::prelude::Widget;
 use ratatui::widgets::Clear;
 use ratatui::widgets::WidgetRef;
 
-use codex_login::AuthMode;
+use codex_protocol::mcp_protocol::AuthMode;
 
 use crate::LoginStatus;
 use crate::app::ChatWidgetArgs;
@@ -84,7 +84,7 @@ impl OnboardingScreen {
                 preferred_auth_method: codex_login::AuthMode::ApiKey,
             }))
         }
-        let is_git_repo = is_inside_git_repo(&cwd);
+        let is_git_repo = get_git_repo_root(&cwd).is_some();
         let highlighted = if is_git_repo {
             TrustDirectorySelection::Trust
         } else {

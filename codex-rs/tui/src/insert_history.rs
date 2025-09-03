@@ -340,7 +340,10 @@ impl Command for SetUnderlineColor {
 }
 
 /// Word-aware wrapping for a list of `Line`s preserving styles.
-pub(crate) fn word_wrap_lines(lines: &[Line], width: u16) -> Vec<Line<'static>> {
+pub(crate) fn word_wrap_lines<'a, I>(lines: I, width: u16) -> Vec<Line<'static>>
+where
+    I: IntoIterator<Item = &'a Line<'a>>,
+{
     let mut out = Vec::new();
     let w = width.max(1) as usize;
     for line in lines {

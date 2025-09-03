@@ -67,6 +67,8 @@ jobs:
             target: aarch64-unknown-linux-musl
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -184,6 +186,11 @@ jobs:
             cp target/${{ matrix.target }}/release/code-tui "$dest/code-tui-${{ matrix.target }}"
             cp target/${{ matrix.target }}/release/code-exec "$dest/code-exec-${{ matrix.target }}"
           fi
+
+      - if: ${{ matrix.runner == 'windows-11-arm' }}
+        name: Install zstd
+        shell: powershell
+        run: choco install -y zstandard
 
       - name: Compress artifacts
         shell: bash
