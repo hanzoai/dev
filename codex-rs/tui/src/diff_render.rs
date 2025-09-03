@@ -2,14 +2,18 @@ use crossterm::terminal;
 // Color type is already in scope at the top of this module
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 use codex_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
+use codex_core::git_info::get_git_repo_root;
+use codex_core::protocol::FileChange;
 
 // Sanitize diff content so tabs and control characters don’t break terminal layout.
 // Mirrors the behavior we use for user input and command output:
@@ -97,6 +101,8 @@ pub(super) fn create_diff_summary(
     title: &str,
     changes: &HashMap<PathBuf, FileChange>,
     event_type: PatchEventType,
+    cwd: &Path,
+    wrap_cols: usize,
 ) -> Vec<RtLine<'static>> {
     create_diff_summary_with_width(title, changes, event_type, None)
 }
@@ -141,51 +147,74 @@ pub(super) fn create_diff_summary_with_width(
                     _ => {}
                 }
             }
-            (adds, dels)
         }
+        PatchEventType::ApprovalRequest => HeaderKind::ProposedChange,
     };
+    render_changes_block(rows, wrap_cols, header_kind, cwd)
+}
 
-    let mut files: Vec<FileSummary> = Vec::new();
+// Shared row for per-file presentation
+#[derive(Clone)]
+struct Row {
+    #[allow(dead_code)]
+    path: PathBuf,
+    move_path: Option<PathBuf>,
+    added: usize,
+    removed: usize,
+    change: FileChange,
+}
+
+fn collect_rows(changes: &HashMap<PathBuf, FileChange>) -> Vec<Row> {
+    let mut rows: Vec<Row> = Vec::new();
     for (path, change) in changes.iter() {
-        match change {
-            FileChange::Add { content } => files.push(FileSummary {
-                display_path: path.display().to_string(),
-                added: content.lines().count(),
-                removed: 0,
-            }),
-            FileChange::Delete => files.push(FileSummary {
-                display_path: path.display().to_string(),
-                added: 0,
-                removed: std::fs::read_to_string(path)
-                    .ok()
-                    .map(|s| s.lines().count())
-                    .unwrap_or(0),
-            }),
+        let (added, removed) = match change {
+            FileChange::Add { content } => (content.lines().count(), 0),
+            FileChange::Delete { content } => (0, content.lines().count()),
+            FileChange::Update { unified_diff, .. } => calculate_add_remove_from_diff(unified_diff),
+        };
+        let move_path = match change {
             FileChange::Update {
-                unified_diff,
-                move_path,
-            } => {
-                let (added, removed) = count_from_unified(unified_diff);
-                let display_path = if let Some(new_path) = move_path {
-                    format!("{} → {}", path.display(), new_path.display())
-                } else {
-                    path.display().to_string()
-                };
-                files.push(FileSummary {
-                    display_path,
-                    added,
-                    removed,
-                });
-            }
-        }
+                move_path: Some(new),
+                ..
+            } => Some(new.clone()),
+            _ => None,
+        };
+        rows.push(Row {
+            path: path.clone(),
+            move_path,
+            added,
+            removed,
+            change: change.clone(),
+        });
     }
+    rows.sort_by_key(|r| r.path.clone());
+    rows
+}
 
-    let file_count = files.len();
-    let total_added: usize = files.iter().map(|f| f.added).sum();
-    let total_removed: usize = files.iter().map(|f| f.removed).sum();
-    let noun = if file_count == 1 { "file" } else { "files" };
+enum HeaderKind {
+    ProposedChange,
+    Edited,
+    ChangeApproved,
+}
 
+fn render_changes_block(
+    rows: Vec<Row>,
+    wrap_cols: usize,
+    header_kind: HeaderKind,
+    cwd: &Path,
+) -> Vec<RtLine<'static>> {
     let mut out: Vec<RtLine<'static>> = Vec::new();
+    let term_cols = wrap_cols;
+
+    fn render_line_count_summary(added: usize, removed: usize) -> Vec<RtSpan<'static>> {
+        let mut spans = Vec::new();
+        spans.push("(".into());
+        spans.push(format!("+{added}").green());
+        spans.push(" ".into());
+        spans.push(format!("-{removed}").red());
+        spans.push(")".into());
+        spans
+    }
 
     // Header
     let mut header_spans: Vec<RtSpan<'static>> = Vec::new();
@@ -245,6 +274,7 @@ pub(super) fn create_diff_summary_with_width(
         spans.push(RtSpan::styled(")".to_string(), Style::default().fg(crate::colors::text_dim())));
         out.push(RtLine::from(spans));
     }
+    out.push(RtLine::from(header_spans));
 
     let show_details = matches!(
         event_type,
@@ -291,7 +321,20 @@ fn render_patch_details_with_width(
                 RtSpan::styled("...", style_dim()),
             ]));
         }
-        match change {
+        // File header line (skip when single-file header already shows the name)
+        let skip_file_header =
+            matches!(header_kind, HeaderKind::ProposedChange | HeaderKind::Edited)
+                && file_count == 1;
+        if !skip_file_header {
+            let mut header: Vec<RtSpan<'static>> = Vec::new();
+            header.push("  └ ".dim());
+            header.extend(render_path(&r));
+            header.push(" ".into());
+            header.extend(render_line_count_summary(r.added, r.removed));
+            out.push(RtLine::from(header));
+        }
+
+        match r.change {
             FileChange::Add { content } => {
                 for (i, raw) in content.lines().enumerate() {
                     let ln = i + 1;
@@ -317,20 +360,12 @@ fn render_patch_details_with_width(
                     ));
                 }
             }
-            FileChange::Update {
-                unified_diff,
-                move_path: _,
-            } => {
-                if let Ok(patch) = diffy::Patch::from_str(unified_diff) {
+            FileChange::Update { unified_diff, .. } => {
+                if let Ok(patch) = diffy::Patch::from_str(&unified_diff) {
                     let mut is_first_hunk = true;
                     for h in patch.hunks() {
-                        // Render a simple separator between non-contiguous hunks
-                        // instead of diff-style @@ headers.
                         if !is_first_hunk {
-                            out.push(RtLine::from(vec![
-                                RtSpan::raw("    "),
-                                RtSpan::styled("⋮", style_dim()),
-                            ]));
+                            out.push(RtLine::from(vec!["    ".into(), "⋮".dim()]));
                         }
                         is_first_hunk = false;
 
@@ -593,6 +628,12 @@ mod tests {
     use ratatui::widgets::Paragraph;
     use ratatui::widgets::WidgetRef;
     use ratatui::widgets::Wrap;
+    fn diff_summary_for_tests(
+        changes: &HashMap<PathBuf, FileChange>,
+        event_type: PatchEventType,
+    ) -> Vec<RtLine<'static>> {
+        create_diff_summary(changes, event_type, &PathBuf::from("/"), 80)
+    }
 
     fn snapshot_lines(name: &str, lines: Vec<RtLine<'static>>, width: u16, height: u16) {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -606,6 +647,23 @@ mod tests {
         assert_snapshot!(name, terminal.backend());
     }
 
+    fn snapshot_lines_text(name: &str, lines: &[RtLine<'static>]) {
+        // Convert Lines to plain text rows and trim trailing spaces so it's
+        // easier to validate indentation visually in snapshots.
+        let text = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .map(|s| s.trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_snapshot!(name, text);
+    }
+
     #[test]
     fn ui_snapshot_add_details() {
         let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
@@ -616,8 +674,7 @@ mod tests {
             },
         );
 
-        let lines =
-            create_diff_summary("proposed patch", &changes, PatchEventType::ApprovalRequest);
+        let lines = diff_summary_for_tests(&changes, PatchEventType::ApprovalRequest);
 
         snapshot_lines("add_details", lines, 80, 10);
     }
@@ -638,8 +695,7 @@ mod tests {
             },
         );
 
-        let lines =
-            create_diff_summary("proposed patch", &changes, PatchEventType::ApprovalRequest);
+        let lines = diff_summary_for_tests(&changes, PatchEventType::ApprovalRequest);
 
         snapshot_lines("update_details_with_rename", lines, 80, 12);
     }
@@ -679,8 +735,7 @@ mod tests {
             },
         );
 
-        let lines =
-            create_diff_summary("proposed patch", &changes, PatchEventType::ApprovalRequest);
+        let lines = diff_summary_for_tests(&changes, PatchEventType::ApprovalRequest);
 
         snapshot_lines("single_line_replacement_counts", lines, 80, 8);
     }
@@ -701,8 +756,7 @@ mod tests {
             },
         );
 
-        let lines =
-            create_diff_summary("proposed patch", &changes, PatchEventType::ApprovalRequest);
+        let lines = diff_summary_for_tests(&changes, PatchEventType::ApprovalRequest);
 
         snapshot_lines("blank_context_line", lines, 80, 10);
     }
@@ -724,10 +778,232 @@ mod tests {
             },
         );
 
-        let lines =
-            create_diff_summary("proposed patch", &changes, PatchEventType::ApprovalRequest);
+        let lines = diff_summary_for_tests(&changes, PatchEventType::ApprovalRequest);
 
         // Height is large enough to show both hunks and the separator
         snapshot_lines("vertical_ellipsis_between_hunks", lines, 80, 16);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_block() {
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        let original = "line one\nline two\nline three\n";
+        let modified = "line one\nline two changed\nline three\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        changes.insert(
+            PathBuf::from("example.txt"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        for (name, auto_approved) in [
+            ("apply_update_block", true),
+            ("apply_update_block_manual", false),
+        ] {
+            let lines =
+                diff_summary_for_tests(&changes, PatchEventType::ApplyBegin { auto_approved });
+
+            snapshot_lines(name, lines, 80, 12);
+        }
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_with_rename_block() {
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        let original = "A\nB\nC\n";
+        let modified = "A\nB changed\nC\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        changes.insert(
+            PathBuf::from("old_name.rs"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: Some(PathBuf::from("new_name.rs")),
+            },
+        );
+
+        let lines = diff_summary_for_tests(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+        );
+
+        snapshot_lines("apply_update_with_rename_block", lines, 80, 12);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_multiple_files_block() {
+        // Two files: one update and one add, to exercise combined header and per-file rows
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+
+        // File a.txt: single-line replacement (one delete, one insert)
+        let patch_a = diffy::create_patch("one\n", "one changed\n").to_string();
+        changes.insert(
+            PathBuf::from("a.txt"),
+            FileChange::Update {
+                unified_diff: patch_a,
+                move_path: None,
+            },
+        );
+
+        // File b.txt: newly added with one line
+        changes.insert(
+            PathBuf::from("b.txt"),
+            FileChange::Add {
+                content: "new\n".to_string(),
+            },
+        );
+
+        let lines = diff_summary_for_tests(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+        );
+
+        snapshot_lines("apply_multiple_files_block", lines, 80, 14);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_add_block() {
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            PathBuf::from("new_file.txt"),
+            FileChange::Add {
+                content: "alpha\nbeta\n".to_string(),
+            },
+        );
+
+        let lines = diff_summary_for_tests(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+        );
+
+        snapshot_lines("apply_add_block", lines, 80, 10);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_delete_block() {
+        // Write a temporary file so the delete renderer can read original content
+        let tmp_path = PathBuf::from("tmp_delete_example.txt");
+        std::fs::write(&tmp_path, "first\nsecond\nthird\n").expect("write tmp file");
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            tmp_path.clone(),
+            FileChange::Delete {
+                content: "first\nsecond\nthird\n".to_string(),
+            },
+        );
+
+        let lines = diff_summary_for_tests(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+        );
+
+        // Cleanup best-effort; rendering has already read the file
+        let _ = std::fs::remove_file(&tmp_path);
+
+        snapshot_lines("apply_delete_block", lines, 80, 12);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_block_wraps_long_lines() {
+        // Create a patch with a long modified line to force wrapping
+        let original = "line 1\nshort\nline 3\n";
+        let modified = "line 1\nshort this_is_a_very_long_modified_line_that_should_wrap_across_multiple_terminal_columns_and_continue_even_further_beyond_eighty_columns_to_force_multiple_wraps\nline 3\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            PathBuf::from("long_example.txt"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        let lines = create_diff_summary(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+            &PathBuf::from("/"),
+            72,
+        );
+
+        // Render with backend width wider than wrap width to avoid Paragraph auto-wrap.
+        snapshot_lines("apply_update_block_wraps_long_lines", lines, 80, 12);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_block_wraps_long_lines_text() {
+        // This mirrors the desired layout example: sign only on first inserted line,
+        // subsequent wrapped pieces start aligned under the line number gutter.
+        let original = "1\n2\n3\n4\n";
+        let modified = "1\nadded long line which wraps and_if_there_is_a_long_token_it_will_be_broken\n3\n4 context line which also wraps across\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            PathBuf::from("wrap_demo.txt"),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: None,
+            },
+        );
+
+        let mut lines = create_diff_summary(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+            &PathBuf::from("/"),
+            28,
+        );
+        // Drop the combined header for this text-only snapshot
+        if !lines.is_empty() {
+            lines.remove(0);
+        }
+        snapshot_lines_text("apply_update_block_wraps_long_lines_text", &lines);
+    }
+
+    #[test]
+    fn ui_snapshot_apply_update_block_relativizes_path() {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        let abs_old = cwd.join("abs_old.rs");
+        let abs_new = cwd.join("abs_new.rs");
+
+        let original = "X\nY\n";
+        let modified = "X changed\nY\n";
+        let patch = diffy::create_patch(original, modified).to_string();
+
+        let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
+        changes.insert(
+            abs_old.clone(),
+            FileChange::Update {
+                unified_diff: patch,
+                move_path: Some(abs_new.clone()),
+            },
+        );
+
+        let lines = create_diff_summary(
+            &changes,
+            PatchEventType::ApplyBegin {
+                auto_approved: true,
+            },
+            &cwd,
+            80,
+        );
+
+        snapshot_lines("apply_update_block_relativizes_path", lines, 80, 10);
     }
 }

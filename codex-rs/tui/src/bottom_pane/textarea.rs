@@ -236,7 +236,6 @@ impl TextArea {
             } => self.delete_backward_word(),
             KeyEvent {
                 code: KeyCode::Backspace,
-                modifiers: KeyModifiers::NONE,
                 ..
             }
             | KeyEvent {

@@ -46,7 +46,107 @@ pub(crate) async fn stream_chat_completions(
 
     let input = prompt.get_formatted_input();
 
+    // Pre-scan: map Reasoning blocks to the adjacent assistant anchor after the last user.
+    // - If the last emitted message is a user message, drop all reasoning.
+    // - Otherwise, for each Reasoning item after the last user message, attach it
+    //   to the immediate previous assistant message (stop turns) or the immediate
+    //   next assistant anchor (tool-call turns: function/local shell call, or assistant message).
+    let mut reasoning_by_anchor_index: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::new();
+
+    // Determine the last role that would be emitted to Chat Completions.
+    let mut last_emitted_role: Option<&str> = None;
     for item in &input {
+        match item {
+            ResponseItem::Message { role, .. } => last_emitted_role = Some(role.as_str()),
+            ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                last_emitted_role = Some("assistant")
+            }
+            ResponseItem::FunctionCallOutput { .. } => last_emitted_role = Some("tool"),
+            ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
+            ResponseItem::CustomToolCall { .. } => {}
+            ResponseItem::CustomToolCallOutput { .. } => {}
+            ResponseItem::WebSearchCall { .. } => {}
+        }
+    }
+
+    // Find the last user message index in the input.
+    let mut last_user_index: Option<usize> = None;
+    for (idx, item) in input.iter().enumerate() {
+        if let ResponseItem::Message { role, .. } = item
+            && role == "user"
+        {
+            last_user_index = Some(idx);
+        }
+    }
+
+    // Attach reasoning only if the conversation does not end with a user message.
+    if !matches!(last_emitted_role, Some("user")) {
+        for (idx, item) in input.iter().enumerate() {
+            // Only consider reasoning that appears after the last user message.
+            if let Some(u_idx) = last_user_index
+                && idx <= u_idx
+            {
+                continue;
+            }
+
+            if let ResponseItem::Reasoning {
+                content: Some(items),
+                ..
+            } = item
+            {
+                let mut text = String::new();
+                for c in items {
+                    match c {
+                        ReasoningItemContent::ReasoningText { text: t }
+                        | ReasoningItemContent::Text { text: t } => text.push_str(t),
+                    }
+                }
+                if text.trim().is_empty() {
+                    continue;
+                }
+
+                // Prefer immediate previous assistant message (stop turns)
+                let mut attached = false;
+                if idx > 0
+                    && let ResponseItem::Message { role, .. } = &input[idx - 1]
+                    && role == "assistant"
+                {
+                    reasoning_by_anchor_index
+                        .entry(idx - 1)
+                        .and_modify(|v| v.push_str(&text))
+                        .or_insert(text.clone());
+                    attached = true;
+                }
+
+                // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
+                if !attached && idx + 1 < input.len() {
+                    match &input[idx + 1] {
+                        ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                            reasoning_by_anchor_index
+                                .entry(idx + 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                        }
+                        ResponseItem::Message { role, .. } if role == "assistant" => {
+                            reasoning_by_anchor_index
+                                .entry(idx + 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Track last assistant text we emitted to avoid duplicate assistant messages
+    // in the outbound Chat Completions payload (can happen if a final
+    // aggregated assistant message was recorded alongside an earlier partial).
+    let mut last_assistant_text: Option<String> = None;
+
+    for (idx, item) in input.iter().enumerate() {
         match item {
             ResponseItem::Message { role, content, .. } => {
                 // If the message contains any images, we must use the
@@ -96,7 +196,7 @@ pub(crate) async fn stream_chat_completions(
                 call_id,
                 ..
             } => {
-                messages.push(json!({
+                let mut msg = json!({
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
@@ -107,7 +207,13 @@ pub(crate) async fn stream_chat_completions(
                             "arguments": arguments,
                         }
                     }]
-                }));
+                });
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
+                    && let Some(obj) = msg.as_object_mut()
+                {
+                    obj.insert("reasoning".to_string(), json!(reasoning));
+                }
+                messages.push(msg);
             }
             ResponseItem::LocalShellCall {
                 id,
@@ -116,7 +222,7 @@ pub(crate) async fn stream_chat_completions(
                 action,
             } => {
                 // Confirm with API team.
-                messages.push(json!({
+                let mut msg = json!({
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
@@ -125,7 +231,13 @@ pub(crate) async fn stream_chat_completions(
                         "status": status,
                         "action": action,
                     }]
-                }));
+                });
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
+                    && let Some(obj) = msg.as_object_mut()
+                {
+                    obj.insert("reasoning".to_string(), json!(reasoning));
+                }
+                messages.push(msg);
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
                 messages.push(json!({
@@ -443,7 +555,10 @@ async fn process_chat_sse<S>(
             // Some providers stream `reasoning` as a plain string while others
             // nest the text under an object (e.g. `{ "reasoning": { "text": "…" } }`).
             if let Some(reasoning_val) = choice.get("delta").and_then(|d| d.get("reasoning")) {
-                let mut maybe_text = reasoning_val.as_str().map(|s| s.to_string());
+                let mut maybe_text = reasoning_val
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty());
 
                 if maybe_text.is_none() && reasoning_val.is_object() {
                     if let Some(s) = reasoning_val
@@ -462,6 +577,8 @@ async fn process_chat_sse<S>(
                 }
 
                 if let Some(reasoning) = maybe_text {
+                    // Accumulate so we can emit a terminal Reasoning item at the end.
+                    reasoning_text.push_str(&reasoning);
                     let _ = tx_event
                         .send(Ok(ResponseEvent::ReasoningContentDelta {
                             delta: reasoning,
@@ -469,6 +586,31 @@ async fn process_chat_sse<S>(
                             sequence_number: None,
                             output_index: None,
                         }))
+                        .await;
+                }
+            }
+
+            // Some providers only include reasoning on the final message object.
+            if let Some(message_reasoning) = choice.get("message").and_then(|m| m.get("reasoning"))
+            {
+                // Accept either a plain string or an object with { text | content }
+                if let Some(s) = message_reasoning.as_str() {
+                    if !s.is_empty() {
+                        reasoning_text.push_str(s);
+                        let _ = tx_event
+                            .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
+                            .await;
+                    }
+                } else if let Some(obj) = message_reasoning.as_object()
+                    && let Some(s) = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| obj.get("content").and_then(|v| v.as_str()))
+                    && !s.is_empty()
+                {
+                    reasoning_text.push_str(s);
+                    let _ = tx_event
+                        .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
                         .await;
                 }
             }
@@ -657,9 +799,6 @@ where
                                 }
                             }
                         }
-
-                        // Swallow assistant message here; emit on Completed.
-                        continue;
                     }
 
                     // Also capture item_id from Reasoning items
@@ -697,6 +836,11 @@ where
                         emitted_any = true;
                     }
 
+                    // Always emit the final aggregated assistant message when any
+                    // content deltas have been observed. In AggregatedOnly mode this
+                    // is the sole assistant output; in Streaming mode this finalizes
+                    // the streamed deltas into a terminal OutputItemDone so callers
+                    // can persist/render the message once per turn.
                     if !this.cumulative.is_empty() {
                         let aggregated_message = ResponseItem::Message {
                             id: this.cumulative_item_id.clone(),

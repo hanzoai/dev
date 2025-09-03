@@ -6,6 +6,8 @@ use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
 use codex_common::create_config_summary_entries;
 use codex_common::elapsed::format_duration;
+use codex_core::auth::get_auth_file;
+use codex_core::auth::try_read_auth_json;
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::parse_command::ParsedCommand;
@@ -18,6 +20,7 @@ use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
 use image::DynamicImage;
 use image::ImageReader;
+use itertools::Itertools;
 use mcp_types::EmbeddedResourceResource;
 use mcp_types::ResourceLink;
 use ratatui::prelude::*;
@@ -31,6 +34,7 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -5133,6 +5137,66 @@ pub(crate) fn new_completed_web_fetch_tool_call(
         lines,
         state: if success { ToolState::Success } else { ToolState::Failed },
     }
+
+    pub(crate) fn new(call: ExecCall) -> Self {
+        ExecCell { calls: vec![call] }
+    }
+
+    fn is_exploring_call(call: &ExecCall) -> bool {
+        !call.parsed.is_empty()
+            && call.parsed.iter().all(|p| {
+                matches!(
+                    p,
+                    ParsedCommand::Read { .. }
+                        | ParsedCommand::ListFiles { .. }
+                        | ParsedCommand::Search { .. }
+                )
+            })
+    }
+
+    fn is_exploring_cell(&self) -> bool {
+        self.calls.iter().all(Self::is_exploring_call)
+    }
+
+    pub(crate) fn with_added_call(
+        &self,
+        call_id: String,
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+    ) -> Option<Self> {
+        let call = ExecCall {
+            call_id,
+            command,
+            parsed,
+            output: None,
+            start_time: Some(Instant::now()),
+            duration: None,
+        };
+        if self.is_exploring_cell() && Self::is_exploring_call(&call) {
+            Some(Self {
+                calls: [self.calls.clone(), vec![call]].concat(),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn complete_call(
+        &mut self,
+        call_id: &str,
+        output: CommandOutput,
+        duration: Duration,
+    ) {
+        if let Some(call) = self.calls.iter_mut().rev().find(|c| c.call_id == call_id) {
+            call.output = Some(output);
+            call.duration = Some(duration);
+            call.start_time = None;
+        }
+    }
+
+    pub(crate) fn should_flush(&self) -> bool {
+        !self.is_exploring_cell() && self.calls.iter().all(|c| c.output.is_some())
+    }
 }
 
 // Map `browser_*` tool names to friendly titles
@@ -5671,20 +5735,14 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     // Only show Reasoning fields if present in config summary
     let reff = lookup("reasoning effort");
     if !reff.is_empty() {
-        lines.push(Line::from(vec![
-            "  • Reasoning Effort: ".into(),
-            title_case(&reff).into(),
-        ]));
+        lines.push(vec!["  • Reasoning Effort: ".into(), title_case(&reff).into()].into());
     }
     let rsum = lookup("reasoning summaries");
     if !rsum.is_empty() {
-        lines.push(Line::from(vec![
-            "  • Reasoning Summaries: ".into(),
-            title_case(&rsum).into(),
-        ]));
+        lines.push(vec!["  • Reasoning Summaries: ".into(), title_case(&rsum).into()].into());
     }
 
-    lines.push(Line::from(""));
+    lines.push("".into());
 
     // 📊 Token Usage
     lines.push(Line::from(vec!["📊 ".into(), "Token Usage".bold()]));
@@ -5736,6 +5794,8 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
 
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
     let UpdatePlanArgs { explanation, plan } = update;
+    PlanUpdateCell { explanation, plan }
+}
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     // Header with progress summary
@@ -5826,14 +5886,41 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
             } else {
                 Span::raw("  ")
             };
-            lines.push(Line::from(vec![
-                prefix,
-                box_span,
-                Span::raw(" "),
-                text_span,
-            ]));
+            let wrap_width = (width as usize)
+                .saturating_sub(4)
+                .saturating_sub(box_str.width())
+                .max(1);
+            let parts = textwrap::wrap(text, wrap_width);
+            let step_text = parts
+                .into_iter()
+                .map(|s| s.to_string().set_style(step_style).into())
+                .collect();
+            prefix_lines(step_text, &box_str.into(), &"  ".into())
+        };
+
+        fn prefix_lines(
+            lines: Vec<Line<'static>>,
+            initial_prefix: &Span<'static>,
+            subsequent_prefix: &Span<'static>,
+        ) -> Vec<Line<'static>> {
+            lines
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    Line::from(
+                        [
+                            vec![if i == 0 {
+                                initial_prefix.clone()
+                            } else {
+                                subsequent_prefix.clone()
+                            }],
+                            l.spans,
+                        ]
+                        .concat(),
+                    )
+                })
+                .collect()
         }
-    }
 
     PlainHistoryCell {
         lines,

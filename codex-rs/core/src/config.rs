@@ -22,6 +22,7 @@ use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
 use codex_login::AuthMode;
 use codex_protocol::config_types::SandboxMode;
+use codex_protocol::mcp_protocol::AuthMode;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -537,6 +538,8 @@ pub struct ConfigToml {
     pub experimental_instructions_file: Option<PathBuf>,
 
     pub experimental_use_exec_command_tool: Option<bool>,
+
+    pub use_experimental_reasoning_summary: Option<bool>,
 
     /// The value for the `originator` header included with Responses API requests.
     pub responses_originator_header_internal_override: Option<String>,
