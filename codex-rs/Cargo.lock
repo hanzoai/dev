@@ -787,6 +787,7 @@ dependencies = [
  "codex-common",
  "codex-core",
  "codex-login",
+ "codex-protocol",
  "reqwest",
  "serde",
  "serde_json",
