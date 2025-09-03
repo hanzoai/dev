@@ -1007,6 +1007,7 @@ impl ChatWidget<'_> {
             let conversation_manager = ConversationManager::new(AuthManager::shared(
                 config_for_agent_loop.codex_home.clone(),
                 AuthMode::ApiKey,
+                config_for_agent_loop.responses_originator_header.clone(),
             ));
             let new_conversation = match conversation_manager
                 .new_conversation(config_for_agent_loop)
