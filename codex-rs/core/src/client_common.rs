@@ -183,12 +183,14 @@ pub enum ResponseEvent {
         item_id: Option<String>,
         sequence_number: Option<u64>,
         output_index: Option<u32>,
+        summary_index: Option<u32>,
     },
     ReasoningContentDelta {
         delta: String,
         item_id: Option<String>,
         sequence_number: Option<u64>,
         output_index: Option<u32>,
+        content_index: Option<u32>,
     },
     ReasoningSummaryPartAdded,
     WebSearchCallBegin {
