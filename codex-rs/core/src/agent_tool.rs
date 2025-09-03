@@ -111,14 +111,16 @@ impl AgentManager {
 
             let event = Event {
                 id: uuid::Uuid::new_v4().to_string(),
+                event_seq: 0,
                 msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
                     agents,
                     context,
                     task,
                 }),
+                order: None,
             };
 
-            let _ = sender.send(event);
+            let _ = sender.send(Event { order: None, ..event });
         }
     }
 

@@ -379,10 +379,7 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
                 },
                 chunk: ByteBuf::from(chunk),
             });
-            let event = Event {
-                id: stream.sub_id.clone(),
-                msg,
-            };
+            let event = Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: None };
             #[allow(clippy::let_unit_value)]
             let _ = stream.tx_event.send(event).await;
             emitted_deltas += 1;

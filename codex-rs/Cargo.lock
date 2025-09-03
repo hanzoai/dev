@@ -810,6 +810,7 @@ dependencies = [
  "codex-protocol",
  "codex-protocol-ts",
  "codex-tui",
+ "regex",
  "serde_json",
  "tokio",
  "tracing",

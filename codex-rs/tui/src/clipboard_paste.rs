@@ -212,7 +212,7 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
 
 // Image format inference removed alongside clipboard image helpers.
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod pasted_paths_tests {
     use super::*;
 

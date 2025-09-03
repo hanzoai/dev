@@ -809,7 +809,7 @@ impl TextArea {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

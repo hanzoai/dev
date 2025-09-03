@@ -317,15 +317,52 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
                         .is_some() => Some(idx),
                 _ => None,
             };
-        let idx = if let Some(i) = agg_index {
-            i
-        } else {
-            let before_len = chat.history_cells.len();
-            chat.history_push(history_cell::ReadAggregationCell::new());
-            let i = if chat.history_cells.len() > 0 { chat.history_cells.len() - 1 } else { before_len };
+        let idx = if let Some(i) = agg_index { i } else {
+            // Reserve an ordered slot for the read aggregation header if the provider
+            // supplied OrderMeta; otherwise it will fall back to unordered.
+            let i = chat.push_cell_maybe_ordered(history_cell::ReadAggregationCell::new());
+            // If the immediately-previous cell is also a ReadAggregationCell (from an
+            // earlier attempt), merge into it so consecutive Read blocks collapse into
+            // a single "Read" section as per UX rules.
+            if i > 0 {
+                let prev_is_read_agg = chat.history_cells[i - 1]
+                    .as_any()
+                    .downcast_ref::<history_cell::ReadAggregationCell>()
+                    .is_some();
+                if prev_is_read_agg {
+                    // Move this new cell's lines into the previous aggregator, then remove self.
+                    if let Some(new_cell) = chat.history_cells[i]
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::ReadAggregationCell>()
+                    {
+                        let lines = new_cell.display_lines();
+                        // drop header and push body lines only
+                        let mut body: Vec<ratatui::text::Line<'static>> = lines.into_iter().skip(1).collect();
+                        if let Some(prev_cell) = chat.history_cells[i - 1]
+                            .as_any_mut()
+                            .downcast_mut::<history_cell::ReadAggregationCell>()
+                        {
+                            prev_cell.push_lines(body.drain(..).collect());
+                        }
+                    }
+                    chat.history_remove_at(i);
+                    chat.invalidate_height_cache();
+                    chat.autoscroll_if_near_bottom();
+                    chat.bottom_pane.set_has_chat_history(true);
+                    chat.process_animation_cleanup();
+                    chat.app_event_tx.send(AppEvent::RequestRedraw);
+                    // Use the previous cell as the active aggregator
+                    chat.exec.running_read_agg_index = Some(i - 1);
+                    i - 1
+                } else {
+                    chat.exec.running_read_agg_index = Some(i);
+                    i
+                }
+            } else {
                 chat.exec.running_read_agg_index = Some(i);
                 i
-            };
+            }
+        };
         let tmp = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
         let mut lines = tmp.display_lines();
         if !lines.is_empty() { lines.remove(0); }
@@ -342,9 +379,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
     }
 
     let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
-    let before_len = chat.history_cells.len();
-    chat.history_push(cell);
-    let idx = if chat.history_cells.len() > 0 { chat.history_cells.len() - 1 } else { before_len };
+    let idx = chat.push_cell_maybe_ordered(cell);
     chat.exec.running_commands.insert(
         super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand { command: ev.command.clone(), parsed: parsed_command, history_index: Some(idx) },
@@ -448,7 +483,12 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
     }
 
     if !replaced {
-                if let Some(c) = completed_opt.take() { chat.history_push_and_maybe_merge(c); }
+        if let Some(c) = completed_opt.take() {
+            // Respect any pending ordered key captured from OrderMeta for this event.
+            let idx = chat.push_cell_maybe_ordered(c);
+            // Attempt standard merge with previous Exec if applicable.
+            crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+        }
     }
 
     if exit_code == 0 {
@@ -459,33 +499,7 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
     chat.maybe_hide_spinner();
 }
 
-pub(super) fn maybe_move_last_before_final_assistant_exec(chat: &mut ChatWidget<'_>, call_id: &str) {
-    let assistant_idx = match chat.index_of_final_assistant() { Some(i) => i, None => return };
-    if chat.history_cells.is_empty() { return; }
-    let last_idx = chat.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-    let cell = chat.history_cells.remove(last_idx); chat.history_cells.insert(assistant_idx, cell);
-    if let Some(rc) = chat.exec.running_commands.get_mut(&super::ExecCallId(call_id.to_string())) { rc.history_index = Some(assistant_idx); }
-    chat.invalidate_height_cache(); chat.request_redraw();
-}
-
-pub(super) fn maybe_move_last_before_final_assistant_tool(chat: &mut ChatWidget<'_>, call_id: &str) {
-    let assistant_idx = match chat.index_of_final_assistant() { Some(i) => i, None => return };
-    if chat.history_cells.is_empty() { return; }
-    let last_idx = chat.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-    let cell = chat.history_cells.remove(last_idx); chat.history_cells.insert(assistant_idx, cell);
-    if let Some(idx) = chat.tools_state.running_custom_tools.get_mut(&super::ToolCallId(call_id.to_string())) { *idx = assistant_idx; }
-    chat.invalidate_height_cache(); chat.request_redraw();
-}
-
-pub(super) fn maybe_move_last_before_final_assistant(chat: &mut ChatWidget<'_>, seq: u64) {
-    let ans_seq = match chat.stream_state.seq_answer_final { Some(s) => s, None => return };
-    if seq >= ans_seq { return; }
-    let assistant_idx = match chat.index_of_final_assistant() { Some(i) => i, None => return };
-    if chat.history_cells.is_empty() { return; }
-    let last_idx = chat.history_cells.len() - 1; if last_idx <= assistant_idx { return; }
-    let cell = chat.history_cells.remove(last_idx); chat.history_cells.insert(assistant_idx, cell);
-    chat.invalidate_height_cache(); chat.request_redraw();
-}
+// Stable ordering now inserts at the correct position; these helpers are removed.
 
 // `handle_exec_approval_now` remains on ChatWidget in chatwidget.rs because
 // it is referenced directly from interrupt handling and is trivial.

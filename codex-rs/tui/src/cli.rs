@@ -65,6 +65,11 @@ pub struct Cli {
     #[clap(long = "debug", short = 'd', default_value_t = false)]
     pub debug: bool,
 
+    /// Show per-cell ordering overlays (request index, order key, window/position) to debug
+    /// event ordering. Off by default.
+    #[arg(long = "order", default_value_t = false)]
+    pub order: bool,
+
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
 }

@@ -44,6 +44,7 @@ pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String
     chat.stream_state.current_kind = Some(kind);
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
     chat.stream.begin_with_id(kind, Some(id), &sink);
+    
     chat.stream.push_and_maybe_commit(&delta, &sink);
 }
 

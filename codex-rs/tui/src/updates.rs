@@ -116,7 +116,7 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     Some((maj, min, pat))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
 

@@ -662,7 +662,7 @@ async fn process_sse<S>(
                     }
                 }
 
-                let event = ResponseEvent::OutputItemDone(item);
+                let event = ResponseEvent::OutputItemDone { item, sequence_number: event.sequence_number, output_index: event.output_index };
                 if tx_event.send(Ok(event)).await.is_err() {
                     return;
                 }
@@ -677,6 +677,8 @@ async fn process_sse<S>(
                     let ev = ResponseEvent::OutputTextDelta {
                         delta,
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
+                        sequence_number: event.sequence_number,
+                        output_index: event.output_index,
                     };
                     if tx_event.send(Ok(ev)).await.is_err() {
                         return;
@@ -714,6 +716,8 @@ async fn process_sse<S>(
                     let ev = ResponseEvent::ReasoningSummaryDelta {
                         delta,
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
+                        sequence_number: event.sequence_number,
+                        output_index: event.output_index,
                     };
                     if tx_event.send(Ok(ev)).await.is_err() {
                         return;
@@ -752,6 +756,8 @@ async fn process_sse<S>(
                     let ev = ResponseEvent::ReasoningContentDelta {
                         delta,
                         item_id: event.item_id.or_else(|| current_item_id.clone()),
+                        sequence_number: event.sequence_number,
+                        output_index: event.output_index,
                     };
                     if tx_event.send(Ok(ev)).await.is_err() {
                         return;

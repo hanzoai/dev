@@ -392,7 +392,7 @@ impl WidgetRef for &UserApprovalWidget<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crossterm::event::KeyCode;

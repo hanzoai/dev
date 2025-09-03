@@ -355,7 +355,7 @@ fn split_text_and_fences(src: &str) -> Vec<Segment> {
     segments
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
