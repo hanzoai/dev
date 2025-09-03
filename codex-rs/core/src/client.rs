@@ -33,6 +33,7 @@ use crate::config::Config;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
+use crate::default_client::create_client;
 use crate::debug_logger::DebugLogger;
 use crate::error::CodexErr;
 use crate::error::Result;
@@ -97,7 +98,7 @@ impl ModelClient {
         Self {
             config,
             auth_manager,
-            client: crate::http_client::build_http_client(),
+            client,
             provider,
             session_id,
             effort,

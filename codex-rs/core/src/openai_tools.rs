@@ -277,6 +277,14 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
             writable_roots,
             ..
         } => {
+            let roots_str = if writable_roots.is_empty() {
+                "    - (none)\n".to_string()
+            } else {
+                writable_roots
+                    .iter()
+                    .map(|p| format!("    - {}\n", p.display()))
+                    .collect()
+            };
             format!(
                 r#"
 The shell tool is used to execute shell commands.
@@ -295,6 +303,7 @@ The shell tool is used to execute shell commands.
   - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
 
 Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
+                roots_str,
                 if !network_access {
                     "\n    - Commands that require network access\n"
                 } else {
