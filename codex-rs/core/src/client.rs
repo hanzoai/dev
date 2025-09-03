@@ -43,7 +43,6 @@ use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::openai_tools::create_tools_json_for_responses_api;
 use crate::protocol::TokenUsage;
-use crate::user_agent::get_codex_user_agent;
 use crate::util::backoff;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -93,6 +92,8 @@ impl ModelClient {
         session_id: Uuid,
         debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
+        let client = create_client(&config.responses_originator_header);
+
         Self {
             config,
             auth_manager,
@@ -285,10 +286,6 @@ impl ModelClient {
                     }
                 }
             }
-
-            let originator = &self.config.responses_originator_header;
-            req_builder = req_builder.header("originator", originator);
-            req_builder = req_builder.header("User-Agent", get_codex_user_agent(Some(originator)));
 
             let res = req_builder.send().await;
             if let Ok(resp) = &res {

@@ -23,6 +23,7 @@ use super::SESSIONS_SUBDIR;
 use super::list::ConversationsPage;
 use super::list::Cursor;
 use super::list::get_conversations;
+use super::policy::is_persisted_response_item;
 use crate::config::Config;
 use crate::conversation_manager::InitialHistory;
 use codex_protocol::models::ResponseItem;
