@@ -20,9 +20,8 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
-use codex_login::AuthMode;
-use codex_protocol::config_types::SandboxMode;
 use codex_protocol::mcp_protocol::AuthMode;
+use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -893,8 +892,8 @@ impl Config {
 
     /// Check if we're using ChatGPT authentication
     fn is_using_chatgpt_auth(codex_home: &Path) -> bool {
-        use codex_login::AuthMode;
-        use codex_login::CodexAuth;
+        use codex_protocol::mcp_protocol::AuthMode;
+        use crate::CodexAuth;
         
         match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey) {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,

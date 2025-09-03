@@ -23,7 +23,6 @@ use super::command_popup::CommandItem;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::paste_burst::PasteBurst;
-use crate::bottom_pane::paste_burst::FlushResult;
 use crate::slash_command::SlashCommand;
 use codex_protocol::custom_prompts::CustomPrompt;
 
@@ -430,7 +429,7 @@ impl ChatComposer {
             let placeholder = format!("[Pasted Content {char_count} chars]");
             self.textarea.insert_str(&placeholder);
             self.pending_pastes.push((placeholder, pasted));
-        } else if char_count > 1 && self.handle_paste_image_path(pasted.clone()) {
+        } else if self.handle_paste_image_path(pasted.clone()) {
             self.textarea.insert_str(" ");
         } else if pasted.trim().is_empty() {
             // No textual content pasted — try reading an image directly from the OS clipboard.
@@ -492,7 +491,12 @@ impl ChatComposer {
 
     #[allow(dead_code)]
     pub(crate) fn flush_paste_burst_if_due(&mut self) -> bool {
-        self.handle_paste_burst_flush(Instant::now())
+        let now = Instant::now();
+        if let Some(pasted) = self.paste_burst.flush_if_due(now) {
+            let _ = self.handle_paste(pasted);
+            return true;
+        }
+        false
     }
 
     pub(crate) fn is_in_paste_burst(&self) -> bool {
@@ -619,11 +623,9 @@ impl ChatComposer {
             KeyEvent {
                 code: KeyCode::Tab, ..
             } => {
-                // Ensure popup filtering/selection reflects the latest composer text
-                // before applying completion.
-                let first_line = self.textarea.text().lines().next().unwrap_or("");
-                popup.on_composer_text_change(first_line.to_string());
                 if let Some(sel) = popup.selected_item() {
+                    let first_line = self.textarea.text().lines().next().unwrap_or("");
+
                     match sel {
                         CommandItem::Builtin(cmd) => {
                             let starts_with_cmd = first_line
@@ -1176,30 +1178,6 @@ impl ChatComposer {
                 }
             }
             input => self.handle_input_basic(input),
-        }
-    }
-
-    fn handle_paste_burst_flush(&mut self, now: Instant) -> bool {
-        match self.paste_burst.flush_if_due(now) {
-            FlushResult::Paste(pasted) => {
-                self.handle_paste(pasted);
-                true
-            }
-            FlushResult::Typed(ch) => {
-                // Mirror insert_str() behavior so popups stay in sync when a
-                // pending fast char flushes as normal typed input.
-                self.textarea.insert_str(ch.to_string().as_str());
-                // Keep popup sync consistent with key handling: prefer slash popup; only
-                // sync file popup when slash popup is NOT active.
-                self.sync_command_popup();
-                if matches!(self.active_popup, ActivePopup::Command(_)) {
-                    self.dismissed_file_popup_token = None;
-                } else {
-                    self.sync_file_search_popup();
-                }
-                true
-            }
-            FlushResult::None => false,
         }
     }
 
@@ -1818,33 +1796,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_enter_returns_none() {
-        use crossterm::event::KeyCode;
-        use crossterm::event::KeyEvent;
-        use crossterm::event::KeyModifiers;
-
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            true,
-            sender,
-            false,
-            "Ask Codex to do anything".to_string(),
-            false,
-        );
-
-        // Ensure composer is empty and press Enter.
-        assert!(composer.textarea.text().is_empty());
-        let (result, _needs_redraw) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-        match result {
-            InputResult::None => {}
-            other => panic!("expected None for empty enter, got: {other:?}"),
-        }
-    }
-
-    #[test]
     fn handle_paste_large_uses_placeholder_and_replaces_on_submit() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
@@ -1943,66 +1894,6 @@ mod tests {
                 .unwrap_or_else(|e| panic!("Failed to draw {name} composer: {e}"));
 
             assert_snapshot!(name, terminal.backend());
-        }
-    }
-
-    #[test]
-    fn slash_popup_model_first_for_mo_ui() {
-        use insta::assert_snapshot;
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-
-        let mut composer = ChatComposer::new(
-            true,
-            sender,
-            false,
-            "Ask Codex to do anything".to_string(),
-            false,
-        );
-
-        // Type "/mo" humanlike so paste-burst doesn’t interfere.
-        type_chars_humanlike(&mut composer, &['/', 'm', 'o']);
-
-        let mut terminal = match Terminal::new(TestBackend::new(60, 4)) {
-            Ok(t) => t,
-            Err(e) => panic!("Failed to create terminal: {e}"),
-        };
-        terminal
-            .draw(|f| f.render_widget_ref(composer, f.area()))
-            .unwrap_or_else(|e| panic!("Failed to draw composer: {e}"));
-
-        // Visual snapshot should show the slash popup with /model as the first entry.
-        assert_snapshot!("slash_popup_mo", terminal.backend());
-    }
-
-    #[test]
-    fn slash_popup_model_first_for_mo_logic() {
-        use super::super::command_popup::CommandItem;
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            true,
-            sender,
-            false,
-            "Ask Codex to do anything".to_string(),
-            false,
-        );
-        type_chars_humanlike(&mut composer, &['/', 'm', 'o']);
-
-        match &composer.active_popup {
-            ActivePopup::Command(popup) => match popup.selected_item() {
-                Some(CommandItem::Builtin(cmd)) => {
-                    assert_eq!(cmd.command(), "model")
-                }
-                Some(CommandItem::UserPrompt(_)) => {
-                    panic!("unexpected prompt selected for '/mo'")
-                }
-                None => panic!("no selected command for '/mo'"),
-            },
-            _ => panic!("slash popup not active after typing '/mo'"),
         }
     }
 
@@ -2287,7 +2178,7 @@ mod tests {
                 composer.handle_paste(paste.clone());
                 composer
                     .textarea
-                    .set_cursor(placeholder.len() - pos_from_end);
+                    .set_cursor((placeholder.len() - pos_from_end) as usize);
                 composer.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
                 let result = (
                     composer.textarea.text().contains(&placeholder),

@@ -19,7 +19,6 @@ bytes = "1.10.1"
 chrono = { version = "0.4", features = ["serde"] }
 codex-apply-patch = { path = "../apply-patch" }
 codex-browser = { path = "../browser" }
-codex-login = { path = "../login" }
 codex-mcp-client = { path = "../mcp-client" }
 codex-protocol = { path = "../protocol" }
 dirs = "6"

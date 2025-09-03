@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use crate::AuthManager;
 use bytes::Bytes;
-use codex_login::AuthManager;
-use codex_login::AuthMode;
+use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
@@ -64,6 +63,10 @@ struct Error {
     // Optional fields available on "usage_limit_reached" and "usage_not_included" errors
     plan_type: Option<String>,
     resets_in_seconds: Option<u64>,
+}
+
+fn try_parse_retry_after(err: &Error) -> Option<std::time::Duration> {
+    err.resets_in_seconds.map(std::time::Duration::from_secs)
 }
 
 #[derive(Debug, Clone)]

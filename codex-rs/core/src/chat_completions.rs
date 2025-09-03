@@ -73,10 +73,10 @@ pub(crate) async fn stream_chat_completions(
     // Find the last user message index in the input.
     let mut last_user_index: Option<usize> = None;
     for (idx, item) in input.iter().enumerate() {
-        if let ResponseItem::Message { role, .. } = item
-            && role == "user"
-        {
-            last_user_index = Some(idx);
+        if let ResponseItem::Message { role, .. } = item {
+            if role == "user" {
+                last_user_index = Some(idx);
+            }
         }
     }
 
@@ -84,10 +84,10 @@ pub(crate) async fn stream_chat_completions(
     if !matches!(last_emitted_role, Some("user")) {
         for (idx, item) in input.iter().enumerate() {
             // Only consider reasoning that appears after the last user message.
-            if let Some(u_idx) = last_user_index
-                && idx <= u_idx
-            {
-                continue;
+            if let Some(u_idx) = last_user_index {
+                if idx <= u_idx {
+                    continue;
+                }
             }
 
             if let ResponseItem::Reasoning {
@@ -108,15 +108,16 @@ pub(crate) async fn stream_chat_completions(
 
                 // Prefer immediate previous assistant message (stop turns)
                 let mut attached = false;
-                if idx > 0
-                    && let ResponseItem::Message { role, .. } = &input[idx - 1]
-                    && role == "assistant"
-                {
-                    reasoning_by_anchor_index
-                        .entry(idx - 1)
-                        .and_modify(|v| v.push_str(&text))
-                        .or_insert(text.clone());
-                    attached = true;
+                if idx > 0 {
+                    if let ResponseItem::Message { role, .. } = &input[idx - 1] {
+                        if role == "assistant" {
+                            reasoning_by_anchor_index
+                                .entry(idx - 1)
+                                .and_modify(|v| v.push_str(&text))
+                                .or_insert(text.clone());
+                            attached = true;
+                        }
+                    }
                 }
 
                 // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
@@ -208,10 +209,10 @@ pub(crate) async fn stream_chat_completions(
                         }
                     }]
                 });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
-                    && let Some(obj) = msg.as_object_mut()
-                {
-                    obj.insert("reasoning".to_string(), json!(reasoning));
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
+                    if let Some(obj) = msg.as_object_mut() {
+                        obj.insert("reasoning".to_string(), json!(reasoning));
+                    }
                 }
                 messages.push(msg);
             }
@@ -232,10 +233,10 @@ pub(crate) async fn stream_chat_completions(
                         "action": action,
                     }]
                 });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx)
-                    && let Some(obj) = msg.as_object_mut()
-                {
-                    obj.insert("reasoning".to_string(), json!(reasoning));
+                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
+                    if let Some(obj) = msg.as_object_mut() {
+                        obj.insert("reasoning".to_string(), json!(reasoning));
+                    }
                 }
                 messages.push(msg);
             }
@@ -598,20 +599,32 @@ async fn process_chat_sse<S>(
                     if !s.is_empty() {
                         reasoning_text.push_str(s);
                         let _ = tx_event
-                            .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
+                            .send(Ok(ResponseEvent::ReasoningContentDelta {
+                                delta: s.to_string(),
+                                item_id: current_item_id.clone(),
+                                sequence_number: None,
+                                output_index: None,
+                            }))
                             .await;
                     }
-                } else if let Some(obj) = message_reasoning.as_object()
-                    && let Some(s) = obj
+                } else if let Some(obj) = message_reasoning.as_object() {
+                    if let Some(s) = obj
                         .get("text")
                         .and_then(|v| v.as_str())
                         .or_else(|| obj.get("content").and_then(|v| v.as_str()))
-                    && !s.is_empty()
-                {
-                    reasoning_text.push_str(s);
-                    let _ = tx_event
-                        .send(Ok(ResponseEvent::ReasoningContentDelta(s.to_string())))
-                        .await;
+                    {
+                        if !s.is_empty() {
+                            reasoning_text.push_str(s);
+                            let _ = tx_event
+                                .send(Ok(ResponseEvent::ReasoningContentDelta {
+                                    delta: s.to_string(),
+                                    item_id: current_item_id.clone(),
+                                    sequence_number: None,
+                                    output_index: None,
+                                }))
+                                .await;
+                        }
+                    }
                 }
             }
 

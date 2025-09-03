@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use codex_login::AuthManager;
-use codex_login::AuthMode;
-use codex_login::CodexAuth;
+use crate::AuthManager;
+use crate::CodexAuth;
+use codex_protocol::mcp_protocol::AuthMode;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -131,11 +131,12 @@ impl ConversationManager {
         rollout_path: PathBuf,
         auth_manager: Arc<AuthManager>,
     ) -> CodexResult<NewConversation> {
-        let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
+        let _initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         let CodexSpawnOk {
             codex,
+            init_id: _,
             session_id: conversation_id,
-        } = Codex::spawn(config, auth_manager, initial_history).await?;
+        } = Codex::spawn(config, None).await?;
         self.finalize_spawn(codex, conversation_id).await
     }
 
