@@ -50,7 +50,7 @@ pub struct Prompt {
 
     /// Tools available to the model, including additional tools sourced from
     /// external MCP servers.
-    pub tools: Vec<OpenAiTool>,
+    pub(crate) tools: Vec<OpenAiTool>,
 
     /// Status items to be added at the end of the input
     /// These are generated fresh for each request (screenshots, system status)
@@ -335,7 +335,7 @@ pub(crate) fn create_reasoning_param_for_request(
 
 // Removed legacy TextControls helper; use `Text` with `OpenAiTextVerbosity` instead.
 
-pub(crate) struct ResponseStream {
+pub struct ResponseStream {
     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
 }
 
