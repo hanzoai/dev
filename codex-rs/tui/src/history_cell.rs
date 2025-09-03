@@ -2168,9 +2168,7 @@ fn exec_render_parts_parsed(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
-            ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
-            ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
-            ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
+            // Upstream variants not present in our core parser are ignored or treated as generic runs
             ParsedCommand::Unknown { cmd } => {
                 // Suppress separator helpers like `echo ---` which are used
                 // internally to delimit chunks when reading files.
@@ -2182,14 +2180,15 @@ fn exec_render_parts_parsed(
                     ("Run".to_string(), cmd.clone())
                 }
             }
-            ParsedCommand::Noop { .. } => continue,
+            // Noop variant not present in our core parser
+            // ParsedCommand::Noop { .. } => continue,
         };
         // Enforce per-action grouping: only keep entries matching this cell's action.
         if let Some(exp) = expected_label {
             if label != exp {
                 continue;
             }
-        } else if !(label == "Run" || label == "Test" || label == "Lint" || label == "Format") {
+        } else if !(label == "Run" || label == "Search") {
             // For generic "run" header, keep common run-like labels only.
             continue;
         }
@@ -4602,9 +4601,7 @@ fn new_parsed_command(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
-            ParsedCommand::Format { .. } => ("Format".to_string(), String::new()),
-            ParsedCommand::Test { cmd } => ("Test".to_string(), cmd.clone()),
-            ParsedCommand::Lint { cmd, .. } => ("Lint".to_string(), cmd.clone()),
+            // Upstream-only variants handled as generic runs in this fork
             ParsedCommand::Unknown { cmd } => {
                 let t = cmd.trim();
                 let lower = t.to_lowercase();
@@ -4614,7 +4611,7 @@ fn new_parsed_command(
                     ("Run".to_string(), cmd.clone())
                 }
             }
-            ParsedCommand::Noop { .. } => continue,
+            // ParsedCommand::Noop { .. } => continue,
         };
 
         // Keep only entries that match the primary action grouping.
@@ -4622,7 +4619,7 @@ fn new_parsed_command(
             if label != exp {
                 continue;
             }
-        } else if !(label == "Run" || label == "Test" || label == "Lint" || label == "Format") {
+        } else if !(label == "Run" || label == "Search") {
             continue;
         }
 
