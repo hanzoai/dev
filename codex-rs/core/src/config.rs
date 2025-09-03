@@ -895,7 +895,7 @@ impl Config {
         use codex_protocol::mcp_protocol::AuthMode;
         use crate::CodexAuth;
         
-        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey) {
+        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey, "codex_cli_rs") {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
             _ => false,
         }

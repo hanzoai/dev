@@ -124,6 +124,7 @@ impl App<'_> {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
             AuthMode::ApiKey,
+            config.responses_originator_header.clone(),
         )));
 
         // Split queues so interactive input never waits behind bulk updates.
