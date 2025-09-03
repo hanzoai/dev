@@ -129,10 +129,14 @@ impl BottomPaneView<'_> for ResumeSelectionView {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 { return; }
 
+        // Clear and draw a bordered block that uses the active theme colors.
+        // Other popups (e.g., list_selection_view) already do this; mirroring
+        // that treatment ensures dialogs respect dark/light themes.
         Clear.render(area, buf);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::light_blue()))
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
             .title(self.title.clone())
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
@@ -205,6 +209,8 @@ impl BottomPaneView<'_> for ResumeSelectionView {
             Span::styled("Esc", Style::default().fg(crate::colors::error())),
             Span::raw(" Cancel"),
         ]);
-        Paragraph::new(footer_line).render(footer, buf);
+        Paragraph::new(footer_line)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .render(footer, buf);
     }
 }
