@@ -68,7 +68,11 @@ impl ConversationManager {
 
     pub async fn new_conversation(&self, config: Config) -> CodexResult<NewConversation> {
         // Build auth from codex_home using API key mode by default.
-        let auth = CodexAuth::from_codex_home(&config.codex_home, AuthMode::ApiKey)?;
+        let auth = CodexAuth::from_codex_home(
+            &config.codex_home,
+            AuthMode::ApiKey,
+            &config.responses_originator_header,
+        )?;
         self.spawn_conversation(config, auth).await
     }
 
