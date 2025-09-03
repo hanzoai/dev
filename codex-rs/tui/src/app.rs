@@ -99,6 +99,9 @@ pub(crate) struct App<'a> {
 
     // Double‑Esc timing for backtrack/edit‑previous
     last_esc_time: Option<Instant>,
+
+    /// If true, enable lightweight timing collection and report on exit.
+    timing_enabled: bool,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -111,6 +114,7 @@ pub(crate) struct ChatWidgetArgs {
     enhanced_keys_supported: bool,
     terminal_info: TerminalInfo,
     show_order_overlay: bool,
+    enable_perf: bool,
 }
 
 impl App<'_> {
@@ -122,6 +126,7 @@ impl App<'_> {
         debug: bool,
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
+        enable_perf: bool,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
@@ -145,6 +150,8 @@ impl App<'_> {
             let app_event_tx = app_event_tx.clone();
             let input_running_thread = input_running.clone();
             std::thread::spawn(move || {
+                // Track recent typing to temporarily increase poll frequency for low latency.
+                let mut last_key_time = Instant::now();
                 loop {
                     if !input_running_thread.load(Ordering::Relaxed) { break; }
                     // This timeout is necessary to avoid holding the event lock
@@ -154,13 +161,16 @@ impl App<'_> {
                     // can't acquire it within 2 sec. Resizing the terminal
                     // crashes the app if the cursor position can't be read.
                     // Keep the timeout small to minimize input-to-echo latency.
-                    // Poll slightly less aggressively to reduce wakeups while
-                    // keeping input latency low. If no events are pending,
-                    // sleep briefly to avoid a busy loop.
-                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(10)) {
+                    // Dynamically adapt poll timeout: when the user is actively typing,
+                    // use a very small timeout to minimize key->echo latency; otherwise
+                    // back off to reduce CPU when idle.
+                    let hot_typing = Instant::now().duration_since(last_key_time) <= Duration::from_millis(250);
+                    let poll_timeout = if hot_typing { Duration::from_millis(2) } else { Duration::from_millis(10) };
+                    if let Ok(true) = crossterm::event::poll(poll_timeout) {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
+                                    last_key_time = Instant::now();
                                     app_event_tx.send(AppEvent::KeyEvent(key_event));
                                 }
                                 crossterm::event::Event::Resize(_, _) => {
@@ -191,9 +201,11 @@ impl App<'_> {
                             }
                         }
                     } else {
-                        // Timeout expired, no `Event` is available; sleep briefly
-                        // instead of yielding in a tight loop to reduce CPU at idle.
-                        std::thread::sleep(Duration::from_millis(5));
+                        // Timeout expired, no `Event` is available. If the user is typing
+                        // keep the loop hot; otherwise sleep briefly to cut idle CPU.
+                        if !hot_typing {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
                     }
                 }
             });
@@ -211,6 +223,7 @@ impl App<'_> {
                 enhanced_keys_supported,
                 terminal_info: terminal_info.clone(),
                 show_order_overlay,
+                enable_perf,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -233,6 +246,7 @@ impl App<'_> {
                 terminal_info.clone(),
                 show_order_overlay,
             );
+            chat_widget.enable_perf(enable_perf);
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
             AppState::Chat {
@@ -261,6 +275,7 @@ impl App<'_> {
             terminal_info,
             clear_on_first_frame: true,
             last_esc_time: None,
+            timing_enabled: enable_perf,
         }
     }
 
@@ -357,9 +372,16 @@ impl App<'_> {
                     {
                         let tx = self.app_event_tx.clone();
                         let running = self.commit_anim_running.clone();
+                        let tick_ms: u64 = self
+                            .config
+                            .tui
+                            .stream
+                            .commit_tick_ms
+                            .or(if self.config.tui.stream.responsive { Some(30) } else { None })
+                            .unwrap_or(50);
                         thread::spawn(move || {
                             while running.load(Ordering::Relaxed) {
-                                thread::sleep(Duration::from_millis(50));
+                                thread::sleep(Duration::from_millis(tick_ms));
                                 tx.send(AppEvent::CommitTick);
                             }
                         });
@@ -621,17 +643,18 @@ impl App<'_> {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.new_conversation(self.enhanced_keys_supported);
                             } else {
-                                // If we're not in chat state, create a new chat widget
-                                let new_widget = Box::new(ChatWidget::new(
-                                    self.config.clone(),
-                                    self.app_event_tx.clone(),
-                                    None,
-                                    Vec::new(),
-                                    self.enhanced_keys_supported,
-                                    self.terminal_info.clone(),
-                                    self.show_order_overlay,
-                                ));
-                                self.app_state = AppState::Chat { widget: new_widget };
+                        // If we're not in chat state, create a new chat widget
+                        let mut new_widget = ChatWidget::new(
+                            self.config.clone(),
+                            self.app_event_tx.clone(),
+                            None,
+                            Vec::new(),
+                            self.enhanced_keys_supported,
+                            self.terminal_info.clone(),
+                            self.show_order_overlay,
+                        );
+                        new_widget.enable_perf(self.timing_enabled);
+                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
                             }
                             self.app_event_tx.send(AppEvent::RequestRedraw);
                         }
@@ -787,7 +810,7 @@ impl App<'_> {
                     let mut cfg = self.config.clone();
                     cfg.experimental_resume = Some(path);
                     if let AppState::Chat { .. } = &self.app_state {
-                        let new_widget = Box::new(ChatWidget::new(
+                        let mut new_widget = ChatWidget::new(
                             cfg,
                             self.app_event_tx.clone(),
                             None,
@@ -795,8 +818,9 @@ impl App<'_> {
                             self.enhanced_keys_supported,
                             self.terminal_info.clone(),
                             self.show_order_overlay,
-                        ));
-                        self.app_state = AppState::Chat { widget: new_widget };
+                        );
+                        new_widget.enable_perf(self.timing_enabled);
+                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
                         self.app_event_tx.send(AppEvent::RequestRedraw);
                     }
                 }
@@ -898,18 +922,19 @@ impl App<'_> {
                     initial_prompt,
                     terminal_info,
                     show_order_overlay,
+                    enable_perf,
                 }) => {
-                    self.app_state = AppState::Chat {
-                        widget: Box::new(ChatWidget::new(
-                            config,
-                            app_event_tx.clone(),
-                            initial_prompt,
-                            initial_images,
-                            enhanced_keys_supported,
-                            terminal_info,
-                            show_order_overlay,
-                        )),
-                    }
+                    let mut w = ChatWidget::new(
+                        config,
+                        app_event_tx.clone(),
+                        initial_prompt,
+                        initial_images,
+                        enhanced_keys_supported,
+                        terminal_info,
+                        show_order_overlay,
+                    );
+                    w.enable_perf(enable_perf);
+                    self.app_state = AppState::Chat { widget: Box::new(w) }
                 }
                 AppEvent::StartFileSearch(query) => {
                     if !query.is_empty() {
@@ -978,7 +1003,7 @@ impl App<'_> {
                     // Replace widget with a new one bound to the forked conversation
                     let session_conf = new_conv.0.session_configured.clone();
                     let conv = new_conv.0.conversation.clone();
-                    let new_widget = ChatWidget::new_from_existing(
+                    let mut new_widget = ChatWidget::new_from_existing(
                         cfg,
                         conv,
                         session_conf,
@@ -987,6 +1012,7 @@ impl App<'_> {
                         self.terminal_info.clone(),
                         self.show_order_overlay,
                     );
+                    new_widget.enable_perf(self.timing_enabled);
 
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
 
@@ -1025,7 +1051,7 @@ impl App<'_> {
         loop {
             if let Ok(ev) = self.app_event_rx_high.try_recv() { return Some(ev); }
             if let Ok(ev) = self.app_event_rx_bulk.try_recv() { return Some(ev); }
-            match self.app_event_rx_high.recv_timeout(Duration::from_millis(20)) {
+            match self.app_event_rx_high.recv_timeout(Duration::from_millis(10)) {
                 Ok(ev) => return Some(ev),
                 Err(Timeout) => continue,
                 Err(Disconnected) => break,
@@ -1063,6 +1089,15 @@ impl App<'_> {
         self.commit_anim_running.store(false, Ordering::Release);
         self.input_running.store(false, Ordering::Release);
         usage
+    }
+
+    /// Return a human-readable performance summary if timing was enabled.
+    pub(crate) fn perf_summary(&self) -> Option<String> {
+        if !self.timing_enabled { return None; }
+        match &self.app_state {
+            AppState::Chat { widget } => Some(widget.perf_summary()),
+            AppState::Onboarding { .. } => None,
+        }
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {

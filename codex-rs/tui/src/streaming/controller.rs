@@ -204,12 +204,19 @@ impl StreamController {
             if prev.is_some() {
                 self.header.reset_for_stream(kind);
             }
-            // Emit header immediately for reasoning; for answers, defer to first commit.
-            if matches!(kind, StreamKind::Reasoning) {
+            // Emit header immediately for reasoning; for answers, optionally emit immediately.
+            if matches!(kind, StreamKind::Reasoning)
+                || (matches!(kind, StreamKind::Answer) && self.config.tui.stream.answer_header_immediate)
+            {
                 let mut header_lines = Vec::new();
                 if self.emit_header_if_needed(kind, &mut header_lines) {
                     sink.insert_history(header_lines);
                     self.thinking_placeholder_shown = true;
+                    // For answers, optionally insert an empty streaming cell with a hidden header so
+                    // the UI can show a body placeholder (ellipsis) before the first text arrives.
+                    if matches!(kind, StreamKind::Answer) && self.config.tui.stream.show_answer_ellipsis {
+                        sink.insert_history_with_kind(self.current_stream_id.clone(), kind, vec![ratatui::text::Line::from("codex")]);
+                    }
                 }
             }
         }
@@ -232,14 +239,17 @@ impl StreamController {
         // Check header flag before borrowing state (used only to avoid double headers)
         let _just_emitted_header = self.header.consume_header_flag();
         
-        let state = self.state_mut(kind);
-        // Record that at least one delta was received for this stream
-        if !delta.is_empty() {
-            state.has_seen_delta = true;
+        // Mutate collector and counters in a short scope to avoid long mutable borrows.
+        {
+            let state = self.state_mut(kind);
+            if !delta.is_empty() {
+                state.has_seen_delta = true;
+            }
+            state.collector.push_delta(delta);
+            state.tail_chars_since_commit = state.tail_chars_since_commit.saturating_add(delta.len());
         }
-        state.collector.push_delta(delta);
         if delta.contains('\n') {
-            let mut newly_completed = state.collector.commit_complete_lines(&cfg);
+            let mut newly_completed = self.state_mut(kind).collector.commit_complete_lines(&cfg);
             // Reduce leading blanks to at most one across commits
             if !newly_completed.is_empty() {
                 let mut skip_count = 0;
@@ -269,8 +279,50 @@ impl StreamController {
                 }
                 let count = styled.len();
                 tracing::debug!("stream.commit {:?} newly_completed_lines={}", kind, count);
-                state.enqueue(styled);
+                {
+                    let state = self.state_mut(kind);
+                    state.enqueue(styled);
+                    state.last_commit_instant = Some(std::time::Instant::now());
+                    state.tail_chars_since_commit = 0;
+                }
                 sink.start_commit_animation();
+            }
+        }
+
+        // Char-threshold soft commit (when no newline has arrived for a while)
+        if !delta.contains('\n') {
+            let threshold = self.config.tui.stream.soft_commit_chars
+                .or(if self.config.tui.stream.responsive { Some(160) } else { None });
+            if let Some(limit) = threshold {
+                let ready = { self.state(kind).tail_chars_since_commit >= limit };
+                if ready {
+                    let relax_list = self.config.tui.stream.relax_list_holdback;
+                    let relax_code = self.config.tui.stream.relax_code_holdback;
+                    let cfg2 = self.config.clone();
+                    let mut newly_completed = {
+                        let state = self.state_mut(kind);
+                        state.collector.commit_soft_lines(&cfg2, relax_list, relax_code)
+                    };
+                    if !newly_completed.is_empty() {
+                        // Apply stream-specific color
+                        let color = match kind {
+                            StreamKind::Reasoning => Some(crate::colors::text_dim()),
+                            StreamKind::Answer => Some(crate::colors::text_bright()),
+                        };
+                        let mut styled: Vec<Line<'static>> = Vec::with_capacity(newly_completed.len());
+                        for mut line in newly_completed.drain(..) {
+                            if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
+                            styled.push(line);
+                        }
+                        {
+                            let state = self.state_mut(kind);
+                            state.enqueue(styled);
+                            state.last_commit_instant = Some(std::time::Instant::now());
+                            state.tail_chars_since_commit = 0;
+                        }
+                        sink.start_commit_animation();
+                    }
+                }
             }
         }
     }
@@ -433,6 +485,44 @@ impl StreamController {
         let Some(kind) = self.current_stream else {
             return false;
         };
+        // Timeout-based soft commit: if no newline arrived and nothing is queued, force a soft commit.
+        let timeout_ms = self.config.tui.stream.soft_commit_timeout_ms
+            .or(if self.config.tui.stream.responsive { Some(400) } else { None });
+        if let Some(ms) = timeout_ms {
+            let queue_empty = self.state(kind).is_idle();
+            let overdue = self
+                .state(kind)
+                .last_commit_instant
+                .map(|t| t.elapsed() >= std::time::Duration::from_millis(ms))
+                .unwrap_or(false);
+            if queue_empty && overdue {
+                let relax_list = self.config.tui.stream.relax_list_holdback;
+                let relax_code = self.config.tui.stream.relax_code_holdback;
+                let cfg2 = self.config.clone();
+                let mut newly_completed = {
+                    let state = self.state_mut(kind);
+                    state.collector.commit_soft_lines(&cfg2, relax_list, relax_code)
+                };
+                if !newly_completed.is_empty() {
+                    let color = match kind {
+                        StreamKind::Reasoning => Some(crate::colors::text_dim()),
+                        StreamKind::Answer => Some(crate::colors::text_bright()),
+                    };
+                    let mut styled: Vec<Line<'static>> = Vec::with_capacity(newly_completed.len());
+                    for mut line in newly_completed.drain(..) {
+                        if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
+                        styled.push(line);
+                    }
+                    {
+                        let state = self.state_mut(kind);
+                        state.enqueue(styled);
+                        state.last_commit_instant = Some(std::time::Instant::now());
+                        state.tail_chars_since_commit = 0;
+                    }
+                    sink.start_commit_animation();
+                }
+            }
+        }
         let step = {
             let state = self.state_mut(kind);
             state.step()

@@ -123,6 +123,66 @@ pub struct Tui {
     /// Whether to show reasoning content expanded by default (can be toggled with Ctrl+R/T)
     #[serde(default)]
     pub show_reasoning: bool,
+
+    /// Streaming/animation behavior for assistant/reasoning output
+    #[serde(default)]
+    pub stream: StreamConfig,
+}
+
+/// Streaming behavior configuration for the TUI.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct StreamConfig {
+    /// Emit the Answer header immediately when a stream begins (before first newline).
+    #[serde(default)]
+    pub answer_header_immediate: bool,
+
+    /// Show an ellipsis placeholder in the Answer body while waiting for first text.
+    #[serde(default = "default_true")]
+    pub show_answer_ellipsis: bool,
+
+    /// Commit animation pacing in milliseconds (lines per CommitTick).
+    /// If unset, defaults to 50ms; in responsive profile, defaults to 30ms.
+    #[serde(default)]
+    pub commit_tick_ms: Option<u64>,
+
+    /// Soft-commit timeout (ms) when no newline arrives; commits partial content.
+    /// If unset, disabled; in responsive profile, defaults to 400ms.
+    #[serde(default)]
+    pub soft_commit_timeout_ms: Option<u64>,
+
+    /// Soft-commit when this many chars have streamed without a newline.
+    /// If unset, disabled; in responsive profile, defaults to 160 chars.
+    #[serde(default)]
+    pub soft_commit_chars: Option<usize>,
+
+    /// Relax list hold-back: allow list lines with content; only withhold bare markers.
+    #[serde(default)]
+    pub relax_list_holdback: bool,
+
+    /// Relax code hold-back: allow committing inside an open fenced code block
+    /// except the very last partial line.
+    #[serde(default)]
+    pub relax_code_holdback: bool,
+
+    /// Convenience switch enabling a snappier preset for the above values.
+    /// Explicit values above still take precedence if set.
+    #[serde(default)]
+    pub responsive: bool,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            answer_header_immediate: false,
+            show_answer_ellipsis: true,
+            commit_tick_ms: None,
+            soft_commit_timeout_ms: None,
+            soft_commit_chars: None,
+            relax_list_holdback: false,
+            relax_code_holdback: false,
+            responsive: false,
+        }
+    }
 }
 
 /// Theme configuration for the TUI
