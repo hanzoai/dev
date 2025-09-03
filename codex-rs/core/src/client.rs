@@ -96,7 +96,7 @@ impl ModelClient {
         Self {
             config,
             auth_manager,
-            client: reqwest::Client::new(),
+            client: crate::http_client::build_http_client(),
             provider,
             session_id,
             effort,

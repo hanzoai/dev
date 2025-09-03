@@ -25,8 +25,12 @@ Help us improve by filing issues or submitting PRs (see the section below for ho
 Install globally:
 
 ```shell
-npm install -g @openai/codex
+npm install -g @just-every/code
 ```
+
+Note: The old package name `@just-every/coder` is deprecated and no longer
+receives updates. If you installed that in the past, please switch to
+`@just-every/code` to get the latest releases.
 
 Next, set your OpenAI API key as an environment variable:
 

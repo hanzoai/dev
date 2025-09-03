@@ -16,7 +16,7 @@ pub(crate) async fn chatgpt_get_request<T: DeserializeOwned>(
     init_chatgpt_token_from_auth(&config.codex_home).await?;
 
     // Make direct HTTP request to ChatGPT backend API with the token
-    let client = reqwest::Client::new();
+    let client = codex_core::http_client::build_http_client();
     let url = format!("{chatgpt_base_url}{path}");
 
     let token =
