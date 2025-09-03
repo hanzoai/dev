@@ -34,7 +34,11 @@ pub fn list_sessions_for_cwd(cwd: &Path, codex_home: &Path) -> Vec<ResumeCandida
     // First: try per-directory index
     if let Some(mut v) = read_dir_index(codex_home, cwd) {
         v.sort_by(|a, b| b.sort_key.cmp(&a.sort_key));
-        return v.into_iter().take(200).collect();
+        if !v.is_empty() {
+            return v.into_iter().take(200).collect();
+        }
+        // If the index file exists but is empty or has only irrelevant rows,
+        // fall through to on-disk scan to avoid hiding recent sessions.
     }
 
     // Fallback: scan rollouts

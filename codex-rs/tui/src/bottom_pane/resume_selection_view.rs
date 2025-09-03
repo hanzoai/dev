@@ -26,24 +26,67 @@ pub struct ResumeSelectionView {
     subtitle: String,
     rows: Vec<ResumeRow>,
     selected: usize,
+    // Topmost row index currently visible in the table viewport
+    top: usize,
     complete: bool,
     app_event_tx: AppEventSender,
 }
 
 impl ResumeSelectionView {
     pub fn new(title: String, subtitle: String, rows: Vec<ResumeRow>, app_event_tx: AppEventSender) -> Self {
-        Self { title, subtitle, rows, selected: 0, complete: false, app_event_tx }
+        Self { title, subtitle, rows, selected: 0, top: 0, complete: false, app_event_tx }
     }
 
     fn move_up(&mut self) {
         if self.rows.is_empty() { return; }
         if self.selected == 0 { self.selected = self.rows.len().saturating_sub(1); }
         else { self.selected -= 1; }
+        self.ensure_selected_visible();
     }
 
     fn move_down(&mut self) {
         if self.rows.is_empty() { return; }
         self.selected = (self.selected + 1) % self.rows.len();
+        self.ensure_selected_visible();
+    }
+
+    fn page_up(&mut self) {
+        if self.rows.is_empty() { return; }
+        let page = self.visible_rows();
+        if self.selected >= page { self.selected -= page; } else { self.selected = 0; }
+        self.ensure_selected_visible();
+    }
+
+    fn page_down(&mut self) {
+        if self.rows.is_empty() { return; }
+        let page = self.visible_rows();
+        self.selected = (self.selected + page).min(self.rows.len().saturating_sub(1));
+        self.ensure_selected_visible();
+    }
+
+    fn go_home(&mut self) {
+        if self.rows.is_empty() { return; }
+        self.selected = 0;
+        self.ensure_selected_visible();
+    }
+
+    fn go_end(&mut self) {
+        if self.rows.is_empty() { return; }
+        self.selected = self.rows.len().saturating_sub(1);
+        self.ensure_selected_visible();
+    }
+
+    fn visible_rows(&self) -> usize {
+        self.rows.len().clamp(1, MAX_POPUP_ROWS)
+    }
+
+    fn ensure_selected_visible(&mut self) {
+        let page = self.visible_rows();
+        if self.selected < self.top {
+            self.top = self.selected;
+        } else if self.selected >= self.top.saturating_add(page) {
+            self.top = self.selected.saturating_sub(page.saturating_sub(1));
+        }
     }
 }
 
@@ -52,6 +95,10 @@ impl BottomPaneView<'_> for ResumeSelectionView {
         match key_event.code {
             KeyCode::Up => self.move_up(),
             KeyCode::Down => self.move_down(),
+            KeyCode::PageUp => self.page_up(),
+            KeyCode::PageDown => self.page_down(),
+            KeyCode::Home => self.go_home(),
+            KeyCode::End => self.go_end(),
             KeyCode::Enter => {
                 if let Some(row) = self.rows.get(self.selected) {
                     self.app_event_tx.send(AppEvent::ResumeFrom(row.path.clone()));
@@ -113,8 +160,12 @@ impl BottomPaneView<'_> for ResumeSelectionView {
                 .saturating_sub(footer_reserved + (next_y - inner.y)),
         };
 
-        // Build rows
-        let rows_iter = self.rows.iter().enumerate().map(|(i, r)| {
+        // Build rows (windowed to the visible viewport)
+        let page = self.visible_rows();
+        let start = self.top.min(self.rows.len());
+        let end = (start + page).min(self.rows.len());
+        let rows_iter = self.rows[start..end].iter().enumerate().map(|(idx, r)| {
+            let i = start + idx; // absolute index
             let cells = vec![
                 r.modified.clone(), r.created.clone(), r.msgs.clone(), r.branch.clone(), r.summary.clone()
             ].into_iter().map(|c| ratatui::widgets::Cell::from(c));
@@ -147,7 +198,7 @@ impl BottomPaneView<'_> for ResumeSelectionView {
         // Draw a spacer line above footer (implicit by not drawing into that row)
         let footer = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
         let footer_line = Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(crate::colors::light_blue())),
+            Span::styled("↑↓ PgUp PgDn", Style::default().fg(crate::colors::light_blue())),
             Span::raw(" Navigate  "),
             Span::styled("Enter", Style::default().fg(crate::colors::success())),
             Span::raw(" Select  "),
