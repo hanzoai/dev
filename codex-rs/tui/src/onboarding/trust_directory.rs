@@ -9,8 +9,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
 use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
@@ -52,7 +54,7 @@ impl WidgetRef for &TrustDirectoryWidget {
                 ),
                 Span::raw(self.cwd.to_string_lossy().to_string()),
             ]),
-            "".into(),
+            Line::from(""),
         ];
 
         if self.is_git_repo {
@@ -63,12 +65,12 @@ impl WidgetRef for &TrustDirectoryWidget {
                 "  to work in this folder without asking for approval.",
             ));
         } else {
-            lines.push(
-                "  Since this folder is not version controlled, we recommend requiring".into(),
-            );
-            lines.push("  approval of all edits and commands.".into());
+            lines.push(Line::from(
+                "  Since this folder is not version controlled, we recommend requiring",
+            ));
+            lines.push(Line::from("  approval of all edits and commands."));
         }
-        lines.push("".into());
+        lines.push(Line::from(""));
 
         let create_option =
             |idx: usize, option: TrustDirectorySelection, text: &str| -> Line<'static> {
@@ -111,7 +113,7 @@ impl WidgetRef for &TrustDirectoryWidget {
                 "Require approval of edits and commands",
             ));
         }
-        lines.push("".into());
+        lines.push(Line::from(""));
         if let Some(error) = &self.error {
             lines.push(Line::from(format!("  {error}")).fg(crate::colors::error()));
             lines.push(Line::from(""));

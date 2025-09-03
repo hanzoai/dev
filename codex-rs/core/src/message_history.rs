@@ -109,17 +109,21 @@ pub(crate) async fn append_entry(text: &str, session_id: &Uuid, config: &Config)
     tokio::task::spawn_blocking(move || -> Result<()> {
         // Retry a few times to avoid indefinite blocking when contended.
         for _ in 0..MAX_RETRIES {
-            match history_file.try_lock() {
+            match fs2::FileExt::try_lock_exclusive(&history_file) {
                 Ok(()) => {
                     // While holding the exclusive lock, write the full line.
                     history_file.write_all(line.as_bytes())?;
                     history_file.flush()?;
+                    let _ = fs2::FileExt::unlock(&history_file);
                     return Ok(());
                 }
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    std::thread::sleep(RETRY_SLEEP);
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        std::thread::sleep(RETRY_SLEEP);
+                        continue;
+                    }
+                    return Err(e.into());
                 }
-                Err(e) => return Err(e.into()),
             }
         }
 
@@ -237,9 +241,7 @@ pub(crate) fn lookup(log_id: u64, offset: usize, config: &Config) -> Option<Hist
     // Open & lock file for reading using a shared lock.
     // Retry a few times to avoid indefinite blocking.
     for _ in 0..MAX_RETRIES {
-        let lock_result = file.try_lock_shared();
-
-        match lock_result {
+        match fs2::FileExt::try_lock_shared(&file) {
             Ok(()) => {
                 let reader = BufReader::new(&file);
                 for (idx, line_res) in reader.lines().enumerate() {
@@ -247,27 +249,32 @@ pub(crate) fn lookup(log_id: u64, offset: usize, config: &Config) -> Option<Hist
                         Ok(l) => l,
                         Err(e) => {
                             tracing::warn!(error = %e, "failed to read line from history file");
+                            let _ = fs2::FileExt::unlock(&file);
                             return None;
                         }
                     };
 
                     if idx == offset {
-                        match serde_json::from_str::<HistoryEntry>(&line) {
-                            Ok(entry) => return Some(entry),
+                        let res = match serde_json::from_str::<HistoryEntry>(&line) {
+                            Ok(entry) => Some(entry),
                             Err(e) => {
                                 tracing::warn!(error = %e, "failed to parse history entry");
-                                return None;
+                                None
                             }
-                        }
+                        };
+                        let _ = fs2::FileExt::unlock(&file);
+                        return res;
                     }
                 }
+                let _ = fs2::FileExt::unlock(&file);
                 // Not found at requested offset.
                 return None;
             }
-            Err(std::fs::TryLockError::WouldBlock) => {
-                std::thread::sleep(RETRY_SLEEP);
-            }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    std::thread::sleep(RETRY_SLEEP);
+                    continue;
+                }
                 tracing::warn!(error = %e, "failed to acquire shared lock on history file");
                 return None;
             }

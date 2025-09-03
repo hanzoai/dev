@@ -4,7 +4,8 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Block, Borders, Clear};
@@ -43,7 +44,7 @@ pub(crate) struct ListSelectionView {
 
 impl ListSelectionView {
     fn dim_prefix_span() -> Span<'static> {
-        "▌ ".dim()
+        Span::styled("▌ ", Style::default().add_modifier(Modifier::DIM))
     }
 
     fn render_dim_prefix_line(area: Rect, buf: &mut Buffer) {
@@ -216,15 +217,7 @@ impl BottomPaneView<'_> for ListSelectionView {
             })
             .collect();
         if rows_area.height > 0 {
-            render_rows(
-                rows_area,
-                buf,
-                &rows,
-                &self.state,
-                MAX_POPUP_ROWS,
-                true,
-                "no matches",
-            );
+            render_rows(rows_area, buf, &rows, &self.state, MAX_POPUP_ROWS, true);
         }
 
         if self.footer_hint.is_some() {

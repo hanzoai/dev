@@ -25,8 +25,6 @@ use super::list::Cursor;
 use super::list::get_conversations;
 use crate::config::Config;
 use crate::conversation_manager::InitialHistory;
-use crate::git_info::GitInfo;
-use crate::git_info::collect_git_info;
 use codex_protocol::models::ResponseItem;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -34,21 +32,14 @@ pub struct SessionMeta {
     pub id: Uuid,
     pub timestamp: String,
     pub instructions: Option<String>,
-    /// Absolute working directory for the session. Optional for back-compat
-    /// with older rollout files that did not record this information.
-    #[serde(default)]
-    pub cwd: Option<String>,
-    /// Model identifier for the session.
-    #[serde(default)]
-    pub model: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SessionMetaWithGit {
     #[serde(flatten)]
     meta: SessionMeta,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    git: Option<GitInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")] 
+    git: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -64,15 +55,6 @@ pub struct SavedSession {
     pub session_id: Uuid,
 }
 
-/// Records all [`ResponseItem`]s for a session and flushes them to disk after
-/// every update.
-///
-/// Rollouts are recorded as JSONL and can be inspected with tools such as:
-///
-/// ```ignore
-/// $ jq -C . ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
     tx: Sender<RolloutCmd>,
@@ -86,7 +68,6 @@ enum RolloutCmd {
 
 impl RolloutRecorder {
     #[allow(dead_code)]
-    /// List conversations (rollout files) under the provided Codex home directory.
     pub async fn list_conversations(
         codex_home: &Path,
         page_size: usize,
@@ -95,15 +76,12 @@ impl RolloutRecorder {
         get_conversations(codex_home, page_size, cursor).await
     }
 
-    /// Attempt to create a new [`RolloutRecorder`]. If the sessions directory
-    /// cannot be created or the rollout file cannot be opened we return the
-    /// error so the caller can decide whether to disable persistence.
     pub async fn new(
         config: &Config,
         uuid: Uuid,
         instructions: Option<String>,
     ) -> std::io::Result<Self> {
-        let LogFileInfo { file, session_id, timestamp, path } = create_log_file(config, uuid)?;
+        let LogFileInfo { file, session_id, timestamp } = create_log_file(config, uuid)?;
 
         let timestamp_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
@@ -112,55 +90,76 @@ impl RolloutRecorder {
             .format(timestamp_format)
             .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
 
-        // Clone the cwd for the spawned task to collect git info asynchronously
-        let cwd = config.cwd.clone();
-
-        // A reasonably-sized bounded channel. If the buffer fills up the send
-        // future will yield, which is fine – we only need to ensure we do not
-        // perform *blocking* I/O on the caller's thread.
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
-
-        // Spawn a Tokio task that owns the file handle and performs async
-        // writes. Using `tokio::fs::File` keeps everything on the async I/O
-        // driver instead of blocking the runtime.
         tokio::task::spawn(rollout_writer(
             tokio::fs::File::from_std(file),
             rx,
-            Some(SessionMeta {
-                timestamp,
-                id: session_id,
-                instructions,
-                cwd: Some(config.cwd.to_string_lossy().to_string()),
-                model: Some(config.model.clone()),
-            }),
-            cwd,
-            config.codex_home.clone(),
-            path,
+            Some(SessionMeta { timestamp, id: session_id, instructions }),
         ));
-
         Ok(Self { tx })
     }
 
-    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
-        let mut filtered = Vec::new();
-        for item in items {
-            match item {
-                // Note that function calls may look a bit strange if they are
-                // "fully qualified MCP tool calls," so we could consider
-                // reformatting them in that case.
-                ResponseItem::Message { .. }
-                | ResponseItem::LocalShellCall { .. }
-                | ResponseItem::FunctionCall { .. }
-                | ResponseItem::FunctionCallOutput { .. }
-                | ResponseItem::CustomToolCall { .. }
-                | ResponseItem::CustomToolCallOutput { .. }
-                | ResponseItem::Reasoning { .. } => filtered.push(item.clone()),
-                ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {
-                    // These should never be serialized.
-                    continue;
-                }
+    pub async fn resume(path: &Path, _cwd: std::path::PathBuf) -> std::io::Result<(Self, SavedSession)> {
+        info!("Resuming rollout from {path:?}");
+        let text = tokio::fs::read_to_string(path).await?;
+        let mut lines = text.lines();
+        let first = lines
+            .next()
+            .ok_or_else(|| IoError::other("empty session file"))?;
+        let meta: SessionMeta = serde_json::from_str::<SessionMetaWithGit>(first)
+            .map(|m| m.meta)
+            .map_err(|e| IoError::other(format!("failed to parse session header: {e}")))?;
+
+        let mut items = Vec::new();
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if v.get("record_type")
+                .and_then(|rt| rt.as_str())
+                .map(|s| s == "state")
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Ok(item) = serde_json::from_value::<ResponseItem>(v.clone()) {
+                items.push(item);
             }
         }
+
+        let file = std::fs::OpenOptions::new().append(true).read(true).open(path)?;
+        let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
+        tokio::task::spawn(rollout_writer(tokio::fs::File::from_std(file), rx, None));
+
+        let saved = SavedSession {
+            session: meta.clone(),
+            items: items.clone(),
+            state: SessionStateSnapshot::default(),
+            session_id: meta.id,
+        };
+        info!("Resumed rollout successfully from {path:?}");
+        Ok((Self { tx }, saved))
+    }
+
+    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
+        let filtered: Vec<ResponseItem> = items
+            .iter()
+            .filter(|item| matches!(
+                item,
+                ResponseItem::Message { .. }
+                    | ResponseItem::LocalShellCall { .. }
+                    | ResponseItem::FunctionCall { .. }
+                    | ResponseItem::FunctionCallOutput { .. }
+                    | ResponseItem::CustomToolCall { .. }
+                    | ResponseItem::CustomToolCallOutput { .. }
+                    | ResponseItem::Reasoning { .. }
+            ))
+            .cloned()
+            .collect();
         if filtered.is_empty() {
             return Ok(());
         }
@@ -185,7 +184,6 @@ impl RolloutRecorder {
             .next()
             .ok_or_else(|| IoError::other("empty session file"))?;
         let mut items = Vec::new();
-
         for line in lines {
             if line.trim().is_empty() {
                 continue;
@@ -201,45 +199,10 @@ impl RolloutRecorder {
             {
                 continue;
             }
-            match serde_json::from_value::<ResponseItem>(v.clone()) {
-                Ok(item) => match item {
-                    ResponseItem::Message { .. }
-                    | ResponseItem::LocalShellCall { .. }
-                    | ResponseItem::FunctionCall { .. }
-                    | ResponseItem::FunctionCallOutput { .. }
-                    | ResponseItem::CustomToolCall { .. }
-                    | ResponseItem::CustomToolCallOutput { .. }
-                    | ResponseItem::Reasoning { .. } => items.push(item),
-                    ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {}
-                },
-                Err(e) => {
-                    warn!("failed to parse item: {v:?}, error: {e}");
-                }
+            if let Ok(item) = serde_json::from_value::<ResponseItem>(v.clone()) {
+                items.push(item);
             }
         }
-
-        let saved = SavedSession {
-            session: session.clone(),
-            items: items.clone(),
-            state: state.clone(),
-            session_id: session.id,
-        };
-
-        let file = std::fs::OpenOptions::new()
-            .append(true)
-            .read(true)
-            .open(path)?;
-
-        let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
-        tokio::task::spawn(rollout_writer(
-            tokio::fs::File::from_std(file),
-            rx,
-            None,
-            cwd.clone(),
-            crate::config::find_codex_home().unwrap_or_else(|_| std::env::temp_dir()),
-            path.to_path_buf(),
-        ));
-        info!("Resumed rollout successfully from {path:?}");
         if items.is_empty() {
             Ok(InitialHistory::New)
         } else {
@@ -264,21 +227,12 @@ impl RolloutRecorder {
 }
 
 struct LogFileInfo {
-    /// Opened file handle to the rollout file.
     file: File,
-
-    /// Session ID (also embedded in filename).
     session_id: Uuid,
-
-    /// Timestamp for the start of the session.
     timestamp: OffsetDateTime,
-
-    /// Absolute path to the rollout file on disk.
-    path: std::path::PathBuf,
 }
 
 fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.codex/sessions/YYYY/MM/DD and create it if missing.
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.codex_home.clone();
@@ -287,129 +241,37 @@ fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFile
     dir.push(format!("{:02}", u8::from(timestamp.month())));
     dir.push(format!("{:02}", timestamp.day()));
     fs::create_dir_all(&dir)?;
-
-    // Custom format for YYYY-MM-DDThh-mm-ss. Use `-` instead of `:` for
-    // compatibility with filesystems that do not allow colons in filenames.
-    let format: &[FormatItem] =
-        format_description!("[year]-[month]-[day]T[hour]-[minute]-[second]");
+    let format: &[FormatItem] = format_description!("[year]-[month]-[day]T[hour]-[minute]-[second]");
     let date_str = timestamp
         .format(format)
         .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
-
     let filename = format!("rollout-{date_str}-{session_id}.jsonl");
-
     let path = dir.join(filename);
-    let file = std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&path)?;
-
-    Ok(LogFileInfo {
-        file,
-        session_id,
-        timestamp,
-        path,
-    })
+    let file = std::fs::OpenOptions::new().append(true).create(true).open(&path)?;
+    Ok(LogFileInfo { file, session_id, timestamp })
 }
 
 async fn rollout_writer(
-    file: tokio::fs::File,
+    mut file: tokio::fs::File,
     mut rx: mpsc::Receiver<RolloutCmd>,
     mut meta: Option<SessionMeta>,
-    cwd: std::path::PathBuf,
-    codex_home: std::path::PathBuf,
-    rollout_path: std::path::PathBuf,
 ) -> std::io::Result<()> {
-    let mut writer = JsonlWriter { file };
-
-    // If we have a meta, collect git info asynchronously and write meta first
     if let Some(session_meta) = meta.take() {
-        let git_info = collect_git_info(&cwd).await;
-        let session_meta_with_git = SessionMetaWithGit {
-            meta: session_meta,
-            git: git_info,
-        };
-
-        // Write the SessionMeta as the first item in the file
-        writer.write_line(&session_meta_with_git).await?;
-
-        // Best-effort initial directory index update
-        if let Err(e) = append_dir_index_update(
-            &codex_home,
-            &cwd,
-            &session_meta_with_git,
-            &rollout_path,
-            0,
-            None,
-        ) {
-            warn!("failed to write dir index: {e}");
-        }
+        let mut json = serde_json::to_string(&SessionMetaWithGit { meta: session_meta, git: None })?;
+        json.push('\n');
+        let _ = file.write_all(json.as_bytes()).await;
+        file.flush().await?;
     }
 
-    // Process rollout commands
     while let Some(cmd) = rx.recv().await {
         match cmd {
             RolloutCmd::AddItems(items) => {
-                // Track message count and last user snippet while writing
-                let mut msg_count_delta = 0usize;
-                let mut last_user_snippet: Option<String> = None;
                 for item in items {
-                    match item {
-                        ResponseItem::Message { .. }
-                        | ResponseItem::LocalShellCall { .. }
-                        | ResponseItem::FunctionCall { .. }
-                        | ResponseItem::FunctionCallOutput { .. }
-                        | ResponseItem::CustomToolCall { .. }
-                        | ResponseItem::CustomToolCallOutput { .. }
-                        | ResponseItem::Reasoning { .. } => {
-                            // Skip internal system status messages from persistence
-                            if let ResponseItem::Message { content, .. } = &item {
-                                let contains_system_status = content.iter().any(|ci| match ci {
-                                    codex_protocol::models::ContentItem::InputText { text }
-                                    | codex_protocol::models::ContentItem::OutputText { text } => text.contains("== System Status =="),
-                                    _ => false,
-                                });
-                                if contains_system_status {
-                                    continue;
-                                }
-                            }
-                            writer.write_line(&item).await?;
-
-                            if let ResponseItem::Message { role, content, .. } = &item {
-                                if role == "user" {
-                                    // Synthesize a short snippet
-                                    let mut s = String::new();
-                                    for c in content {
-                                        if let codex_protocol::models::ContentItem::InputText { text } = c {
-                                            if !text.is_empty() {
-                                                s.push_str(text);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if s.is_empty() {
-                                        s = "(image/message)".to_string();
-                                    }
-                                    last_user_snippet = Some(s);
-                                }
-                                msg_count_delta = msg_count_delta.saturating_add(1);
-                            }
-                        }
-                        ResponseItem::WebSearchCall { .. } | ResponseItem::Other => {}
-                    }
+                    let mut json = serde_json::to_string(&item)?;
+                    json.push('\n');
+                    let _ = file.write_all(json.as_bytes()).await;
                 }
-
-                // Best-effort index append after batch
-                if let Err(e) = append_dir_index_update(
-                    &codex_home,
-                    &cwd,
-                    &SessionMetaWithGit { meta: SessionMeta { id: Uuid::nil(), timestamp: String::new(), instructions: None, cwd: Some(cwd.to_string_lossy().to_string()), model: None }, git: None },
-                    &rollout_path,
-                    msg_count_delta,
-                    last_user_snippet,
-                ) {
-                    warn!("failed to write dir index: {e}");
-                }
+                file.flush().await?;
             }
             RolloutCmd::UpdateState(state) => {
                 #[derive(Serialize)]
@@ -418,106 +280,14 @@ async fn rollout_writer(
                     #[serde(flatten)]
                     state: &'a SessionStateSnapshot,
                 }
-                writer
-                    .write_line(&StateLine {
-                        record_type: "state",
-                        state: &state,
-                    })
-                    .await?;
+                let mut json = serde_json::to_string(&StateLine { record_type: "state", state: &state })?;
+                json.push('\n');
+                let _ = file.write_all(json.as_bytes()).await;
+                file.flush().await?;
             }
-            RolloutCmd::Shutdown { ack } => {
-                let _ = ack.send(());
-            }
+            RolloutCmd::Shutdown { ack } => { let _ = ack.send(()); }
         }
     }
 
     Ok(())
-}
-
-struct JsonlWriter {
-    file: tokio::fs::File,
-}
-
-impl JsonlWriter {
-    async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
-        let mut json = serde_json::to_string(item)?;
-        json.push('\n');
-        let _ = self.file.write_all(json.as_bytes()).await;
-        self.file.flush().await?;
-        Ok(())
-    }
-}
-
-#[derive(Serialize)]
-struct DirIndexLine<'a> {
-    record_type: &'static str,
-    cwd: &'a str,
-    session_file: &'a str,
-    session_id: String,
-    created_ts: Option<&'a str>,
-    modified_ts: String,
-    message_count_delta: usize,
-    model: Option<&'a str>,
-    branch: Option<&'a str>,
-    last_user_snippet: Option<String>,
-}
-
-fn dir_index_path(codex_home: &std::path::Path, cwd: &std::path::Path) -> std::path::PathBuf {
-    let mut name = cwd.to_string_lossy().to_string();
-    name = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    if name.len() > 160 {
-        name.truncate(160);
-    }
-    let mut p = codex_home.to_path_buf();
-    p.push(SESSIONS_SUBDIR);
-    p.push("index");
-    p.push("by-dir");
-    let _ = fs::create_dir_all(&p);
-    p.push(format!("{}.jsonl", name));
-    p
-}
-
-fn append_dir_index_update(
-    codex_home: &std::path::Path,
-    cwd: &std::path::Path,
-    session_meta_with_git: &SessionMetaWithGit,
-    rollout_path: &std::path::Path,
-    message_count_delta: usize,
-    last_user_snippet: Option<String>,
-) -> std::io::Result<()> {
-    let path = dir_index_path(codex_home, cwd);
-    let mut opts = std::fs::OpenOptions::new();
-    opts.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut f = opts.open(&path)?;
-    let now = OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "".to_string());
-    let meta = &session_meta_with_git.meta;
-    let branch = session_meta_with_git.git.as_ref().and_then(|g| g.branch.as_deref());
-    let sf_binding = rollout_path.to_string_lossy();
-    let line = DirIndexLine {
-        record_type: "dir_index",
-        cwd: meta.cwd.as_deref().unwrap_or("") ,
-        session_file: sf_binding.as_ref(),
-        session_id: meta.id.to_string(),
-        created_ts: Some(&meta.timestamp),
-        modified_ts: now,
-        message_count_delta,
-        model: meta.model.as_deref(),
-        branch,
-        last_user_snippet,
-    };
-    let s = serde_json::to_string(&line)
-        .map_err(|e| IoError::other(format!("failed to serialize dir index line: {e}")))?;
-    use std::io::Write as _;
-    f.write_all(s.as_bytes())?;
-    f.write_all(b"\n")
 }

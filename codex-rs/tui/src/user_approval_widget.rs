@@ -29,7 +29,6 @@ use ratatui::widgets::Wrap;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history_cell;
 
 /// Request coming from the agent that needs user approval.
 pub(crate) enum ApprovalRequest {
@@ -239,8 +238,8 @@ impl UserApprovalWidget<'_> {
         match &self.approval_request {
             ApprovalRequest::Exec { command, .. } => {
                 let cmd = strip_bash_lc_and_escape(command);
-                // TODO: move this rendering into history_cell.
-                let mut lines: Vec<Line<'static>> = vec![];
+                let mut cmd_span: Span = cmd.clone().into();
+                cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
 
                 // Result line based on decision.
                 match decision {
@@ -285,20 +284,15 @@ impl UserApprovalWidget<'_> {
                         ]));
                     }
                 }
-
-                if !feedback.trim().is_empty() {
-                    lines.push(Line::from("feedback:"));
-                    for l in feedback.lines() {
-                        lines.push(Line::from(l.to_string()));
-                    }
-                }
-
-                self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    history_cell::new_user_approval_decision(lines),
-                )));
             }
             ApprovalRequest::ApplyPatch { .. } => {
-                // No history line for patch approval decisions.
+                lines.push(Line::from(format!("patch approval decision: {decision:?}")));
+            }
+        }
+        if !feedback.trim().is_empty() {
+            lines.push(Line::from("feedback:"));
+            for l in feedback.lines() {
+                lines.push(Line::from(l.to_string()));
             }
         }
         lines.push(Line::from(""));

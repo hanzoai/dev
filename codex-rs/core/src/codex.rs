@@ -35,7 +35,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
-use codex_login::CodexAuth;
+use crate::CodexAuth;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
@@ -1568,7 +1568,7 @@ async fn submission_loop(
                 // Wrap provided auth (if any) in a minimal AuthManager for client usage.
                 let auth_manager = auth
                     .as_ref()
-                    .map(|a| codex_login::AuthManager::from_auth_for_testing(a.clone()));
+                    .map(|a| crate::AuthManager::from_auth_for_testing(a.clone()));
                 let client = ModelClient::new(
                     config.clone(),
                     auth_manager,

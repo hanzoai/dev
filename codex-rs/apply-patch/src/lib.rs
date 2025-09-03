@@ -113,8 +113,8 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
                 is_shell && is_flag && starts_with_apply
             } =>
         {
-            match extract_heredoc_body_from_apply_patch_command(script) {
-                Ok(body) => match parse_patch(&body) {
+            match extract_apply_patch_from_bash(script) {
+                Ok((body, _maybe_cd)) => match parse_patch(&body) {
                     Ok(source) => MaybeApplyPatch::Body(source),
                     Err(e) => MaybeApplyPatch::PatchParseError(e),
                 },
