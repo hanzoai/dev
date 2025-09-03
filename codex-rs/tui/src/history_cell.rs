@@ -366,9 +366,7 @@ impl ReadAggregationCell {
         self.lines.extend(more);
     }
 
-    pub(crate) fn finalize(&mut self) {
-        self.finalized = true;
-    }
+    pub(crate) fn finalize(&mut self) { self.finalized = true; }
 
     // Build a normalized copy of aggregated lines where only the very first
     // visible line uses the corner connector "└ "; subsequent lines use two
@@ -401,17 +399,11 @@ impl ReadAggregationCell {
 impl HistoryCell for ReadAggregationCell {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } }
-    }
+    fn kind(&self) -> HistoryCellType { HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } } }
     fn display_lines(&self) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
-        // Header: match Exec running/success styling for informational actions
-        let header = if self.finalized {
-            Line::styled("Read", Style::default().fg(crate::colors::text()))
-        } else {
-            Line::styled("Read", Style::default().fg(crate::colors::info()))
-        };
+        // Always render a stable, completed-style header to avoid flicker
+        let header = Line::styled("Read", Style::default().fg(crate::colors::text()));
         out.push(header);
         out.extend(self.normalized_lines());
         out
@@ -1435,10 +1427,10 @@ mod tests {
     #[test]
     fn action_enum_from_parsed_variants() {
         // Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into(), path: Some("foo.txt".into()) }];
+        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Read));
         // Search
-        let parsed = vec![ParsedCommand::Search { query: "term".into(), path: Some("src".into()), cmd: "rg term src".into() }];
+        let parsed = vec![ParsedCommand::Search { query: Some("term".into()), path: Some("src".into()), cmd: "rg term src".into() }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Search));
         // List files
         let parsed = vec![ParsedCommand::ListFiles { cmd: "ls -la".into(), path: Some(".".into()) }];
@@ -1454,7 +1446,7 @@ mod tests {
     #[test]
     fn merged_exec_cell_push_and_kind() {
         // Build two completed ExecCell instances for Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into(), path: Some("foo.txt".into()) }];
+        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
         let e1 = new_completed_exec_command(
             vec!["sed".into(), "-n".into(), "1,10p".into(), "foo.txt".into()],
             parsed.clone(),
@@ -1989,33 +1981,27 @@ fn exec_render_parts_parsed(
     let ctx_path = first_context_path(parsed_commands);
     let mut pre: Vec<Line<'static>> = vec![match output {
         None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            let header = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Running... in {}", p),
-                    None => "Running...".to_string(),
-                },
-            };
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(
-                    header + &duration_str,
-                    Style::default().fg(crate::colors::info()),
-                )
-            } else {
-                Line::styled(
-                    header + &duration_str,
-                    Style::default()
-                        .fg(crate::colors::info())
-                        .add_modifier(Modifier::BOLD),
-                )
+            match action {
+                // For these informational actions, remove the transient “running” style
+                // and render exactly like the finalized state (no duration, normal text color).
+                ExecAction::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
+                ExecAction::Search => Line::styled("Searched", Style::default().fg(crate::colors::text())),
+                ExecAction::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
+                // Keep rich running header for real Run commands
+                ExecAction::Run => {
+                    let duration_str = if let Some(start) = start_time {
+                        let elapsed = start.elapsed();
+                        format!(" ({})", format_duration(elapsed))
+                    } else { String::new() };
+                    let header = match &ctx_path {
+                        Some(p) => format!("Running... in {}", p),
+                        None => "Running...".to_string(),
+                    };
+                    Line::styled(
+                        header + &duration_str,
+                        Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD),
+                    )
+                }
             }
         }
         Some(o) if o.exit_code == 0 => {
@@ -2802,14 +2788,17 @@ pub(crate) struct CollapsibleReasoningCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) collapsed: std::cell::Cell<bool>,
     pub(crate) in_progress: std::cell::Cell<bool>,
+    // Optional stream id to anchor routing of deltas/finals
+    pub(crate) id: Option<String>,
 }
 
 impl CollapsibleReasoningCell {
-    pub fn new(lines: Vec<Line<'static>>) -> Self {
+    pub fn new_with_id(lines: Vec<Line<'static>>, id: Option<String>) -> Self {
         Self {
             lines,
             collapsed: std::cell::Cell::new(true), // Default to collapsed
             in_progress: std::cell::Cell::new(false),
+            id,
         }
     }
 
@@ -2961,6 +2950,8 @@ impl HistoryCell for CollapsibleReasoningCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
+        // Touch id for sanity/read to avoid dead-code warning; used for routing in ChatWidget
+        let _ = &self.id;
         if self.lines.is_empty() {
             return Vec::new();
         }

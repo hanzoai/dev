@@ -232,11 +232,52 @@ pub(crate) struct ChatWidget<'a> {
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
+    
+    // Stable ordering: per-visible-cell order key parallel to `history_cells`.
+    cell_order_seq: Vec<Option<OrderKey>>,
+    // Debug: per-cell order info string rendered in the UI to diagnose ordering.
+    cell_order_dbg: Vec<Option<String>>,
+    // Start index of the current turn within history_cells for ordered inserts.
+    turn_start_idx: usize,
+    // Current turn id from TaskStarted (if any)
+    current_turn_id: Option<String>,
+    // Pending order seq for next insertion (set by interrupt flush)
+    pending_insert_seq: Option<OrderKey>,
+    // Pending turn window index for next insertion
+    pending_insert_turn: Option<usize>,
+    // Routing for reasoning stream ids -> existing CollapsibleReasoningCell index
+    reasoning_index: HashMap<String, usize>,
+    // Stream id -> owning turn id (for reasoning/answer ids)
+    stream_id_to_turn: HashMap<String, String>,
+    // Generic call id (exec/tool/patch) -> owning turn id
+    call_id_to_turn: HashMap<String, String>,
+    // Stable per-(turn_id, kind, id) ordering, seeded from event_seq
+    stream_order_seq: HashMap<(String, StreamKind, String), OrderKey>,
+    // Monotonic arrival counter per turn; increments on every EventMsg handled
+    turn_arrival_seq: u64,
+    // Turn windows and lookup
+    turn_windows: Vec<TurnWindow>,
+    turn_index_by_id: HashMap<String, usize>,
+    // Map turn id -> request ordinal (from OrderMeta). Lets us show request index even for
+    // unordered/pushed cells that lack an explicit OrderMeta on the triggering event.
+    turn_request_ordinal: HashMap<String, u64>,
+    // Show order overlay when true (from --order)
+    show_order_overlay: bool,
 }
 
 struct PendingJumpBack {
     removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
 }
+
+// ---------- Stable ordering & routing helpers ----------
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct OrderKey(u64);
+
+#[derive(Debug, Clone)]
+struct TurnWindow {
+    start_idx: usize,
+}
+
 
 // Global guard to prevent overlapping background screenshot captures and to rate-limit them
 static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
@@ -288,6 +329,37 @@ impl std::fmt::Display for StreamId { fn fmt(&self, f: &mut std::fmt::Formatter<
 impl AsRef<str> for StreamId { fn as_ref(&self) -> &str { &self.0 } }
 
 impl ChatWidget<'_> {
+    // Build an ordered key from model-provided OrderMeta.
+    // Layout: [63: ordered flag (0 = ordered, 1 = unordered)] [62..48: request_ordinal (16b)] [47..32: output_index (16b)] [31..0: sequence_number (32b)]
+    fn order_key_from_order_meta(order: Option<&codex_core::protocol::OrderMeta>) -> Option<OrderKey> {
+        order.map(|om| {
+            let req = (om.request_ordinal & 0xFFFF) << 48;
+            let out = (om.output_index.unwrap_or(0) as u64 & 0xFFFF) << 32;
+            let seq = om.sequence_number.unwrap_or(0) & 0xFFFF_FFFF;
+            // MSB cleared to indicate ordered content
+            OrderKey(req | out | seq)
+        })
+    }
+
+    // Generate a key for unordered items that must sort after all ordered ones in a turn window.
+    fn next_unordered_seq(&mut self) -> OrderKey {
+        self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
+        // Set MSB to 1 so unordered items always sort after ordered ones
+        OrderKey((1u64 << 63) | (self.turn_arrival_seq & 0x7FFF_FFFF_FFFF_FFFF))
+    }
+
+    fn debug_fmt_order_key(ok: OrderKey) -> String {
+        let v = ok.0;
+        let is_unordered = (v >> 63) == 1;
+        if is_unordered {
+            format!("U:{}", v & 0x7FFF_FFFF_FFFF_FFFF)
+        } else {
+            let req = (v >> 48) & 0xFFFF;
+            let out = (v >> 32) & 0xFFFF;
+            let seq = v & 0xFFFF_FFFF;
+            format!("O:req={} out={} seq={}", req, out, seq)
+        }
+    }
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
         let any_tools_running = !self.exec.running_commands.is_empty()
@@ -522,15 +594,7 @@ impl ChatWidget<'_> {
         s
     }
 
-    fn index_of_final_assistant(&self) -> Option<usize> {
-        self.history_cells.iter().rposition(|c| c.as_any().downcast_ref::<history_cell::AssistantMarkdownCell>().is_some())
-    }
-
-    fn maybe_move_last_before_final_assistant_exec(&mut self, call_id: &str) { exec_tools::maybe_move_last_before_final_assistant_exec(self, call_id); }
-
-    fn maybe_move_last_before_final_assistant_tool(&mut self, call_id: &str) { exec_tools::maybe_move_last_before_final_assistant_tool(self, call_id); }
-
-    fn maybe_move_last_before_final_assistant(&mut self, seq: u64) { exec_tools::maybe_move_last_before_final_assistant(self, seq); }
+    // Removed order-adjustment helpers; ordering now uses stable order keys on insert.
 
 
 
@@ -579,7 +643,7 @@ impl ChatWidget<'_> {
         // Clone for session storage before moving into history
         let changes_clone = changes.clone();
         // Surface the patch summary in the main conversation
-        self.history_push(history_cell::new_patch_event(
+        self.push_cell_maybe_ordered(history_cell::new_patch_event(
             history_cell::PatchEventType::ApprovalRequest,
             changes,
         ));
@@ -672,7 +736,7 @@ impl ChatWidget<'_> {
             }
             // Fallback: if no prior cell found, do nothing (avoid extra section)
         } else {
-            self.history_push(history_cell::new_patch_apply_failure(ev.stderr));
+            self.push_cell_maybe_ordered(history_cell::new_patch_apply_failure(ev.stderr));
         }
         // After patch application completes, re-evaluate idle state
         self.maybe_hide_spinner();
@@ -685,6 +749,17 @@ impl ChatWidget<'_> {
 
     pub(crate) fn insert_str(&mut self, s: &str) {
         self.bottom_pane.insert_str(s);
+    }
+
+    // Interrupts set a pending seq; the next insertion uses ordered placement.
+    fn set_pending_insert_seq(&mut self, seq: u64) {
+        let is_unordered = (seq >> 63) == 1;
+        tracing::info!(
+            "[order] set_pending_insert_seq key={} ({})",
+            seq,
+            if is_unordered { "unordered" } else { "ordered" }
+        );
+        self.pending_insert_seq = Some(OrderKey(seq));
     }
 
     pub(crate) fn register_pasted_image(&mut self, placeholder: String, path: std::path::PathBuf) {
@@ -920,6 +995,7 @@ impl ChatWidget<'_> {
         initial_images: Vec<PathBuf>,
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
+        show_order_overlay: bool,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -945,10 +1021,7 @@ impl ChatWidget<'_> {
             };
 
             // Forward the SessionConfigured event to the UI
-            let event = Event {
-                id: new_conversation.conversation_id.to_string(),
-                msg: EventMsg::SessionConfigured(new_conversation.session_configured),
-            };
+            let event = Event { id: new_conversation.conversation_id.to_string(), event_seq: 0, msg: EventMsg::SessionConfigured(new_conversation.session_configured), order: None };
             app_event_tx_clone.send(AppEvent::CodexEvent(event));
 
             let conversation = new_conversation.conversation;
@@ -1052,6 +1125,22 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
+            // Stable ordering & routing init
+            cell_order_seq: vec![None; 1],
+            cell_order_dbg: vec![None; 1],
+            turn_start_idx: 1,
+            current_turn_id: None,
+            pending_insert_seq: None,
+            pending_insert_turn: None,
+            reasoning_index: HashMap::new(),
+            stream_id_to_turn: HashMap::new(),
+            call_id_to_turn: HashMap::new(),
+            stream_order_seq: HashMap::new(),
+            turn_arrival_seq: 0,
+            turn_windows: Vec::new(),
+            turn_index_by_id: HashMap::new(),
+            turn_request_ordinal: HashMap::new(),
+            show_order_overlay,
         };
         
         // Note: Initial redraw needs to be triggered after widget is added to app_state
@@ -1068,6 +1157,7 @@ impl ChatWidget<'_> {
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
+        show_order_overlay: bool,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -1075,7 +1165,7 @@ impl ChatWidget<'_> {
         let app_event_tx_clone = app_event_tx.clone();
         tokio::spawn(async move {
             // Send the provided SessionConfigured to the UI first
-            let event = Event { id: "fork".to_string(), msg: EventMsg::SessionConfigured(session_configured) };
+            let event = Event { id: "fork".to_string(), event_seq: 0, msg: EventMsg::SessionConfigured(session_configured), order: None };
             app_event_tx_clone.send(AppEvent::CodexEvent(event));
 
             let conversation_clone = conversation.clone();
@@ -1164,6 +1254,22 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             browser_is_external: false,
+            // Stable ordering & routing init for forked widget
+            cell_order_seq: vec![None; 1],
+            cell_order_dbg: vec![None; 1],
+            turn_start_idx: 1,
+            current_turn_id: None,
+            pending_insert_seq: None,
+            pending_insert_turn: None,
+            reasoning_index: HashMap::new(),
+            stream_id_to_turn: HashMap::new(),
+            call_id_to_turn: HashMap::new(),
+            stream_order_seq: HashMap::new(),
+            turn_arrival_seq: 0,
+            turn_windows: Vec::new(),
+            turn_index_by_id: HashMap::new(),
+            turn_request_ordinal: HashMap::new(),
+            show_order_overlay,
             
         }
     }
@@ -1577,6 +1683,27 @@ impl ChatWidget<'_> {
 
         // Store in memory for local rendering
         self.history_cells.push(new_cell);
+        self.cell_order_seq.push(None);
+        // Record debug info for push-without-explicit-order
+        let win_idx = self.current_turn_window_index();
+        let (start, end) = if let Some(wi) = win_idx { self.turn_window_bounds_by_index(wi) } else { (self.turn_start_idx, self.history_cells.len()) };
+        let turn_id = self.current_turn_id.as_deref().unwrap_or("-");
+        let req_dbg = self
+            .current_turn_id
+            .as_ref()
+            .and_then(|tid| self.turn_request_ordinal.get(tid))
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let dbg = format!(
+            "push: req={} turn={:?} win={:?} bounds=[{},{}] pos={} ordered=None",
+            req_dbg,
+            turn_id,
+            win_idx,
+            start,
+            end,
+            self.history_cells.len().saturating_sub(1)
+        );
+        self.cell_order_dbg.push(Some(dbg));
         
         
         // Log animation cells
@@ -1600,26 +1727,171 @@ impl ChatWidget<'_> {
     // History helper shim: centralize history mutations
     fn history_push(&mut self, cell: impl HistoryCell + 'static) { self.add_to_history(cell); }
 
+    // Insert using a provided sequence (stable per turn). Convenience wrapper.
+    fn history_insert_with_seq(&mut self, cell: impl HistoryCell + 'static, raw_seq: u64) {
+        let seq = OrderKey(raw_seq);
+        self.history_insert_with_seq_internal(Box::new(cell), seq);
+    }
+
+    // Internal ordered insert returning the index.
+    fn history_insert_with_seq_internal(&mut self, cell: Box<dyn HistoryCell>, seq: OrderKey) -> usize {
+        self.history_insert_in_window_with_seq_internal(cell, seq, None)
+    }
+
+    fn history_insert_in_window_with_seq_internal(
+        &mut self,
+        cell: Box<dyn HistoryCell>,
+        seq: OrderKey,
+        target_window: Option<usize>,
+    ) -> usize {
+        let (start, end, win_idx) = if let Some(wi) = target_window.or_else(|| self.current_turn_window_index()) {
+            let (s,e0) = self.turn_window_bounds_by_index(wi);
+            // Clamp end to be at least start to avoid inverted ranges when window metadata lags
+            let mut e = if e0 < s { s } else { e0 };
+            // Also clamp end to current history length to avoid inserting beyond the buffer
+            let curr_len = self.history_cells.len();
+            if e > curr_len { e = curr_len; }
+            (s, e, Some(wi))
+        } else {
+            (self.turn_start_idx, self.history_cells.len(), None)
+        };
+        // Determine insertion position within window based on sequence ordering
+        let mut pos = end;
+        for i in start..end {
+            match self.cell_order_seq.get(i) {
+                Some(Some(existing)) => {
+                    if existing.0 > seq.0 { pos = i; break; }
+                }
+                Some(None) => { pos = i; break; } // insert before unordered items
+                _ => {}
+            }
+        }
+        if pos < start { pos = start; }
+        if pos > end { pos = end; }
+
+        // Keep auxiliary order vector in lockstep with history before inserting
+        if self.cell_order_seq.len() < self.history_cells.len() {
+            let missing = self.history_cells.len() - self.cell_order_seq.len();
+            self.cell_order_seq.extend(std::iter::repeat(None).take(missing));
+        }
+
+        tracing::info!(
+            "[order] insert window: seq={} ({}) start={} end={} pos={} target_win={:?} len_before={} order_len_before={}",
+            seq.0,
+            Self::debug_fmt_order_key(seq),
+            start,
+            end,
+            pos,
+            win_idx,
+            self.history_cells.len(),
+            self.cell_order_seq.len()
+        );
+        self.history_cells.insert(pos, cell);
+        // Ensure order vector is also long enough for position after cell insert
+        if self.cell_order_seq.len() < pos { self.cell_order_seq.resize(pos, None); }
+        self.cell_order_seq.insert(pos, Some(seq));
+        // Insert debug info aligned with cell insert
+        let ordered = if (seq.0 >> 63) == 0 { "ordered" } else { "unordered" };
+        let req_dbg = self
+            .current_turn_id
+            .as_ref()
+            .and_then(|tid| self.turn_request_ordinal.get(tid))
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let dbg = format!(
+            "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={}",
+            ordered,
+            req_dbg,
+            seq.0,
+            Self::debug_fmt_order_key(seq),
+            self.current_turn_id.as_deref().unwrap_or("-"),
+            win_idx,
+            start,
+            end,
+            pos
+        );
+        if self.cell_order_dbg.len() < pos { self.cell_order_dbg.resize(pos, None); }
+        self.cell_order_dbg.insert(pos, Some(dbg));
+        // Shift later window starts
+        if let Some(idx) = win_idx { self.bump_windows_after_insert(pos, 1, idx); }
+        self.invalidate_height_cache();
+        self.autoscroll_if_near_bottom();
+        self.bottom_pane.set_has_chat_history(true);
+        self.process_animation_cleanup();
+        self.app_event_tx.send(AppEvent::RequestRedraw);
+        pos
+    }
+
+    fn bump_windows_after_insert(&mut self, inserted_at: usize, delta: isize, win_idx: usize) {
+        if delta == 0 { return; }
+        for (i, tw) in self.turn_windows.iter_mut().enumerate() {
+            // Only shift windows strictly AFTER the one we inserted into.
+            if i > win_idx && tw.start_idx >= inserted_at {
+                if delta > 0 { tw.start_idx = tw.start_idx.saturating_add(delta as usize); }
+                else { tw.start_idx = tw.start_idx.saturating_sub(delta.wrapping_abs() as usize); }
+            }
+        }
+        // Maintain non-decreasing order of window starts to keep bounds sane
+        for i in 1..self.turn_windows.len() {
+            if self.turn_windows[i].start_idx < self.turn_windows[i-1].start_idx {
+                self.turn_windows[i].start_idx = self.turn_windows[i-1].start_idx;
+            }
+        }
+        // Also shift debug vector to remain aligned when we insert between windows.
+        // (No action needed here; alignment handled at insert/remove sites.)
+    }
+
+    fn current_turn_window_index(&self) -> Option<usize> {
+        self.current_turn_id
+            .as_ref()
+            .and_then(|id| self.turn_index_by_id.get(id).copied())
+    }
+
+    fn turn_window_bounds_by_index(&self, idx: usize) -> (usize, usize) {
+        if self.turn_windows.is_empty() || idx >= self.turn_windows.len() {
+            return (self.turn_start_idx, self.history_cells.len());
+        }
+        let start = self.turn_windows[idx].start_idx;
+        let end = if idx + 1 < self.turn_windows.len() {
+            self.turn_windows[idx + 1].start_idx
+        } else {
+            self.history_cells.len()
+        };
+        (start, end)
+    }
+
+    // Helper used by interrupt flush to route into ordered insert when a pending seq exists.
+    fn push_cell_maybe_ordered(&mut self, cell: impl HistoryCell + 'static) -> usize {
+        if let Some(seq) = self.pending_insert_seq.take() {
+            let win = self.pending_insert_turn.take();
+            return self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, win);
+        }
+        let before_len = self.history_cells.len();
+        self.history_push(cell);
+        if self.history_cells.is_empty() { before_len } else { self.history_cells.len() - 1 }
+    }
+
     fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
         if idx < self.history_cells.len() {
             self.history_cells[idx] = cell;
             self.invalidate_height_cache();
             self.request_redraw();
+            // Keep debug info for this cell index as-is.
         }
     }
 
     fn history_remove_at(&mut self, idx: usize) {
         if idx < self.history_cells.len() {
             self.history_cells.remove(idx);
+            if idx < self.cell_order_seq.len() { self.cell_order_seq.remove(idx); }
+            if idx < self.cell_order_dbg.len() { self.cell_order_dbg.remove(idx); }
+            // Shift later windows start indices by -1
+            for tw in &mut self.turn_windows {
+                if tw.start_idx > idx { tw.start_idx = tw.start_idx.saturating_sub(1); }
+            }
             self.invalidate_height_cache();
             self.request_redraw();
         }
-    }
-
-    // History merge API: consolidates exec/tool merge logic
-    fn history_push_and_maybe_merge(&mut self, cell: impl HistoryCell + 'static) {
-        // For push, add_to_history already contains merge heuristics for Exec/Tool cells.
-        self.add_to_history(cell);
     }
 
     fn history_replace_and_maybe_merge(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
@@ -1939,7 +2211,17 @@ impl ChatWidget<'_> {
             "handle_codex_event({})",
             serde_json::to_string_pretty(&event).unwrap_or_default()
         );
-        let Event { id, msg } = event;
+        // Pre-compute an insertion key from model-provided ordering, if available.
+        let pending_from_order = Self::order_key_from_order_meta(event.order.as_ref());
+        if let Some(ok) = pending_from_order { self.pending_insert_seq = Some(ok); }
+        // Record request_ordinal for current turn when provided so we can show it for all cells.
+        if let Some(ord) = event.order.as_ref().map(|o| o.request_ordinal) {
+            if let Some(ref tid) = self.current_turn_id {
+                self.turn_request_ordinal.insert(tid.clone(), ord);
+            }
+        }
+
+        let Event { id, msg, .. } = event.clone();
         match msg {
             EventMsg::SessionConfigured(event) => {
                 // Record session id for potential future fork/backtrack features
@@ -1962,33 +2244,56 @@ impl ChatWidget<'_> {
 
                 self.request_redraw();
             }
-            EventMsg::WebSearchBegin(ev) => tools::web_search_begin(self, ev.call_id, ev.query),
+            EventMsg::WebSearchBegin(ev) => {
+                if let Some(ti) = self.current_turn_window_index() {
+                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
+                        .or_else(|| Some(self.next_unordered_seq()));
+                    self.pending_insert_turn = Some(ti);
+                }
+                tracing::info!("[order] WebSearchBegin call_id={} seq={}", ev.call_id, event.event_seq);
+                self.call_id_to_turn.insert(ev.call_id.clone(), self.current_turn_id.clone().unwrap_or_default());
+                tools::web_search_begin(self, ev.call_id, ev.query)
+            },
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
-                // Record sequence for the final assistant message
-                self.stream_state.seq_answer_final = Some(self.next_sequence());
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
+                self.stream_state.seq_answer_final = Some(event.event_seq);
+                // Bind stream id to current turn and reserve an ordered key from OrderMeta if provided.
+                if !self.stream_id_to_turn.contains_key(&id) {
+                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
+                }
+                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                if let Some(ok) = Self::order_key_from_order_meta(event.order.as_ref()) {
+                    // Seed a stable key for this (turn, Answer, id) so the final insert uses it.
+                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
+                    // ensure_stream_order_key consumes pending_insert_seq only when present; set it explicitly.
+                    self.pending_insert_seq = Some(ok);
+                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
+                } else {
+                    // Fall back to unordered placement if no model order is provided.
+                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
+                }
+
                 tracing::debug!(
                     "AgentMessage final id={} bytes={} preview={:?}",
                     id,
                     message.len(),
                     message.chars().take(80).collect::<String>()
                 );
-                // Fallback: if any tools/execs are still marked running, complete them now.
+
+                // Close out any running tool/exec indicators before inserting final answer.
                 self.finalize_all_running_due_to_answer();
-                // Use StreamController for final answer
+
+                // Route final message through streaming controller so AppEvent::InsertFinalAnswer
+                // is the single source of truth for assistant content.
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 streaming::begin(self, StreamKind::Answer, Some(id.clone()));
-                let _finished = self.stream.apply_final_answer(&message, &sink);
-                // Stream finishing is handled by StreamController
+                let _ = self.stream.apply_final_answer(&message, &sink);
+
+                // Track last message for potential dedup heuristics.
                 self.last_assistant_message = Some(message);
-                // Mark this id closed for further answer deltas in this turn
-                self.stream_state.closed_answer_ids.insert(StreamId(id.clone()));
-                // Defensive: this turn's task should be considered complete for UI purposes
-                self.active_task_ids.remove(&id);
-                // Defensive: clear transient agents-preparing state unless we see real updates
-                self.agents_ready_to_start = false;
-                // Possibly drop spinner if everything is idle now
+                // Do not mark closed here; the final insert path manages closed ids and replacement.
                 self.maybe_hide_spinner();
-                self.mark_needs_redraw();
             }
             EventMsg::ReplayHistory(ev) => {
                 // Render prior transcript items statically without executing tools
@@ -1999,18 +2304,28 @@ impl ChatWidget<'_> {
             }
             EventMsg::WebSearchComplete(ev) => tools::web_search_complete(self, ev.call_id, ev.query),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_answer_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
                     return;
                 }
+                // Reserve order key for this Answer stream id using event seq
+                if !self.stream_id_to_turn.contains_key(&id) {
+                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
+                }
+                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                tracing::info!("[order] EventMsg::AgentMessageDelta id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
+                self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), Some(event.event_seq));
                 // Stream answer delta through StreamController
                 streaming::delta_text(self, StreamKind::Answer, id.clone(), delta);
                 // Show responding state while assistant streams
                 self.bottom_pane.update_status_text("responding".to_string());
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentReasoning event with text: {:?}...", text.chars().take(100).collect::<String>());
                 // Guard: duplicate final Reasoning for the same id can arrive due to provider
                 // retries or thread replays. If we've already finalized this id in the current
@@ -2019,6 +2334,14 @@ impl ChatWidget<'_> {
                     tracing::warn!("Ignoring duplicate AgentReasoning for closed id={}", id);
                     return;
                 }
+                // Reserve order key for this Reasoning stream id using event seq
+                if !self.stream_id_to_turn.contains_key(&id) {
+                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
+                }
+                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                tracing::info!("[order] EventMsg::AgentReasoning id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
+                self.ensure_stream_order_key(turn_hint, StreamKind::Reasoning, Some(&id), Some(event.event_seq));
                 // Fallback: if any tools/execs are still marked running, complete them now.
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
@@ -2031,15 +2354,29 @@ impl ChatWidget<'_> {
                 // Stream finishing is handled by StreamController
                 // Mark this id closed for further reasoning deltas in this turn
                 self.stream_state.closed_reasoning_ids.insert(StreamId(id.clone()));
+                // Clear in-progress flags on the most recent reasoning cell(s)
+                if let Some(last) = self.history_cells.iter().rposition(|c| c.as_any().downcast_ref::<history_cell::CollapsibleReasoningCell>().is_some()) {
+                    if let Some(reason) = self.history_cells[last].as_any().downcast_ref::<history_cell::CollapsibleReasoningCell>() {
+                        reason.set_in_progress(false);
+                    }
+                }
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
                     return;
                 }
+                if !self.stream_id_to_turn.contains_key(&id) {
+                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
+                }
+                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                tracing::info!("[order] EventMsg::AgentReasoningDelta id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
+                self.ensure_stream_order_key(turn_hint, StreamKind::Reasoning, Some(&id), Some(event.event_seq));
                 // Stream reasoning delta through StreamController
                 streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta);
                 // Show thinking state while reasoning streams
@@ -2051,6 +2388,7 @@ impl ChatWidget<'_> {
                 self.stream.insert_reasoning_section_break(&sink);
             }
             EventMsg::TaskStarted => {
+                self.turn_arrival_seq = 0;
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.stream_state.current_kind = None;
@@ -2063,8 +2401,23 @@ impl ChatWidget<'_> {
                 self.stream_state.drop_streaming = false;
                 // Mark this task id as active and ensure the status stays visible
                 self.active_task_ids.insert(id.clone());
+                // Establish new turn ordering window and clear per-turn routing
+                self.current_turn_id = Some(id.clone());
+                self.turn_start_idx = self.history_cells.len();
+                // Define a new turn window starting at current end
+                let win = TurnWindow { start_idx: self.history_cells.len() };
+                self.turn_windows.push(win);
+                self.turn_index_by_id.insert(id.clone(), self.turn_windows.len() - 1);
+                // Clear any stale request_ordinal mapping for this new turn; it will be populated
+                // by the first event in this turn that carries OrderMeta.
+                self.turn_request_ordinal.remove(&id);
+                self.pending_insert_seq = None;
+                self.pending_insert_turn = None;
+                self.reasoning_index.clear();
+                // Do not clear all keys; keep keys per turn. New entries will use this turn id.
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane.update_status_text("waiting for model".to_string());
+                tracing::info!("[order] EventMsg::TaskStarted turn_id={} window_index={} start_idx={}", id, self.turn_windows.len()-1, self.turn_start_idx);
                 
                 // Don't add loading cell - we have progress in the input area
                 // self.add_to_history(history_cell::new_loading_cell("waiting for model".to_string()));
@@ -2169,6 +2522,11 @@ impl ChatWidget<'_> {
                 let _finished = self.stream.apply_final_reasoning(&text, &sink);
                 // Stream finishing is handled by StreamController
                 self.stream_state.closed_reasoning_ids.insert(StreamId(id.clone()));
+                if let Some(last) = self.history_cells.iter().rposition(|c| c.as_any().downcast_ref::<history_cell::CollapsibleReasoningCell>().is_some()) {
+                    if let Some(reason) = self.history_cells[last].as_any().downcast_ref::<history_cell::CollapsibleReasoningCell>() {
+                        reason.set_in_progress(false);
+                    }
+                }
                 self.mark_needs_redraw();
             }
             EventMsg::TokenCount(token_usage) => {
@@ -2189,15 +2547,21 @@ impl ChatWidget<'_> {
                 // the plan block doesn't split a heading and its content.
                 if self.is_write_cycle_active() {
                     let seq = self.next_sequence();
-                    self.interrupts.push_plan_update(seq, update);
+                    let wi = self.current_turn_window_index();
+                    self.interrupts.push_plan_update(seq, update, event.order.clone(), wi);
                 } else {
-                    self.history_push(history_cell::new_plan_update(update));
+                    if let Some(ti) = self.current_turn_window_index() {
+                        self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
+                            .or_else(|| Some(self.next_unordered_seq()));
+                        self.pending_insert_turn = Some(ti);
+                    }
+                    self.push_cell_maybe_ordered(history_cell::new_plan_update(update));
                 }
             }
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_exec_approval(seq, id, ev),
                     |this| {
@@ -2211,10 +2575,17 @@ impl ChatWidget<'_> {
             EventMsg::ApplyPatchApprovalRequest(ev) => {
                 let id2 = id.clone();
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
+                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_apply_patch_approval(seq, id, ev),
+                    move |interrupts| interrupts.push_apply_patch_approval(seq, id, ev, event.order.clone(), wi),
                     |this| {
+                        // Place approval request in the correct turn window
+                        if let Some(ti) = this.current_turn_window_index() {
+                            this.pending_insert_seq = Some(order_ok);
+                            this.pending_insert_turn = Some(ti);
+                        }
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
                         this.handle_apply_patch_approval_now(id2, ev2);
@@ -2224,15 +2595,26 @@ impl ChatWidget<'_> {
             }
             EventMsg::ExecCommandBegin(ev) => {
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
+                let wi = self.current_turn_window_index();
+                let tid = self.current_turn_id.clone();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_exec_begin(seq, ev),
+                    move |interrupts| interrupts.push_exec_begin(seq, ev, event.order.clone(), wi, tid),
                     |this| {
                         // Finalize any active streaming sections, then establish
                         // the running Exec cell before flushing queued interrupts.
                         // This prevents an out‑of‑order ExecCommandEnd from being
                         // applied first (which would fall back to showing call_id).
                         this.finalize_active_stream();
+                        // Bind call id to this turn and reserve window+seq
+                        if let Some(ti) = this.current_turn_window_index() {
+                            this.call_id_to_turn.insert(ev2.call_id.clone(), this.current_turn_id.clone().unwrap_or_default());
+                            this.pending_insert_seq = Some(order_ok);
+                            this.pending_insert_turn = Some(ti);
+                        }
+                        tracing::info!("[order] ExecCommandBegin call_id={} seq={} arrival={}", ev2.call_id, seq, this.turn_arrival_seq);
                         this.handle_exec_begin_now(ev2);
                         this.flush_interrupt_queue();
                     },
@@ -2273,45 +2655,78 @@ impl ChatWidget<'_> {
                 }
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
-                self.history_push(history_cell::new_patch_event(
+                if let Some(ti) = self.current_turn_window_index() {
+                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
+                        .or_else(|| Some(self.next_unordered_seq()));
+                    self.pending_insert_turn = Some(ti);
+                }
+                self.push_cell_maybe_ordered(history_cell::new_patch_event(
                     PatchEventType::ApplyBegin { auto_approved },
                     changes,
                 ));
             }
             EventMsg::PatchApplyEnd(ev) => {
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_patch_end(seq, ev),
+                    move |interrupts| interrupts.push_patch_end(seq, ev, event.order.clone(), wi),
                     |this| this.handle_patch_apply_end_now(ev2),
                 );
             }
             EventMsg::ExecCommandEnd(ev) => {
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
+                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
+                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_exec_end(seq, ev),
-                    |this| this.handle_exec_end_now(ev2),
+                    move |interrupts| interrupts.push_exec_end(seq, ev, wi),
+                    |this| {
+                        if let Some(ti) = this.current_turn_window_index() {
+                            this.pending_insert_seq = Some(order_ok);
+                            this.pending_insert_turn = Some(ti);
+                        }
+                        tracing::info!("[order] ExecCommandEnd call_id={} seq={} arrival={}", ev2.call_id, seq, this.turn_arrival_seq);
+                        this.handle_exec_end_now(ev2)
+                    },
                 );
             }
             EventMsg::McpToolCallBegin(ev) => {
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
+                let wi = self.current_turn_window_index();
+                let tid = self.current_turn_id.clone();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_mcp_begin(seq, ev),
+                    move |interrupts| interrupts.push_mcp_begin(seq, ev, event.order.clone(), wi, tid),
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
+                        if let Some(ti) = this.current_turn_window_index() {
+                            this.pending_insert_seq = Some(order_ok);
+                            this.pending_insert_turn = Some(ti);
+                        }
+                        tracing::info!("[order] McpToolCallBegin call_id={} seq={}", ev2.call_id, seq);
                         tools::mcp_begin(this, ev2);
                     },
                 );
             }
             EventMsg::McpToolCallEnd(ev) => {
                 let ev2 = ev.clone();
-                let seq = self.next_sequence();
+                let seq = event.event_seq;
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
+                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_mcp_end(seq, ev),
-                    |this| tools::mcp_end(this, ev2),
+                    move |interrupts| interrupts.push_mcp_end(seq, ev, wi),
+                    |this| {
+                        if let Some(ti) = this.current_turn_window_index() {
+                            this.pending_insert_seq = Some(order_ok);
+                            this.pending_insert_turn = Some(ti);
+                        }
+                        tracing::info!("[order] McpToolCallEnd call_id={} seq={}", ev2.call_id, seq);
+                        tools::mcp_end(this, ev2)
+                    },
                 );
             }
             EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
@@ -2332,7 +2747,16 @@ impl ChatWidget<'_> {
                 } else {
                     history_cell::new_running_custom_tool_call(tool_name.clone(), params_string.clone())
                 };
-                self.history_push(cell);
+                // Reserve ordering in current turn
+                if let Some(ti) = self.current_turn_window_index() {
+                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
+                        .or_else(|| Some(self.next_unordered_seq()));
+                    self.pending_insert_turn = Some(ti);
+                }
+                if let Some(tid) = self.current_turn_id.clone() {
+                    self.call_id_to_turn.insert(call_id.clone(), tid);
+                }
+                self.push_cell_maybe_ordered(cell);
                 // Track index so we can replace it on completion
                 if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
                     self.tools_state.running_custom_tools.insert(ToolCallId(call_id.clone()), last_idx);
@@ -2355,6 +2779,12 @@ impl ChatWidget<'_> {
                 duration,
                 result,
             }) => {
+                if let Some(ti) = self.current_turn_window_index() {
+                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
+                        .or_else(|| Some(self.next_unordered_seq()));
+                    self.pending_insert_turn = Some(ti);
+                }
+                tracing::info!("[order] CustomToolCallEnd call_id={} tool={} seq={}", call_id, tool_name, event.event_seq);
                 // Convert parameters to String if present
                 let params_string = parameters.map(|p| p.to_string());
                 // Determine success and content from Result
@@ -2375,10 +2805,11 @@ impl ChatWidget<'_> {
                         if idx < self.history_cells.len() {
                             self.history_replace_at(idx, Box::new(completed));
                         } else {
-                            self.history_push(completed);
+                            // fallback: ordered insert using pending window+seq
+                            self.push_cell_maybe_ordered(completed);
                         }
                     } else {
-                        self.history_push(completed);
+                        self.push_cell_maybe_ordered(completed);
                     }
 
                     // After tool completes, likely transitioning to response
@@ -2397,10 +2828,10 @@ impl ChatWidget<'_> {
                     if idx < self.history_cells.len() {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
-                        self.history_push(completed);
+                        self.push_cell_maybe_ordered(completed);
                     }
                 } else {
-                    self.history_push(completed);
+                    self.push_cell_maybe_ordered(completed);
                 }
 
                 // After tool completes, likely transitioning to response
@@ -3349,32 +3780,66 @@ impl ChatWidget<'_> {
                 self.bottom_pane.set_reasoning_hint(true);
                 // Update footer label to reflect current visibility state
                 self.bottom_pane.set_reasoning_state(self.is_reasoning_shown());
-                // Append to last reasoning cell if present; else create a new one
-                if let Some(last) = self.history_cells.last_mut() {
-                    if let Some(reasoning_cell) = last
-                        .as_any_mut()
-                        .downcast_mut::<history_cell::CollapsibleReasoningCell>()
-                    {
-                tracing::debug!("Appending {} lines to CollapsibleReasoningCell", lines.len());
-                        reasoning_cell.lines.extend(lines);
-                        // Mark in-progress on the bottom-most reasoning cell
-                        reasoning_cell.set_in_progress(true);
-                        // Content height changed; clear memoized heights
-                        self.invalidate_height_cache();
-                        self.autoscroll_if_near_bottom();
-                        self.request_redraw();
-                        return;
+                // Route by id when provided to avoid splitting reasoning across cells.
+                // Be defensive: the cached index may be stale after inserts/removals; validate it.
+                if let Some(ref rid) = id {
+                    if let Some(&idx) = self.reasoning_index.get(rid) {
+                        if idx < self.history_cells.len() {
+                            if let Some(reasoning_cell) = self.history_cells[idx]
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::CollapsibleReasoningCell>()
+                            {
+                                tracing::debug!("Appending {} lines to Reasoning(id={})", lines.len(), rid);
+                                reasoning_cell.lines.extend(lines);
+                                reasoning_cell.set_in_progress(true);
+                                self.invalidate_height_cache();
+                                self.autoscroll_if_near_bottom();
+                                self.request_redraw();
+                                return;
+                            }
+                        }
+                        // Cached index was stale or wrong type — try to locate by scanning.
+                        if let Some(found_idx) = self.history_cells.iter().rposition(|c| {
+                            c.as_any()
+                                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                                .and_then(|rc| rc.id.as_ref())
+                                .map(|sid| sid == rid)
+                                .unwrap_or(false)
+                        }) {
+                            if let Some(reasoning_cell) = self.history_cells[found_idx]
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::CollapsibleReasoningCell>()
+                            {
+                                // Refresh the cache with the corrected index
+                                self.reasoning_index.insert(rid.clone(), found_idx);
+                                tracing::debug!("Recovered stale reasoning index; appending at {} for id={}", found_idx, rid);
+                                reasoning_cell.lines.extend(lines);
+                                reasoning_cell.set_in_progress(true);
+                                self.invalidate_height_cache();
+                                self.autoscroll_if_near_bottom();
+                                self.request_redraw();
+                                return;
+                            }
+                        } else {
+                            // No matching cell remains; drop the stale cache entry.
+                            self.reasoning_index.remove(rid);
+                        }
                     }
                 }
-                tracing::debug!("Creating new CollapsibleReasoningCell");
-                let cell = history_cell::CollapsibleReasoningCell::new(lines);
-                if self.config.tui.show_reasoning {
-                    cell.set_collapsed(false);
-                } else {
-                    cell.set_collapsed(true);
-                }
+
+                tracing::debug!("Creating new CollapsibleReasoningCell id={:?}", id);
+                let cell = history_cell::CollapsibleReasoningCell::new_with_id(lines, id.clone());
+                if self.config.tui.show_reasoning { cell.set_collapsed(false); } else { cell.set_collapsed(true); }
                 cell.set_in_progress(true);
-                self.history_cells.push(Box::new(cell));
+
+                // Assign a stable order key for this reasoning stream on first visibility
+                let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
+                let turn_hint_s: Option<String> = id.as_deref().and_then(|s| self.stream_id_to_turn.get(s)).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                let seq = self.ensure_stream_order_key(turn_hint, kind, id.as_deref(), None);
+                tracing::info!("[order] insert Reasoning new id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
+                let idx = self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, turn_win);
+                if let Some(rid) = id { self.reasoning_index.insert(rid, idx); }
             }
             StreamKind::Answer => {
                 tracing::debug!(
@@ -3481,9 +3946,18 @@ impl ChatWidget<'_> {
                     with_header.extend(lines);
                     lines = with_header;
                 }
-                let new_idx = self.history_cells.len();
-                self.history_cells.push(Box::new(history_cell::new_streaming_content_with_id(id.clone(), lines)));
-                tracing::debug!("history.new StreamingContentCell at idx={} id={:?}", new_idx, id);
+                // Assign stable order key for this answer stream on first visibility
+                let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
+                let turn_hint_s: Option<String> = id.as_deref().and_then(|s| self.stream_id_to_turn.get(s)).cloned();
+                let turn_hint = turn_hint_s.as_deref();
+                let seq = self.ensure_stream_order_key(turn_hint, kind, id.as_deref(), None);
+                tracing::info!("[order] insert Answer new id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
+                let new_idx = self.history_insert_in_window_with_seq_internal(
+                    Box::new(history_cell::new_streaming_content_with_id(id.clone(), lines)),
+                    seq,
+                    turn_win,
+                );
+        tracing::debug!("history.new StreamingContentCell at idx={} id={:?}", new_idx, id);
             }
         }
 
@@ -3501,6 +3975,8 @@ impl ChatWidget<'_> {
         source: String,
     ) {
         tracing::debug!("insert_final_answer_with_id id={:?} source_len={} lines={}", id, source.len(), lines.len());
+        let turn_win_dbg = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
+        tracing::info!("[order] final Answer id={:?} initial turn_win={:?}", id, turn_win_dbg);
         // Debug: list last few history cell kinds so we can see what's present
         let tail_kinds: String = self
             .history_cells
@@ -3652,10 +4128,62 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Fallback: no prior assistant cell found; append as new.
-        tracing::debug!("final-answer: append new AssistantMarkdownCell (no prior cell) id={:?}", id);
+        // Fallback: no prior assistant cell found; insert at stable sequence position.
+        tracing::debug!("final-answer: ordered insert new AssistantMarkdownCell id={:?}", id);
+        let seq = self.ensure_stream_order_key(None, StreamKind::Answer, id.as_deref(), None);
+        let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
+        tracing::info!("[order] final Answer ordered insert id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
         let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
-        self.history_push(cell);
+        self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, turn_win);
+    }
+
+    // Assign or fetch a stable sequence for a stream kind+id within its originating turn
+    fn ensure_stream_order_key(&mut self, turn_hint: Option<&str>, kind: StreamKind, id: Option<&str>, _seq_hint: Option<u64>) -> OrderKey {
+        let id_key = id.unwrap_or("__default__").to_string();
+        // Resolve turn id for this stream id
+        let turn_id = if let Some(t) = turn_hint {
+            t.to_string()
+        } else if let Some(t) = self.stream_id_to_turn.get(&id_key) {
+            t.clone()
+        } else if let Some(t) = &self.current_turn_id {
+            t.clone()
+        } else {
+            // Fallback: no turn known; allocate as unordered so it will sort after ordered items
+            let raw = self.next_unordered_seq();
+            tracing::info!("[order] ensure_key fallback(kind={:?}, id={}, unordered) -> {}", kind, id_key, raw.0);
+            return raw;
+        };
+        let map_key = (turn_id.clone(), kind, id_key.clone());
+        if let Some(&existing) = self.stream_order_seq.get(&map_key) {
+            // If we already have a key but it's unordered, and a pending ordered key exists, upgrade it.
+            if let Some(pend) = self.pending_insert_seq.take() {
+                let pend_is_ordered = (pend.0 >> 63) == 0;
+                let existing_is_unordered = (existing.0 >> 63) == 1;
+                if pend_is_ordered && existing_is_unordered {
+                    self.stream_order_seq.insert(map_key.clone(), pend);
+                    tracing::info!(
+                        "[order] ensure_key UPGRADE turn={} kind={:?} id={} {} -> {}",
+                        turn_id, kind, id_key, Self::debug_fmt_order_key(existing), Self::debug_fmt_order_key(pend)
+                    );
+                    return pend;
+                } else {
+                    // Put it back if we didn't consume it
+                    self.pending_insert_seq = Some(pend);
+                }
+            }
+            tracing::info!("[order] ensure_key EXISTING turn={} kind={:?} id={} -> {}", turn_id, kind, id_key, existing.0);
+            return existing;
+        }
+        // Prefer any pending model-provided order key captured for this event.
+        let chosen = if let Some(pend) = self.pending_insert_seq.take() {
+            pend
+        } else {
+            // Otherwise assign an unordered key that will sort after ordered items in the window.
+            self.next_unordered_seq()
+        };
+        self.stream_order_seq.insert(map_key, chosen);
+        tracing::info!("[order] ensure_key NEW turn={} kind={:?} id={} -> {}", turn_id, kind, id_key, chosen.0);
+        chosen
     }
 
     /// Normalize text for duplicate detection (trim trailing whitespace and normalize newlines)
@@ -3958,12 +4486,14 @@ impl ChatWidget<'_> {
                 use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
+                    event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                         message: format!(
                             "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
                             connect_deadline.as_secs(), port.unwrap_or(0), port.unwrap_or(0)
                         ),
                     }),
+                    order: None,
                 }));
                 // Offer launch options popup to help recover quickly
                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
@@ -4008,9 +4538,11 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
+                        event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                             message: success_msg.clone(),
                         }),
+                        order: None,
                     }));
 
                     // Persist last connection cache to disk (best-effort)
@@ -4051,10 +4583,12 @@ impl ChatWidget<'_> {
                                             };
                                             let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                 id: uuid::Uuid::new_v4().to_string(),
+                                                event_seq: 0,
                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                     screenshot_path: first_path.clone(),
                                                     url: url_inner,
                                                 }),
+                                                order: None,
                                             }));
                                             break;
                                         }
@@ -4100,10 +4634,12 @@ impl ChatWidget<'_> {
                                             use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                             let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                 id: uuid::Uuid::new_v4().to_string(),
+                                                event_seq: 0,
                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                     screenshot_path: first_path.clone(),
                                                     url: url.unwrap_or_else(|| "Chrome".to_string()),
                                                 }),
+                                                order: None,
                                             }));
                                             break;
                                         }
@@ -4167,10 +4703,7 @@ impl ChatWidget<'_> {
                                     _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
                                 use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: success_msg }),
-                                }));
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: success_msg }), order: None }));
 
                                 // Persist last connection cache
                                 tokio::spawn(async move {
@@ -4204,10 +4737,12 @@ impl ChatWidget<'_> {
                                                             use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                                             let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
+                                                                event_seq: 0,
                                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                                     screenshot_path: first_path.clone(),
                                                                     url: url_inner,
                                                                 }),
+                                                                order: None,
                                                             }));
                                                             break;
                                                         }
@@ -4249,10 +4784,12 @@ impl ChatWidget<'_> {
                                                         use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                                         let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
+                                                            event_seq: 0,
                                                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                                 screenshot_path: first_path.clone(),
                                                                 url: url.unwrap_or_else(|| "Chrome".to_string()),
                                                             }),
+                                                            order: None,
                                                         }));
                                                         break;
                                                     }
@@ -4271,15 +4808,12 @@ impl ChatWidget<'_> {
                             Ok(Err(e2)) => {
                                 tracing::error!("[cdp] Fallback connect failed: {}", e2);
                                 use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
                                             e2, err_msg
                                         ),
-                                    }),
-                                }));
+                                    }), order: None }));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -4287,15 +4821,12 @@ impl ChatWidget<'_> {
                             Err(_) => {
                                 tracing::error!("[cdp] Fallback connect timed out after {:?}", retry_deadline);
                                 use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
                                             retry_deadline.as_secs()
                                         ),
-                                    }),
-                                }));
+                                    }), order: None }));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -4304,12 +4835,7 @@ impl ChatWidget<'_> {
                     } else {
                         tracing::error!("[cdp] connect_to_chrome_only failed immediately: {}", err_msg);
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to connect to Chrome: {}", err_msg),
-                            }),
-                        }));
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("❌ Failed to connect to Chrome: {}", err_msg) }), order: None }));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -4456,9 +4982,11 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
+                        event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                             message: "🔌 Browser disabled".to_string(),
                         }),
+                        order: None,
                     }));
                 } else {
                     // Not in internal mode → enable internal and open about:blank
@@ -4478,12 +5006,7 @@ impl ChatWidget<'_> {
                     if let Err(e) = browser_manager.start().await {
                         tracing::error!("[/browser] failed to start internal browser: {}", e);
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to start internal browser: {}", e),
-                            }),
-                        }));
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("❌ Failed to start internal browser: {}", e) }), order: None }));
                         return;
                     }
 
@@ -4497,12 +5020,7 @@ impl ChatWidget<'_> {
 
                     // Emit confirmation
                     use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "✅ Browser enabled (about:blank)".to_string(),
-                        }),
-                    }));
+                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "✅ Browser enabled (about:blank)".to_string() }), order: None }));
                 }
             });
             return;
@@ -4606,12 +5124,14 @@ impl ChatWidget<'_> {
                                                 let _ = app_event_tx_inner.send(
                                                     AppEvent::CodexEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
+                                                        event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
                                                             BrowserScreenshotUpdateEvent {
                                                                 screenshot_path: first_path.clone(),
                                                                 url: url_inner,
                                                             },
                                                         ),
+                                                        order: None,
                                                     }),
                                                 );
                                             }
@@ -4663,13 +5183,10 @@ impl ChatWidget<'_> {
 
                                                 // Send update event
                                                 use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
-                                                    id: uuid::Uuid::new_v4().to_string(),
-                                                    msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
-                                                    }),
-                                                }));
+                                                    }), order: None }));
                                             }
                                         }
                                         Err(e) => {
@@ -4692,12 +5209,7 @@ impl ChatWidget<'_> {
 
                             // Send success message to chat
                             use codex_core::protocol::{BackgroundEventEvent, EventMsg};
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                    message: format!("✅ Internal browser opened: {}", result.url),
-                                }),
-                            }));
+                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("✅ Internal browser opened: {}", result.url) }), order: None }));
 
                             // Capture initial screenshot
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -4720,15 +5232,7 @@ impl ChatWidget<'_> {
                                         // Send update event
                                         use codex_core::protocol::BrowserScreenshotUpdateEvent;
                                         use codex_core::protocol::EventMsg;
-                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                            id: uuid::Uuid::new_v4().to_string(),
-                                            msg: EventMsg::BrowserScreenshotUpdate(
-                                                BrowserScreenshotUpdateEvent {
-                                                    screenshot_path: first_path.clone(),
-                                                    url: url.unwrap_or_else(|| result.url.clone()),
-                                                },
-                                            ),
-                                        }));
+                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| result.url.clone()) }), order: None }));
                                     }
                                 }
                                 Err(e) => {
@@ -4904,12 +5408,7 @@ impl ChatWidget<'_> {
             // Explicitly (re)start the internal browser session now
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!("❌ Failed to start internal browser: {}", e),
-                    }),
-                }));
+                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("❌ Failed to start internal browser: {}", e) }), order: None }));
                 return;
             }
 
@@ -4917,12 +5416,7 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                id: uuid::Uuid::new_v4().to_string(),
-                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                    message: "✅ Switched to internal browser mode (reconnected)".to_string(),
-                }),
-            }));
+            let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "✅ Switched to internal browser mode (reconnected)".to_string() }), order: None }));
 
             // Clear any existing screenshot
             if let Ok(mut screenshot) = latest_screenshot.lock() {
@@ -4943,13 +5437,7 @@ impl ChatWidget<'_> {
                             ));
                         }
                         use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                screenshot_path: first_path.clone(),
-                                url: url.unwrap_or_else(|| "Browser".to_string()),
-                            }),
-                        }));
+                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| "Browser".to_string()) }), order: None }));
                     }
                 }
                 Err(e) => {
@@ -5012,12 +5500,7 @@ impl ChatWidget<'_> {
                     }
                     // Notify UI
                     use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "🔌 Disconnected from Chrome".to_string(),
-                        }),
-                    }));
+                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "🔌 Disconnected from Chrome".to_string() }), order: None }));
                     let _ = tx.send(true);
                 } else {
                     // Not connected externally; proceed to connect
@@ -5093,6 +5576,7 @@ impl ChatWidget<'_> {
     pub(crate) fn new_conversation(&mut self, enhanced_keys_supported: bool) {
         // Clear all history cells
         self.history_cells.clear();
+        self.cell_order_seq.clear();
         
         // Reset various state
         self.active_exec_cell = None;
@@ -5101,6 +5585,12 @@ impl ChatWidget<'_> {
         // Add a new animated welcome cell
         let welcome_cell = Box::new(history_cell::new_animated_welcome());
         self.history_cells.push(welcome_cell);
+        self.cell_order_seq.push(None);
+        self.turn_start_idx = self.history_cells.len();
+        self.current_turn_id = None;
+        self.pending_insert_seq = None;
+        self.reasoning_index.clear();
+        self.stream_order_seq.clear();
         
         // Reset the bottom pane with a new composer
         // (This effectively clears the text input)
@@ -5495,6 +5985,83 @@ impl ChatWidget<'_> {
             .wrap(ratatui::widgets::Wrap { trim: true });
 
         placeholder_widget.render(area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_core::config::{Config, ConfigOverrides, ConfigToml};
+
+    fn test_config() -> Config {
+        codex_core::config::Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            std::env::temp_dir(),
+        ).expect("cfg")
+    }
+
+    fn make_widget() -> ChatWidget<'static> {
+        let (tx_raw, _rx) = std::sync::mpsc::channel::<AppEvent>();
+        let app_event_tx = AppEventSender::new(tx_raw);
+        let cfg = test_config();
+        let term = crate::tui::TerminalInfo { picker: None, font_size: (8, 16) };
+        ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn exec_end_before_begin_yields_completed_cell_once() {
+        let mut chat = make_widget();
+        chat.handle_codex_event(codex_core::protocol::Event {
+            id: "call-x".into(),
+            msg: codex_core::protocol::EventMsg::ExecCommandEnd(codex_core::protocol::ExecCommandEndEvent {
+                call_id: "call-x".into(), exit_code: 0, duration: std::time::Duration::from_millis(5), stdout: "ok".into(), stderr: String::new()
+            })
+        });
+        chat.handle_codex_event(codex_core::protocol::Event {
+            id: "call-x".into(),
+            msg: codex_core::protocol::EventMsg::ExecCommandBegin(codex_core::protocol::ExecCommandBeginEvent {
+                call_id: "call-x".into(), command: vec!["echo".into(), "ok".into()], cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")), parsed_cmd: vec![]
+            })
+        });
+        let dump = chat.test_dump_history_text();
+        assert!(dump.iter().any(|s| s.contains("ok") || s.contains("Ran")), "dump: {:?}", dump);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn answer_final_then_delta_ignores_late_delta() {
+        let mut chat = make_widget();
+        chat.handle_codex_event(codex_core::protocol::Event { id: "ans-1".into(), msg: codex_core::protocol::EventMsg::AgentMessage(codex_core::protocol::AgentMessageEvent { message: "hello".into() })});
+        chat.handle_codex_event(codex_core::protocol::Event { id: "ans-1".into(), msg: codex_core::protocol::EventMsg::AgentMessageDelta(codex_core::protocol::AgentMessageDeltaEvent { delta: " world".into() })});
+        assert_eq!(chat.last_assistant_message.as_deref(), Some("hello"));
+        // Late delta should be ignored; closed set contains the id
+        assert!(chat.stream_state.closed_answer_ids.contains(&StreamId("ans-1".into())));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reasoning_final_then_delta_ignores_late_delta() {
+        let mut chat = make_widget();
+        chat.handle_codex_event(codex_core::protocol::Event { id: "r-1".into(), msg: codex_core::protocol::EventMsg::AgentReasoning(codex_core::protocol::AgentReasoningEvent { text: "think".into() })});
+        chat.handle_codex_event(codex_core::protocol::Event { id: "r-1".into(), msg: codex_core::protocol::EventMsg::AgentReasoningDelta(codex_core::protocol::AgentReasoningDeltaEvent { delta: " harder".into() })});
+        assert!(chat.stream_state.closed_reasoning_ids.contains(&StreamId("r-1".into())));
+    }
+}
+
+#[cfg(test)]
+impl ChatWidget<'_> {
+    pub(crate) fn test_dump_history_text(&self) -> Vec<String> {
+        self.history_cells
+            .iter()
+            .map(|c| {
+                let lines = c.display_lines();
+                let mut s = String::new();
+                for l in lines {
+                    for sp in l.spans { s.push_str(&sp.content); }
+                    s.push('\n');
+                }
+                s
+            })
+            .collect()
     }
 }
 
@@ -6541,7 +7108,30 @@ impl WidgetRef for &ChatWidget<'_> {
                     );
                 }
                 
+                // Render the cell content first
                 item.render_with_skip(item_area, buf, skip_rows);
+
+                // Debug: overlay order info on the spacing row below (or above if needed).
+                if self.show_order_overlay {
+                    if let Some(Some(info)) = self.cell_order_dbg.get(idx) {
+                        let mut text = format!("⟦{}⟧", info);
+                        let style = Style::default().fg(crate::colors::text_dim());
+                        // Prefer below the item in the one-row spacing area
+                        let below_y = item_area.y.saturating_add(visible_height);
+                        let bottom_y = content_area.y.saturating_add(content_area.height);
+                        let maxw = item_area.width as usize;
+                        if text.len() > maxw { text.truncate(maxw); }
+                        if item_area.width > 0 {
+                            if below_y < bottom_y {
+                                buf.set_string(item_area.x, below_y, text.clone(), style);
+                            } else if item_area.y > content_area.y {
+                                // Fall back to above the item if no space below
+                                let above_y = item_area.y.saturating_sub(1);
+                                buf.set_string(item_area.x, above_y, text.clone(), style);
+                            }
+                        }
+                    }
+                }
                 screen_y += visible_height;
             }
 

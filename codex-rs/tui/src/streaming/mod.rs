@@ -4,7 +4,7 @@ use crate::markdown_stream::AnimatedLineStreamer;
 use crate::markdown_stream::MarkdownStreamCollector;
 pub(crate) mod controller;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum StreamKind {
     Answer,
     Reasoning,

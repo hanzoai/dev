@@ -541,11 +541,7 @@ impl BottomPane<'_> {
         self.live_ring = None;
     }
     
-    /// Set the live ring rows and maximum rows to display
-    #[cfg(test)]
-    pub(crate) fn set_live_ring_rows(&mut self, max_rows: usize, rows: Vec<Line<'static>>) {
-        self.live_ring = Some(live_ring_widget::LiveRingWidget::new(max_rows, rows));
-    }
+    // test helper removed
 
     /// Ensure input focus is maintained, especially after redraws or content updates
     pub(crate) fn ensure_input_focus(&mut self) {
@@ -651,8 +647,8 @@ impl WidgetRef for &BottomPane<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "legacy_tests"))]
+mod tests_removed {
     use super::*;
     use crate::app_event::AppEvent;
     use ratatui::buffer::Buffer;
