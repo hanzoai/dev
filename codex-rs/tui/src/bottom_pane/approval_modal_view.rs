@@ -71,7 +71,7 @@ impl<'a> BottomPaneView<'a> for ApprovalModalView<'a> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;

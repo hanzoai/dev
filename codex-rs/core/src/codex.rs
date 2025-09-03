@@ -539,6 +539,10 @@ struct State {
     /// Scratchpad that buffers streamed items/deltas for the current HTTP attempt
     /// so we can seed retries without losing progress.
     turn_scratchpad: Option<TurnScratchpad>,
+    /// Per-submission monotonic event sequence (resets at TaskStarted)
+    event_seq_by_sub_id: HashMap<String, u64>,
+    /// 1-based ordinal of the current HTTP request attempt in this session.
+    request_ordinal: u64,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -636,6 +640,13 @@ impl Session {
         state.turn_scratchpad = Some(TurnScratchpad::default());
     }
 
+    /// Bump the per-session HTTP request attempt ordinal so `OrderMeta`
+    /// reflects the correct provider request index for this attempt.
+    fn begin_http_attempt(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.request_ordinal = state.request_ordinal.saturating_add(1);
+    }
+
     fn scratchpad_push(&self, item: &ResponseItem, response: &Option<ResponseInputItem>) {
         let mut state = self.state.lock().unwrap();
         if let Some(sp) = &mut state.turn_scratchpad {
@@ -711,12 +722,68 @@ impl Session {
         }
     }
 
-    /// Sends the given event to the client and swallows the send event, if
+    /// Sends the given event to the client and swallows the send error, if
     /// any, logging it as an error.
     pub(crate) async fn send_event(&self, event: Event) {
         if let Err(e) = self.tx_event.send(event).await {
             error!("failed to send tool call event: {e}");
         }
+    }
+
+    /// Create a stamped Event with a per-turn sequence number.
+    fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+        let mut state = self.state.lock().unwrap();
+        let seq = match msg {
+            EventMsg::TaskStarted => {
+                // Reset per-sub_id sequence at the start of a turn.
+                // We increment request_ordinal per HTTP attempt instead
+                // (see `begin_http_attempt`).
+                let e = state
+                    .event_seq_by_sub_id
+                    .entry(sub_id.to_string())
+                    .or_insert(0);
+                *e = 0;
+                0
+            }
+            _ => {
+                let e = state
+                    .event_seq_by_sub_id
+                    .entry(sub_id.to_string())
+                    .or_insert(0);
+                *e = e.saturating_add(1);
+                *e
+            }
+        };
+        Event { id: sub_id.to_string(), event_seq: seq, msg, order: None }
+    }
+
+    /// Same as make_event but allows supplying a provider sequence_number
+    /// (e.g., Responses API SSE event). We DO NOT overwrite `event_seq`
+    /// with this hint because `event_seq` must remain monotonic per turn
+    /// and local to our runtime. Provider ordering is carried via
+    /// `OrderMeta` when applicable.
+    fn make_event_with_hint(&self, sub_id: &str, msg: EventMsg, _seq_hint: Option<u64>) -> Event {
+        // Preserve the monotonic invariant of event_seq by delegating to make_event.
+        // Any ordering hints from the provider should be conveyed through
+        // OrderMeta (see make_event_with_order) rather than event_seq.
+        self.make_event(sub_id, msg)
+    }
+
+    fn make_event_with_order(
+        &self,
+        sub_id: &str,
+        msg: EventMsg,
+        order: crate::protocol::OrderMeta,
+        seq_hint: Option<u64>,
+    ) -> Event {
+        let mut ev = self.make_event_with_hint(sub_id, msg, seq_hint);
+        ev.order = Some(order);
+        ev
+    }
+
+    fn current_request_ordinal(&self) -> u64 {
+        let state = self.state.lock().unwrap();
+        state.request_ordinal
     }
 
     pub async fn request_command_approval(
@@ -728,15 +795,15 @@ impl Session {
         reason: Option<String>,
     ) -> oneshot::Receiver<ReviewDecision> {
         let (tx_approve, rx_approve) = oneshot::channel();
-        let event = Event {
-            id: sub_id.clone(),
-            msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
+        let event = self.make_event(
+            &sub_id,
+            EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
                 call_id,
                 command,
                 cwd,
                 reason,
             }),
-        };
+        );
         let _ = self.tx_event.send(event).await;
         {
             let mut state = self.state.lock().unwrap();
@@ -754,15 +821,15 @@ impl Session {
         grant_root: Option<PathBuf>,
     ) -> oneshot::Receiver<ReviewDecision> {
         let (tx_approve, rx_approve) = oneshot::channel();
-        let event = Event {
-            id: sub_id.clone(),
-            msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+        let event = self.make_event(
+            &sub_id,
+            EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
                 call_id,
                 changes: convert_apply_patch_to_protocol(action),
                 reason,
                 grant_root,
             }),
-        };
+        );
         let _ = self.tx_event.send(event).await;
         {
             let mut state = self.state.lock().unwrap();
@@ -939,6 +1006,8 @@ impl Session {
         &self,
         turn_diff_tracker: &mut TurnDiffTracker,
         exec_command_context: ExecCommandContext,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
     ) {
         let ExecCommandContext {
             sub_id,
@@ -967,10 +1036,8 @@ impl Session {
                 parsed_cmd: parse_command(&command_for_display),
             }),
         };
-        let event = Event {
-            id: sub_id.to_string(),
-            msg,
-        };
+        let order = crate::protocol::OrderMeta { request_ordinal: self.current_request_ordinal(), output_index, sequence_number: seq_hint };
+        let event = self.make_event_with_order(&sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
     }
 
@@ -981,6 +1048,8 @@ impl Session {
         call_id: &str,
         output: &ExecToolCallOutput,
         is_apply_patch: bool,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
     ) {
         let ExecToolCallOutput {
             stdout,
@@ -1012,11 +1081,8 @@ impl Session {
                 duration: *duration,
             })
         };
-
-        let event = Event {
-            id: sub_id.to_string(),
-            msg,
-        };
+        let order = crate::protocol::OrderMeta { request_ordinal: self.current_request_ordinal(), output_index, sequence_number: seq_hint };
+        let event = self.make_event_with_order(sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
 
         // If this is an apply_patch, after we emit the end patch, emit a second event
@@ -1025,10 +1091,7 @@ impl Session {
             let unified_diff = turn_diff_tracker.get_unified_diff();
             if let Ok(Some(unified_diff)) = unified_diff {
                 let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
-                let event = Event {
-                    id: sub_id.into(),
-                    msg,
-                };
+                let event = self.make_event(sub_id, msg);
                 let _ = self.tx_event.send(event).await;
             }
         }
@@ -1042,22 +1105,24 @@ impl Session {
         turn_diff_tracker: &mut TurnDiffTracker,
         begin_ctx: ExecCommandContext,
         exec_args: ExecInvokeArgs<'a>,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
     ) -> crate::error::Result<ExecToolCallOutput> {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
 
-        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone())
+        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index)
             .await;
 
-        let result = process_exec_tool_call(
-            exec_args.params,
-            exec_args.sandbox_type,
-            exec_args.sandbox_policy,
-            exec_args.codex_linux_sandbox_exe,
-            exec_args.stdout_stream,
-        )
-        .await;
+            let result = process_exec_tool_call(
+                exec_args.params,
+                exec_args.sandbox_type,
+                exec_args.sandbox_policy,
+                exec_args.codex_linux_sandbox_exe,
+                exec_args.stdout_stream,
+            )
+            .await;
 
         let output_stderr;
         let borrowed: &ExecToolCallOutput = match &result {
@@ -1079,6 +1144,8 @@ impl Session {
             &call_id,
             borrowed,
             is_apply_patch,
+            seq_hint.map(|h| h.saturating_add(1)),
+            output_index,
         )
         .await;
 
@@ -1089,22 +1156,18 @@ impl Session {
     /// the call‑sites terse so adding more diagnostics does not clutter the
     /// core agent logic.
     async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
-        let event = Event {
-            id: sub_id.to_string(),
-            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                message: message.into(),
-            }),
-        };
+        let event = self.make_event(
+            sub_id,
+            EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
+        );
         let _ = self.tx_event.send(event).await;
     }
 
     async fn notify_stream_error(&self, sub_id: &str, message: impl Into<String>) {
-        let event = Event {
-            id: sub_id.to_string(),
-            msg: EventMsg::Error(ErrorEvent {
-                message: message.into(),
-            }),
-        };
+        let event = self.make_event(
+            sub_id,
+            EventMsg::Error(ErrorEvent { message: message.into() }),
+        );
         let _ = self.tx_event.send(event).await;
     }
 
@@ -1381,15 +1444,12 @@ impl AgentAgent {
         // TOCTOU?
         if !self.handle.is_finished() {
             self.handle.abort();
-            let event = Event {
-                id: self.sub_id,
-                msg: EventMsg::Error(ErrorEvent {
-                    message: "Turn interrupted".to_string(),
-                }),
-            };
+            let stamped = self
+                .sess
+                .make_event(&self.sub_id, EventMsg::Error(ErrorEvent { message: "Turn interrupted".to_string() }));
             let tx_event = self.sess.tx_event.clone();
             tokio::spawn(async move {
-                tx_event.send(event).await.ok();
+                tx_event.send(stamped).await.ok();
             });
         }
     }
@@ -1408,10 +1468,9 @@ async fn submission_loop(
     let send_no_session_event = |sub_id: String| async {
         let event = Event {
             id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: "No session initialized, expected 'ConfigureSession' as first Op"
-                    .to_string(),
-            }),
+            event_seq: 0,
+            msg: EventMsg::Error(ErrorEvent { message: "No session initialized, expected 'ConfigureSession' as first Op".to_string() }),
+            order: None,
         };
         tx_event.send(event).await.ok();
     };
@@ -1451,10 +1510,7 @@ async fn submission_loop(
                 if !cwd.is_absolute() {
                     let message = format!("cwd is not absolute: {cwd:?}");
                     error!(message);
-                    let event = Event {
-                        id: sub.id,
-                        msg: EventMsg::Error(ErrorEvent { message }),
-                    };
+                    let event = Event { id: sub.id, event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None };
                     if let Err(e) = tx_event.send(event).await {
                         error!("failed to send error message: {e:?}");
                     }
@@ -1545,10 +1601,7 @@ async fn submission_loop(
                         Err(e) => {
                             let message = format!("Failed to create MCP connection manager: {e:#}");
                             error!("{message}");
-                            mcp_connection_errors.push(Event {
-                                id: sub.id.clone(),
-                                msg: EventMsg::Error(ErrorEvent { message }),
-                            });
+                            mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
                             (McpConnectionManager::default(), Default::default())
                         }
                     };
@@ -1559,10 +1612,7 @@ async fn submission_loop(
                         let message =
                             format!("MCP client for `{server_name}` failed to start: {err:#}");
                         error!("{message}");
-                        mcp_connection_errors.push(Event {
-                            id: sub.id.clone(),
-                            msg: EventMsg::Error(ErrorEvent { message }),
-                        });
+                        mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
@@ -1620,12 +1670,14 @@ async fn submission_loop(
                 // ack
                 let events = std::iter::once(Event {
                     id: INITIAL_SUBMIT_ID.to_string(),
+                    event_seq: 0,
                     msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                         session_id,
                         model,
                         history_log_id,
                         history_entry_count,
                     }),
+                    order: None,
                 })
                 .chain(mcp_connection_errors.into_iter());
                 for event in events {
@@ -1635,10 +1687,7 @@ async fn submission_loop(
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
                 if let Some(items) = restored_items {
-                    let event = Event {
-                        id: sub.id.clone(),
-                        msg: EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }),
-                    };
+                    let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }), order: None };
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
                     }
@@ -1739,6 +1788,7 @@ async fn submission_loop(
 
                     let event = Event {
                         id: sub_id,
+                        event_seq: 0,
                         msg: EventMsg::GetHistoryEntryResponse(
                             crate::protocol::GetHistoryEntryResponseEvent {
                                 offset,
@@ -1746,6 +1796,7 @@ async fn submission_loop(
                                 entry: entry_opt,
                             },
                         ),
+                        order: None,
                     };
 
                     if let Err(e) = tx_event.send(event).await {
@@ -1794,22 +1845,14 @@ async fn submission_loop(
                     if let Some(rec) = recorder_opt {
                         if let Err(e) = rec.shutdown().await {
                             warn!("failed to shutdown rollout recorder: {e}");
-                            let event = Event {
-                                id: sub.id.clone(),
-                                msg: EventMsg::Error(ErrorEvent {
-                                    message: "Failed to shutdown rollout recorder".to_string(),
-                                }),
-                            };
+                            let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: "Failed to shutdown rollout recorder".to_string() }), order: None };
                             if let Err(e) = tx_event.send(event).await {
                                 warn!("failed to send error message: {e:?}");
                             }
                         }
                     }
                 }
-                let event = Event {
-                    id: sub.id.clone(),
-                    msg: EventMsg::ShutdownComplete,
-                };
+                let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ShutdownComplete, order: None };
                 if let Err(e) = tx_event.send(event).await {
                     warn!("failed to send Shutdown event: {e}");
                 }
@@ -1837,7 +1880,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     if input.is_empty() {
         return;
     }
-    let event = Event { id: sub_id.clone(), msg: EventMsg::TaskStarted };
+    let event = sess.make_event(&sub_id, EventMsg::TaskStarted);
     if sess.tx_event.send(event).await.is_err() {
         return;
     }
@@ -2034,12 +2077,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                let event = Event {
-                    id: sub_id.clone(),
-                    msg: EventMsg::Error(ErrorEvent {
-                        message: e.to_string(),
-                    }),
-                };
+                let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
                 sess.tx_event.send(event).await.ok();
                 // let the user continue the conversation
                 break;
@@ -2047,12 +2085,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         }
     }
     sess.remove_agent(&sub_id);
-    let event = Event {
-        id: sub_id,
-        msg: EventMsg::TaskComplete(TaskCompleteEvent {
-            last_agent_message: last_task_message,
-        }),
-    };
+    let event = Event { id: sub_id, event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: last_task_message }), order: None };
     match &event.msg {
         EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: Some(m) }) => {
             tracing::info!("core.emit TaskComplete last_agent_message.len={}", m.len());
@@ -2082,6 +2115,10 @@ async fn run_turn(
     // items from a previous dropped stream attempt so we don't lose progress.
     let mut attempt_input: Vec<ResponseItem> = input.clone();
     loop {
+        // Each loop iteration corresponds to a single provider HTTP request.
+        // Increment the attempt ordinal first so all OrderMeta emitted during
+        // this attempt share the same `req`.
+        sess.begin_http_attempt();
         // Build status items (screenshots, system status) fresh for each attempt
         let status_items = build_turn_status_items(sess).await;
 
@@ -2312,9 +2349,9 @@ async fn try_run_turn(
 
         match event {
             ResponseEvent::Created => {}
-            ResponseEvent::OutputItemDone(item) => {
+            ResponseEvent::OutputItemDone { item, sequence_number, output_index } => {
                 let response =
-                    handle_response_item(sess, turn_diff_tracker, sub_id, item.clone()).await?;
+                    handle_response_item(sess, turn_diff_tracker, sub_id, item.clone(), sequence_number, output_index).await?;
 
                 // Save into scratchpad so we can seed a retry if the stream drops later.
                 sess.scratchpad_push(&item, &response);
@@ -2329,19 +2366,13 @@ async fn try_run_turn(
             ResponseEvent::WebSearchCallBegin { call_id } => {
                 let _ = sess
                     .tx_event
-                    .send(Event {
-                        id: sub_id.to_string(),
-                        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: None }),
-                    })
+                    .send(sess.make_event(&sub_id, EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: None })))
                     .await;
             }
             ResponseEvent::WebSearchCallCompleted { call_id, query } => {
                 let _ = sess
                     .tx_event
-                    .send(Event {
-                        id: sub_id.to_string(),
-                        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query }),
-                    })
+                    .send(sess.make_event(&sub_id, EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query })))
                     .await;
             }
             ResponseEvent::Completed {
@@ -2350,10 +2381,7 @@ async fn try_run_turn(
             } => {
                 if let Some(token_usage) = token_usage {
                     sess.tx_event
-                        .send(Event {
-                            id: sub_id.to_string(),
-                            msg: EventMsg::TokenCount(token_usage),
-                        })
+                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
                         .await
                         .ok();
                 }
@@ -2361,63 +2389,52 @@ async fn try_run_turn(
                 let unified_diff = turn_diff_tracker.get_unified_diff();
                 if let Ok(Some(unified_diff)) = unified_diff {
                     let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
-                    let event = Event {
-                        id: sub_id.to_string(),
-                        msg,
-                    };
-                    let _ = sess.tx_event.send(event).await;
+                    let _ = sess.tx_event.send(sess.make_event(&sub_id, msg)).await;
                 }
 
                 return Ok(output);
             }
-            ResponseEvent::OutputTextDelta { delta, item_id } => {
+            ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, output_index } => {
                 // Don't append to history during streaming - only send UI events.
                 // The complete message will be added to history when OutputItemDone arrives.
                 // This ensures items are recorded in the correct chronological order.
 
                 // Use the item_id if present, otherwise fall back to sub_id
                 let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
-                let event = Event {
-                    id: event_id,
-                    msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta: delta.clone() }),
+                let order = crate::protocol::OrderMeta {
+                    request_ordinal: sess.current_request_ordinal(),
+                    output_index,
+                    sequence_number,
                 };
-                sess.tx_event.send(event).await.ok();
+                let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta: delta.clone() }), order, sequence_number);
+                sess.tx_event.send(stamped).await.ok();
 
                 // Track partial assistant text in the scratchpad to help resume on retry.
                 // Only accumulate when we have an item context or a single active stream.
                 // We deliberately do not scope by item_id to keep implementation simple.
                 sess.scratchpad_add_text_delta(&delta);
             }
-            ResponseEvent::ReasoningSummaryDelta { delta, item_id } => {
+            ResponseEvent::ReasoningSummaryDelta { delta, item_id, sequence_number, output_index } => {
                 // Use the item_id if present, otherwise fall back to sub_id
                 let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
-                let event = Event {
-                    id: event_id,
-                    msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta: delta.clone() }),
-                };
-                sess.tx_event.send(event).await.ok();
+                let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
+                let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta: delta.clone() }), order, sequence_number);
+                sess.tx_event.send(stamped).await.ok();
 
                 // Buffer reasoning summary so we can include a hint on retry.
                 sess.scratchpad_add_reasoning_delta(&delta);
             }
             ResponseEvent::ReasoningSummaryPartAdded => {
-                let event = Event {
-                    id: sub_id.to_string(),
-                    msg: EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {}),
-                };
-                sess.tx_event.send(event).await.ok();
+                let stamped = sess.make_event(&sub_id, EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {}));
+                sess.tx_event.send(stamped).await.ok();
             }
-            ResponseEvent::ReasoningContentDelta { delta, item_id } => {
+            ResponseEvent::ReasoningContentDelta { delta, item_id, sequence_number, output_index } => {
                 if sess.show_raw_agent_reasoning {
                     // Use the item_id if present, otherwise fall back to sub_id
                     let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
-                    let event = Event {
-                        id: event_id,
-                        msg: EventMsg::AgentReasoningRawContentDelta(
-                            AgentReasoningRawContentDeltaEvent { delta },
-                        ),
-                    };
-                    sess.tx_event.send(event).await.ok();
+                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
+                    let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }), order, sequence_number);
+                    sess.tx_event.send(stamped).await.ok();
                 }
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
@@ -2431,7 +2448,7 @@ async fn run_compact_agent(
     input: Vec<InputItem>,
     compact_instructions: String,
 ) {
-    let start_event = Event { id: sub_id.clone(), msg: EventMsg::TaskStarted };
+    let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
     if sess.tx_event.send(start_event).await.is_err() {
         return;
     }
@@ -2444,6 +2461,9 @@ async fn run_compact_agent(
     let mut retries = 0;
 
     loop {
+        // Bump request_ordinal for this provider request attempt so
+        // downstream OrderMeta carries the correct `req` index.
+        sess.begin_http_attempt();
         // Build status items (screenshots, system status) fresh for each attempt
         let status_items = build_turn_status_items(&sess).await;
 
@@ -2482,20 +2502,10 @@ async fn run_compact_agent(
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
-                    let event = Event {
-                        id: sub_id.clone(),
-                        msg: EventMsg::Error(ErrorEvent {
-                            message: e.to_string(),
-                        }),
-                    };
+                    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
                     sess.send_event(event).await;
                     // Ensure the UI is released from running state even on errors.
-                    let done = Event {
-                        id: sub_id.clone(),
-                        msg: EventMsg::TaskComplete(TaskCompleteEvent {
-                            last_agent_message: None,
-                        }),
-                    };
+                    let done = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }), order: None };
                     sess.send_event(done).await;
                     return;
                 }
@@ -2504,19 +2514,12 @@ async fn run_compact_agent(
     }
 
     sess.remove_agent(&sub_id);
-    let event = Event {
-        id: sub_id.clone(),
-        msg: EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Compact agent completed".to_string(),
-        }),
-    };
+    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::AgentMessage(AgentMessageEvent { message: "Compact agent completed".to_string() }), order: None };
     sess.send_event(event).await;
-    let event = Event {
-        id: sub_id.clone(),
-        msg: EventMsg::TaskComplete(TaskCompleteEvent {
-            last_agent_message: None,
-        }),
-    };
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    );
     sess.send_event(event).await;
 
     let mut state = sess.state.lock().unwrap();
@@ -2528,6 +2531,8 @@ async fn handle_response_item(
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: &str,
     item: ResponseItem,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
 ) -> CodexResult<Option<ResponseInputItem>> {
     debug!(?item, "Output item");
     let output = match item {
@@ -2536,11 +2541,9 @@ async fn handle_response_item(
             let event_id = id.unwrap_or_else(|| sub_id.to_string());
             for item in content {
                 if let ContentItem::OutputText { text } = item {
-                    let event = Event {
-                        id: event_id.clone(),
-                        msg: EventMsg::AgentMessage(AgentMessageEvent { message: text }),
-                    };
-                    sess.tx_event.send(event).await.ok();
+                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                    let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentMessage(AgentMessageEvent { message: text }), order, seq_hint);
+                    sess.tx_event.send(stamped).await.ok();
                 }
             }
             None
@@ -2561,11 +2564,9 @@ async fn handle_response_item(
                 let text = match item {
                     ReasoningItemReasoningSummary::SummaryText { text } => text,
                 };
-                let event = Event {
-                    id: event_id.clone(),
-                    msg: EventMsg::AgentReasoning(AgentReasoningEvent { text }),
-                };
-                sess.tx_event.send(event).await.ok();
+                let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoning(AgentReasoningEvent { text }), order, seq_hint);
+                sess.tx_event.send(stamped).await.ok();
             }
             if sess.show_raw_agent_reasoning && content.is_some() {
                 let content = content.unwrap();
@@ -2574,13 +2575,9 @@ async fn handle_response_item(
                         ReasoningItemContent::ReasoningText { text } => text,
                         ReasoningItemContent::Text { text } => text,
                     };
-                    let event = Event {
-                        id: event_id.clone(),
-                        msg: EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent {
-                            text,
-                        }),
-                    };
-                    sess.tx_event.send(event).await.ok();
+                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                    let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }), order, seq_hint);
+                    sess.tx_event.send(stamped).await.ok();
                 }
             }
             None
@@ -2600,6 +2597,8 @@ async fn handle_response_item(
                     name,
                     arguments,
                     call_id,
+                    seq_hint,
+                    output_index,
                 )
                 .await,
             )
@@ -2636,14 +2635,16 @@ async fn handle_response_item(
 
             let exec_params = to_exec_params(params, sess);
             Some(
-                handle_container_exec_with_params(
-                    exec_params,
-                    sess,
-                    turn_diff_tracker,
-                    sub_id.to_string(),
-                    effective_call_id,
-                )
-                .await,
+            handle_container_exec_with_params(
+                exec_params,
+                sess,
+                turn_diff_tracker,
+                sub_id.to_string(),
+                effective_call_id,
+                seq_hint,
+                output_index,
+            )
+            .await,
             )
         }
         ResponseItem::CustomToolCall { call_id, name, .. } => {
@@ -2667,10 +2668,7 @@ async fn handle_response_item(
         ResponseItem::WebSearchCall { id, action, .. } => {
             if let WebSearchAction::Search { query } = action {
                 let call_id = id.unwrap_or_else(|| "".to_string());
-                let event = Event {
-                    id: sub_id.to_string(),
-                    msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query: Some(query) }),
-                };
+                let event = sess.make_event_with_hint(&sub_id, EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query: Some(query) }), seq_hint);
                 sess.tx_event.send(event).await.ok();
             }
             None
@@ -2715,6 +2713,8 @@ async fn handle_function_call(
     name: String,
     arguments: String,
     call_id: String,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
 ) -> ResponseInputItem {
     match name.as_str() {
         "container.exec" | "shell" => {
@@ -2724,7 +2724,7 @@ async fn handle_function_call(
                     return *output;
                 }
             };
-            handle_container_exec_with_params(params, sess, turn_diff_tracker, sub_id, call_id)
+            handle_container_exec_with_params(params, sess, turn_diff_tracker, sub_id, call_id, seq_hint, output_index)
                 .await
         }
         "update_plan" => handle_update_plan(sess, arguments, sub_id, call_id).await,
@@ -4515,12 +4515,7 @@ async fn handle_list_agents(
                     running_count,
                     if running_count != 1 { "s" } else { "" }
                 );
-                let event = Event {
-                    id: "agent-status".to_string(),
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: status_msg,
-                    }),
-                };
+    let event = Event { id: "agent-status".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: status_msg }), order: None };
                 let _ = sess.tx_event.send(event).await;
             }
 
@@ -4594,6 +4589,8 @@ async fn handle_container_exec_with_params(
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
     call_id: String,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
 ) -> ResponseInputItem {
     // Intercept risky git branch-changing commands and require an explicit confirm prefix.
     // We support a simple convention: prefix the script with `confirm:` to proceed.
@@ -4934,6 +4931,8 @@ async fn handle_container_exec_with_params(
                     })
                 },
             },
+            seq_hint,
+            output_index,
         )
         .await;
 
@@ -5069,6 +5068,8 @@ async fn handle_sandbox_error(
                             })
                         },
                     },
+                    None,
+                    None,
                 )
                 .await;
 
@@ -5262,7 +5263,7 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
             ));
         };
         match event {
-            Ok(ResponseEvent::OutputItemDone(item)) => {
+            Ok(ResponseEvent::OutputItemDone { item, sequence_number: _, output_index: _ }) => {
                 // Record only to in-memory conversation history; avoid state snapshot.
                 let mut state = sess.state.lock().unwrap();
                 state.history.record_items(std::slice::from_ref(&item));
@@ -5274,13 +5275,10 @@ async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> Co
                 // some providers don't return token usage, so we default
                 // TODO: consider approximate token usage
                 let token_usage = token_usage.unwrap_or_default();
-                sess.tx_event
-                    .send(Event {
-                        id: sub_id.to_string(),
-                        msg: EventMsg::TokenCount(token_usage),
-                    })
-                    .await
-                    .ok();
+    sess.tx_event
+        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
+        .await
+        .ok();
 
                 return Ok(());
             }
@@ -5359,11 +5357,13 @@ async fn send_agent_status_update(sess: &Session) {
 
     let event = Event {
         id: "agent_status".to_string(),
+        event_seq: 0,
         msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
             agents,
             context: None,
             task: None,
         }),
+        order: None,
     };
 
     // Send event asynchronously
@@ -5383,10 +5383,12 @@ fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String)
     // Also send an immediate event to update the TUI display
     let event = Event {
         id: "browser_screenshot".to_string(),
+        event_seq: 0,
         msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
             screenshot_path,
             url,
         }),
+        order: None,
     };
 
     // Send event asynchronously to avoid blocking
@@ -5463,14 +5465,14 @@ where
     use std::time::Instant;
 
     // Send begin event
-    let begin_event = Event {
-        id: sub_id.to_string(),
-        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+    let begin_event = sess.make_event(
+        sub_id,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
             call_id: call_id.clone(),
             tool_name: tool_name.clone(),
             parameters: parameters.clone(),
         }),
-    };
+    );
     sess.send_event(begin_event).await;
 
     // Execute the tool
@@ -5489,16 +5491,16 @@ where
     };
 
     // Send end event
-    let end_event = Event {
-        id: sub_id.to_string(),
-        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+    let end_event = sess.make_event(
+        sub_id,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
             call_id: call_id.clone(),
             tool_name,
             parameters,
             duration,
             result: if success { Ok(message) } else { Err(message) },
         }),
-    };
+    );
     sess.send_event(end_event).await;
 
     result

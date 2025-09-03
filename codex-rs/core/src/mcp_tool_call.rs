@@ -74,9 +74,5 @@ pub(crate) async fn handle_mcp_tool_call(
 }
 
 async fn notify_mcp_tool_call_event(sess: &Session, sub_id: &str, event: EventMsg) {
-    sess.send_event(Event {
-        id: sub_id.to_string(),
-        msg: event,
-    })
-    .await;
+    sess.send_event(Event { id: sub_id.to_string(), event_seq: 0, msg: event, order: None }).await;
 }

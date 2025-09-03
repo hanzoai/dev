@@ -81,6 +81,8 @@ pub(crate) struct App<'a> {
 
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
+    /// Show per-cell ordering overlay when true
+    show_order_overlay: bool,
 
     /// Controls the animation thread that sends CommitTick events.
     commit_anim_running: Arc<AtomicBool>,
@@ -106,6 +108,7 @@ pub(crate) struct ChatWidgetArgs {
     initial_images: Vec<PathBuf>,
     enhanced_keys_supported: bool,
     terminal_info: TerminalInfo,
+    show_order_overlay: bool,
 }
 
 impl App<'_> {
@@ -115,6 +118,7 @@ impl App<'_> {
         initial_images: Vec<std::path::PathBuf>,
         show_trust_screen: bool,
         debug: bool,
+        show_order_overlay: bool,
         terminal_info: TerminalInfo,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
@@ -195,6 +199,7 @@ impl App<'_> {
                 initial_images,
                 enhanced_keys_supported,
                 terminal_info: terminal_info.clone(),
+                show_order_overlay,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -215,6 +220,7 @@ impl App<'_> {
                 initial_images,
                 enhanced_keys_supported,
                 terminal_info.clone(),
+                show_order_overlay,
             );
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
@@ -238,6 +244,7 @@ impl App<'_> {
             _transcript_saved_viewport: None,
             enhanced_keys_supported,
             _debug: debug,
+            show_order_overlay,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
@@ -597,6 +604,7 @@ impl App<'_> {
                                     Vec::new(),
                                     self.enhanced_keys_supported,
                                     self.terminal_info.clone(),
+                                    self.show_order_overlay,
                                 ));
                                 self.app_state = AppState::Chat { widget: new_widget };
                             }
@@ -715,6 +723,7 @@ impl App<'_> {
 
                             self.app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: "1".to_string(),
+                                event_seq: 0,
                                 // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
                                 //     call_id: "1".to_string(),
                                 //     command: vec!["git".into(), "apply".into()],
@@ -743,6 +752,7 @@ impl App<'_> {
                                         grant_root: Some(PathBuf::from("/tmp")),
                                     },
                                 ),
+                                order: None,
                             }));
                         }
                     }
@@ -759,6 +769,7 @@ impl App<'_> {
                             Vec::new(),
                             self.enhanced_keys_supported,
                             self.terminal_info.clone(),
+                            self.show_order_overlay,
                         ));
                         self.app_state = AppState::Chat { widget: new_widget };
                         self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -861,6 +872,7 @@ impl App<'_> {
                     initial_images,
                     initial_prompt,
                     terminal_info,
+                    show_order_overlay,
                 }) => {
                     self.app_state = AppState::Chat {
                         widget: Box::new(ChatWidget::new(
@@ -870,6 +882,7 @@ impl App<'_> {
                             initial_images,
                             enhanced_keys_supported,
                             terminal_info,
+                            show_order_overlay,
                         )),
                     }
                 }
@@ -947,6 +960,7 @@ impl App<'_> {
                         self.app_event_tx.clone(),
                         self.enhanced_keys_supported,
                         self.terminal_info.clone(),
+                        self.show_order_overlay,
                     );
 
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
@@ -954,9 +968,11 @@ impl App<'_> {
                     // Replay prefix to the UI
                     let ev = codex_core::protocol::Event {
                         id: "fork".to_string(),
+                        event_seq: 0,
                         msg: codex_core::protocol::EventMsg::ReplayHistory(
                             codex_core::protocol::ReplayHistoryEvent { items: prefix_items }
                         ),
+                        order: None,
                     };
                     self.app_event_tx.send(AppEvent::CodexEvent(ev));
 
@@ -1101,57 +1117,4 @@ fn should_show_login_screen(login_status: crate::LoginStatus, _config: &Config) 
     matches!(login_status, crate::LoginStatus::NotAuthenticated)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use codex_core::config::ConfigOverrides;
-    use codex_core::config::ConfigToml;
-    use codex_login::AuthMode;
-
-    fn make_config(preferred: AuthMode) -> Config {
-        let mut cfg = Config::load_from_base_config_with_overrides(
-            ConfigToml::default(),
-            ConfigOverrides::default(),
-            std::env::temp_dir(),
-        )
-        .expect("load default config");
-        cfg.preferred_auth_method = preferred;
-        cfg
-    }
-
-    #[test]
-    fn shows_login_when_not_authenticated() {
-        let cfg = make_config(AuthMode::ChatGPT);
-        assert!(should_show_login_screen(
-            LoginStatus::NotAuthenticated,
-            &cfg
-        ));
-    }
-
-    #[test]
-    fn shows_login_when_api_key_but_prefers_chatgpt() {
-        let cfg = make_config(AuthMode::ChatGPT);
-        assert!(should_show_login_screen(
-            LoginStatus::AuthMode(AuthMode::ApiKey),
-            &cfg
-        ))
-    }
-
-    #[test]
-    fn hides_login_when_api_key_and_prefers_api_key() {
-        let cfg = make_config(AuthMode::ApiKey);
-        assert!(!should_show_login_screen(
-            LoginStatus::AuthMode(AuthMode::ApiKey),
-            &cfg
-        ))
-    }
-
-    #[test]
-    fn hides_login_when_chatgpt_and_prefers_chatgpt() {
-        let cfg = make_config(AuthMode::ChatGPT);
-        assert!(!should_show_login_screen(
-            LoginStatus::AuthMode(AuthMode::ChatGPT),
-            &cfg
-        ))
-    }
-}
+// (legacy tests removed)

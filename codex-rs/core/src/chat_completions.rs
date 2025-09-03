@@ -367,7 +367,7 @@ async fn process_chat_sse<S>(
                     }],
                     id: current_item_id.clone(),
                 };
-                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
             }
 
             if !reasoning_text.is_empty() {
@@ -379,7 +379,7 @@ async fn process_chat_sse<S>(
                     }]),
                     encrypted_content: None,
                 };
-                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
             }
 
             let _ = tx_event
@@ -432,6 +432,8 @@ async fn process_chat_sse<S>(
                         .send(Ok(ResponseEvent::OutputTextDelta {
                             delta: content.to_string(),
                             item_id: current_item_id.clone(),
+                            sequence_number: None,
+                            output_index: None,
                         }))
                         .await;
                 }
@@ -464,6 +466,8 @@ async fn process_chat_sse<S>(
                         .send(Ok(ResponseEvent::ReasoningContentDelta {
                             delta: reasoning,
                             item_id: current_item_id.clone(),
+                            sequence_number: None,
+                            output_index: None,
                         }))
                         .await;
                 }
@@ -514,7 +518,7 @@ async fn process_chat_sse<S>(
                                 }]),
                                 encrypted_content: None,
                             };
-                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
                         }
 
                         // Then emit the FunctionCall response item.
@@ -525,7 +529,7 @@ async fn process_chat_sse<S>(
                             call_id: fn_call_state.call_id.clone().unwrap_or_else(String::new),
                         };
 
-                        let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                        let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
                     }
                     "stop" => {
                         // Regular turn without tool-call. Emit the final assistant message
@@ -538,7 +542,7 @@ async fn process_chat_sse<S>(
                                 }],
                                 id: current_item_id.clone(),
                             };
-                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
                         }
                         // Also emit a terminal Reasoning item so UIs can finalize raw reasoning.
                         if !reasoning_text.is_empty() {
@@ -550,7 +554,7 @@ async fn process_chat_sse<S>(
                                 }]),
                                 encrypted_content: None,
                             };
-                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone(item))).await;
+                            let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
                         }
                     }
                     _ => {}
@@ -627,7 +631,7 @@ where
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
-                Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone(item)))) => {
+                Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone { item, sequence_number: _, .. }))) => {
                     // If this is an incremental assistant message chunk, accumulate but
                     // do NOT emit yet. Forward any other item (e.g. FunctionCall) right
                     // away so downstream consumers see it.
@@ -666,7 +670,7 @@ where
                     }
 
                     // Not an assistant message – forward immediately.
-                    return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone(item))));
+                    return Poll::Ready(Some(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })));
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::Completed {
                     response_id,
@@ -689,7 +693,7 @@ where
                             encrypted_content: None,
                         };
                         this.pending
-                            .push_back(ResponseEvent::OutputItemDone(aggregated_reasoning));
+                            .push_back(ResponseEvent::OutputItemDone { item: aggregated_reasoning, sequence_number: None, output_index: None });
                         emitted_any = true;
                     }
 
@@ -702,7 +706,7 @@ where
                             }],
                         };
                         this.pending
-                            .push_back(ResponseEvent::OutputItemDone(aggregated_message));
+                            .push_back(ResponseEvent::OutputItemDone { item: aggregated_message, sequence_number: None, output_index: None });
                         emitted_any = true;
                     }
 
@@ -729,7 +733,7 @@ where
                     // will never appear in a Chat Completions stream.
                     continue;
                 }
-                Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta { delta, item_id }))) => {
+                Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, .. }))) => {
                     // Always accumulate deltas so we can emit a final OutputItemDone at Completed.
                     this.cumulative.push_str(&delta);
                     // Capture the item_id if we haven't already
@@ -741,12 +745,14 @@ where
                         return Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta {
                             delta,
                             item_id,
+                            sequence_number,
+                            output_index: None,
                         })));
                     } else {
                         continue;
                     }
                 }
-                Poll::Ready(Some(Ok(ResponseEvent::ReasoningContentDelta { delta, item_id }))) => {
+                Poll::Ready(Some(Ok(ResponseEvent::ReasoningContentDelta { delta, item_id, sequence_number, .. }))) => {
                     // Always accumulate reasoning deltas so we can emit a final Reasoning item at Completed.
                     this.cumulative_reasoning.push_str(&delta);
                     // Capture the item_id if we haven't already
@@ -758,6 +764,8 @@ where
                         return Poll::Ready(Some(Ok(ResponseEvent::ReasoningContentDelta {
                             delta,
                             item_id,
+                            sequence_number,
+                            output_index: None,
                         })));
                     } else {
                         continue;

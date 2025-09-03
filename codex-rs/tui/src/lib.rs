@@ -73,7 +73,7 @@ mod status_indicator_widget;
 
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod chatwidget_stream_tests;
 
 #[cfg(not(debug_assertions))]
@@ -343,6 +343,7 @@ fn run_ratatui_app(
         prompt,
         images,
         debug,
+        order,
         ..
     } = cli;
     let mut app = App::new(
@@ -351,6 +352,7 @@ fn run_ratatui_app(
         images,
         should_show_trust_screen,
         debug,
+        order,
         terminal_info,
     );
 

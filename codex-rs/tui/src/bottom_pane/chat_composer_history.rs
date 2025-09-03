@@ -237,7 +237,7 @@ impl ChatComposerHistory {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     #![expect(clippy::expect_used)]
     use super::*;

@@ -167,7 +167,7 @@ impl Prompt {
 #[derive(Debug)]
 pub enum ResponseEvent {
     Created,
-    OutputItemDone(ResponseItem),
+    OutputItemDone { item: ResponseItem, sequence_number: Option<u64>, output_index: Option<u32> },
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
@@ -175,14 +175,20 @@ pub enum ResponseEvent {
     OutputTextDelta {
         delta: String,
         item_id: Option<String>,
+        sequence_number: Option<u64>,
+        output_index: Option<u32>,
     },
     ReasoningSummaryDelta {
         delta: String,
         item_id: Option<String>,
+        sequence_number: Option<u64>,
+        output_index: Option<u32>,
     },
     ReasoningContentDelta {
         delta: String,
         item_id: Option<String>,
+        sequence_number: Option<u64>,
+        output_index: Option<u32>,
     },
     ReasoningSummaryPartAdded,
     WebSearchCallBegin {

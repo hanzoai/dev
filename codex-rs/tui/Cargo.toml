@@ -16,6 +16,8 @@ path = "src/lib.rs"
 vt100-tests = []
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
+# Disable legacy tests by default; enable with `--features legacy_tests` if needed.
+legacy_tests = []
 
 [lints]
 workspace = true

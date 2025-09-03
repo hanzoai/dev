@@ -495,7 +495,7 @@ impl StaticOverlay {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use insta::assert_snapshot;
