@@ -69,6 +69,7 @@ pub mod user_agent;
 pub use rollout::list::ConversationsPage;
 mod user_notification;
 pub mod util;
+pub mod http_client;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use safety::get_platform_sandbox;
 // Use our local protocol definitions to preserve custom events and input items.

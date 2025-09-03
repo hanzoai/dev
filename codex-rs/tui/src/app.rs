@@ -363,7 +363,14 @@ impl App<'_> {
                         widget.on_commit_tick();
                     }
                 }
-                AppEvent::KeyEvent(key_event) => {
+                AppEvent::KeyEvent(mut key_event) => {
+                    // On terminals that do not support keyboard enhancement flags
+                    // (notably some Windows Git Bash/mintty setups), crossterm may
+                    // report only Release events. Normalize such events to Press so
+                    // keys register consistently.
+                    if !self.enhanced_keys_supported {
+                        key_event = KeyEvent::new(key_event.code, key_event.modifiers);
+                    }
                     // Reset double‑Esc timer on any non‑Esc key
                     if !matches!(key_event.code, KeyCode::Esc) {
                         self.last_esc_time = None;
