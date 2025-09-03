@@ -145,7 +145,7 @@ pub(crate) async fn stream_chat_completions(
     // Track last assistant text we emitted to avoid duplicate assistant messages
     // in the outbound Chat Completions payload (can happen if a final
     // aggregated assistant message was recorded alongside an earlier partial).
-    let mut last_assistant_text: Option<String> = None;
+    let _last_assistant_text: Option<String> = None;
 
     for (idx, item) in input.iter().enumerate() {
         match item {

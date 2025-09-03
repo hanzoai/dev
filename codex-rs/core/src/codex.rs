@@ -11,7 +11,6 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
-use crate::AuthManager;
 use async_channel::Receiver;
 use async_channel::Sender;
 use base64::Engine;
