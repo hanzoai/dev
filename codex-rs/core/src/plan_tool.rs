@@ -5,7 +5,6 @@ use crate::codex::Session;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
-use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
@@ -68,6 +67,8 @@ pub(crate) async fn handle_update_plan(
     arguments: String,
     sub_id: String,
     call_id: String,
+    seq_hint: Option<u64>,
+    output_index: Option<u32>,
 ) -> ResponseInputItem {
     match parse_update_plan_arguments(arguments, &call_id) {
         Ok(args) => {
@@ -79,7 +80,7 @@ pub(crate) async fn handle_update_plan(
                 },
             };
             session
-        .send_event(Event { id: sub_id.to_string(), event_seq: 0, msg: EventMsg::PlanUpdate(args), order: None })
+                .send_ordered_event(&sub_id, EventMsg::PlanUpdate(args), seq_hint, output_index)
                 .await;
             output
         }
