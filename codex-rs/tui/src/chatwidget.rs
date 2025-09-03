@@ -1703,6 +1703,35 @@ impl ChatWidget<'_> {
             end,
             self.history_cells.len().saturating_sub(1)
         );
+        let dbg = if self.show_order_overlay {
+            if let Some(rc) = self
+                .history_cells
+                .last()
+                .and_then(|c| c.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>())
+            {
+                let lines = rc.display_lines_trimmed();
+                if let Some(line) = lines.first() {
+                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let bytes = text.len();
+                    let chars = text.chars().count();
+                    let width = unicode_width::UnicodeWidthStr::width(text.as_str());
+                    let spans = line.spans.len();
+                    let span_lens: Vec<usize> = line.spans.iter().map(|s| s.content.len()).collect();
+                    let mut preview = text.clone();
+                    if preview.len() > 120 { preview.truncate(120); preview.push_str("…"); }
+                    format!(
+                        "{} | title='{}' bytes={} chars={} width={} spans={} span_bytes={:?}",
+                        dbg, preview, bytes, chars, width, spans, span_lens
+                    )
+                } else {
+                    dbg
+                }
+            } else {
+                dbg
+            }
+        } else {
+            dbg
+        };
         self.cell_order_dbg.push(Some(dbg));
         
         
@@ -1786,6 +1815,56 @@ impl ChatWidget<'_> {
             self.history_cells.len(),
             self.cell_order_seq.len()
         );
+        // If order overlay is enabled, compute a short, inline debug summary for
+        // reasoning titles so we can spot mid‑word character drops quickly.
+        // We intentionally do this before inserting so we can attach the
+        // composed string alongside the standard order debug info.
+        let reasoning_title_dbg: Option<String> = if self.show_order_overlay {
+            // CollapsibleReasoningCell shows a collapsed "title" line; extract
+            // the first visible line and summarize its raw text/lengths.
+            if let Some(rc) = cell
+                .as_any()
+                .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+            {
+                let lines = rc.display_lines_trimmed();
+                let first = lines.first();
+                if let Some(line) = first {
+                    // Collect visible text and basic metrics
+                    let text: String = line
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect();
+                    let bytes = text.len();
+                    let chars = text.chars().count();
+                    let width = unicode_width::UnicodeWidthStr::width(text.as_str());
+                    let spans = line.spans.len();
+                    // Per‑span byte lengths to catch odd splits inside words
+                    let span_lens: Vec<usize> = line
+                        .spans
+                        .iter()
+                        .map(|s| s.content.len())
+                        .collect();
+                    // Truncate preview to avoid overflow in narrow panes
+                    let mut preview = text.clone();
+                    if preview.len() > 120 {
+                        preview.truncate(120);
+                        preview.push_str("…");
+                    }
+                    Some(format!(
+                        "title='{}' bytes={} chars={} width={} spans={} span_bytes={:?}",
+                        preview, bytes, chars, width, spans, span_lens
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         self.history_cells.insert(pos, cell);
         // Ensure order vector is also long enough for position after cell insert
         if self.cell_order_seq.len() < pos { self.cell_order_seq.resize(pos, None); }
@@ -1798,18 +1877,34 @@ impl ChatWidget<'_> {
             .and_then(|tid| self.turn_request_ordinal.get(tid))
             .map(|r| r.to_string())
             .unwrap_or_else(|| "?".to_string());
-        let dbg = format!(
-            "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={}",
-            ordered,
-            req_dbg,
-            seq.0,
-            Self::debug_fmt_order_key(seq),
-            self.current_turn_id.as_deref().unwrap_or("-"),
-            win_idx,
-            start,
-            end,
-            pos
-        );
+        let dbg = if let Some(tdbg) = reasoning_title_dbg {
+            format!(
+                "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={} | {}",
+                ordered,
+                req_dbg,
+                seq.0,
+                Self::debug_fmt_order_key(seq),
+                self.current_turn_id.as_deref().unwrap_or("-"),
+                win_idx,
+                start,
+                end,
+                pos,
+                tdbg
+            )
+        } else {
+            format!(
+                "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={}",
+                ordered,
+                req_dbg,
+                seq.0,
+                Self::debug_fmt_order_key(seq),
+                self.current_turn_id.as_deref().unwrap_or("-"),
+                win_idx,
+                start,
+                end,
+                pos
+            )
+        };
         if self.cell_order_dbg.len() < pos { self.cell_order_dbg.resize(pos, None); }
         self.cell_order_dbg.insert(pos, Some(dbg));
         // Shift later window starts
