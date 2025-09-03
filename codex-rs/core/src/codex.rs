@@ -3313,7 +3313,7 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             }
 
             let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
-            let codex_ua = crate::user_agent::get_codex_user_agent(Some("web_fetch"));
+            let codex_ua = crate::default_client::get_codex_user_agent(Some("web_fetch"));
 
             // Heuristic: some domains render key content client-side. Prefer a
             // quick browser render first so we capture comments/timelines.
