@@ -99,6 +99,10 @@ pub(crate) fn function() -> Color {
     current_theme().function
 }
 
+pub(crate) fn keyword() -> Color {
+    current_theme().keyword
+}
+
 // Overlay/scrim helper: a dimmed background used behind modal overlays.
 // We derive it from the current theme background so it looks consistent for
 // both light and dark themes.

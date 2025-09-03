@@ -71,6 +71,8 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed.
     pending_redraw: Arc<AtomicBool>,
+    /// Controls the input reader thread spawned at startup.
+    input_running: Arc<AtomicBool>,
 
     // Transcript overlay state
     _transcript_overlay: Option<TranscriptApp>,
@@ -137,10 +139,14 @@ impl App<'_> {
 
         // Spawn a dedicated thread for reading the crossterm event loop and
         // re-publishing the events as AppEvents, as appropriate.
+        // Create the input thread stop flag up front so we can store it on `Self`.
+        let input_running = Arc::new(AtomicBool::new(true));
         {
             let app_event_tx = app_event_tx.clone();
+            let input_running_thread = input_running.clone();
             std::thread::spawn(move || {
                 loop {
+                    if !input_running_thread.load(Ordering::Relaxed) { break; }
                     // This timeout is necessary to avoid holding the event lock
                     // that crossterm::event::read() acquires. In particular,
                     // reading the cursor position (crossterm::cursor::position())
@@ -148,7 +154,10 @@ impl App<'_> {
                     // can't acquire it within 2 sec. Resizing the terminal
                     // crashes the app if the cursor position can't be read.
                     // Keep the timeout small to minimize input-to-echo latency.
-                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(5)) {
+                    // Poll slightly less aggressively to reduce wakeups while
+                    // keeping input latency low. If no events are pending,
+                    // sleep briefly to avoid a busy loop.
+                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(10)) {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
@@ -182,8 +191,9 @@ impl App<'_> {
                             }
                         }
                     } else {
-                        // Timeout expired, no `Event` is available; yield cooperatively
-                        std::thread::yield_now();
+                        // Timeout expired, no `Event` is available; sleep briefly
+                        // instead of yielding in a tight loop to reduce CPU at idle.
+                        std::thread::sleep(Duration::from_millis(5));
                     }
                 }
             });
@@ -240,6 +250,7 @@ impl App<'_> {
             config,
             file_search,
             pending_redraw,
+            input_running,
             _transcript_overlay: None,
             _deferred_history_lines: Vec::new(),
             _transcript_saved_viewport: None,
@@ -575,7 +586,13 @@ impl App<'_> {
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
-                AppEvent::ExitRequest => { break 'main; }
+                AppEvent::ExitRequest => {
+                    // Stop background threads and break the UI loop.
+                    self.commit_anim_running.store(false, Ordering::Release);
+                    self.input_running.store(false, Ordering::Release);
+                    break 'main;
+                }
+                // fallthrough handled by break
                 AppEvent::CodexOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
@@ -1038,10 +1055,14 @@ impl App<'_> {
     }
 
     pub(crate) fn token_usage(&self) -> codex_core::protocol::TokenUsage {
-        match &self.app_state {
+        let usage = match &self.app_state {
             AppState::Chat { widget } => widget.token_usage().clone(),
             AppState::Onboarding { .. } => codex_core::protocol::TokenUsage::default(),
-        }
+        };
+        // ensure background helpers stop before returning
+        self.commit_anim_running.store(false, Ordering::Release);
+        self.input_running.store(false, Ordering::Release);
+        usage
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {

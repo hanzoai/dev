@@ -969,11 +969,15 @@ impl ChatWidget<'_> {
             // Stop any active UI streams immediately so output ceases at once.
             self.finalize_active_stream();
             self.stream_state.drop_streaming = true;
+            // Surface an explicit notice in history so users see confirmation.
+            // We add a lightweight background event (not an error) to match prior UX.
+            self.history_push(crate::history_cell::new_background_event(
+                "Cancelled by user.".to_string(),
+            ));
             self.submit_op(Op::Interrupt);
-            // If nothing else is active, drop spinner; otherwise status already updated.
-            if self.active_task_ids.is_empty() {
-                self.bottom_pane.set_task_running(false);
-            }
+            // Immediately drop the running status so the next message can be typed/run,
+            // even if backend cleanup (and Error event) arrives slightly later.
+            self.bottom_pane.set_task_running(false);
             self.bottom_pane.clear_live_ring();
             // Reset with max width to disable wrapping
             self.live_builder = RowBuilder::new(usize::MAX);
@@ -2351,6 +2355,11 @@ impl ChatWidget<'_> {
                 tools::web_search_begin(self, ev.call_id, ev.query)
             },
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
+                // If the user requested an interrupt, ignore late final answers.
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring AgentMessage after interrupt");
+                    return;
+                }
                 self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 self.stream_state.seq_answer_final = Some(event.event_seq);
                 // Bind stream id to current turn and reserve an ordered key from OrderMeta if provided.
@@ -2421,6 +2430,11 @@ impl ChatWidget<'_> {
                 self.bottom_pane.update_status_text("responding".to_string());
             }
             EventMsg::AgentReasoning(AgentReasoningEvent { text }) => {
+                // Ignore late reasoning if we've dropped streaming due to interrupt.
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring AgentReasoning after interrupt");
+                    return;
+                }
                 self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentReasoning event with text: {:?}...", text.chars().take(100).collect::<String>());
                 // Guard: duplicate final Reasoning for the same id can arrive due to provider
@@ -2607,6 +2621,10 @@ impl ChatWidget<'_> {
                 self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring AgentReasoningRawContent after interrupt");
+                    return;
+                }
                 tracing::debug!("AgentReasoningRawContent event with text: {:?}...", text.chars().take(100).collect::<String>());
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::warn!("Ignoring duplicate AgentReasoningRawContent for closed id={}", id);
@@ -3133,7 +3151,7 @@ impl ChatWidget<'_> {
 
         // Gather active agents from current UI state
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from("/agents".magenta()));
+        lines.push(Line::from("/agents").fg(crate::colors::keyword()));
         lines.push(Line::from(""));
 
         // Platform + environment summary to aid debugging
@@ -5818,11 +5836,20 @@ impl ChatWidget<'_> {
                            include_branch: bool,
                            include_dir: bool| {
             let mut spans: Vec<Span> = Vec::new();
-            spans.push(Span::styled("Code", Style::default().add_modifier(Modifier::BOLD)));
+            // Title follows theme text color
+            spans.push(Span::styled(
+                "Code",
+                Style::default()
+                    .fg(crate::colors::text())
+                    .add_modifier(Modifier::BOLD),
+            ));
 
             if include_model {
-                spans.push(Span::raw("  •  "));
-                spans.push(Span::styled("Model: ", Style::default().dim()));
+                spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    "Model: ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 spans.push(Span::styled(
                     self.format_model_name(&self.config.model),
                     Style::default().fg(crate::colors::info()),
@@ -5830,8 +5857,11 @@ impl ChatWidget<'_> {
             }
 
             if include_reasoning {
-                spans.push(Span::raw("  •  "));
-                spans.push(Span::styled("Reasoning: ", Style::default().dim()));
+                spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    "Reasoning: ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 spans.push(Span::styled(
                     format!("{}", self.config.model_reasoning_effort),
                     Style::default().fg(crate::colors::info()),
@@ -5839,15 +5869,21 @@ impl ChatWidget<'_> {
             }
 
             if include_dir {
-                spans.push(Span::raw("  •  "));
-                spans.push(Span::styled("Directory: ", Style::default().dim()));
+                spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                spans.push(Span::styled(
+                    "Directory: ",
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 spans.push(Span::styled(cwd_str.clone(), Style::default().fg(crate::colors::info())));
             }
 
             if include_branch {
                 if let Some(branch) = &branch_opt {
-                    spans.push(Span::raw("  •  "));
-                    spans.push(Span::styled("Branch: ", Style::default().dim()));
+                    spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
+                    spans.push(Span::styled(
+                        "Branch: ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
                     spans.push(Span::styled(
                         branch.clone(),
                         Style::default().fg(crate::colors::success_green()),
@@ -5857,11 +5893,11 @@ impl ChatWidget<'_> {
 
             // Add reasoning visibility toggle hint only when reasoning is shown
             if self.is_reasoning_shown() {
-                spans.push(Span::raw("  •  "));
+                spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
                 let reasoning_hint = "Ctrl+R hide reasoning";
                 spans.push(Span::styled(
                     reasoning_hint,
-                    Style::default().dim(),
+                    Style::default().fg(crate::colors::text_dim()),
                 ));
             }
 
@@ -5876,9 +5912,14 @@ impl ChatWidget<'_> {
         let mut status_spans = build_spans(include_reasoning, include_model, include_branch, include_dir);
 
         // Now recompute exact available width inside the border + padding before measuring
+        // Render a bordered status block and explicitly fill its background.
+        // Without a background fill, some terminals blend with prior frame
+        // contents, which is especially noticeable on dark themes as dark
+        // "caps" at the edges. Match the app background for consistency.
         let status_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()));
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()));
         let inner_area = status_block.inner(padded_area);
         let padded_inner = inner_area.inner(Margin::new(1, 0));
         let inner_width = padded_inner.width as usize;
@@ -5904,15 +5945,10 @@ impl ChatWidget<'_> {
             status_spans = build_spans(include_reasoning, include_model, include_branch, include_dir);
         }
         
-        // Add reasoning visibility toggle hint only when reasoning is shown
-        if self.is_reasoning_shown() {
-            status_spans.push(Span::raw("  •  "));
-            let reasoning_hint = "Ctrl+R hide reasoning";
-            status_spans.push(Span::styled(
-                reasoning_hint,
-                Style::default().dim(),
-            ));
-        }
+        // Note: The reasoning visibility hint is appended inside `build_spans`
+        // so it participates in width measurement and elision. Do not append
+        // it again here to avoid overflow that caused corrupted glyph boxes on
+        // some terminals.
 
         let status_line = Line::from(status_spans);
 
@@ -5920,8 +5956,13 @@ impl ChatWidget<'_> {
         status_block.render(padded_area, buf);
 
         // Then render the text inside with padding, centered
-        let status_widget =
-            Paragraph::new(vec![status_line]).alignment(ratatui::layout::Alignment::Center);
+        let status_widget = Paragraph::new(vec![status_line])
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(
+                Style::default()
+                    .bg(crate::colors::background())
+                    .fg(crate::colors::text()),
+            );
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
@@ -6748,15 +6789,10 @@ impl ChatWidget<'_> {
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
 
-        // Fill entire area with theme background
-        let bg_style = Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                buf[(x, y)].set_style(bg_style);
-            }
-        }
+        // Avoid full‑frame background fill each frame. Individual widgets/cells
+        // paint their own backgrounds, and App clears on the first frame or when
+        // themes change. Removing this per‑cell loop significantly reduces per‑frame
+        // work during animations and while typing.
 
         // Remember full frame height for HUD sizing logic
         self.layout.last_frame_height.set(area.height);
@@ -6937,9 +6973,10 @@ impl WidgetRef for &ChatWidget<'_> {
 
         if has_active_animation {
             tracing::debug!("Active animation detected, scheduling next frame");
-            // Schedule next frame after debounce window to avoid dropped requests.
-            // Using 20ms ensures we're past the 16ms debounce and maintain smooth animation.
-            self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(20)));
+            // Lower animation cadence to reduce CPU while remaining smooth in terminals.
+            // ~50ms ≈ 20 FPS is typically sufficient.
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(50)));
         }
 
         // Calculate scroll position and vertical alignment
@@ -7211,6 +7248,12 @@ impl WidgetRef for &ChatWidget<'_> {
                 if self.show_order_overlay {
                     if let Some(Some(info)) = self.cell_order_dbg.get(idx) {
                         let mut text = format!("⟦{}⟧", info);
+                        // Live reasoning diagnostics: append current title detection snapshot
+                        if let Some(rc) = item.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>() {
+                            let snap = rc.debug_title_overlay();
+                            text.push_str(" | ");
+                            text.push_str(&snap);
+                        }
                         let style = Style::default().fg(crate::colors::text_dim());
                         // Prefer below the item in the one-row spacing area
                         let below_y = item_area.y.saturating_add(visible_height);
