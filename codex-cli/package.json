@@ -27,13 +27,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@vscode/ripgrep": "^1.15.14"
-  },
+  "dependencies": {},
   "devDependencies": {
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
+    "@vscode/ripgrep": "^1.15.14",
     "@just-every/code-darwin-arm64": "0.2.56",
     "@just-every/code-darwin-x64": "0.2.56",
     "@just-every/code-linux-x64-musl": "0.2.56",
