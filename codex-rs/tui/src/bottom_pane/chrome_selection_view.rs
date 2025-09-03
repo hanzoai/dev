@@ -133,12 +133,14 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        // Create the selection box
+        // Create the selection box with theme-aware styling
+        Clear.render(area, buf);
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Chrome Launch Options ")
             .title_alignment(Alignment::Center)
-            .border_style(Style::default().fg(crate::colors::primary()));
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .border_style(Style::default().fg(crate::colors::border()));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -208,7 +210,9 @@ impl<'a> BottomPaneView<'a> for ChromeSelectionView {
             width: inner.width.saturating_sub(1),
             height: inner.height,
         };
-        let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
+        let paragraph = Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
         paragraph.render(padded, buf);
     }
 

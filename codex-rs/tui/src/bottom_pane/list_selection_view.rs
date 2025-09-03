@@ -162,7 +162,7 @@ impl BottomPaneView<'_> for ListSelectionView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()))
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
             .title(self.title.clone())
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
