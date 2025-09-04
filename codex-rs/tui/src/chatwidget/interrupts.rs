@@ -15,13 +15,13 @@ use super::tools;
 #[derive(Debug)]
 pub(crate) enum QueuedInterrupt {
     ExecApproval { seq: u64, id: String, ev: ExecApprovalRequestEvent },
-    ApplyPatchApproval { seq: u64, id: String, ev: ApplyPatchApprovalRequestEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize> },
-    ExecBegin { seq: u64, ev: ExecCommandBeginEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>, turn_id: Option<String> },
-    ExecEnd { seq: u64, ev: ExecCommandEndEvent, turn_win: Option<usize> },
-    McpBegin { seq: u64, ev: McpToolCallBeginEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>, turn_id: Option<String> },
-    McpEnd { seq: u64, ev: McpToolCallEndEvent, turn_win: Option<usize> },
-    PatchEnd { seq: u64, ev: PatchApplyEndEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize> },
-    PlanUpdate { seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize> },
+    ApplyPatchApproval { seq: u64, id: String, ev: ApplyPatchApprovalRequestEvent },
+    ExecBegin { seq: u64, ev: ExecCommandBeginEvent, order: Option<codex_core::protocol::OrderMeta> },
+    ExecEnd { seq: u64, ev: ExecCommandEndEvent, order: Option<codex_core::protocol::OrderMeta> },
+    McpBegin { seq: u64, ev: McpToolCallBeginEvent, order: Option<codex_core::protocol::OrderMeta> },
+    McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<codex_core::protocol::OrderMeta> },
+    PatchEnd { seq: u64, ev: PatchApplyEndEvent },
+    PlanUpdate { seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta> },
 }
 
 #[derive(Default)]
@@ -46,34 +46,32 @@ impl InterruptManager {
         seq: u64,
         id: String,
         ev: ApplyPatchApprovalRequestEvent,
-        order: Option<codex_core::protocol::OrderMeta>,
-        turn_win: Option<usize>,
     ) {
-        self.queue.push(QueuedInterrupt::ApplyPatchApproval { seq, id, ev, order, turn_win });
+        self.queue.push(QueuedInterrupt::ApplyPatchApproval { seq, id, ev });
     }
 
-    pub(crate) fn push_exec_begin(&mut self, seq: u64, ev: ExecCommandBeginEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>, turn_id: Option<String>) {
-        self.queue.push(QueuedInterrupt::ExecBegin { seq, ev, order, turn_win, turn_id });
+    pub(crate) fn push_exec_begin(&mut self, seq: u64, ev: ExecCommandBeginEvent, order: Option<codex_core::protocol::OrderMeta>) {
+        self.queue.push(QueuedInterrupt::ExecBegin { seq, ev, order });
     }
 
-    pub(crate) fn push_exec_end(&mut self, seq: u64, ev: ExecCommandEndEvent, turn_win: Option<usize>) {
-        self.queue.push(QueuedInterrupt::ExecEnd { seq, ev, turn_win });
+    pub(crate) fn push_exec_end(&mut self, seq: u64, ev: ExecCommandEndEvent, order: Option<codex_core::protocol::OrderMeta>) {
+        self.queue.push(QueuedInterrupt::ExecEnd { seq, ev, order });
     }
 
-    pub(crate) fn push_mcp_begin(&mut self, seq: u64, ev: McpToolCallBeginEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>, turn_id: Option<String>) {
-        self.queue.push(QueuedInterrupt::McpBegin { seq, ev, order, turn_win, turn_id });
+    pub(crate) fn push_mcp_begin(&mut self, seq: u64, ev: McpToolCallBeginEvent, order: Option<codex_core::protocol::OrderMeta>) {
+        self.queue.push(QueuedInterrupt::McpBegin { seq, ev, order });
     }
 
-    pub(crate) fn push_mcp_end(&mut self, seq: u64, ev: McpToolCallEndEvent, turn_win: Option<usize>) {
-        self.queue.push(QueuedInterrupt::McpEnd { seq, ev, turn_win });
+    pub(crate) fn push_mcp_end(&mut self, seq: u64, ev: McpToolCallEndEvent, order: Option<codex_core::protocol::OrderMeta>) {
+        self.queue.push(QueuedInterrupt::McpEnd { seq, ev, order });
     }
 
-    pub(crate) fn push_patch_end(&mut self, seq: u64, ev: PatchApplyEndEvent, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>) {
-        self.queue.push(QueuedInterrupt::PatchEnd { seq, ev, order, turn_win });
+    pub(crate) fn push_patch_end(&mut self, seq: u64, ev: PatchApplyEndEvent) {
+        self.queue.push(QueuedInterrupt::PatchEnd { seq, ev });
     }
 
-    pub(crate) fn push_plan_update(&mut self, seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta>, turn_win: Option<usize>) {
-        self.queue.push(QueuedInterrupt::PlanUpdate { seq, ev, order, turn_win });
+    pub(crate) fn push_plan_update(&mut self, seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta>) {
+        self.queue.push(QueuedInterrupt::PlanUpdate { seq, ev, order });
     }
 
     pub(crate) fn flush_all(&mut self, chat: &mut ChatWidget<'_>) {
@@ -82,48 +80,25 @@ impl InterruptManager {
         for q in self.queue.drain(..) {
             match q {
                 QueuedInterrupt::ExecApproval { id, ev, .. } => chat.handle_exec_approval_now(id, ev),
-                QueuedInterrupt::ApplyPatchApproval { seq, id, ev, order, turn_win } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref())
-                        .unwrap_or_else(|| chat.next_unordered_seq());
-                    tracing::info!("[order/flush] ApplyPatchApproval: queue_seq={} chosen_key={}", seq, ok.0);
-                    chat.set_pending_insert_seq(ok.0);
-                    if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); }
+                QueuedInterrupt::ApplyPatchApproval { seq: _, id, ev } => {
                     chat.handle_apply_patch_approval_now(id, ev);
                 }
-                QueuedInterrupt::ExecBegin { seq, ev, order, turn_win, turn_id } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref())
-                        .unwrap_or_else(|| chat.next_unordered_seq());
-                    tracing::info!("[order/flush] ExecBegin: queue_seq={} chosen_key={}", seq, ok.0);
-                    chat.set_pending_insert_seq(ok.0);
-                    if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); }
-                    if let Some(tid) = turn_id { chat.call_id_to_turn.insert(ev.call_id.clone(), tid); }
-                    chat.handle_exec_begin_now(ev);
+                QueuedInterrupt::ExecBegin { seq: _, ev, order, .. } => {
+                    let ord = order.as_ref().expect("missing OrderMeta in queued ExecBegin");
+                    chat.handle_exec_begin_now(ev, ord);
                 }
-                QueuedInterrupt::ExecEnd { ev, turn_win, .. } => { if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); } chat.handle_exec_end_now(ev) },
-                QueuedInterrupt::McpBegin { seq, ev, order, turn_win, turn_id } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref())
-                        .unwrap_or_else(|| chat.next_unordered_seq());
-                    tracing::info!("[order/flush] McpBegin: queue_seq={} chosen_key={}", seq, ok.0);
-                    chat.set_pending_insert_seq(ok.0);
-                    if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); }
-                    if let Some(tid) = turn_id { chat.call_id_to_turn.insert(ev.call_id.clone(), tid); }
-                    tools::mcp_begin(chat, ev);
+                QueuedInterrupt::ExecEnd { ev, order, .. } => { let ord = order.as_ref().expect("missing OrderMeta in queued ExecEnd"); chat.handle_exec_end_now(ev, ord) },
+                QueuedInterrupt::McpBegin { seq: _, ev, order, .. } => {
+                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref());
+                    tools::mcp_begin(chat, ev, ok);
                 }
-                QueuedInterrupt::McpEnd { ev, turn_win, .. } => { if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); } tools::mcp_end(chat, ev) },
-                QueuedInterrupt::PatchEnd { seq, ev, order, turn_win } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref())
-                        .unwrap_or_else(|| chat.next_unordered_seq());
-                    tracing::info!("[order/flush] PatchEnd: queue_seq={} chosen_key={}", seq, ok.0);
-                    chat.set_pending_insert_seq(ok.0);
-                    if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); }
+                QueuedInterrupt::McpEnd { ev, order, .. } => { let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref()); tools::mcp_end(chat, ev, ok) },
+                QueuedInterrupt::PatchEnd { seq: _, ev } => {
                     chat.handle_patch_apply_end_now(ev);
                 }
-                QueuedInterrupt::PlanUpdate { seq, ev, order, turn_win } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref())
-                        .unwrap_or_else(|| chat.next_unordered_seq());
-                    tracing::info!("[order/flush] PlanUpdate: queue_seq={} chosen_key={}", seq, ok.0);
-                    if let Some(wi) = turn_win { chat.pending_insert_turn = Some(wi); }
-                    chat.history_insert_with_seq(crate::history_cell::new_plan_update(ev), ok.0);
+                QueuedInterrupt::PlanUpdate { ev, order, .. } => {
+                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref());
+                    let _ = chat.history_insert_with_key_global(Box::new(crate::history_cell::new_plan_update(ev)), ok);
                 }
             }
         }

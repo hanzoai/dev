@@ -102,6 +102,7 @@ pub(crate) struct App<'a> {
 
     /// If true, enable lightweight timing collection and report on exit.
     timing_enabled: bool,
+    timing: TimingStats,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -276,31 +277,32 @@ impl App<'_> {
             clear_on_first_frame: true,
             last_esc_time: None,
             timing_enabled: enable_perf,
+            timing: TimingStats::default(),
         }
     }
 
 
-    /// Schedule a redraw if one is not already pending.
+    /// Schedule a redraw immediately and open a short debounce window to coalesce
+    /// subsequent requests. Crucially, even if a timer is already armed (e.g., an
+    /// animation scheduled a future frame), we still trigger an immediate redraw
+    /// to keep keypress echo latency low.
     #[allow(clippy::unwrap_used)]
     fn schedule_redraw(&self) {
-        // Attempt to set the flag to `true`. If it was already `true`, another
-        // redraw is already pending so we can return early.
+        // Always issue a leading-edge redraw for responsiveness.
+        self.app_event_tx.send(AppEvent::Redraw);
+
+        // Arm debounce window if not already armed.
         if self
             .pending_redraw
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
+            .is_ok()
         {
-            return;
+            let pending_redraw = self.pending_redraw.clone();
+            thread::spawn(move || {
+                thread::sleep(REDRAW_DEBOUNCE);
+                pending_redraw.store(false, Ordering::Release);
+            });
         }
-        // Leading-edge draw now for lower input latency; coalesce further
-        // requests until the debounce window elapses.
-        self.app_event_tx.send(AppEvent::Redraw);
-
-        let pending_redraw = self.pending_redraw.clone();
-        thread::spawn(move || {
-            thread::sleep(REDRAW_DEBOUNCE);
-            pending_redraw.store(false, Ordering::Release);
-        });
     }
     
     /// Schedule a redraw after the specified duration
@@ -361,8 +363,17 @@ impl App<'_> {
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
+                AppEvent::FlushPendingExecEnds => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.flush_pending_exec_ends();
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::Redraw => {
+                    if self.timing_enabled { self.timing.on_redraw_begin(); }
+                    let t0 = Instant::now();
                     std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
+                    if self.timing_enabled { self.timing.on_redraw_end(t0); }
                 }
                 AppEvent::StartCommitAnimation => {
                     if self
@@ -398,6 +409,7 @@ impl App<'_> {
                     }
                 }
                 AppEvent::KeyEvent(mut key_event) => {
+                    if self.timing_enabled { self.timing.on_key(); }
                     // On terminals that do not support keyboard enhancement flags
                     // (notably some Windows Git Bash/mintty setups), crossterm may
                     // report only Release events. Normalize such events to Press so
@@ -1093,11 +1105,16 @@ impl App<'_> {
 
     /// Return a human-readable performance summary if timing was enabled.
     pub(crate) fn perf_summary(&self) -> Option<String> {
-        if !self.timing_enabled { return None; }
-        match &self.app_state {
-            AppState::Chat { widget } => Some(widget.perf_summary()),
-            AppState::Onboarding { .. } => None,
+        if !self.timing_enabled {
+            return None;
         }
+        let mut out = String::new();
+        if let AppState::Chat { widget } = &self.app_state {
+            out.push_str(&widget.perf_summary());
+            out.push_str("\n\n");
+        }
+        out.push_str(&self.timing.summarize());
+        Some(out)
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
@@ -1182,3 +1199,55 @@ fn should_show_login_screen(login_status: crate::LoginStatus, _config: &Config) 
 }
 
 // (legacy tests removed)
+#[derive(Default, Clone, Debug)]
+struct TimingStats {
+    frames_drawn: u64,
+    redraw_events: u64,
+    key_events: u64,
+    draw_ns: Vec<u64>,
+    key_to_frame_ns: Vec<u64>,
+    last_key_event: Option<Instant>,
+    key_waiting_for_frame: bool,
+}
+
+impl TimingStats {
+    fn on_key(&mut self) {
+        self.key_events = self.key_events.saturating_add(1);
+        self.last_key_event = Some(Instant::now());
+        self.key_waiting_for_frame = true;
+    }
+    fn on_redraw_begin(&mut self) { self.redraw_events = self.redraw_events.saturating_add(1); }
+    fn on_redraw_end(&mut self, started: Instant) {
+        self.frames_drawn = self.frames_drawn.saturating_add(1);
+        let dt = started.elapsed().as_nanos() as u64;
+        self.draw_ns.push(dt);
+        if self.key_waiting_for_frame {
+            if let Some(t0) = self.last_key_event.take() {
+                let d = t0.elapsed().as_nanos() as u64;
+                self.key_to_frame_ns.push(d);
+            }
+            self.key_waiting_for_frame = false;
+        }
+    }
+    fn pct(ns: &[u64], p: f64) -> f64 {
+        if ns.is_empty() { return 0.0; }
+        let mut v = ns.to_vec();
+        v.sort_unstable();
+        let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
+        (v[idx] as f64) / 1_000_000.0
+    }
+    fn summarize(&self) -> String {
+        let draw_p50 = Self::pct(&self.draw_ns, 0.50);
+        let draw_p95 = Self::pct(&self.draw_ns, 0.95);
+        let kf_p50 = Self::pct(&self.key_to_frame_ns, 0.50);
+        let kf_p95 = Self::pct(&self.key_to_frame_ns, 0.95);
+        format!(
+            "app-timing: frames={}\n  redraw_events={} key_events={}\n  draw_ms: p50={:.2} p95={:.2}\n  key->frame_ms: p50={:.2} p95={:.2}",
+            self.frames_drawn,
+            self.redraw_events,
+            self.key_events,
+            draw_p50, draw_p95,
+            kf_p50, kf_p95,
+        )
+    }
+}
