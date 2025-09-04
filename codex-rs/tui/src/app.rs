@@ -69,8 +69,12 @@ pub(crate) struct App<'a> {
 
     file_search: FileSearchManager,
 
-    /// True when a redraw has been scheduled but not yet executed.
+    /// True when a redraw has been scheduled but not yet executed (debounce window).
     pending_redraw: Arc<AtomicBool>,
+    /// True while a one-shot timer for a future animation frame is armed.
+    /// This prevents arming multiple timers at once, while allowing timers
+    /// to run independently of the short debounce used for immediate redraws.
+    scheduled_frame_armed: Arc<AtomicBool>,
     /// Controls the input reader thread spawned at startup.
     input_running: Arc<AtomicBool>,
 
@@ -140,6 +144,7 @@ impl App<'_> {
         let (bulk_tx, app_event_rx_bulk) = channel();
         let app_event_tx = AppEventSender::new_dual(high_tx.clone(), bulk_tx.clone());
         let pending_redraw = Arc::new(AtomicBool::new(false));
+        let scheduled_frame_armed = Arc::new(AtomicBool::new(false));
 
         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
 
@@ -265,6 +270,7 @@ impl App<'_> {
             config,
             file_search,
             pending_redraw,
+            scheduled_frame_armed,
             input_running,
             _transcript_overlay: None,
             _deferred_history_lines: Vec::new(),
@@ -307,22 +313,20 @@ impl App<'_> {
     
     /// Schedule a redraw after the specified duration
     fn schedule_redraw_in(&self, duration: Duration) {
-        // Coalesce: if a redraw is already pending (either debounce timer or a
-        // previously scheduled frame), skip arming another timer. This avoids
-        // rapid-fire frame scheduling that can make spinners appear too fast.
+        // Coalesce timers: only arm one future frame at a time. Crucially, do
+        // NOT gate this on the short debounce flag used for immediate redraws,
+        // otherwise animations can stall if the timer is suppressed by debounce.
         if self
-            .pending_redraw
+            .scheduled_frame_armed
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
-        {
-            return;
-        }
-        let pending_redraw = self.pending_redraw.clone();
+        { return; }
+        let scheduled = self.scheduled_frame_armed.clone();
         let tx = self.app_event_tx.clone();
         thread::spawn(move || {
             thread::sleep(duration);
-            // Clear and draw exactly one frame at the requested cadence.
-            pending_redraw.store(false, Ordering::Release);
+            // Allow a subsequent timer to be armed.
+            scheduled.store(false, Ordering::Release);
             tx.send(AppEvent::Redraw);
         });
     }

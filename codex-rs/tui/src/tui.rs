@@ -134,8 +134,9 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
         }
     }
 
-    // Wrap stdout in a BufWriter to reduce syscalls during rendering.
-    let backend = CrosstermBackend::new(BufWriter::new(stdout()));
+    // Wrap stdout in a larger BufWriter to reduce syscalls and flushes.
+    // A larger buffer significantly helps during heavy scrolling where many cells change.
+    let backend = CrosstermBackend::new(BufWriter::with_capacity(512 * 1024, stdout()));
     let tui = Terminal::new(backend)?;
     Ok((tui, terminal_info))
 }

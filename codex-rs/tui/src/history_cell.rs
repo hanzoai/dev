@@ -539,6 +539,8 @@ pub(crate) struct AssistantMarkdownCell {
     pub(crate) id: Option<String>,
     // Pre-rendered lines (first line is a hidden "codex" header)
     pub(crate) lines: Vec<Line<'static>>, // includes hidden header "codex"
+    // Cached per-width wrap plan to avoid re-segmentation and re-measure
+    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>, 
 }
 
 impl AssistantMarkdownCell {
@@ -556,6 +558,7 @@ impl AssistantMarkdownCell {
             raw,
             id,
             lines: Vec::new(),
+            cached_layout: std::cell::RefCell::new(None),
         };
         me.rebuild(cfg);
         me
@@ -570,6 +573,100 @@ impl AssistantMarkdownCell {
             line.style = line.style.patch(Style::default().fg(bright));
         }
         self.lines = out;
+        // Invalidate cached layout on rebuild (theme/lines changed)
+        *self.cached_layout.borrow_mut() = None;
+    }
+}
+
+// Cached layout for AssistantMarkdownCell (per width)
+#[derive(Clone)]
+struct AssistantLayoutCache {
+    width: u16,
+    segs: Vec<AssistantSeg>,
+    seg_rows: Vec<u16>,
+    total_rows_with_padding: u16,
+}
+
+#[derive(Clone, Debug)]
+enum AssistantSeg {
+    Text(Vec<Line<'static>>),
+    Bullet(Vec<Line<'static>>),
+    Code(Vec<Line<'static>>),
+}
+
+impl AssistantMarkdownCell {
+    fn ensure_layout(&self, width: u16) -> AssistantLayoutCache {
+        if let Some(cache) = self.cached_layout.borrow().as_ref() {
+            if cache.width == width {
+                return cache.clone();
+            }
+        }
+        let text_wrap_width = width;
+        let mut segs: Vec<AssistantSeg> = Vec::new();
+        let mut text_buf: Vec<Line<'static>> = Vec::new();
+        let mut iter = self.display_lines_trimmed().into_iter().peekable();
+        while let Some(line) = iter.next() {
+            if crate::render::line_utils::is_code_block_painted(&line) {
+                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                let mut chunk = vec![line];
+                while let Some(n) = iter.peek() {
+                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
+                }
+                // Remove language sentinel and trim blank padding rows (as in render)
+                if let Some(first) = chunk.first() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    if flat.contains("⟦LANG:") { let _ = chunk.remove(0); }
+                }
+                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.remove(0); }
+                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.pop(); }
+                segs.push(AssistantSeg::Code(chunk));
+                continue;
+            }
+            if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
+                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                let hr = Line::from(Span::styled(
+                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
+                    Style::default().fg(crate::colors::assistant_hr()),
+                ));
+                segs.push(AssistantSeg::Bullet(vec![hr]));
+                continue;
+            }
+            if text_wrap_width > 4 {
+                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
+                    if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                    segs.push(AssistantSeg::Bullet(wrap_bullet_line(
+                        line,
+                        indent_spaces,
+                        &bullet_char,
+                        text_wrap_width,
+                    )));
+                    continue;
+                }
+            }
+            text_buf.push(line);
+        }
+        if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+
+        // Precompute rows per segment and total with top/bottom padding
+        let mut seg_rows: Vec<u16> = Vec::with_capacity(segs.len());
+        let mut total: u16 = 0;
+        for seg in &segs {
+            let rows = match seg {
+                AssistantSeg::Bullet(lines) => lines.len() as u16,
+                AssistantSeg::Text(lines) => Paragraph::new(Text::from(lines.clone()))
+                    .wrap(Wrap { trim: false })
+                    .line_count(text_wrap_width)
+                    .try_into()
+                    .unwrap_or(0),
+                AssistantSeg::Code(lines) => lines.len() as u16 + 2,
+            };
+            seg_rows.push(rows);
+            total = total.saturating_add(rows);
+        }
+        total = total.saturating_add(2); // top+bottom padding
+        let cache = AssistantLayoutCache { width, segs, seg_rows, total_rows_with_padding: total };
+        *self.cached_layout.borrow_mut() = Some(cache.clone());
+        cache
     }
 }
 
@@ -595,98 +692,7 @@ impl HistoryCell for AssistantMarkdownCell {
         true
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Match custom rendering exactly:
-        // - Bullet lines are prewrapped with hanging indent and treated as fixed rows
-        // - Code blocks render inside a bordered card (add 2 rows for borders)
-        // - Other text wraps via Paragraph at the available width
-        // - Add top and bottom padding rows
-        let text_wrap_width = width;
-        let src_lines = self.display_lines_trimmed();
-
-        #[derive(Debug)]
-        enum Seg {
-            Text(Vec<Line<'static>>),
-            Bullet(Vec<Line<'static>>),
-            Code(Vec<Line<'static>>),
-        }
-
-        let mut segs: Vec<Seg> = Vec::new();
-        let mut text_buf: Vec<Line<'static>> = Vec::new();
-        let mut _is_first_output_line = true;
-        let mut iter = src_lines.into_iter().peekable();
-        while let Some(line) = iter.next() {
-            if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let mut chunk = vec![line];
-                while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
-                }
-                segs.push(Seg::Code(chunk));
-                continue;
-            }
-
-            if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
-                    Style::default().fg(crate::colors::assistant_hr()),
-                ));
-                segs.push(Seg::Bullet(vec![hr]));
-                _is_first_output_line = false;
-                continue;
-            }
-
-            if text_wrap_width > 4 {
-                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                    // Always use explicit bullet wrapping with hanging indent so
-                    // continuation lines align under the start of the content.
-                    segs.push(Seg::Bullet(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        text_wrap_width,
-                    )));
-                    _is_first_output_line = false;
-                    continue;
-                }
-            }
-
-            text_buf.push(line);
-            _is_first_output_line = false;
-        }
-        if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-
-        let mut total: u16 = 0;
-        for seg in segs {
-            match seg {
-                Seg::Bullet(lines) => {
-                    total = total.saturating_add(lines.len() as u16);
-                }
-                Seg::Text(lines) => {
-                    if lines.is_empty() { continue; }
-                    let text = Text::from(lines);
-                    let rows: u16 = Paragraph::new(text)
-                        .wrap(Wrap { trim: false })
-                        .line_count(text_wrap_width)
-                        .try_into()
-                        .unwrap_or(0);
-                    total = total.saturating_add(rows);
-                }
-                Seg::Code(mut chunk) => {
-                    // Remove language sentinel and trim blank padding rows
-                    if let Some(first) = chunk.first() {
-                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                        if flat.contains("⟦LANG:") { chunk.remove(0); }
-                    }
-                    while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
-                    while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
-                    total = total.saturating_add(chunk.len() as u16 + 2);
-                }
-            }
-        }
-
-        total.saturating_add(2)
+        self.ensure_layout(width).total_rows_with_padding
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Mirror StreamingContentCell rendering so finalized assistant cells look
@@ -701,58 +707,11 @@ impl HistoryCell for AssistantMarkdownCell {
             }
         }
 
-        // Build segments: prewrapped bullets, code (no rewrap), and normal text.
+        // Build or reuse cached segments for this width
+        let plan = self.ensure_layout(area.width);
+        let segs = &plan.segs;
+        let seg_rows = &plan.seg_rows;
         let text_wrap_width = area.width;
-        #[derive(Debug)]
-        enum Seg {
-            Text(Vec<Line<'static>>),
-            Bullet(Vec<Line<'static>>),
-            Code(Vec<Line<'static>>),
-        }
-        let mut segs: Vec<Seg> = Vec::new();
-        let mut text_buf: Vec<Line<'static>> = Vec::new();
-        let mut _is_first_output_line = true;
-        let mut iter = self.display_lines_trimmed().into_iter().peekable();
-        while let Some(line) = iter.next() {
-            if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let mut chunk = vec![line];
-                while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
-                }
-                // Trim padding rows rendered inside the code card background
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
-                segs.push(Seg::Code(chunk));
-                continue;
-            }
-            if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
-                    Style::default().fg(crate::colors::assistant_hr()),
-                ));
-                segs.push(Seg::Bullet(vec![hr]));
-                _is_first_output_line = false;
-                continue;
-            }
-            if text_wrap_width > 4 {
-                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                    segs.push(Seg::Bullet(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        text_wrap_width,
-                    )));
-                    _is_first_output_line = false;
-                    continue;
-                }
-            }
-            text_buf.push(line);
-            _is_first_output_line = false;
-        }
-        if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
 
         // Streaming-style top padding row for the entire assistant cell
         let mut remaining_skip = skip_rows;
@@ -764,6 +723,8 @@ impl HistoryCell for AssistantMarkdownCell {
         remaining_skip = remaining_skip.saturating_sub(1);
 
         // Helpers
+        #[derive(Debug, Clone)]
+        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
         use unicode_width::UnicodeWidthStr as UW;
         let measure_line =
             |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
@@ -922,11 +883,23 @@ impl HistoryCell for AssistantMarkdownCell {
             }
         };
 
-        for seg in &segs {
+        for (seg_idx, seg) in segs.iter().enumerate() {
             if cur_y >= end_y {
                 break;
             }
-            draw_segment(seg, &mut cur_y, &mut remaining_skip);
+            // Clamp skip to precomputed rows for this segment to avoid extra measure work
+            let _before = remaining_skip;
+            let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
+            if remaining_skip >= rows {
+                remaining_skip -= rows;
+                continue;
+            }
+            let seg_draw = match seg {
+                AssistantSeg::Text(v) => Seg::Text(v.clone()),
+                AssistantSeg::Bullet(v) => Seg::Bullet(v.clone()),
+                AssistantSeg::Code(v) => Seg::Code(v.clone()),
+            };
+            draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
         }
         // Bottom padding row (blank): area is already cleared to bg
         if remaining_skip == 0 && cur_y < end_y {
@@ -2910,8 +2883,13 @@ impl CollapsibleReasoningCell {
     }
 
     /// Extracts section titles for collapsed display: any line that appears to
-    /// be a heading or starts with a leading bold run. Returns at least the
-    /// first non-empty non-header line if no titles found.
+    /// be a heading (entire line styled bold). While streaming (`in_progress`),
+    /// we intentionally suppress the fallback that would otherwise return the
+    /// first non-empty non-header line — this prevents verbose paragraph
+    /// content from flashing before the model emits proper section titles.
+    ///
+    /// After streaming completes, we keep the gentle fallback so providers
+    /// that never emit bold headings still have a concise summary line.
     fn extract_section_titles(&self) -> Vec<Line<'static>> {
         let lines = self.normalized_lines();
         let mut titles: Vec<Line<'static>> = Vec::new();
@@ -2933,14 +2911,15 @@ impl CollapsibleReasoningCell {
             }
         }
 
-        if titles.is_empty() {
-            // Fallback: first non-empty line as summary
+        // If we're still streaming, do NOT fallback to the first non-empty line;
+        // show an ellipsis in `display_lines` until a real title arrives. This
+        // avoids flashing full reasoning paragraphs in collapsed mode.
+        if titles.is_empty() && !self.in_progress.get() {
+            // Fallback (finalized only): first non-empty line as summary
             for l in lines.iter() {
                 let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
                 let trimmed = text.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
+                if trimmed.is_empty() { continue; }
                 titles.push(l.clone());
                 break;
             }
@@ -3092,9 +3071,11 @@ impl HistoryCell for CollapsibleReasoningCell {
 
 pub(crate) struct StreamingContentCell {
     pub(crate) id: Option<String>,
-    pub(crate) lines: Vec<Line<'static>>,
+    lines: Vec<Line<'static>>,
     // Show an ellipsis on a new line while streaming is in progress
     pub(crate) show_ellipsis: bool,
+    // Cached per-width wrap plan to avoid re-segmentation; invalidated on extend
+    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>, // reuse same struct
 }
 
 impl HistoryCell for StreamingContentCell {
@@ -3119,81 +3100,8 @@ impl HistoryCell for StreamingContentCell {
         true
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Match streaming render path with bullet-aware prewrapping and no double wrap.
-        let text_wrap_width = width;
-        let src_lines = self.display_lines_trimmed();
-
-        #[derive(Debug)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
-
-        let mut segs: Vec<Seg> = Vec::new();
-        let mut text_buf: Vec<Line<'static>> = Vec::new();
-        let mut _is_first_output_line = true;
-        let mut iter = src_lines.into_iter().peekable();
-        while let Some(line) = iter.next() {
-            if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let mut chunk = vec![line];
-                while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
-                }
-                segs.push(Seg::Code(chunk));
-                continue;
-            }
-            if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
-                    Style::default().fg(crate::colors::assistant_hr()),
-                ));
-                segs.push(Seg::Bullet(vec![hr]));
-                _is_first_output_line = false;
-                continue;
-            }
-            if text_wrap_width > 4 {
-                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                    segs.push(Seg::Bullet(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        text_wrap_width,
-                    )));
-                    _is_first_output_line = false;
-                    continue;
-                }
-            }
-            text_buf.push(line);
-            _is_first_output_line = false;
-        }
-        if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-
-        let mut total: u16 = 0;
-        for seg in segs {
-            match seg {
-                Seg::Bullet(lines) => total = total.saturating_add(lines.len() as u16),
-                Seg::Text(lines) => {
-                    if lines.is_empty() { continue; }
-                    let text = Text::from(lines);
-                    let rows: u16 = Paragraph::new(text)
-                        .wrap(Wrap { trim: false })
-                        .line_count(text_wrap_width)
-                        .try_into()
-                        .unwrap_or(0);
-                    total = total.saturating_add(rows);
-                }
-                Seg::Code(mut chunk) => {
-                    if let Some(first) = chunk.first() {
-                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                        if flat.contains("⟦LANG:") { chunk.remove(0); }
-                    }
-                    while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
-                    while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
-                    total = total.saturating_add(chunk.len() as u16 + 2);
-                }
-            }
-        }
-        let mut total = total.saturating_add(2);
+        let plan = self.ensure_stream_layout(width);
+        let mut total = plan.total_rows_with_padding;
         if self.show_ellipsis { total = total.saturating_add(1); }
         total
     }
@@ -3209,55 +3117,18 @@ impl HistoryCell for StreamingContentCell {
             }
         }
 
-        // Build segments: prewrapped bullets, code (no rewrap), and normal text.
+        // Build or reuse cached segments for this width
+        let plan = self.ensure_stream_layout(area.width);
         let text_wrap_width = area.width;
-        #[derive(Debug)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
-        let mut segs: Vec<Seg> = Vec::new();
-        let mut text_buf: Vec<Line<'static>> = Vec::new();
-        let mut _is_first_output_line = true;
-        let mut iter = self.display_lines_trimmed().into_iter().peekable();
-        while let Some(line) = iter.next() {
-            if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let mut chunk = vec![line];
-                while let Some(n) = iter.peek() { if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; } }
-                // Trim padding rows inside code card
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.remove(0); }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { chunk.pop(); }
-                segs.push(Seg::Code(chunk));
-                continue;
-            }
-            if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
-                    Style::default().fg(crate::colors::assistant_hr()),
-                ));
-                segs.push(Seg::Bullet(vec![hr]));
-                _is_first_output_line = false;
-                continue;
-            }
-            if text_wrap_width > 4 {
-                if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-                    segs.push(Seg::Bullet(wrap_bullet_line(
-                        line,
-                        indent_spaces,
-                        &bullet_char,
-                        text_wrap_width,
-                    )));
-                    _is_first_output_line = false;
-                    continue;
-                }
-            }
-            text_buf.push(line);
-            _is_first_output_line = false;
-        }
-        if !text_buf.is_empty() { segs.push(Seg::Text(std::mem::take(&mut text_buf))); }
-        // Append an ellipsis line as its own segment when streaming
-        if self.show_ellipsis {
-            segs.push(Seg::Text(vec![Line::from("…".dim())]));
+        let mut segs = plan.segs.clone();
+        let mut seg_rows = plan.seg_rows.clone();
+        if self.show_ellipsis { 
+            segs.push(AssistantSeg::Text(vec![Line::from("…".dim())]));
+            seg_rows.push(Paragraph::new(Text::from(vec![Line::from("…")]))
+                .wrap(Wrap { trim: false })
+                .line_count(text_wrap_width)
+                .try_into()
+                .unwrap_or(1));
         }
 
         // Streaming-style top padding row
@@ -3270,6 +3141,8 @@ impl HistoryCell for StreamingContentCell {
         remaining_skip = remaining_skip.saturating_sub(1);
 
         // Helpers
+        #[derive(Debug, Clone)]
+        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
         use unicode_width::UnicodeWidthStr as UW;
         let measure_line =
             |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
@@ -3423,11 +3296,22 @@ impl HistoryCell for StreamingContentCell {
             }
         };
 
-        for seg in &segs {
+        for (i, seg) in segs.iter().enumerate() {
             if cur_y >= end_y {
                 break;
             }
-            draw_segment(seg, &mut cur_y, &mut remaining_skip);
+            // Fast-skip full segments using precomputed rows
+            let rows = seg_rows.get(i).copied().unwrap_or(0);
+            if remaining_skip >= rows {
+                remaining_skip -= rows;
+                continue;
+            }
+            let seg_draw = match seg {
+                AssistantSeg::Text(lines) => Seg::Text(lines.clone()),
+                AssistantSeg::Bullet(lines) => Seg::Bullet(lines.clone()),
+                AssistantSeg::Code(lines) => Seg::Code(lines.clone()),
+            };
+            draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
         }
         // Bottom padding row (blank): area already cleared
         if remaining_skip == 0 && cur_y < end_y {
@@ -3451,6 +3335,38 @@ impl HistoryCell for StreamingContentCell {
         } else {
             self.lines.clone()
         }
+    }
+}
+
+impl StreamingContentCell {
+    pub(crate) fn extend_lines(&mut self, mut new_lines: Vec<Line<'static>>) {
+        if new_lines.is_empty() { return; }
+        self.lines.append(&mut new_lines);
+        // Invalidate cached plan so next render recomputes incrementally for current width
+        *self.cached_layout.borrow_mut() = None;
+    }
+
+    pub(crate) fn retint(&mut self, old: &crate::theme::Theme, new: &crate::theme::Theme) {
+        retint_lines_in_place(&mut self.lines, old, new);
+        *self.cached_layout.borrow_mut() = None;
+    }
+
+    fn ensure_stream_layout(&self, width: u16) -> AssistantLayoutCache {
+        if let Some(cache) = self.cached_layout.borrow().as_ref() {
+            if cache.width == width {
+                return cache.clone();
+            }
+        }
+        // Reuse the same segmentation logic as Assistant, operating on current lines
+        let tmp = AssistantMarkdownCell {
+            raw: String::new(),
+            id: None,
+            lines: std::iter::once(Line::from("codex")).chain(self.lines.clone()).collect(),
+            cached_layout: std::cell::RefCell::new(None),
+        };
+        let cache = tmp.ensure_layout(width);
+        *self.cached_layout.borrow_mut() = Some(cache.clone());
+        cache
     }
 }
 
@@ -4374,14 +4290,14 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
 }
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell { id: None, lines, show_ellipsis: true }
+    StreamingContentCell { id: None, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
 }
 
 pub(crate) fn new_streaming_content_with_id(
     id: Option<String>,
     lines: Vec<Line<'static>>,
 ) -> StreamingContentCell {
-    StreamingContentCell { id, lines, show_ellipsis: true }
+    StreamingContentCell { id, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
