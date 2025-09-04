@@ -4308,6 +4308,30 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     }
 }
 
+/// Render a queued user message that will be sent in the next turn.
+/// Visually identical to a normal user cell, but the header shows a
+/// small "(queued)" suffix so it’s clear it hasn’t been executed yet.
+pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
+    use ratatui::style::Style;
+    use ratatui::text::Span;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    // Header: "user (queued)"
+    lines.push(Line::from(vec![
+        Span::from("user "),
+        Span::from("(queued)").style(Style::default().fg(crate::colors::text_dim())),
+    ]));
+    // Normalize and render body like normal user messages
+    let normalized = normalize_overwrite_sequences(&message);
+    let expanded = expand_tabs_to_spaces(&normalized, 4);
+    let content: Vec<Line<'static>> = expanded
+        .lines()
+        .map(|l| ansi_escape_line(l))
+        .collect();
+    let content = trim_empty_lines(content);
+    lines.extend(content);
+    PlainHistoryCell { lines, kind: HistoryCellType::User }
+}
+
 /// Expand horizontal tabs to spaces using a fixed tab stop.
 /// This prevents terminals from applying their own tab expansion after
 /// ratatui has computed layout, which can otherwise cause glyphs to appear

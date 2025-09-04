@@ -230,37 +230,36 @@ pub(crate) struct ChatWidget<'a> {
     // agent/sub‑agent is still running (long‑running sessions can interleave).
     active_task_ids: HashSet<String>,
 
+    // --- Queued user message support ---
+    // Messages typed while a task is running are kept here and rendered
+    // at the bottom as "(queued)" until the next turn begins. At that
+    // point we submit one queued message and move its cell into the
+    // normal history within the new turn window.
+    queued_user_messages: std::collections::VecDeque<UserMessage>,
+    // Number of user prompts we pre-pended to history just before starting
+    // a new turn; used to anchor the next turn window so assistant output
+    // appears after them.
+    pending_user_prompts_for_next_turn: usize,
+
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
     
-    // Stable ordering: per-visible-cell order key parallel to `history_cells`.
-    cell_order_seq: Vec<Option<OrderKey>>,
+    // Strict global ordering for history: every cell has a required key
+    // (req, out, seq). No unordered inserts and no turn windows.
+    cell_order_seq: Vec<OrderKey>,
     // Debug: per-cell order info string rendered in the UI to diagnose ordering.
     cell_order_dbg: Vec<Option<String>>,
-    // Start index of the current turn within history_cells for ordered inserts.
-    turn_start_idx: usize,
-    // Current turn id from TaskStarted (if any)
-    current_turn_id: Option<String>,
-    // Pending order seq for next insertion (set by interrupt flush)
-    pending_insert_seq: Option<OrderKey>,
-    // Pending turn window index for next insertion
-    pending_insert_turn: Option<usize>,
     // Routing for reasoning stream ids -> existing CollapsibleReasoningCell index
     reasoning_index: HashMap<String, usize>,
-    // Stream id -> owning turn id (for reasoning/answer ids)
-    stream_id_to_turn: HashMap<String, String>,
-    // Generic call id (exec/tool/patch) -> owning turn id
-    call_id_to_turn: HashMap<String, String>,
-    // Stable per-(turn_id, kind, id) ordering, seeded from event_seq
-    stream_order_seq: HashMap<(String, StreamKind, String), OrderKey>,
-    // Monotonic arrival counter per turn; increments on every EventMsg handled
-    turn_arrival_seq: u64,
-    // Turn windows and lookup
-    turn_windows: Vec<TurnWindow>,
-    turn_index_by_id: HashMap<String, usize>,
-    // Map turn id -> request ordinal (from OrderMeta). Lets us show request index even for
-    // unordered/pushed cells that lack an explicit OrderMeta on the triggering event.
-    turn_request_ordinal: HashMap<String, u64>,
+    // Stable per-(kind, stream_id) ordering, derived from OrderMeta.
+    stream_order_seq: HashMap<(StreamKind, String), OrderKey>,
+    // Track last provider request_ordinal seen so internal messages can be
+    // assigned request_index = last_seen + 1 (with out = -1).
+    last_seen_request_index: u64,
+    // Synthetic request index used for internal-only messages; always >= last_seen_request_index
+    current_request_index: u64,
+    // Monotonic seq for internal messages to keep intra-request order stable
+    internal_seq: u64,
     // Show order overlay when true (from --order)
     show_order_overlay: bool,
 }
@@ -270,13 +269,32 @@ struct PendingJumpBack {
 }
 
 // ---------- Stable ordering & routing helpers ----------
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct OrderKey(u64);
-
-#[derive(Debug, Clone)]
-struct TurnWindow {
-    start_idx: usize,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OrderKey {
+    req: u64,
+    out: i32,
+    seq: u64,
 }
+
+impl Ord for OrderKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.req.cmp(&other.req) {
+            std::cmp::Ordering::Equal => match self.out.cmp(&other.out) {
+                std::cmp::Ordering::Equal => self.seq.cmp(&other.seq),
+                o => o,
+            },
+            o => o,
+        }
+    }
+}
+
+impl PartialOrd for OrderKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// Removed legacy turn-window logic; ordering is strictly global.
 
 
 // Global guard to prevent overlapping background screenshot captures and to rate-limit them
@@ -329,38 +347,29 @@ impl std::fmt::Display for StreamId { fn fmt(&self, f: &mut std::fmt::Formatter<
 impl AsRef<str> for StreamId { fn as_ref(&self) -> &str { &self.0 } }
 
 impl ChatWidget<'_> {
+    
     pub(crate) fn enable_perf(&mut self, enable: bool) { self.perf_state.enabled = enable; }
     pub(crate) fn perf_summary(&self) -> String { self.perf_state.stats.borrow().summary() }
-    // Build an ordered key from model-provided OrderMeta.
-    // Layout: [63: ordered flag (0 = ordered, 1 = unordered)] [62..48: request_ordinal (16b)] [47..32: output_index (16b)] [31..0: sequence_number (32b)]
-    fn order_key_from_order_meta(order: Option<&codex_core::protocol::OrderMeta>) -> Option<OrderKey> {
-        order.map(|om| {
-            let req = (om.request_ordinal & 0xFFFF) << 48;
-            let out = (om.output_index.unwrap_or(0) as u64 & 0xFFFF) << 32;
-            let seq = om.sequence_number.unwrap_or(0) & 0xFFFF_FFFF;
-            // MSB cleared to indicate ordered content
-            OrderKey(req | out | seq)
-        })
-    }
-
-    // Generate a key for unordered items that must sort after all ordered ones in a turn window.
-    fn next_unordered_seq(&mut self) -> OrderKey {
-        self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
-        // Set MSB to 1 so unordered items always sort after ordered ones
-        OrderKey((1u64 << 63) | (self.turn_arrival_seq & 0x7FFF_FFFF_FFFF_FFFF))
+    // Build an ordered key from model-provided OrderMeta. Missing metadata is not allowed by policy.
+    fn order_key_from_order_meta(order: Option<&codex_core::protocol::OrderMeta>) -> OrderKey {
+        let om = order.expect("missing OrderMeta: strict ordering requires request_ordinal/output_index/sequence_number");
+        // sequence_number can be None on some terminal events; treat as 0 for stable placement
+        OrderKey { req: om.request_ordinal, out: om.output_index.map(|v| v as i32).unwrap_or(0), seq: om.sequence_number.unwrap_or(0) }
     }
 
     fn debug_fmt_order_key(ok: OrderKey) -> String {
-        let v = ok.0;
-        let is_unordered = (v >> 63) == 1;
-        if is_unordered {
-            format!("U:{}", v & 0x7FFF_FFFF_FFFF_FFFF)
-        } else {
-            let req = (v >> 48) & 0xFFFF;
-            let out = (v >> 32) & 0xFFFF;
-            let seq = v & 0xFFFF_FFFF;
-            format!("O:req={} out={} seq={}", req, out, seq)
+        format!("O:req={} out={} seq={}", ok.req, ok.out, ok.seq)
+    }
+
+    // Allocate a new synthetic key for internal (non-LLM) messages.
+    fn next_internal_key(&mut self) -> OrderKey {
+        // Ensure current_request_index always moves forward from the last seen provider index
+        if self.current_request_index < self.last_seen_request_index {
+            self.current_request_index = self.last_seen_request_index;
         }
+        self.current_request_index = self.current_request_index.saturating_add(1);
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        OrderKey { req: self.current_request_index, out: -1, seq: self.internal_seq }
     }
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
@@ -372,6 +381,32 @@ impl ChatWidget<'_> {
         let any_tasks_active = !self.active_task_ids.is_empty();
         if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
             self.bottom_pane.set_task_running(false);
+        }
+    }
+
+    /// Flush any ExecEnd events that arrived before their matching ExecBegin.
+    /// We briefly stash such ends to allow natural pairing when the Begin shows up
+    /// shortly after. If the pairing window expires, render a fallback completed
+    /// Exec cell so users still see the output in history.
+    pub(crate) fn flush_pending_exec_ends(&mut self) {
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        // Collect keys to avoid holding a mutable borrow while iterating
+        let mut ready: Vec<ExecCallId> = Vec::new();
+        for (k, (_ev, _order, t0)) in self.exec.pending_exec_ends.iter() {
+            if now.saturating_duration_since(*t0) >= Duration::from_millis(110) {
+                ready.push(k.clone());
+            }
+        }
+        for key in &ready {
+            if let Some((ev, order, _t0)) = self.exec.pending_exec_ends.remove(&key) {
+                // Regardless of whether a Begin has arrived by now, handle the End;
+                // handle_exec_end_now pairs with a running Exec if present, or falls back.
+                self.handle_exec_end_now(ev, &order);
+            }
+        }
+        if !ready.is_empty() {
+            self.request_redraw();
         }
     }
     
@@ -434,9 +469,10 @@ impl ChatWidget<'_> {
         let codex_home = self.config.codex_home.clone();
         let candidates = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home);
         if candidates.is_empty() {
-            self.history_push(crate::history_cell::new_background_event(
+            let key = self.next_internal_key();
+            let _ = self.history_insert_with_key_global(Box::new(crate::history_cell::new_background_event(
                 "No past sessions found for this folder".to_string(),
-            ));
+            )), key);
             return;
         }
         // Convert to simple rows with aligned columns and human-friendly times
@@ -508,21 +544,24 @@ impl ChatWidget<'_> {
                     use ratatui::text::Line as RLine;
                     let mut lines: Vec<RLine<'static>> = Vec::new();
                     crate::markdown::append_markdown(&text, &mut lines, &self.config);
-                    self.history_push(crate::history_cell::PlainHistoryCell {
+                    let key = self.next_internal_key();
+                    let _ = self.history_insert_with_key_global(Box::new(crate::history_cell::PlainHistoryCell {
                         lines,
                         kind: crate::history_cell::HistoryCellType::Notice,
-                    });
+                    }), key);
                     return;
                 }
                 if role == "user" {
-                    self.history_push(crate::history_cell::new_user_prompt(text));
+                    let key = self.next_internal_key();
+                    let _ = self.history_insert_with_key_global(Box::new(crate::history_cell::new_user_prompt(text)), key);
                 } else {
                     // Build a PlainHistoryCell with Assistant kind; header line hidden by renderer
                     use crate::history_cell::{PlainHistoryCell, HistoryCellType};
                     let mut lines = Vec::new();
                     lines.push(ratatui::text::Line::from("assistant"));
                     for l in text.lines() { lines.push(ratatui::text::Line::from(l.to_string())); }
-                    self.history_push(PlainHistoryCell { lines, kind: HistoryCellType::Assistant });
+                    let key = self.next_internal_key();
+                    let _ = self.history_insert_with_key_global(Box::new(PlainHistoryCell { lines, kind: HistoryCellType::Assistant }), key);
                 }
             }
             ResponseItem::Reasoning { summary, .. } => {
@@ -544,7 +583,8 @@ impl ChatWidget<'_> {
                         content = s.to_string();
                     }
                 }
-                self.history_push(crate::history_cell::new_background_event(content));
+                let key = self.next_internal_key();
+                let _ = self.history_insert_with_key_global(Box::new(crate::history_cell::new_background_event(content)), key);
             }
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
@@ -645,10 +685,14 @@ impl ChatWidget<'_> {
         // Clone for session storage before moving into history
         let changes_clone = changes.clone();
         // Surface the patch summary in the main conversation
-        self.push_cell_maybe_ordered(history_cell::new_patch_event(
-            history_cell::PatchEventType::ApprovalRequest,
-            changes,
-        ));
+        let key = self.next_internal_key();
+        let _ = self.history_insert_with_key_global(
+            Box::new(history_cell::new_patch_event(
+                history_cell::PatchEventType::ApprovalRequest,
+                changes,
+            )),
+            key,
+        );
         // Record change set for session diff popup (latest last)
         self.diffs.session_patch_sets.push(changes_clone);
         // For any new paths, capture an original baseline snapshot the first time we see them
@@ -687,12 +731,12 @@ impl ChatWidget<'_> {
     }
 
     /// Handle exec command begin immediately
-    fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent) {
-        exec_tools::handle_exec_begin_now(self, ev);
+    fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent, order: &codex_core::protocol::OrderMeta) {
+        exec_tools::handle_exec_begin_now(self, ev, order);
     }
 
     /// Handle exec command end immediately
-    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent) { exec_tools::handle_exec_end_now(self, ev); }
+    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent, order: &codex_core::protocol::OrderMeta) { exec_tools::handle_exec_end_now(self, ev, order); }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
     /// previous cell when they represent the same action header (e.g., Searched, Read).
@@ -738,7 +782,8 @@ impl ChatWidget<'_> {
             }
             // Fallback: if no prior cell found, do nothing (avoid extra section)
         } else {
-            self.push_cell_maybe_ordered(history_cell::new_patch_apply_failure(ev.stderr));
+            let key = self.next_internal_key();
+            let _ = self.history_insert_with_key_global(Box::new(history_cell::new_patch_apply_failure(ev.stderr)), key);
         }
         // After patch application completes, re-evaluate idle state
         self.maybe_hide_spinner();
@@ -753,16 +798,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.insert_str(s);
     }
 
-    // Interrupts set a pending seq; the next insertion uses ordered placement.
-    fn set_pending_insert_seq(&mut self, seq: u64) {
-        let is_unordered = (seq >> 63) == 1;
-        tracing::info!(
-            "[order] set_pending_insert_seq key={} ({})",
-            seq,
-            if is_unordered { "unordered" } else { "ordered" }
-        );
-        self.pending_insert_seq = Some(OrderKey(seq));
-    }
+    // Removed: pending insert sequencing is not used under strict ordering.
 
     pub(crate) fn register_pasted_image(&mut self, placeholder: String, path: std::path::PathBuf) {
         self.pending_images.insert(placeholder, path);
@@ -951,7 +987,8 @@ impl ChatWidget<'_> {
     }
 
     fn on_error(&mut self, message: String) {
-        self.history_push(history_cell::new_error_event(message));
+        let key = self.next_internal_key();
+        let _ = self.history_insert_with_key_global(Box::new(history_cell::new_error_event(message)), key);
         self.bottom_pane.set_task_running(false);
         self.exec.running_commands.clear();
         self.stream.clear_all();
@@ -973,9 +1010,10 @@ impl ChatWidget<'_> {
             self.stream_state.drop_streaming = true;
             // Surface an explicit notice in history so users see confirmation.
             // We add a lightweight background event (not an error) to match prior UX.
-            self.history_push(crate::history_cell::new_background_event(
+            let key = self.next_internal_key();
+            let _ = self.history_insert_with_key_global(Box::new(crate::history_cell::new_background_event(
                 "Cancelled by user.".to_string(),
-            ));
+            )), key);
             self.submit_op(Op::Interrupt);
             // Immediately drop the running status so the next message can be typed/run,
             // even if backend cleanup (and Error event) arrives slightly later.
@@ -994,6 +1032,14 @@ impl ChatWidget<'_> {
     }
     fn layout_areas(&self, area: Rect) -> Vec<Rect> { layout_scroll::layout_areas(self, area) }
     fn finalize_active_stream(&mut self) { streaming::finalize_active_stream(self); }
+    // Strict stream order key helpers
+    fn seed_stream_order_key(&mut self, kind: StreamKind, id: &str, key: OrderKey) {
+        self.stream_order_seq.insert((kind, id.to_string()), key);
+    }
+    fn ensure_stream_order_key_strict(&self, kind: StreamKind, id: Option<&str>) -> OrderKey {
+        let id = id.expect("missing stream id for strict ordering");
+        *self.stream_order_seq.get(&(kind, id.to_string())).expect("stream order key not seeded")
+    }
     pub(crate) fn new(
         config: Config,
         app_event_tx: AppEventSender,
@@ -1080,7 +1126,7 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None },
+            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
             tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -1131,22 +1177,17 @@ impl ChatWidget<'_> {
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
+            queued_user_messages: std::collections::VecDeque::new(),
+            pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
             // Stable ordering & routing init
-            cell_order_seq: vec![None; 1],
+            cell_order_seq: vec![OrderKey { req: 0, out: -1, seq: 0 }],
             cell_order_dbg: vec![None; 1],
-            turn_start_idx: 1,
-            current_turn_id: None,
-            pending_insert_seq: None,
-            pending_insert_turn: None,
             reasoning_index: HashMap::new(),
-            stream_id_to_turn: HashMap::new(),
-            call_id_to_turn: HashMap::new(),
             stream_order_seq: HashMap::new(),
-            turn_arrival_seq: 0,
-            turn_windows: Vec::new(),
-            turn_index_by_id: HashMap::new(),
-            turn_request_ordinal: HashMap::new(),
+            last_seen_request_index: 0,
+            current_request_index: 0,
+            internal_seq: 0,
             show_order_overlay,
         };
         
@@ -1211,7 +1252,7 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None },
+            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
             tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
@@ -1260,22 +1301,17 @@ impl ChatWidget<'_> {
             session_id: None,
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
+            queued_user_messages: std::collections::VecDeque::new(),
+            pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
-            // Stable ordering & routing init for forked widget
-            cell_order_seq: vec![None; 1],
+            // Strict ordering init for forked widget
+            cell_order_seq: vec![OrderKey { req: 0, out: -1, seq: 0 }],
             cell_order_dbg: vec![None; 1],
-            turn_start_idx: 1,
-            current_turn_id: None,
-            pending_insert_seq: None,
-            pending_insert_turn: None,
             reasoning_index: HashMap::new(),
-            stream_id_to_turn: HashMap::new(),
-            call_id_to_turn: HashMap::new(),
             stream_order_seq: HashMap::new(),
-            turn_arrival_seq: 0,
-            turn_windows: Vec::new(),
-            turn_index_by_id: HashMap::new(),
-            turn_request_ordinal: HashMap::new(),
+            last_seen_request_index: 0,
+            current_request_index: 0,
+            internal_seq: 0,
             show_order_overlay,
             
         }
@@ -1309,7 +1345,7 @@ impl ChatWidget<'_> {
             tracing::info!("Initial animation detected, scheduling frame");
             // Schedule initial frame for animations to ensure they start properly.
             // Use ScheduleFrameIn to avoid debounce issues with immediate RequestRedraw.
-            self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(20)));
+            self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(50)));
         }
     }
     
@@ -1578,247 +1614,34 @@ impl ChatWidget<'_> {
     /// Briefly show the vertical scrollbar and schedule a redraw to hide it.
     fn flash_scrollbar(&self) { layout_scroll::flash_scrollbar(self); }
 
-    fn add_to_history(&mut self, cell: impl HistoryCell + 'static) {
-        // Debug: trace cell being added
-        // Note: We diverge from upstream here - upstream takes &dyn HistoryCell
-        // and sends display_lines() through events. We store the actual cells
-        // for our terminal rendering and theming system.
-        // Invalidate height cache since content has changed
-        self.invalidate_height_cache();
-        self.height_manager
-            .borrow_mut()
-            .record_event(HeightEvent::HistoryAppend);
-        // Any new history item means reasoning is no longer at the bottom
-        self.clear_reasoning_in_progress();
-        let new_cell: Box<dyn HistoryCell> = Box::new(cell);
-
-        // Attempt to merge consecutive exec outputs of the same type (e.g., multiple Read or Search)
-        if let Some(last_box) = self.history_cells.last_mut() {
-            // Try to merge consecutive Exec summaries of the same action/phase
-            if let (Some(last_exec), Some(new_exec)) = (
-                last_box.as_any().downcast_ref::<history_cell::ExecCell>(),
-                (&*new_cell).as_any().downcast_ref::<history_cell::ExecCell>(),
-            ) {
-                // Never merge if either side is a running (in-progress) exec cell.
-                if last_exec.output.is_none() || new_exec.output.is_none() {
-                    // fall through to normal push below
-                } else {
-                // Compute header label based on parsed action and status
-                let exec_label = |e: &history_cell::ExecCell| -> &'static str {
-                    use crate::history_cell::ExecAction as EA;
-                    let action = history_cell::action_enum_from_parsed(&e.parsed);
-                    match (&e.output, action) {
-                        (None, EA::Read) => "Read",
-                        (None, EA::Search) => "Searched",
-                        (None, EA::List) => "List Files",
-                        (None, EA::Run) => "Running...",
-                        (Some(o), EA::Read) if o.exit_code == 0 => "Read",
-                        (Some(o), EA::Search) if o.exit_code == 0 => "Searched",
-                        (Some(o), EA::List) if o.exit_code == 0 => "List Files",
-                        (Some(o), EA::Run) if o.exit_code == 0 => "Ran",
-                        _ => "",
-                    }
-                };
-                let last_label = exec_label(last_exec);
-                let new_label = exec_label(new_exec);
-                let is_joinable_label = |s: &str| matches!(s, "Searched" | "Read" | "List Files" | "Ran" | "Running...");
-                if !last_label.is_empty() && last_label == new_label && is_joinable_label(last_label) {
-                    // Merge as a styled MergedExecCell to preserve per-exec formatting
-                    let mut merged = history_cell::MergedExecCell::from_exec(last_exec);
-                    merged.push_exec(new_exec);
-                    *last_box = Box::new(merged);
-                    self.autoscroll_if_near_bottom();
-                    self.bottom_pane.set_has_chat_history(true);
-                    self.process_animation_cleanup();
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                    return;
-                }
-                }
-            } else if let (Some(_last_tool), Some(_new_tool)) = (
-                last_box.as_any().downcast_ref::<history_cell::ToolCallCell>(),
-                (&*new_cell).as_any().downcast_ref::<history_cell::ToolCallCell>(),
-            ) {
-                // Merge consecutive Tool cells with the same header (e.g., "Web Search")
-                let last_lines = last_box.display_lines();
-                let new_lines = new_cell.display_lines();
-                let last_header = last_lines
-                    .first()
-                    .and_then(|l| l.spans.get(0))
-                    .map(|s| s.content.clone().to_string())
-                    .unwrap_or_default();
-                let new_header = new_lines
-                    .first()
-                    .and_then(|l| l.spans.get(0))
-                    .map(|s| s.content.clone().to_string())
-                    .unwrap_or_default();
-                if !last_header.is_empty() && last_header == new_header {
-                    let mut combined = last_lines.clone();
-                    while combined
-                        .last()
-                        .map(|l| crate::render::line_utils::is_blank_line_trim(l))
-                        .unwrap_or(false)
-                    {
-                        combined.pop();
-                    }
-                    let mut body: Vec<ratatui::text::Line<'static>> = new_lines.into_iter().skip(1).collect();
-                    while body.first().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.remove(0);
-                    }
-                    while body.last().map(|l| crate::render::line_utils::is_blank_line_trim(l)).unwrap_or(false) {
-                        body.pop();
-                    }
-                    if let Some(first_line) = body.first_mut() {
-                        if let Some(first_span) = first_line.spans.get_mut(0) {
-                            if first_span.content == "  └ " || first_span.content == "└ " {
-                                first_span.content = "  ".into();
-                            }
-                        }
-                    }
-                    combined.extend(body);
-                    *last_box = Box::new(history_cell::PlainHistoryCell { lines: combined, kind: history_cell::HistoryCellType::Plain });
-                    self.autoscroll_if_near_bottom();
-                    self.bottom_pane.set_has_chat_history(true);
-                    self.process_animation_cleanup();
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
-                    return;
-                }
-            } else {
-                // Skip merging Exec into PlainHistoryCell; prefer typed MergedExecCell merges only.
-            }
-            // (disabled) merging Tool cells into prior PlainHistoryCell to keep logic simpler here
+    fn history_insert_with_key_global(&mut self, cell: Box<dyn HistoryCell>, key: OrderKey) -> usize {
+        // Any ordered insert of a non-reasoning cell means reasoning is no longer the
+        // bottom-most active block; drop the in-progress ellipsis on collapsed titles.
+        let is_reasoning_cell = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+            .is_some();
+        if !is_reasoning_cell {
+            self.clear_reasoning_in_progress();
         }
-
-        // Store in memory for local rendering
-        self.history_cells.push(new_cell);
-        self.cell_order_seq.push(None);
-        // Record debug info for push-without-explicit-order
-        let win_idx = self.current_turn_window_index();
-        let (start, end) = if let Some(wi) = win_idx { self.turn_window_bounds_by_index(wi) } else { (self.turn_start_idx, self.history_cells.len()) };
-        let turn_id = self.current_turn_id.as_deref().unwrap_or("-");
-        let req_dbg = self
-            .current_turn_id
-            .as_ref()
-            .and_then(|tid| self.turn_request_ordinal.get(tid))
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "?".to_string());
-        let dbg = format!(
-            "push: req={} turn={:?} win={:?} bounds=[{},{}] pos={} ordered=None",
-            req_dbg,
-            turn_id,
-            win_idx,
-            start,
-            end,
-            self.history_cells.len().saturating_sub(1)
-        );
-        let dbg = if self.show_order_overlay {
-            if let Some(rc) = self
-                .history_cells
-                .last()
-                .and_then(|c| c.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>())
-            {
-                let lines = rc.display_lines_trimmed();
-                if let Some(line) = lines.first() {
-                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-                    let bytes = text.len();
-                    let chars = text.chars().count();
-                    let width = unicode_width::UnicodeWidthStr::width(text.as_str());
-                    let spans = line.spans.len();
-                    let span_lens: Vec<usize> = line.spans.iter().map(|s| s.content.len()).collect();
-                    let mut preview = text.clone();
-                    if preview.len() > 120 { preview.truncate(120); preview.push_str("…"); }
-                    format!(
-                        "{} | title='{}' bytes={} chars={} width={} spans={} span_bytes={:?}",
-                        dbg, preview, bytes, chars, width, spans, span_lens
-                    )
-                } else {
-                    dbg
-                }
-            } else {
-                dbg
-            }
-        } else {
-            dbg
-        };
-        self.cell_order_dbg.push(Some(dbg));
-        
-        
-        // Log animation cells
-        // suppress noisy animation logging
-        
-        // Auto-follow if we're at or near the bottom (preserve position if scrolled up)
-        self.autoscroll_if_near_bottom();
-        // If user has scrolled up (scroll_offset > 0), don't change their position
-        // Check if there's actual conversation history
-        // With trait-based cells, we consider any non-empty history as conversation
-        let has_conversation = !self.history_cells.is_empty();
-        self.bottom_pane.set_has_chat_history(has_conversation);
-        // Ensure input focus is maintained when new content arrives
-        self.bottom_pane.ensure_input_focus();
-        // Clean up any faded-out animations
-        self.process_animation_cleanup();
-        // Request redraw to show new history
-        self.app_event_tx.send(AppEvent::RequestRedraw);
-    }
-
-    // History helper shim: centralize history mutations
-    fn history_push(&mut self, cell: impl HistoryCell + 'static) { self.add_to_history(cell); }
-
-    // Insert using a provided sequence (stable per turn). Convenience wrapper.
-    fn history_insert_with_seq(&mut self, cell: impl HistoryCell + 'static, raw_seq: u64) {
-        let seq = OrderKey(raw_seq);
-        self.history_insert_with_seq_internal(Box::new(cell), seq);
-    }
-
-    // Internal ordered insert returning the index.
-    fn history_insert_with_seq_internal(&mut self, cell: Box<dyn HistoryCell>, seq: OrderKey) -> usize {
-        self.history_insert_in_window_with_seq_internal(cell, seq, None)
-    }
-
-    fn history_insert_in_window_with_seq_internal(
-        &mut self,
-        cell: Box<dyn HistoryCell>,
-        seq: OrderKey,
-        target_window: Option<usize>,
-    ) -> usize {
-        let (start, end, win_idx) = if let Some(wi) = target_window.or_else(|| self.current_turn_window_index()) {
-            let (s,e0) = self.turn_window_bounds_by_index(wi);
-            // Clamp end to be at least start to avoid inverted ranges when window metadata lags
-            let mut e = if e0 < s { s } else { e0 };
-            // Also clamp end to current history length to avoid inserting beyond the buffer
-            let curr_len = self.history_cells.len();
-            if e > curr_len { e = curr_len; }
-            (s, e, Some(wi))
-        } else {
-            (self.turn_start_idx, self.history_cells.len(), None)
-        };
-        // Determine insertion position within window based on sequence ordering
-        let mut pos = end;
-        for i in start..end {
-            match self.cell_order_seq.get(i) {
-                Some(Some(existing)) => {
-                    if existing.0 > seq.0 { pos = i; break; }
-                }
-                Some(None) => { pos = i; break; } // insert before unordered items
-                _ => {}
+        // Determine insertion position across the entire history
+        let mut pos = self.history_cells.len();
+        for i in 0..self.history_cells.len() {
+            if let Some(existing) = self.cell_order_seq.get(i) {
+                if *existing > key { pos = i; break; }
             }
         }
-        if pos < start { pos = start; }
-        if pos > end { pos = end; }
 
         // Keep auxiliary order vector in lockstep with history before inserting
         if self.cell_order_seq.len() < self.history_cells.len() {
             let missing = self.history_cells.len() - self.cell_order_seq.len();
-            self.cell_order_seq.extend(std::iter::repeat(None).take(missing));
+            for _ in 0..missing { self.cell_order_seq.push(OrderKey { req: 0, out: -1, seq: 0}); }
         }
 
         tracing::info!(
-            "[order] insert window: seq={} ({}) start={} end={} pos={} target_win={:?} len_before={} order_len_before={}",
-            seq.0,
-            Self::debug_fmt_order_key(seq),
-            start,
-            end,
+            "[order] insert: {} pos={} len_before={} order_len_before={}",
+            Self::debug_fmt_order_key(key),
             pos,
-            win_idx,
             self.history_cells.len(),
             self.cell_order_seq.len()
         );
@@ -1874,103 +1697,46 @@ impl ChatWidget<'_> {
 
         self.history_cells.insert(pos, cell);
         // Ensure order vector is also long enough for position after cell insert
-        if self.cell_order_seq.len() < pos { self.cell_order_seq.resize(pos, None); }
-        self.cell_order_seq.insert(pos, Some(seq));
+        if self.cell_order_seq.len() < pos { self.cell_order_seq.resize(pos, OrderKey { req: 0, out: -1, seq: 0}); }
+        self.cell_order_seq.insert(pos, key);
         // Insert debug info aligned with cell insert
-        let ordered = if (seq.0 >> 63) == 0 { "ordered" } else { "unordered" };
-        let req_dbg = self
-            .current_turn_id
-            .as_ref()
-            .and_then(|tid| self.turn_request_ordinal.get(tid))
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "?".to_string());
+        let ordered = "ordered";
+        let req_dbg = format!("{}", key.req);
         let dbg = if let Some(tdbg) = reasoning_title_dbg {
             format!(
-                "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={} | {}",
+                "insert: {} req={} key={} {} pos={} | {}",
                 ordered,
                 req_dbg,
-                seq.0,
-                Self::debug_fmt_order_key(seq),
-                self.current_turn_id.as_deref().unwrap_or("-"),
-                win_idx,
-                start,
-                end,
+                0,
+                Self::debug_fmt_order_key(key),
                 pos,
                 tdbg
             )
         } else {
             format!(
-                "insert: {} req={} key={} {} turn={:?} win={:?} bounds=[{},{}] pos={}",
+                "insert: {} req={} {} pos={}",
                 ordered,
                 req_dbg,
-                seq.0,
-                Self::debug_fmt_order_key(seq),
-                self.current_turn_id.as_deref().unwrap_or("-"),
-                win_idx,
-                start,
-                end,
+                Self::debug_fmt_order_key(key),
                 pos
             )
         };
         if self.cell_order_dbg.len() < pos { self.cell_order_dbg.resize(pos, None); }
         self.cell_order_dbg.insert(pos, Some(dbg));
-        // Shift later window starts
-        if let Some(idx) = win_idx { self.bump_windows_after_insert(pos, 1, idx); }
         self.invalidate_height_cache();
         self.autoscroll_if_near_bottom();
         self.bottom_pane.set_has_chat_history(true);
         self.process_animation_cleanup();
+        // Maintain input focus when new history arrives
+        self.bottom_pane.ensure_input_focus();
         self.app_event_tx.send(AppEvent::RequestRedraw);
         pos
     }
 
-    fn bump_windows_after_insert(&mut self, inserted_at: usize, delta: isize, win_idx: usize) {
-        if delta == 0 { return; }
-        for (i, tw) in self.turn_windows.iter_mut().enumerate() {
-            // Only shift windows strictly AFTER the one we inserted into.
-            if i > win_idx && tw.start_idx >= inserted_at {
-                if delta > 0 { tw.start_idx = tw.start_idx.saturating_add(delta as usize); }
-                else { tw.start_idx = tw.start_idx.saturating_sub(delta.wrapping_abs() as usize); }
-            }
-        }
-        // Maintain non-decreasing order of window starts to keep bounds sane
-        for i in 1..self.turn_windows.len() {
-            if self.turn_windows[i].start_idx < self.turn_windows[i-1].start_idx {
-                self.turn_windows[i].start_idx = self.turn_windows[i-1].start_idx;
-            }
-        }
-        // Also shift debug vector to remain aligned when we insert between windows.
-        // (No action needed here; alignment handled at insert/remove sites.)
-    }
-
-    fn current_turn_window_index(&self) -> Option<usize> {
-        self.current_turn_id
-            .as_ref()
-            .and_then(|id| self.turn_index_by_id.get(id).copied())
-    }
-
-    fn turn_window_bounds_by_index(&self, idx: usize) -> (usize, usize) {
-        if self.turn_windows.is_empty() || idx >= self.turn_windows.len() {
-            return (self.turn_start_idx, self.history_cells.len());
-        }
-        let start = self.turn_windows[idx].start_idx;
-        let end = if idx + 1 < self.turn_windows.len() {
-            self.turn_windows[idx + 1].start_idx
-        } else {
-            self.history_cells.len()
-        };
-        (start, end)
-    }
-
-    // Helper used by interrupt flush to route into ordered insert when a pending seq exists.
-    fn push_cell_maybe_ordered(&mut self, cell: impl HistoryCell + 'static) -> usize {
-        if let Some(seq) = self.pending_insert_seq.take() {
-            let win = self.pending_insert_turn.take();
-            return self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, win);
-        }
-        let before_len = self.history_cells.len();
-        self.history_push(cell);
-        if self.history_cells.is_empty() { before_len } else { self.history_cells.len() - 1 }
+    /// Push a cell using a synthetic global order key (internal event).
+    fn history_push(&mut self, cell: impl HistoryCell + 'static) {
+        let key = self.next_internal_key();
+        let _ = self.history_insert_with_key_global(Box::new(cell), key);
     }
 
     fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
@@ -1987,10 +1753,6 @@ impl ChatWidget<'_> {
             self.history_cells.remove(idx);
             if idx < self.cell_order_seq.len() { self.cell_order_seq.remove(idx); }
             if idx < self.cell_order_dbg.len() { self.cell_order_dbg.remove(idx); }
-            // Shift later windows start indices by -1
-            for tw in &mut self.turn_windows {
-                if tw.start_idx > idx { tw.start_idx = tw.start_idx.saturating_sub(1); }
-            }
             self.invalidate_height_cache();
             self.request_redraw();
         }
@@ -2249,37 +2011,33 @@ impl ChatWidget<'_> {
             );
         }
 
-        self.codex_op_tx
-            .send(Op::UserInput { items })
-            .unwrap_or_else(|e| {
-                tracing::error!("failed to send message: {e}");
-            });
-
-        // Persist the original text to cross-session message history.
-        if !original_text.is_empty() {
-            self.codex_op_tx
-                .send(Op::AddToHistory {
-                    text: original_text.clone(),
-                })
-                .unwrap_or_else(|e| {
-                    tracing::error!("failed to send AddHistory op: {e}");
-                });
+        // If a task is running, queue this message to be sent when the
+        // current turn completes. Keep it visible at the bottom as
+        // "user (queued)" until then.
+        let task_is_running = self.bottom_pane.is_task_running() || !self.active_task_ids.is_empty();
+        if task_is_running {
+            self.queued_user_messages.push_back(UserMessage { display_text: original_text.clone(), ordered_items: items });
+            // Show a subtle status so users know it's queued
+            self.bottom_pane.update_status_text("queued for next turn".to_string());
+            self.request_redraw();
+            return;
         }
 
+        // Idle path: append the user cell first so the upcoming TaskStarted
+        // window begins after it, ensuring assistant output renders below.
         if !original_text.is_empty() {
-            // Check if this is the first user prompt to trigger fade-out animation
-            let _has_existing_user_prompts = self.history_cells.iter().any(|cell| {
-                // Check if it's a user prompt by looking at display lines
-                // This is a bit indirect but works with the trait-based system
-                let lines = cell.display_lines();
-                !lines.is_empty() && lines[0].spans.iter().any(|span| 
-                    span.content == "user" || span.content.contains("user")
-                )
-            });
-            
-            // Keep the welcome cell's light version; do not trigger fade-out.
-            
             self.history_push(history_cell::new_user_prompt(original_text.clone()));
+            self.pending_user_prompts_for_next_turn = self.pending_user_prompts_for_next_turn.saturating_add(1);
+        }
+
+        // Now send to the agent
+        self.codex_op_tx
+            .send(Op::UserInput { items })
+            .unwrap_or_else(|e| tracing::error!("failed to send message: {e}"));
+        if !original_text.is_empty() {
+            self.codex_op_tx
+                .send(Op::AddToHistory { text: original_text.clone() })
+                .unwrap_or_else(|e| tracing::error!("failed to send AddHistory op: {e}"));
         }
     }
 
@@ -2313,15 +2071,7 @@ impl ChatWidget<'_> {
             "handle_codex_event({})",
             serde_json::to_string_pretty(&event).unwrap_or_default()
         );
-        // Pre-compute an insertion key from model-provided ordering, if available.
-        let pending_from_order = Self::order_key_from_order_meta(event.order.as_ref());
-        if let Some(ok) = pending_from_order { self.pending_insert_seq = Some(ok); }
-        // Record request_ordinal for current turn when provided so we can show it for all cells.
-        if let Some(ord) = event.order.as_ref().map(|o| o.request_ordinal) {
-            if let Some(ref tid) = self.current_turn_id {
-                self.turn_request_ordinal.insert(tid.clone(), ord);
-            }
-        }
+        // Strict ordering: all LLM/tool events must carry OrderMeta; internal events use synthetic keys.
 
         let Event { id, msg, .. } = event.clone();
         match msg {
@@ -2347,14 +2097,10 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::WebSearchBegin(ev) => {
-                if let Some(ti) = self.current_turn_window_index() {
-                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
-                        .or_else(|| Some(self.next_unordered_seq()));
-                    self.pending_insert_turn = Some(ti);
-                }
+                // Enforce order presence (tool events should carry it)
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 tracing::info!("[order] WebSearchBegin call_id={} seq={}", ev.call_id, event.event_seq);
-                self.call_id_to_turn.insert(ev.call_id.clone(), self.current_turn_id.clone().unwrap_or_default());
-                tools::web_search_begin(self, ev.call_id, ev.query)
+                tools::web_search_begin(self, ev.call_id, ev.query, ok)
             },
             EventMsg::AgentMessage(AgentMessageEvent { message }) => {
                 // If the user requested an interrupt, ignore late final answers.
@@ -2362,24 +2108,10 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring AgentMessage after interrupt");
                     return;
                 }
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 self.stream_state.seq_answer_final = Some(event.event_seq);
-                // Bind stream id to current turn and reserve an ordered key from OrderMeta if provided.
-                if !self.stream_id_to_turn.contains_key(&id) {
-                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
-                }
-                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                if let Some(ok) = Self::order_key_from_order_meta(event.order.as_ref()) {
-                    // Seed a stable key for this (turn, Answer, id) so the final insert uses it.
-                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
-                    // ensure_stream_order_key consumes pending_insert_seq only when present; set it explicitly.
-                    self.pending_insert_seq = Some(ok);
-                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
-                } else {
-                    // Fall back to unordered placement if no model order is provided.
-                    let _ = self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), None);
-                }
+                // Strict order for the stream id
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                self.seed_stream_order_key(StreamKind::Answer, &id, ok);
 
                 tracing::debug!(
                     "AgentMessage final id={} bytes={} preview={:?}",
@@ -2411,21 +2143,15 @@ impl ChatWidget<'_> {
             }
             EventMsg::WebSearchComplete(ev) => tools::web_search_complete(self, ev.call_id, ev.query),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_answer_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
                     return;
                 }
-                // Reserve order key for this Answer stream id using event seq
-                if !self.stream_id_to_turn.contains_key(&id) {
-                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
-                }
-                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                tracing::info!("[order] EventMsg::AgentMessageDelta id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
-                self.ensure_stream_order_key(turn_hint, StreamKind::Answer, Some(&id), Some(event.event_seq));
+                // Seed/refresh order key for this Answer stream id (must have OrderMeta)
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                self.seed_stream_order_key(StreamKind::Answer, &id, ok);
                 // Stream answer delta through StreamController
                 streaming::delta_text(self, StreamKind::Answer, id.clone(), delta);
                 // Show responding state while assistant streams
@@ -2437,23 +2163,16 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring AgentReasoning after interrupt");
                     return;
                 }
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentReasoning event with text: {:?}...", text.chars().take(100).collect::<String>());
-                // Guard: duplicate final Reasoning for the same id can arrive due to provider
-                // retries or thread replays. If we've already finalized this id in the current
-                // turn, ignore to avoid duplicating reasoning content in history.
+                // Guard duplicates for this id within the task
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::warn!("Ignoring duplicate AgentReasoning for closed id={}", id);
                     return;
                 }
-                // Reserve order key for this Reasoning stream id using event seq
-                if !self.stream_id_to_turn.contains_key(&id) {
-                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
-                }
-                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                tracing::info!("[order] EventMsg::AgentReasoning id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
-                self.ensure_stream_order_key(turn_hint, StreamKind::Reasoning, Some(&id), Some(event.event_seq));
+                // Seed strict order key for this Reasoning stream
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                tracing::info!("[order] EventMsg::AgentReasoning id={} key={:?}", id, ok);
+                self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Fallback: if any tools/execs are still marked running, complete them now.
                 self.finalize_all_running_due_to_answer();
                 // Use StreamController for final reasoning
@@ -2475,20 +2194,16 @@ impl ChatWidget<'_> {
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
                     return;
                 }
-                if !self.stream_id_to_turn.contains_key(&id) {
-                    if let Some(tid) = self.current_turn_id.clone() { self.stream_id_to_turn.insert(id.clone(), tid); }
-                }
-                let turn_hint_s = self.stream_id_to_turn.get(&id).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                tracing::info!("[order] EventMsg::AgentReasoningDelta id={} seq={} turn_hint={:?}", id, event.event_seq, turn_hint);
-                self.ensure_stream_order_key(turn_hint, StreamKind::Reasoning, Some(&id), Some(event.event_seq));
+                // Seed strict order key for this Reasoning stream
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                tracing::info!("[order] EventMsg::AgentReasoningDelta id={} key={:?}", id, ok);
+                self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Stream reasoning delta through StreamController
                 streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta);
                 // Show thinking state while reasoning streams
@@ -2500,7 +2215,6 @@ impl ChatWidget<'_> {
                 self.stream.insert_reasoning_section_break(&sink);
             }
             EventMsg::TaskStarted => {
-                self.turn_arrival_seq = 0;
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.stream_state.current_kind = None;
@@ -2513,23 +2227,11 @@ impl ChatWidget<'_> {
                 self.stream_state.drop_streaming = false;
                 // Mark this task id as active and ensure the status stays visible
                 self.active_task_ids.insert(id.clone());
-                // Establish new turn ordering window and clear per-turn routing
-                self.current_turn_id = Some(id.clone());
-                self.turn_start_idx = self.history_cells.len();
-                // Define a new turn window starting at current end
-                let win = TurnWindow { start_idx: self.history_cells.len() };
-                self.turn_windows.push(win);
-                self.turn_index_by_id.insert(id.clone(), self.turn_windows.len() - 1);
-                // Clear any stale request_ordinal mapping for this new turn; it will be populated
-                // by the first event in this turn that carries OrderMeta.
-                self.turn_request_ordinal.remove(&id);
-                self.pending_insert_seq = None;
-                self.pending_insert_turn = None;
+                // Reset per-turn UI indicators; ordering is now global-only
                 self.reasoning_index.clear();
-                // Do not clear all keys; keep keys per turn. New entries will use this turn id.
                 self.bottom_pane.set_task_running(true);
                 self.bottom_pane.update_status_text("waiting for model".to_string());
-                tracing::info!("[order] EventMsg::TaskStarted turn_id={} window_index={} start_idx={}", id, self.turn_windows.len()-1, self.turn_start_idx);
+                tracing::info!("[order] EventMsg::TaskStarted id={}", id);
                 
                 // Don't add loading cell - we have progress in the input area
                 // self.add_to_history(history_cell::new_loading_cell("waiting for model".to_string()));
@@ -2598,6 +2300,29 @@ impl ChatWidget<'_> {
                 // Now that streaming is complete, flush any queued interrupts
                 self.flush_interrupt_queue();
 
+                // If any user messages were queued while the previous task was
+                // running, dispatch exactly one now to start the next turn.
+                if let Some(next) = self.queued_user_messages.pop_front() {
+                    // Move it from the sticky queue preview into history
+                    let UserMessage { display_text, ordered_items } = next;
+                    if !display_text.is_empty() {
+                        self.history_push(history_cell::new_user_prompt(display_text.clone()));
+                        self.pending_user_prompts_for_next_turn = self.pending_user_prompts_for_next_turn.saturating_add(1);
+                    }
+                    self.codex_op_tx
+                        .send(Op::UserInput { items: ordered_items })
+                        .unwrap_or_else(|e| tracing::error!("failed to send queued message: {e}"));
+                    if !display_text.is_empty() {
+                        self.codex_op_tx
+                            .send(Op::AddToHistory { text: display_text })
+                            .unwrap_or_else(|e| tracing::error!("failed to send AddHistory for queued: {e}"));
+                    }
+                    // Keep the spinner up; TaskStarted will follow.
+                    self.bottom_pane.set_task_running(true);
+                    self.bottom_pane.update_status_text("waiting for model".to_string());
+                    self.request_redraw();
+                }
+
                 // Only drop the working status if nothing is actually running.
                 let any_tools_running = !self.exec.running_commands.is_empty()
                     || !self.tools_state.running_custom_tools.is_empty()
@@ -2620,6 +2345,10 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring RawContent delta for closed id={}", id);
                     return;
                 }
+                // Seed strict order key for this reasoning stream id
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
+
                 self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
@@ -2632,6 +2361,9 @@ impl ChatWidget<'_> {
                     tracing::warn!("Ignoring duplicate AgentReasoningRawContent for closed id={}", id);
                     return;
                 }
+                // Seed strict order key now so upcoming insert uses the correct key.
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
                 streaming::begin(self, StreamKind::Reasoning, Some(id.clone()));
@@ -2663,15 +2395,10 @@ impl ChatWidget<'_> {
                 // the plan block doesn't split a heading and its content.
                 if self.is_write_cycle_active() {
                     let seq = self.next_sequence();
-                    let wi = self.current_turn_window_index();
-                    self.interrupts.push_plan_update(seq, update, event.order.clone(), wi);
+                    self.interrupts.push_plan_update(seq, update, event.order.clone());
                 } else {
-                    if let Some(ti) = self.current_turn_window_index() {
-                        self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
-                            .or_else(|| Some(self.next_unordered_seq()));
-                        self.pending_insert_turn = Some(ti);
-                    }
-                    self.push_cell_maybe_ordered(history_cell::new_plan_update(update));
+                    let key = self.next_internal_key();
+                    let _ = self.history_insert_with_key_global(Box::new(history_cell::new_plan_update(update)), key);
                 }
             }
             EventMsg::ExecApprovalRequest(ev) => {
@@ -2691,19 +2418,19 @@ impl ChatWidget<'_> {
             EventMsg::ApplyPatchApprovalRequest(ev) => {
                 let id2 = id.clone();
                 let ev2 = ev.clone();
-                let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
-                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_apply_patch_approval(seq, id, ev, event.order.clone(), wi),
+                    move |interrupts| interrupts.push_apply_patch_approval(event.event_seq, id, ev),
                     |this| {
-                        // Place approval request in the correct turn window
-                        if let Some(ti) = this.current_turn_window_index() {
-                            this.pending_insert_seq = Some(order_ok);
-                            this.pending_insert_turn = Some(ti);
-                        }
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
+                        // Internal message (no OrderMeta in core for approvals): allocate synthetic key
+                        let key = this.next_internal_key();
+                        let cell = history_cell::new_patch_event(
+                            history_cell::PatchEventType::ApprovalRequest,
+                            ev2.changes.clone(),
+                        );
+                        let _ = this.history_insert_with_key_global(Box::new(cell), key);
+                        // Push approval UI state to bottom pane
                         this.handle_apply_patch_approval_now(id2, ev2);
                         this.request_redraw();
                     },
@@ -2712,26 +2439,28 @@ impl ChatWidget<'_> {
             EventMsg::ExecCommandBegin(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
-                let wi = self.current_turn_window_index();
-                let tid = self.current_turn_id.clone();
+                let om_begin = event.order.clone().expect("missing OrderMeta for ExecCommandBegin");
+                let om_begin_for_handler = om_begin.clone();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_exec_begin(seq, ev, event.order.clone(), wi, tid),
-                    |this| {
+                    move |interrupts| interrupts.push_exec_begin(seq, ev, Some(om_begin)),
+                    move |this| {
                         // Finalize any active streaming sections, then establish
                         // the running Exec cell before flushing queued interrupts.
                         // This prevents an out‑of‑order ExecCommandEnd from being
                         // applied first (which would fall back to showing call_id).
                         this.finalize_active_stream();
-                        // Bind call id to this turn and reserve window+seq
-                        if let Some(ti) = this.current_turn_window_index() {
-                            this.call_id_to_turn.insert(ev2.call_id.clone(), this.current_turn_id.clone().unwrap_or_default());
-                            this.pending_insert_seq = Some(order_ok);
-                            this.pending_insert_turn = Some(ti);
+                        tracing::info!("[order] ExecCommandBegin call_id={} seq={}", ev2.call_id, seq);
+                        this.handle_exec_begin_now(ev2.clone(), &om_begin_for_handler);
+                        // If an ExecEnd for this call_id arrived earlier and is waiting,
+                        // apply it immediately now that we have a matching Begin.
+                        if let Some((pending_end, order2, _ts)) = this
+                            .exec
+                            .pending_exec_ends
+                            .remove(&ExecCallId(ev2.call_id.clone()))
+                        {
+                            // Use the same order for the pending end
+                            this.handle_exec_end_now(pending_end, &order2);
                         }
-                        tracing::info!("[order] ExecCommandBegin call_id={} seq={} arrival={}", ev2.call_id, seq, this.turn_arrival_seq);
-                        this.handle_exec_begin_now(ev2);
                         this.flush_interrupt_queue();
                     },
                 );
@@ -2771,77 +2500,74 @@ impl ChatWidget<'_> {
                 }
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
-                if let Some(ti) = self.current_turn_window_index() {
-                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
-                        .or_else(|| Some(self.next_unordered_seq()));
-                    self.pending_insert_turn = Some(ti);
-                }
-                self.push_cell_maybe_ordered(history_cell::new_patch_event(
-                    PatchEventType::ApplyBegin { auto_approved },
-                    changes,
-                ));
+                // Strict order
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let cell = history_cell::new_patch_event(PatchEventType::ApplyBegin { auto_approved }, changes);
+                let _ = self.history_insert_with_key_global(Box::new(cell), ok);
             }
             EventMsg::PatchApplyEnd(ev) => {
                 let ev2 = ev.clone();
-                let seq = event.event_seq;
-                let wi = self.current_turn_window_index();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_patch_end(seq, ev, event.order.clone(), wi),
+                    move |interrupts| interrupts.push_patch_end(event.event_seq, ev),
                     |this| this.handle_patch_apply_end_now(ev2),
                 );
             }
             EventMsg::ExecCommandEnd(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
-                self.turn_arrival_seq = self.turn_arrival_seq.saturating_add(1);
-                let wi = self.current_turn_window_index();
+                let order_meta_end = event.order.clone().expect("missing OrderMeta for ExecCommandEnd");
+                let om_for_send = order_meta_end.clone();
+                let om_for_insert = order_meta_end.clone();
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_exec_end(seq, ev, wi),
-                    |this| {
-                        if let Some(ti) = this.current_turn_window_index() {
-                            this.pending_insert_seq = Some(order_ok);
-                            this.pending_insert_turn = Some(ti);
+                    move |interrupts| interrupts.push_exec_end(seq, ev, Some(om_for_send)),
+                    move |this| {
+                        tracing::info!("[order] ExecCommandEnd call_id={} seq={}", ev2.call_id, seq);
+                        // If we already have a running command for this call_id, finish it now.
+                        let has_running = this
+                            .exec
+                            .running_commands
+                            .contains_key(&ExecCallId(ev2.call_id.clone()));
+                        if has_running {
+                            this.handle_exec_end_now(ev2, &order_meta_end);
+                        } else {
+                            // Otherwise, stash it briefly and schedule a flush in case the
+                            // matching Begin arrives shortly. This avoids rendering a fallback
+                            // "call_<id>" cell when events are slightly out of order.
+                            this.exec
+                                .pending_exec_ends
+                                .insert(ExecCallId(ev2.call_id.clone()), (ev2, om_for_insert, std::time::Instant::now()));
+                            let tx = this.app_event_tx.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(120));
+                                tx.send(crate::app_event::AppEvent::FlushPendingExecEnds);
+                            });
                         }
-                        tracing::info!("[order] ExecCommandEnd call_id={} seq={} arrival={}", ev2.call_id, seq, this.turn_arrival_seq);
-                        this.handle_exec_end_now(ev2)
                     },
                 );
             }
             EventMsg::McpToolCallBegin(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
-                let wi = self.current_turn_window_index();
-                let tid = self.current_turn_id.clone();
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_mcp_begin(seq, ev, event.order.clone(), wi, tid),
+                    move |interrupts| interrupts.push_mcp_begin(seq, ev, event.order.clone()),
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
-                        if let Some(ti) = this.current_turn_window_index() {
-                            this.pending_insert_seq = Some(order_ok);
-                            this.pending_insert_turn = Some(ti);
-                        }
                         tracing::info!("[order] McpToolCallBegin call_id={} seq={}", ev2.call_id, seq);
-                        tools::mcp_begin(this, ev2);
+                        tools::mcp_begin(this, ev2, order_ok);
                     },
                 );
             }
             EventMsg::McpToolCallEnd(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref()).unwrap_or_else(|| self.next_unordered_seq());
-                let wi = self.current_turn_window_index();
+                let order_ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.defer_or_handle(
-                    move |interrupts| interrupts.push_mcp_end(seq, ev, wi),
+                    move |interrupts| interrupts.push_mcp_end(seq, ev, event.order.clone()),
                     |this| {
-                        if let Some(ti) = this.current_turn_window_index() {
-                            this.pending_insert_seq = Some(order_ok);
-                            this.pending_insert_turn = Some(ti);
-                        }
                         tracing::info!("[order] McpToolCallEnd call_id={} seq={}", ev2.call_id, seq);
-                        tools::mcp_end(this, ev2)
+                        tools::mcp_end(this, ev2, order_ok)
                     },
                 );
             }
@@ -2863,19 +2589,12 @@ impl ChatWidget<'_> {
                 } else {
                     history_cell::new_running_custom_tool_call(tool_name.clone(), params_string.clone())
                 };
-                // Reserve ordering in current turn
-                if let Some(ti) = self.current_turn_window_index() {
-                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
-                        .or_else(|| Some(self.next_unordered_seq()));
-                    self.pending_insert_turn = Some(ti);
-                }
-                if let Some(tid) = self.current_turn_id.clone() {
-                    self.call_id_to_turn.insert(call_id.clone(), tid);
-                }
-                self.push_cell_maybe_ordered(cell);
+                // Enforce ordering for custom tool begin
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let idx = self.history_insert_with_key_global(Box::new(cell), ok);
                 // Track index so we can replace it on completion
-                if let Some(last_idx) = self.history_cells.len().checked_sub(1) {
-                    self.tools_state.running_custom_tools.insert(ToolCallId(call_id.clone()), last_idx);
+                if idx < self.history_cells.len() {
+                    self.tools_state.running_custom_tools.insert(ToolCallId(call_id.clone()), idx);
                 }
 
                 // Update border status based on tool
@@ -2895,11 +2614,7 @@ impl ChatWidget<'_> {
                 duration,
                 result,
             }) => {
-                if let Some(ti) = self.current_turn_window_index() {
-                    self.pending_insert_seq = Self::order_key_from_order_meta(event.order.as_ref())
-                        .or_else(|| Some(self.next_unordered_seq()));
-                    self.pending_insert_turn = Some(ti);
-                }
+                let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 tracing::info!("[order] CustomToolCallEnd call_id={} tool={} seq={}", call_id, tool_name, event.event_seq);
                 // Convert parameters to String if present
                 let params_string = parameters.map(|p| p.to_string());
@@ -2918,14 +2633,10 @@ impl ChatWidget<'_> {
                         content,
                     );
                     if let Some(idx) = self.tools_state.running_custom_tools.remove(&ToolCallId(call_id)) {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(idx, Box::new(completed));
-                        } else {
-                            // fallback: ordered insert using pending window+seq
-                            self.push_cell_maybe_ordered(completed);
-                        }
+                        if idx < self.history_cells.len() { self.history_replace_at(idx, Box::new(completed)); }
+                        else { let _ = self.history_insert_with_key_global(Box::new(completed), ok); }
                     } else {
-                        self.push_cell_maybe_ordered(completed);
+                        let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
 
                     // After tool completes, likely transitioning to response
@@ -2940,15 +2651,7 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = self.tools_state.running_custom_tools.remove(&ToolCallId(call_id)) {
-                    if idx < self.history_cells.len() {
-                        self.history_replace_at(idx, Box::new(completed));
-                    } else {
-                        self.push_cell_maybe_ordered(completed);
-                    }
-                } else {
-                    self.push_cell_maybe_ordered(completed);
-                }
+                if let Some(idx) = self.tools_state.running_custom_tools.remove(&ToolCallId(call_id)) { if idx < self.history_cells.len() { self.history_replace_at(idx, Box::new(completed)); } else { let _ = self.history_insert_with_key_global(Box::new(completed), ok); } } else { let _ = self.history_insert_with_key_global(Box::new(completed), ok); }
 
                 // After tool completes, likely transitioning to response
                 self.bottom_pane.update_status_text("responding".to_string());
@@ -3948,13 +3651,10 @@ impl ChatWidget<'_> {
                 if self.config.tui.show_reasoning { cell.set_collapsed(false); } else { cell.set_collapsed(true); }
                 cell.set_in_progress(true);
 
-                // Assign a stable order key for this reasoning stream on first visibility
-                let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
-                let turn_hint_s: Option<String> = id.as_deref().and_then(|s| self.stream_id_to_turn.get(s)).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                let seq = self.ensure_stream_order_key(turn_hint, kind, id.as_deref(), None);
-                tracing::info!("[order] insert Reasoning new id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
-                let idx = self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, turn_win);
+                // Use pre-seeded key for this stream id; required by strict ordering.
+                let key = self.ensure_stream_order_key_strict(kind, id.as_deref());
+                tracing::info!("[order] insert Reasoning new id={:?} {}", id, Self::debug_fmt_order_key(key));
+                let idx = self.history_insert_with_key_global(Box::new(cell), key);
                 if let Some(rid) = id { self.reasoning_index.insert(rid, idx); }
             }
             StreamKind::Answer => {
@@ -4062,16 +3762,12 @@ impl ChatWidget<'_> {
                     with_header.extend(lines);
                     lines = with_header;
                 }
-                // Assign stable order key for this answer stream on first visibility
-                let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
-                let turn_hint_s: Option<String> = id.as_deref().and_then(|s| self.stream_id_to_turn.get(s)).cloned();
-                let turn_hint = turn_hint_s.as_deref();
-                let seq = self.ensure_stream_order_key(turn_hint, kind, id.as_deref(), None);
-                tracing::info!("[order] insert Answer new id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
-                let new_idx = self.history_insert_in_window_with_seq_internal(
+                // Use pre-seeded key for this stream id; required by strict ordering.
+                let key = self.ensure_stream_order_key_strict(kind, id.as_deref());
+                tracing::info!("[order] insert Answer new id={:?} {}", id, Self::debug_fmt_order_key(key));
+                let new_idx = self.history_insert_with_key_global(
                     Box::new(history_cell::new_streaming_content_with_id(id.clone(), lines)),
-                    seq,
-                    turn_win,
+                    key,
                 );
         tracing::debug!("history.new StreamingContentCell at idx={} id={:?}", new_idx, id);
             }
@@ -4091,8 +3787,7 @@ impl ChatWidget<'_> {
         source: String,
     ) {
         tracing::debug!("insert_final_answer_with_id id={:?} source_len={} lines={}", id, source.len(), lines.len());
-        let turn_win_dbg = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
-        tracing::info!("[order] final Answer id={:?} initial turn_win={:?}", id, turn_win_dbg);
+        tracing::info!("[order] final Answer id={:?}", id);
         // Debug: list last few history cell kinds so we can see what's present
         let tail_kinds: String = self
             .history_cells
@@ -4246,61 +3941,14 @@ impl ChatWidget<'_> {
 
         // Fallback: no prior assistant cell found; insert at stable sequence position.
         tracing::debug!("final-answer: ordered insert new AssistantMarkdownCell id={:?}", id);
-        let seq = self.ensure_stream_order_key(None, StreamKind::Answer, id.as_deref(), None);
-        let turn_win = id.as_ref().and_then(|s| self.stream_id_to_turn.get(s)).and_then(|tid| self.turn_index_by_id.get(tid)).copied();
-        tracing::info!("[order] final Answer ordered insert id={:?} turn_win={:?} seq={}", id, turn_win, seq.0);
+        let key = self.ensure_stream_order_key_strict(StreamKind::Answer, id.as_deref());
+        tracing::info!("[order] final Answer ordered insert id={:?} {}", id, Self::debug_fmt_order_key(key));
         let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
-        self.history_insert_in_window_with_seq_internal(Box::new(cell), seq, turn_win);
+        let _ = self.history_insert_with_key_global(Box::new(cell), key);
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
-    fn ensure_stream_order_key(&mut self, turn_hint: Option<&str>, kind: StreamKind, id: Option<&str>, _seq_hint: Option<u64>) -> OrderKey {
-        let id_key = id.unwrap_or("__default__").to_string();
-        // Resolve turn id for this stream id
-        let turn_id = if let Some(t) = turn_hint {
-            t.to_string()
-        } else if let Some(t) = self.stream_id_to_turn.get(&id_key) {
-            t.clone()
-        } else if let Some(t) = &self.current_turn_id {
-            t.clone()
-        } else {
-            // Fallback: no turn known; allocate as unordered so it will sort after ordered items
-            let raw = self.next_unordered_seq();
-            tracing::info!("[order] ensure_key fallback(kind={:?}, id={}, unordered) -> {}", kind, id_key, raw.0);
-            return raw;
-        };
-        let map_key = (turn_id.clone(), kind, id_key.clone());
-        if let Some(&existing) = self.stream_order_seq.get(&map_key) {
-            // If we already have a key but it's unordered, and a pending ordered key exists, upgrade it.
-            if let Some(pend) = self.pending_insert_seq.take() {
-                let pend_is_ordered = (pend.0 >> 63) == 0;
-                let existing_is_unordered = (existing.0 >> 63) == 1;
-                if pend_is_ordered && existing_is_unordered {
-                    self.stream_order_seq.insert(map_key.clone(), pend);
-                    tracing::info!(
-                        "[order] ensure_key UPGRADE turn={} kind={:?} id={} {} -> {}",
-                        turn_id, kind, id_key, Self::debug_fmt_order_key(existing), Self::debug_fmt_order_key(pend)
-                    );
-                    return pend;
-                } else {
-                    // Put it back if we didn't consume it
-                    self.pending_insert_seq = Some(pend);
-                }
-            }
-            tracing::info!("[order] ensure_key EXISTING turn={} kind={:?} id={} -> {}", turn_id, kind, id_key, existing.0);
-            return existing;
-        }
-        // Prefer any pending model-provided order key captured for this event.
-        let chosen = if let Some(pend) = self.pending_insert_seq.take() {
-            pend
-        } else {
-            // Otherwise assign an unordered key that will sort after ordered items in the window.
-            self.next_unordered_seq()
-        };
-        self.stream_order_seq.insert(map_key, chosen);
-        tracing::info!("[order] ensure_key NEW turn={} kind={:?} id={} -> {}", turn_id, kind, id_key, chosen.0);
-        chosen
-    }
+    // removed legacy ensure_stream_order_key; strict variant is used instead
 
     /// Normalize text for duplicate detection (trim trailing whitespace and normalize newlines)
     fn normalize_text(s: &str) -> String {
@@ -5698,13 +5346,10 @@ impl ChatWidget<'_> {
         self.active_exec_cell = None;
         self.clear_token_usage();
         
-        // Add a new animated welcome cell
+        // Add a new animated welcome cell (ordered)
         let welcome_cell = Box::new(history_cell::new_animated_welcome());
-        self.history_cells.push(welcome_cell);
-        self.cell_order_seq.push(None);
-        self.turn_start_idx = self.history_cells.len();
-        self.current_turn_id = None;
-        self.pending_insert_seq = None;
+        let key = self.next_internal_key();
+        let _ = self.history_insert_with_key_global(welcome_cell, key);
         self.reasoning_index.clear();
         self.stream_order_seq.clear();
         
@@ -6861,6 +6506,16 @@ impl WidgetRef for &ChatWidget<'_> {
             all_content.push(cell);
         }
 
+        // Append any queued user messages as sticky preview cells at the very
+        // end so they always render at the bottom until they are dispatched.
+        let mut queued_preview_cells: Vec<crate::history_cell::PlainHistoryCell> = Vec::new();
+        if !self.queued_user_messages.is_empty() {
+            for qm in &self.queued_user_messages {
+                queued_preview_cells.push(crate::history_cell::new_queued_user_prompt(qm.display_text.clone()));
+            }
+            for c in &queued_preview_cells { all_content.push(c as &dyn HistoryCell); }
+        }
+
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
         const GUTTER_WIDTH: u16 = 2; // Same as in render loop
@@ -6948,7 +6603,29 @@ impl WidgetRef for &ChatWidget<'_> {
                     item.desired_height(content_width)
                 };
                 acc = acc.saturating_add(h);
-                if idx < all_content.len() - 1 && !item.is_title_only() {
+                // Spacing rule must mirror the render path: no spacer between
+                // adjacent collapsed reasoning cells.
+                let mut should_add_spacing = idx < all_content.len() - 1 && !item.is_title_only();
+                if should_add_spacing {
+                    let this_is_collapsed_reasoning = item
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                        .map(|rc| rc.is_collapsed())
+                        .unwrap_or(false);
+                    if this_is_collapsed_reasoning {
+                        if let Some(next_item) = all_content.get(idx + 1) {
+                            let next_is_collapsed_reasoning = next_item
+                                .as_any()
+                                .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                                .map(|rc| rc.is_collapsed())
+                                .unwrap_or(false);
+                            if next_is_collapsed_reasoning {
+                                should_add_spacing = false;
+                            }
+                        }
+                    }
+                }
+                if should_add_spacing {
                     acc = acc.saturating_add(spacing);
                 }
                 ps.push(acc);
@@ -7277,9 +6954,30 @@ impl WidgetRef for &ChatWidget<'_> {
             }
 
             // Add spacing only if something was actually rendered for this item.
-            // Prevents a stray blank row when a zero-height cell is present
-            // (e.g., a streaming cell that currently only has a hidden header).
-            if idx < all_content.len() - 1 && !item.is_title_only() {
+            // Prevent a stray blank when zero-height, and suppress spacing between
+            // consecutive collapsed reasoning titles so they appear as a tight list.
+            let mut should_add_spacing = idx < all_content.len() - 1 && !item.is_title_only();
+            if should_add_spacing {
+                // Special-case: two adjacent collapsed reasoning cells → no spacer.
+                let this_is_collapsed_reasoning = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                    .map(|rc| rc.is_collapsed())
+                    .unwrap_or(false);
+                if this_is_collapsed_reasoning {
+                    if let Some(next_item) = all_content.get(idx + 1) {
+                        let next_is_collapsed_reasoning = next_item
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                            .map(|rc| rc.is_collapsed())
+                            .unwrap_or(false);
+                        if next_is_collapsed_reasoning {
+                            should_add_spacing = false;
+                        }
+                    }
+                }
+            }
+            if should_add_spacing {
                 if screen_y < content_area.y + content_area.height {
                     screen_y += spacing.min((content_area.y + content_area.height).saturating_sub(screen_y));
                 }
@@ -7694,6 +7392,10 @@ fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) 
 struct ExecState {
     running_commands: HashMap<ExecCallId, RunningCommand>,
     running_read_agg_index: Option<usize>,
+    // Pairing map for out-of-order exec events. If an ExecEnd arrives before
+    // ExecBegin, we stash it briefly and either pair it when Begin arrives or
+    // flush it after a short timeout to show a fallback cell.
+    pending_exec_ends: HashMap<ExecCallId, (ExecCommandEndEvent, codex_core::protocol::OrderMeta, std::time::Instant)>,
 }
 
 #[derive(Default)]

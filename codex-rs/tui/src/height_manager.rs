@@ -11,7 +11,6 @@ pub(crate) enum HeightEvent {
     Resize,
     HudToggle(bool),
     ComposerModeChange,
-    HistoryAppend,
     HistoryFinalize,
     RunBegin,
     RunEnd,
@@ -88,7 +87,6 @@ impl HeightManager {
             HeightEvent::Resize
             | HeightEvent::HudToggle(_)
             | HeightEvent::ComposerModeChange
-            | HeightEvent::HistoryAppend
             | HeightEvent::HistoryFinalize
             | HeightEvent::RunBegin
             | HeightEvent::RunEnd => {

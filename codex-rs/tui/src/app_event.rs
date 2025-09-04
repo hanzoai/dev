@@ -40,6 +40,11 @@ pub(crate) enum AppEvent {
     /// Multiple requests are coalesced by the central frame scheduler.
     ScheduleFrameIn(Duration),
 
+    /// Internal: flush any pending out-of-order ExecEnd events that did not
+    /// receive a matching ExecBegin within a short pairing window. This lets
+    /// the TUI render a fallback "Ran call_<id>" cell so output is not lost.
+    FlushPendingExecEnds,
+
     KeyEvent(KeyEvent),
 
     MouseEvent(MouseEvent),
