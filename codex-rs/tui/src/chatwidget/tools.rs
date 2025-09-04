@@ -1,16 +1,16 @@
 //! Tool (Web Search, MCP) lifecycle handlers extracted from ChatWidget.
 
-use super::ChatWidget;
+use super::{ChatWidget, OrderKey};
 use crate::history_cell;
 use codex_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent};
 
-pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query: Option<String>) {
+pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query: Option<String>, key: OrderKey) {
     for cell in &chat.history_cells { cell.trigger_fade(); }
     chat.finalize_active_stream();
     chat.flush_interrupt_queue();
 
     let cell = history_cell::new_running_web_search(query.clone());
-    let idx = chat.push_cell_maybe_ordered(cell);
+    let idx = chat.history_insert_with_key_global(Box::new(cell), key);
     tracing::info!("[order] WebSearchBegin call_id={} idx={}", call_id, idx);
     chat.tools_state
         .running_web_search
@@ -59,17 +59,17 @@ pub(super) fn web_search_complete(chat: &mut ChatWidget<'_>, call_id: String, qu
     chat.maybe_hide_spinner();
 }
 
-pub(super) fn mcp_begin(chat: &mut ChatWidget<'_>, ev: McpToolCallBeginEvent) {
+pub(super) fn mcp_begin(chat: &mut ChatWidget<'_>, ev: McpToolCallBeginEvent, key: OrderKey) {
     for cell in &chat.history_cells { cell.trigger_fade(); }
     let McpToolCallBeginEvent { call_id, invocation } = ev;
     let cell = history_cell::new_running_mcp_tool_call(invocation);
-    let idx = chat.push_cell_maybe_ordered(cell);
+    let idx = chat.history_insert_with_key_global(Box::new(cell), key);
     chat.tools_state
         .running_custom_tools
         .insert(super::ToolCallId(call_id), idx);
 }
 
-pub(super) fn mcp_end(chat: &mut ChatWidget<'_>, ev: McpToolCallEndEvent) {
+pub(super) fn mcp_end(chat: &mut ChatWidget<'_>, ev: McpToolCallEndEvent, key: OrderKey) {
     let McpToolCallEndEvent { call_id, duration, invocation, result } = ev;
     let success = !result.as_ref().map(|r| r.is_error.unwrap_or(false)).unwrap_or(false);
     let completed = history_cell::new_completed_mcp_tool_call(80, invocation, duration, success, result);
@@ -79,5 +79,5 @@ pub(super) fn mcp_end(chat: &mut ChatWidget<'_>, ev: McpToolCallEndEvent) {
             return;
         }
     }
-    chat.history_push(completed);
+    let _ = chat.history_insert_with_key_global(Box::new(completed), key);
 }
