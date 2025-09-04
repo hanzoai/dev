@@ -13,6 +13,18 @@ pub struct PerfStats {
     pub height_misses_render: u64,
     pub ns_total_height: u128,
     pub ns_render_loop: u128,
+    // Full widget render wall time (outer render wrapper)
+    pub ns_widget_render_total: u128,
+    // Explicit paint/clear hotspots we perform outside ratatui widgets
+    pub ns_history_clear: u128,
+    pub cells_history_clear: u64,
+    pub ns_gutter_paint: u128,
+    pub cells_gutter_paint: u64,
+    // Diff overlay fills
+    pub ns_overlay_scrim: u128,
+    pub cells_overlay_scrim: u64,
+    pub ns_overlay_body_bg: u128,
+    pub cells_overlay_body_bg: u64,
     // Hotspots: time spent computing heights on cache misses
     pub hot_total: std::collections::HashMap<(usize, u16), ItemStat>,
     pub hot_render: std::collections::HashMap<(usize, u16), ItemStat>,
@@ -33,9 +45,14 @@ impl PerfStats {
     pub fn summary(&self) -> String {
         let ms_total_height = (self.ns_total_height as f64) / 1_000_000.0;
         let ms_render = (self.ns_render_loop as f64) / 1_000_000.0;
+        let ms_widget = (self.ns_widget_render_total as f64) / 1_000_000.0;
+        let ms_hist_clear = (self.ns_history_clear as f64) / 1_000_000.0;
+        let ms_gutter = (self.ns_gutter_paint as f64) / 1_000_000.0;
+        let ms_scrim = (self.ns_overlay_scrim as f64) / 1_000_000.0;
+        let ms_overlay_body = (self.ns_overlay_body_bg as f64) / 1_000_000.0;
         let mut out = String::new();
         out.push_str(&format!(
-            "perf: frames={}\n  prefix_rebuilds={}\n  height_cache: total hits={} misses={}\n  height_cache (render): hits={} misses={}\n  time: total_height={:.2}ms render_visible={:.2}ms",
+            "perf: frames={}\n  prefix_rebuilds={}\n  height_cache: total hits={} misses={}\n  height_cache (render): hits={} misses={}\n  time: total_height={:.2}ms render_visible={:.2}ms\n  time: widget_render_total={:.2}ms\n  paint: history_clear={:.2}ms (cells={}) gutter_bg={:.2}ms (cells={})\n  paint: overlay_scrim={:.2}ms (cells={}) overlay_body_bg={:.2}ms (cells={})",
             self.frames,
             self.prefix_rebuilds,
             self.height_hits_total,
@@ -44,6 +61,15 @@ impl PerfStats {
             self.height_misses_render,
             ms_total_height,
             ms_render,
+            ms_widget,
+            ms_hist_clear,
+            self.cells_history_clear,
+            ms_gutter,
+            self.cells_gutter_paint,
+            ms_scrim,
+            self.cells_overlay_scrim,
+            ms_overlay_body,
+            self.cells_overlay_body_bg,
         ));
 
         // Top hotspots by (index,width)
@@ -134,4 +160,3 @@ impl PerfStats {
         ek.ns = ek.ns.saturating_add(ns);
     }
 }
-

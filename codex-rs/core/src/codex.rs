@@ -2137,6 +2137,8 @@ async fn run_turn(
     );
 
     let mut retries = 0;
+    // Ensure we only auto-compact once per turn to avoid loops
+    let mut did_auto_compact = false;
     // Attempt input starts as the provided input, and may be augmented with
     // items from a previous dropped stream attempt so we don't lose progress.
     let mut attempt_input: Vec<ResponseItem> = input.clone();
@@ -2183,6 +2185,86 @@ async fn run_turn(
                 return Err(e);
             }
             Err(e) => {
+                // Detect context-window overflow and auto-run a compact summarization once
+                if !did_auto_compact {
+                    if let CodexErr::Stream(msg, _maybe_delay) = &e {
+                        let lower = msg.to_ascii_lowercase();
+                        let looks_like_context_overflow =
+                            lower.contains("exceeds the context window")
+                                || lower.contains("exceed the context window")
+                                || lower.contains("context length exceeded")
+                                || lower.contains("maximum context length")
+                                || (lower.contains("context window")
+                                    && (lower.contains("exceed")
+                                        || lower.contains("exceeded")
+                                        || lower.contains("full")
+                                        || lower.contains("too long")));
+
+                        if looks_like_context_overflow {
+                            did_auto_compact = true;
+
+                            // Inform UI and run a one-off compact turn inline, then retry
+                            sess
+                                .notify_stream_error(
+                                    &sub_id,
+                                    "Model hit context-window limit; running /compact and retrying…"
+                                        .to_string(),
+                                )
+                                .await;
+
+                            const SUMMARIZATION_PROMPT: &str =
+                                include_str!("prompt_for_compact_command.md");
+
+                            let compact_input = response_input_from_core_items(vec![InputItem::Text {
+                                text: "Start Summarization".to_string(),
+                            }]);
+                            let compact_turn_input: Vec<ResponseItem> =
+                                sess.turn_input_with_history(vec![compact_input.clone().into()]);
+
+                            let compact_prompt = Prompt {
+                                input: compact_turn_input,
+                                user_instructions: None,
+                                store: !sess.disable_response_storage,
+                                tools: Vec::new(),
+                                base_instructions_override: Some(SUMMARIZATION_PROMPT.to_string()),
+                                environment_context: None,
+                                status_items: Vec::new(),
+                            };
+
+                            match drain_to_completed(sess, &sub_id, &compact_prompt).await {
+                                Ok(()) => {
+                                    // Keep only the summary to shrink history
+                                    {
+                                        let mut state = sess.state.lock().unwrap();
+                                        state.history.keep_last_messages(1);
+                                    }
+
+                                    // Reset any partial attempt state and retry immediately
+                                    sess.clear_scratchpad();
+                                    sess
+                                        .notify_stream_error(
+                                            &sub_id,
+                                            "/compact completed; retrying with condensed history…"
+                                                .to_string(),
+                                        )
+                                        .await;
+                                    attempt_input = input.clone();
+                                    continue;
+                                }
+                                Err(err) => {
+                                    sess
+                                        .notify_stream_error(
+                                            &sub_id,
+                                            format!(
+                                                "/compact failed: {err}; falling back to normal retries…"
+                                            ),
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                }
                 // Use the configured provider-specific stream retry budget.
                 let max_retries = sess.client.get_provider().stream_max_retries();
                 if retries < max_retries {

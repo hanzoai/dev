@@ -357,19 +357,49 @@ impl ChatWidget<'_> {
         OrderKey { req: om.request_ordinal, out: om.output_index.map(|v| v as i32).unwrap_or(0), seq: om.sequence_number.unwrap_or(0) }
     }
 
+    // Track latest request index observed from provider so internal inserts can anchor to it.
+    fn note_order(&mut self, order: Option<&codex_core::protocol::OrderMeta>) {
+        if let Some(om) = order { self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal); }
+    }
+
     fn debug_fmt_order_key(ok: OrderKey) -> String {
         format!("O:req={} out={} seq={}", ok.req, ok.out, ok.seq)
     }
 
-    // Allocate a new synthetic key for internal (non-LLM) messages.
+    // Allocate a new synthetic key for internal (non-LLM) messages at the bottom of the
+    // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
     fn next_internal_key(&mut self) -> OrderKey {
-        // Ensure current_request_index always moves forward from the last seen provider index
-        if self.current_request_index < self.last_seen_request_index {
-            self.current_request_index = self.last_seen_request_index;
-        }
-        self.current_request_index = self.current_request_index.saturating_add(1);
+        // Anchor to the current provider request if known; otherwise step a synthetic counter.
+        let req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            // Ensure current_request_index always moves forward
+            if self.current_request_index < self.last_seen_request_index {
+                self.current_request_index = self.last_seen_request_index;
+            }
+            self.current_request_index = self.current_request_index.saturating_add(1);
+            self.current_request_index
+        };
         self.internal_seq = self.internal_seq.saturating_add(1);
-        OrderKey { req: self.current_request_index, out: -1, seq: self.internal_seq }
+        // Place internal notices at the end of the current request window by using
+        // a maximal out so they sort after any model-provided output_index.
+        OrderKey { req, out: i32::MAX, seq: self.internal_seq }
+    }
+
+    // Synthetic key for internal content that should appear at the TOP of the NEXT request
+    // (e.g., the user’s prompt preceding the model’s output for that turn).
+    fn next_req_key_top(&mut self) -> OrderKey {
+        let req = self.last_seen_request_index.saturating_add(1);
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        OrderKey { req, out: i32::MIN, seq: self.internal_seq }
+    }
+
+    // Synthetic key for a user prompt that should appear just after banners but
+    // still before any model output within the next request.
+    fn next_req_key_prompt(&mut self) -> OrderKey {
+        let req = self.last_seen_request_index.saturating_add(1);
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        OrderKey { req, out: i32::MIN + 1, seq: self.internal_seq }
     }
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
@@ -1096,11 +1126,9 @@ impl ChatWidget<'_> {
         // Browser manager is now handled through the global state
         // The core session will use the same global manager when browser tools are invoked
 
-        // Add initial animated welcome message to history
-        let mut history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
-        let welcome_cell = Box::new(history_cell::new_animated_welcome());
-        // add AnimatedWelcomeCell silently
-        history_cells.push(welcome_cell);
+        // Add initial animated welcome message to history (top of first request)
+        let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
+        // Insert later via history_push_top_next_req once struct is constructed
 
         // Removed startup tip for /resume; /resume is now shown under "Popular commands".
 
@@ -1190,11 +1218,11 @@ impl ChatWidget<'_> {
             internal_seq: 0,
             show_order_overlay,
         };
-        
-        // Note: Initial redraw needs to be triggered after widget is added to app_state
-        // ready; trigger initial redraw
-        
-        new_widget
+        // Insert the welcome cell as top-of-first-request so future model output
+        // appears below it.
+        let mut w = new_widget;
+        w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
+        w
     }
 
     /// Construct a ChatWidget from an existing conversation (forked session).
@@ -1232,10 +1260,9 @@ impl ChatWidget<'_> {
         });
 
         // Basic widget state mirrors `new`
-        let mut history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
-        history_cells.push(Box::new(history_cell::new_animated_welcome()));
+        let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
 
-        Self {
+        let mut w = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
             bottom_pane: BottomPane::new(BottomPaneParams {
@@ -1314,7 +1341,10 @@ impl ChatWidget<'_> {
             internal_seq: 0,
             show_order_overlay,
             
-        }
+        };
+        // Welcome at top of first request for forked session too
+        w.history_push_top_next_req(history_cell::new_animated_welcome());
+        w
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
@@ -1615,6 +1645,11 @@ impl ChatWidget<'_> {
     fn flash_scrollbar(&self) { layout_scroll::flash_scrollbar(self); }
 
     fn history_insert_with_key_global(&mut self, cell: Box<dyn HistoryCell>, key: OrderKey) -> usize {
+        self.history_insert_with_key_global_tagged(cell, key, "untagged")
+    }
+
+    // Internal: same as above but with a short tag for debug overlays.
+    fn history_insert_with_key_global_tagged(&mut self, cell: Box<dyn HistoryCell>, key: OrderKey, tag: &'static str) -> usize {
         // Any ordered insert of a non-reasoning cell means reasoning is no longer the
         // bottom-most active block; drop the in-progress ellipsis on collapsed titles.
         let is_reasoning_cell = cell
@@ -1639,11 +1674,12 @@ impl ChatWidget<'_> {
         }
 
         tracing::info!(
-            "[order] insert: {} pos={} len_before={} order_len_before={}",
+            "[order] insert: {} pos={} len_before={} order_len_before={} tag={}",
             Self::debug_fmt_order_key(key),
             pos,
             self.history_cells.len(),
-            self.cell_order_seq.len()
+            self.cell_order_seq.len(),
+            tag
         );
         // If order overlay is enabled, compute a short, inline debug summary for
         // reasoning titles so we can spot mid‑word character drops quickly.
@@ -1704,21 +1740,23 @@ impl ChatWidget<'_> {
         let req_dbg = format!("{}", key.req);
         let dbg = if let Some(tdbg) = reasoning_title_dbg {
             format!(
-                "insert: {} req={} key={} {} pos={} | {}",
+                "insert: {} req={} key={} {} pos={} tag={} | {}",
                 ordered,
                 req_dbg,
                 0,
                 Self::debug_fmt_order_key(key),
                 pos,
+                tag,
                 tdbg
             )
         } else {
             format!(
-                "insert: {} req={} {} pos={}",
+                "insert: {} req={} {} pos={} tag={}",
                 ordered,
                 req_dbg,
                 Self::debug_fmt_order_key(key),
-                pos
+                pos,
+                tag
             )
         };
         if self.cell_order_dbg.len() < pos { self.cell_order_dbg.resize(pos, None); }
@@ -1733,11 +1771,12 @@ impl ChatWidget<'_> {
         pos
     }
 
-    /// Push a cell using a synthetic global order key (internal event).
-    fn history_push(&mut self, cell: impl HistoryCell + 'static) {
-        let key = self.next_internal_key();
-        let _ = self.history_insert_with_key_global(Box::new(cell), key);
-    }
+    /// Push a cell using a synthetic global order key at the bottom of the current request.
+    fn history_push(&mut self, cell: impl HistoryCell + 'static) { let key = self.next_internal_key(); let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue"); }
+    /// Push a cell using a synthetic key at the TOP of the NEXT request.
+    fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) { let key = self.next_req_key_top(); let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude"); }
+    /// Push a user prompt so it appears right under banners and above model output for the next request.
+    fn history_push_prompt_next_req(&mut self, cell: impl HistoryCell + 'static) { let key = self.next_req_key_prompt(); let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt"); }
 
     fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
         if idx < self.history_cells.len() {
@@ -2026,7 +2065,7 @@ impl ChatWidget<'_> {
         // Idle path: append the user cell first so the upcoming TaskStarted
         // window begins after it, ensuring assistant output renders below.
         if !original_text.is_empty() {
-            self.history_push(history_cell::new_user_prompt(original_text.clone()));
+            self.history_push_prompt_next_req(history_cell::new_user_prompt(original_text.clone()));
             self.pending_user_prompts_for_next_turn = self.pending_user_prompts_for_next_turn.saturating_add(1);
         }
 
@@ -2072,6 +2111,8 @@ impl ChatWidget<'_> {
             serde_json::to_string_pretty(&event).unwrap_or_default()
         );
         // Strict ordering: all LLM/tool events must carry OrderMeta; internal events use synthetic keys.
+        // Track provider order to anchor internal inserts at the bottom of the active request.
+        self.note_order(event.order.as_ref());
 
         let Event { id, msg, .. } = event.clone();
         match msg {
@@ -2086,7 +2127,7 @@ impl ChatWidget<'_> {
                 if is_first {
                     self.welcome_shown = true;
                 }
-                self.history_push(history_cell::new_session_info(&self.config, event, is_first));
+                self.history_push_top_next_req(history_cell::new_session_info(&self.config, event, is_first)); // tag: prelude
 
                 if let Some(user_message) = self.initial_user_message.take() {
                     // If the user provided an initial message, add it to the
@@ -2306,7 +2347,7 @@ impl ChatWidget<'_> {
                     // Move it from the sticky queue preview into history
                     let UserMessage { display_text, ordered_items } = next;
                     if !display_text.is_empty() {
-                        self.history_push(history_cell::new_user_prompt(display_text.clone()));
+                        self.history_push_prompt_next_req(history_cell::new_user_prompt(display_text.clone()));
                         self.pending_user_prompts_for_next_turn = self.pending_user_prompts_for_next_turn.saturating_add(1);
                     }
                     self.codex_op_tx
@@ -3380,7 +3421,7 @@ impl ChatWidget<'_> {
             } else if let Some(reason) = cell.as_any_mut().downcast_mut::<history_cell::CollapsibleReasoningCell>() {
                 history_cell::retint_lines_in_place(&mut reason.lines, &old, &new);
             } else if let Some(stream) = cell.as_any_mut().downcast_mut::<history_cell::StreamingContentCell>() {
-                history_cell::retint_lines_in_place(&mut stream.lines, &old, &new);
+                stream.retint(&old, &new);
             } else if let Some(assist) = cell.as_any_mut().downcast_mut::<history_cell::AssistantMarkdownCell>() {
                 // Fully rebuild from raw to apply new theme + syntax highlight
                 assist.rebuild(&self.config);
@@ -3692,7 +3733,7 @@ impl ChatWidget<'_> {
                                         lines.remove(0);
                                     }
                                 }
-                                stream_cell.lines.extend(lines);
+                                stream_cell.extend_lines(lines);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
@@ -3711,7 +3752,7 @@ impl ChatWidget<'_> {
                             }).unwrap_or(false) {
                                 if lines.len() == 1 { return; } else { lines.remove(0); }
                             }
-                            stream_cell.lines.extend(lines);
+                            stream_cell.extend_lines(lines);
                             self.invalidate_height_cache();
                             self.autoscroll_if_near_bottom();
                             self.request_redraw();
@@ -3737,7 +3778,7 @@ impl ChatWidget<'_> {
                             }).unwrap_or(false) {
                                 if lines.len() == 1 { return; } else { lines.remove(0); }
                             }
-                            stream_cell.lines.extend(lines);
+                            stream_cell.extend_lines(lines);
                             self.invalidate_height_cache();
                             self.autoscroll_if_near_bottom();
                             self.request_redraw();
@@ -5346,10 +5387,9 @@ impl ChatWidget<'_> {
         self.active_exec_cell = None;
         self.clear_token_usage();
         
-        // Add a new animated welcome cell (ordered)
-        let welcome_cell = Box::new(history_cell::new_animated_welcome());
-        let key = self.next_internal_key();
-        let _ = self.history_insert_with_key_global(welcome_cell, key);
+        // Add a new animated welcome cell at the top of the next request so
+        // upcoming output appears below it.
+        self.history_push_top_next_req(history_cell::new_animated_welcome());
         self.reasoning_index.clear();
         self.stream_order_seq.clear();
         
@@ -5401,46 +5441,35 @@ impl ChatWidget<'_> {
     }
 
     fn get_git_branch(&self) -> Option<String> {
-        use std::process::Command;
+        use std::fs;
+        use std::path::Path;
 
-        let output = Command::new("git")
-            .arg("rev-parse")
-            .arg("--abbrev-ref")
-            .arg("HEAD")
-            .current_dir(&self.config.cwd)
-            .output()
-            .ok()?;
+        // Read .git/HEAD to avoid spawning `git` every frame.
+        // Formats:
+        //   - "ref: refs/heads/<branch>" when on a named branch
+        //   - "<40-hex-SHA>" when in a detached HEAD state
+        let head_path = self.config.cwd.join(".git/HEAD");
+        let head_contents = fs::read_to_string(&head_path).ok()?;
+        let head = head_contents.trim();
 
-        if output.status.success() {
-            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !branch.is_empty() && branch != "HEAD" {
-                Some(branch)
-            } else {
-                // Try to get short commit hash if in detached HEAD state
-                let commit_output = Command::new("git")
-                    .arg("rev-parse")
-                    .arg("--short")
-                    .arg("HEAD")
-                    .current_dir(&self.config.cwd)
-                    .output()
-                    .ok()?;
-
-                if commit_output.status.success() {
-                    let commit = String::from_utf8_lossy(&commit_output.stdout)
-                        .trim()
-                        .to_string();
-                    if !commit.is_empty() {
-                        Some(format!("detached: {}", commit))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+        if let Some(rest) = head.strip_prefix("ref: ") {
+            // Extract last path segment as branch name
+            if let Some(name) = Path::new(rest)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+            {
+                return Some(name.to_string());
             }
-        } else {
-            None
         }
+
+        // Detached HEAD: display short SHA if it looks like a commit hash
+        let is_hex = head.len() >= 7 && head.as_bytes().iter().all(|b| b.is_ascii_hexdigit());
+        if is_hex {
+            return Some(format!("detached: {}", &head[..7]));
+        }
+
+        None
     }
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
@@ -6435,11 +6464,20 @@ impl ChatWidget<'_> {
 
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        // Top-level widget render timing
+        let _perf_widget_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
 
-        // Avoid full‑frame background fill each frame. Individual widgets/cells
-        // paint their own backgrounds, and App clears on the first frame or when
-        // themes change. Removing this per‑cell loop significantly reduces per‑frame
-        // work during animations and while typing.
+        // Ensure a consistent background even when individual widgets skip
+        // painting unchanged regions. Without this, gutters and inter‑cell
+        // spacing can show through after we reduced full clears.
+        // Cost: one Block render across the frame (O(area)); acceptable and
+        // fixes visual artifacts reported after redraw reductions.
+        {
+            use ratatui::style::Style;
+            use ratatui::widgets::Block;
+            let bg = Block::default().style(Style::default().bg(crate::colors::background()));
+            bg.render(area, buf);
+        }
 
         // Remember full frame height for HUD sizing logic
         self.layout.last_frame_height.set(area.height);
@@ -6562,11 +6600,16 @@ impl WidgetRef for &ChatWidget<'_> {
                     .downcast_ref::<crate::history_cell::ExecCell>()
                     .map(|e| e.output.is_some())
                     .unwrap_or(false);
+                // Assistant markdown cells are static once built; cache their heights
+                let is_assistant_static = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                    .is_some();
                 let is_streaming = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::StreamingContentCell>()
                     .is_some();
-                let is_cacheable = ((!item.has_custom_render()) || is_stable_exec)
+                let is_cacheable = ((!item.has_custom_render()) || is_stable_exec || is_assistant_static)
                     && !item.is_animating()
                     && !is_streaming;
                 let h = if is_cacheable {
@@ -6703,17 +6746,50 @@ impl WidgetRef for &ChatWidget<'_> {
         // Record current viewport height for the next frame
         self.layout.last_history_viewport_height.set(content_area.height);
 
-        // Clear the entire history region (including left/right padding), not just
-        // the inner content area. This avoids occasional artifacts at the margins
-        // and ensures background is fully painted even when widths shrink.
-        // Fill with spaces while preserving the theme background color.
+        // Targeted clears: only pad stripes and any top gap inside content area.
         let clear_style = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
-        for y in history_area.y..history_area.y.saturating_add(history_area.height) {
-            for x in history_area.x..history_area.x.saturating_add(history_area.width) {
-                buf[(x, y)].set_char(' ').set_style(clear_style);
+        let _perf_hist_clear_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
+        let mut cleared_cells: u64 = 0;
+        // Left/right padding stripes
+        let left_pad_w = content_area.x.saturating_sub(history_area.x);
+        let right_pad_start = content_area.x.saturating_add(content_area.width);
+        let right_pad_w = history_area
+            .x
+            .saturating_add(history_area.width)
+            .saturating_sub(right_pad_start);
+        if left_pad_w > 0 {
+            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
+                for x in history_area.x..history_area.x.saturating_add(left_pad_w) {
+                    buf[(x, y)].set_char(' ').set_style(clear_style);
+                }
             }
+            cleared_cells = cleared_cells.saturating_add((left_pad_w as u64) * (history_area.height as u64));
+        }
+        if right_pad_w > 0 {
+            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
+                for x in right_pad_start..right_pad_start.saturating_add(right_pad_w) {
+                    buf[(x, y)].set_char(' ').set_style(clear_style);
+                }
+            }
+            cleared_cells = cleared_cells.saturating_add((right_pad_w as u64) * (history_area.height as u64));
+        }
+        // Top gap inside content area when content is bottom-aligned
+        if start_y > content_area.y {
+            let gap_h = start_y.saturating_sub(content_area.y);
+            for y in content_area.y..content_area.y.saturating_add(gap_h) {
+                for x in content_area.x..content_area.x.saturating_add(content_area.width) {
+                    buf[(x, y)].set_char(' ').set_style(clear_style);
+                }
+            }
+            cleared_cells = cleared_cells.saturating_add((gap_h as u64) * (content_area.width as u64));
+        }
+        if let Some(t0) = _perf_hist_clear_start {
+            let dt = t0.elapsed().as_nanos();
+            let mut p = self.perf_state.stats.borrow_mut();
+            p.ns_history_clear = p.ns_history_clear.saturating_add(dt);
+            p.cells_history_clear = p.cells_history_clear.saturating_add(cleared_cells);
         }
 
         // Render the scrollable content with spacing using prefix sums
@@ -6822,18 +6898,28 @@ impl WidgetRef for &ChatWidget<'_> {
                     crate::colors::background()
                 };
 
-                let gutter_bg_style = Style::default().bg(gutter_bg);
-                for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
-                    // Gutter’s two columns (symbol + space)
-                    if gutter_area.width > 0 {
-                        buf[(gutter_area.x, y)].set_char(' ').set_style(gutter_bg_style);
+                // Paint gutter background for assistant cells so the tinted
+                // strip appears contiguous with the message body. This avoids
+                // the light "hole" seen after we reduced redraws. For other
+                // cell types keep the default background (already painted by
+                // the frame bg fill above).
+                if is_assistant && gutter_area.width > 0 && gutter_area.height > 0 {
+                    let _perf_gutter_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
+                    let style = Style::default().bg(gutter_bg);
+                    for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
+                        // Only the first column (symbol column) needs tint; the second is spacing to content
+                        // but tint both for visual continuity with the assistant block.
+                        for x in gutter_area.x..gutter_area.x.saturating_add(gutter_area.width) {
+                            buf[(x, y)].set_char(' ').set_style(style);
+                        }
                     }
-                    if gutter_area.width > 1 {
-                        buf[(gutter_area.x + 1, y)].set_char(' ').set_style(gutter_bg_style);
-                    }
-                    // One extra column to the left for Assistant only (no layout change)
-                    if is_assistant && gutter_area.x > 0 {
-                        buf[(gutter_area.x - 1, y)].set_char(' ').set_style(gutter_bg_style);
+                    if let Some(t0) = _perf_gutter_start {
+                        let dt = t0.elapsed().as_nanos();
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.ns_gutter_paint = p.ns_gutter_paint.saturating_add(dt);
+                        // Rough accounting: area of gutter rectangle (clamped to u64)
+                        let area_cells: u64 = (gutter_area.width as u64).saturating_mul(gutter_area.height as u64);
+                        p.cells_gutter_paint = p.cells_gutter_paint.saturating_add(area_cells);
                     }
                 }
 
@@ -6990,6 +7076,24 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
 
+        // Clear any bottom gap inside the content area that wasn’t covered by items
+        if screen_y < content_area.y + content_area.height {
+            let _perf_hist_clear2 = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
+            for y in screen_y..content_area.y + content_area.height {
+                for x in content_area.x..content_area.x + content_area.width {
+                    buf[(x, y)].set_char(' ').set_style(clear_style);
+                }
+            }
+            if let Some(t0) = _perf_hist_clear2 {
+                let dt = t0.elapsed().as_nanos();
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.ns_history_clear = p.ns_history_clear.saturating_add(dt);
+                let cells = (content_area.width as u64)
+                    * ((content_area.y + content_area.height - screen_y) as u64);
+                p.cells_history_clear = p.cells_history_clear.saturating_add(cells);
+            }
+        }
+
         // Render vertical scrollbar when content is scrollable and currently visible
         // Auto-hide after a short delay to avoid copying it along with text.
         let now = std::time::Instant::now();
@@ -7046,12 +7150,20 @@ impl WidgetRef for &ChatWidget<'_> {
             let scrim_bg = Style::default()
                 .bg(crate::colors::overlay_scrim())
                 .fg(crate::colors::text_dim());
+            let _perf_scrim_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
             for y in area.y..area.y + area.height {
                 for x in area.x..area.x + area.width {
                     // Overwrite with a dimmed style; we don't Clear so existing glyphs remain,
                     // but foreground is muted to reduce visual competition.
                     buf[(x, y)].set_style(scrim_bg);
                 }
+            }
+            if let Some(t0) = _perf_scrim_start {
+                let dt = t0.elapsed().as_nanos();
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.ns_overlay_scrim = p.ns_overlay_scrim.saturating_add(dt);
+                let cells = (area.width as u64) * (area.height as u64);
+                p.cells_overlay_scrim = p.cells_overlay_scrim.saturating_add(cells);
             }
             // Match the horizontal padding used by status bar and input
             let padding = 1u16;
@@ -7065,10 +7177,18 @@ impl WidgetRef for &ChatWidget<'_> {
             // Clear and repaint the overlay area with theme scrim background
             Clear.render(area, buf);
             let bg_style = Style::default().bg(crate::colors::overlay_scrim());
+            let _perf_overlay_area_bg_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
             for y in area.y..area.y + area.height {
                 for x in area.x..area.x + area.width {
                     buf[(x, y)].set_style(bg_style);
                 }
+            }
+            if let Some(t0) = _perf_overlay_area_bg_start {
+                let dt = t0.elapsed().as_nanos();
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                let cells = (area.width as u64) * (area.height as u64);
+                p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
             }
 
             // Build a styled title: keys/icons in normal text color; descriptors and dividers dim
@@ -7113,10 +7233,18 @@ impl WidgetRef for &ChatWidget<'_> {
 
             // Paint inner content background as the normal theme background
             let inner_bg = Style::default().bg(crate::colors::background());
+            let _perf_overlay_inner_bg_start = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
             for y in inner.y..inner.y + inner.height {
                 for x in inner.x..inner.x + inner.width {
                     buf[(x, y)].set_style(inner_bg);
                 }
+            }
+            if let Some(t0) = _perf_overlay_inner_bg_start {
+                let dt = t0.elapsed().as_nanos();
+                let mut p = self.perf_state.stats.borrow_mut();
+                p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                let cells = (inner.width as u64) * (inner.height as u64);
+                p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
             }
 
             // Split into header tabs and body/footer
@@ -7248,10 +7376,18 @@ impl WidgetRef for &ChatWidget<'_> {
                     _ => bg,
                 };
                 let body_bg = Style::default().bg(paper_color);
+                let _perf_overlay_body_bg2 = if self.perf_state.enabled { Some(std::time::Instant::now()) } else { None };
                 for y in body_inner.y..body_inner.y + body_inner.height {
                     for x in body_inner.x..body_inner.x + body_inner.width {
                         buf[(x, y)].set_style(body_bg);
                     }
+                }
+                if let Some(t0) = _perf_overlay_body_bg2 {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                    let cells = (body_inner.width as u64) * (body_inner.height as u64);
+                    p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
                 }
                 let paragraph = Paragraph::new(RtText::from(visible.to_vec())).wrap(ratatui::widgets::Wrap { trim: false });
                 ratatui::widgets::Widget::render(paragraph, body_inner, buf);
@@ -7287,6 +7423,12 @@ impl WidgetRef for &ChatWidget<'_> {
                     ratatui::widgets::Widget::render(para, dlg_inner, buf);
                 }
             }
+        }
+        // Finalize widget render timing
+        if let Some(t0) = _perf_widget_start {
+            let dt = t0.elapsed().as_nanos();
+            let mut p = self.perf_state.stats.borrow_mut();
+            p.ns_widget_render_total = p.ns_widget_render_total.saturating_add(dt);
         }
     }
 }
