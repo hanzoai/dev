@@ -32,10 +32,8 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
     let t = t.clamp(0.0, 1.0);
     let outline_p = smoothstep(0.00, 0.60, t); // outline draws L->R
     let fill_p = smoothstep(0.35, 0.95, t); // interior fills L->R
-    // Keep the animation vivid until the very end. Only begin a subtle fade in
-    // the last ~2% of progress, and render the final frame fully bright.
-    let mut fade = smoothstep(0.98, 1.00, t);
-    if (t - 1.0).abs() < 1e-6 { fade = 0.0; }
+    // Original fade profile: begin soft fade near the end.
+    let fade = smoothstep(0.90, 1.00, t);
     let scan_p = smoothstep(0.55, 0.85, t); // scanline sweep
     let frame = (t * 60.0) as u32;
 
@@ -95,11 +93,8 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
     let alpha = alpha.clamp(0.0, 1.0);
     let outline_p = smoothstep(0.00, 0.60, t); // outline draws L->R
     let fill_p = smoothstep(0.35, 0.95, t); // interior fills L->R
-    // Match the non-alpha path: keep vivid until the end and avoid dimming the
-    // terminal-stable final frame. Any longer fade-out is handled by the caller
-    // (AnimatedWelcomeCell) using alpha blending.
-    let mut fade = smoothstep(0.98, 1.00, t);
-    if (t - 1.0).abs() < 1e-6 { fade = 0.0; }
+    // Match original fade profile for alpha path as well.
+    let fade = smoothstep(0.90, 1.00, t);
     let scan_p = smoothstep(0.55, 0.85, t); // scanline sweep
     let frame = (t * 60.0) as u32;
 

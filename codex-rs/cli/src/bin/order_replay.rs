@@ -5,17 +5,8 @@ use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Key(u64);
-
-fn decode_key(k: u64) -> (bool, u64, u64, u64) {
-    // returns (unordered, request_ordinal, output_index, sequence_number)
-    let unordered = (k >> 63) == 1;
-    let req = (k >> 48) & 0xFFFF;
-    let out = (k >> 32) & 0xFFFF;
-    let seq = k & 0xFFFF_FFFF;
-    (unordered, req, out, seq)
-}
+// Note: helper types for decoding packed keys were removed
+// because this binary now parses structured logs instead.
 
 fn parse_response_expected(path: &Path) -> Result<Vec<(u64, u64)>> {
     // Returns vector of (out, seq) in the order they appear if we sort by out then seq
@@ -103,4 +94,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
