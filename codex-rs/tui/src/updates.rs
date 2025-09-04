@@ -13,12 +13,13 @@ use codex_core::default_client::create_client;
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
+    let originator = config.responses_originator_header.clone();
 
     // Always refresh the cached latest version in the background so TUI startup
     // isn’t blocked by a network call. The UI reads the previously cached
     // value (if any) for this run; the next run shows the banner if needed.
     tokio::spawn(async move {
-        check_for_update(&version_file)
+        check_for_update(&version_file, &originator)
             .await
             .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
     });
