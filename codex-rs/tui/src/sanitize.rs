@@ -129,7 +129,10 @@ fn strip_specials(input: String, mode: Mode) -> String {
                     }
                 }
             }
-            c if (c as u32) < 0x20 || c == '\u{007F}' => { /* drop C0 */ }
+            // Preserve newlines for layout; tabs must never be re-emitted
+            // here (they should have been expanded earlier).
+            '\n' => out.push('\n'),
+            c if (c as u32) < 0x20 || c == '\u{007F}' => { /* drop other C0 */ }
             c if is_c1(c) => { /* drop C1 */ }
             c if is_zero_width_or_bidi(c) => { /* drop zero-width/bidi */ }
             _ => out.push(ch),
