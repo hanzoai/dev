@@ -1,0 +1,199 @@
+name: Issue → Auto PR or Reply
+
+on:
+  issues:
+    types: [opened, reopened]
+
+concurrency:
+  group: issue-autopilot-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  issue_autopilot:
+    runs-on: ubuntu-latest
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+      ACTOR: ${{ github.actor }}
+      REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      BRANCH_NAME: issue-${{ github.event.issue.number }}-${{ github.run_id }}
+
+    steps:
+      - name: Check out repository (default branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm (npx) downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+          key: npm-cache-${{ runner.os }}-node20-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock') }}
+          restore-keys: |
+            npm-cache-${{ runner.os }}-node20-
+
+      - name: Cache Code binary bootstrap (~/.cache/just-every/code)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/just-every/code
+          key: code-bin-cache-${{ runner.os }}-v1
+          restore-keys: |
+            code-bin-cache-${{ runner.os }}-
+
+      - name: Configure Git author
+        run: |
+          git config user.name "issue-bot[bot]"
+          git config user.email "issue-bot@users.noreply.github.com"
+
+      - name: Prepare working files for the agent
+        run: |
+          mkdir -p .github/auto
+          : > .github/auto/PR_TITLE.txt
+          : > .github/auto/PR_BODY.md
+          : > .github/auto/ISSUE_COMMENT.md
+          cat > .github/auto/CONTEXT.md << 'EOF'
+          You are contributing to an existing repository. Your task is:
+          - Read the issue below and decide whether concrete changes are warranted.
+          - If code/docs changes are warranted, make minimal, safe edits directly in the repo. Keep diffs focused.
+          - Ensure the repo still builds locally using ./build-fast.sh if you touched Rust code. Do not run long tests.
+          - Write a high-quality PR title in .github/auto/PR_TITLE.txt and a detailed PR body in .github/auto/PR_BODY.md (include rationale and a brief validation note).
+          - If no code changes are appropriate, instead write a helpful maintainer-quality triage/clarifying response in .github/auto/ISSUE_COMMENT.md and leave the repo untouched.
+          - Do not open PRs for purely speculative ideas without changes; in that case, write the comment only.
+          - Be concise. Avoid touching unrelated files. Fix any compiler warnings you introduce.
+          EOF
+
+      - name: Run Code agent to implement or respond (published package)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY secret is required for issue autopilot." >&2
+            exit 1
+          fi
+          PROMPT=$(cat << 'EOP'
+          /plan
+          - Understand the issue and list exact edits needed (paths, snippets).
+          - If edits are warranted, make them and ensure the repo still builds locally if applicable (use ./build-fast.sh).
+          - If no edits are warranted, prepare a high-signal maintainer comment.
+
+          /solve
+
+          Context
+          --------
+          Repository: ${{ env.REPO }}
+          Default branch: ${{ env.DEFAULT_BRANCH }}
+          Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+
+          Issue body:
+          ${{ env.ISSUE_BODY }}
+
+          Actor: ${{ env.ACTOR }}
+
+          Instructions:
+          $(cat .github/auto/CONTEXT.md)
+          EOP
+          )
+          printf '%s' "$PROMPT" | npx -y @just-every/code@latest exec \
+            --cd "$GITHUB_WORKSPACE" \
+            --full-auto \
+            --skip-git-repo-check \
+            -
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: If no changes, post a helpful comment
+        if: steps.changes.outputs.changed == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '.github/auto/ISSUE_COMMENT.md';
+            let body = '';
+            if (fs.existsSync(path)) {
+              body = fs.readFileSync(path, 'utf8').trim();
+            }
+            if (!body) {
+              body = [
+                `Thanks @${context.actor}! I reviewed this issue.`,
+                '',
+                'Right now there aren’t concrete code changes to apply.',
+                'Please add reproduction steps, expected vs actual behavior, and any logs so we can proceed.',
+              ].join('\n');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body
+            });
+
+      - name: If changes exist, create branch, commit, push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git checkout -b "${BRANCH_NAME}"
+          git add -A
+          git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
+          git push --set-upstream origin "${BRANCH_NAME}"
+
+      - name: Open PR with AI-written title/body
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            function readOrDefault(p, dflt) {
+              try { const t = fs.readFileSync(p, 'utf8').trim(); return t || dflt; }
+              catch { return dflt; }
+            }
+            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${context.payload.issue.title}`);
+            const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
+            const footer = [
+              '',
+              '---',
+              `Auto-generated for issue #${context.payload.issue.number} by a workflow.`,
+              `Author: @${context.actor}`
+            ].join('\n');
+            const body = bodyBase ? `${bodyBase}\n${footer}` : footer;
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              head: process.env.BRANCH_NAME,
+              base: process.env.DEFAULT_BRANCH,
+              body
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `Opened PR #${pr.data.number} to address this issue.`
+            });
+
