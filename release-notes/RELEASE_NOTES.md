@@ -1,19 +1,19 @@
-## @just-every/code v0.2.59
+## @just-every/code v0.2.60
 
-A stability and UX polish release: strict per‑turn ordering, instant cancels, and safer output rendering. Your terminal stays tidy and snappy.
+This release refines packaging and notes to improve asset availability and clarity.
 
 ### Changes
-- TUI: enforce strict global ordering and require stream IDs for stable per‑turn history.
-- TUI/Core: make cancel/exit immediate during streaming; kill child process on abort to avoid orphans.
-- TUI: sanitize diff/output (expand tabs; strip OSC/DCS/C1/zero‑width) for safe rendering.
-- TUI: add WebFetch tool cell with preview; preserve first line during streaming.
-- TUI: restore typing on Git Bash/mintty by normalizing key event kind (Windows).
+
+- Release: collect all `code-*` artifacts recursively to ensure assets.
+- Release notes: add Compare link and optional Thanks; enforce strict sections.
+- Docs: use '@latest' in install snippet; tighten notes format.
 
 ### Install
+
 ```
-npm install -g @just-every/code
+npm install -g @just-every/code@latest
 code
 ```
 
-Compare: v0.2.56...v0.2.59
+Compare: https://github.com/just-every/code/compare/v0.2.59...v0.2.60
 
