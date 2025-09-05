@@ -167,6 +167,7 @@ jobs:
 
       - name: Safety screen (LLM review of issue)
         timeout-minutes: 5
+        if: steps.rate_limit.outputs.allow == 'true'
         id: safety
         uses: actions/github-script@v7
         env:
