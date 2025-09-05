@@ -177,9 +177,10 @@ jobs:
             if (!apiKey) {
               core.setOutput('decision', 'block');
               core.setOutput('reason', 'Missing OPENAI_API_KEY for safety screening.');
+              core.notice('Safety: block (no OPENAI_API_KEY)');
             } else {
               const payload = {
-                model: 'gpt-4o-mini',
+                model: 'gpt-5',
                 messages: [
                   {
                     role: 'system',
@@ -213,6 +214,7 @@ jobs:
               if (!res.ok) {
                 core.setOutput('decision', 'comment_only');
                 core.setOutput('reason', `Safety API error: ${res.status} ${res.statusText}`);
+                core.notice(`Safety: comment_only (API ${res.status} ${res.statusText})`);
               } else {
                 const data = await res.json();
                 let json = {};
@@ -225,6 +227,7 @@ jobs:
                 const reason = json.reason || 'Insufficient rationale';
                 core.setOutput('decision', decision);
                 core.setOutput('reason', reason);
+                core.notice(`Safety: ${decision} - ${reason}`);
               }
             }
 
@@ -239,9 +242,15 @@ jobs:
           reason_safety='${{ steps.safety.outputs.reason }}'
 
           allow_agent='false'
+          agent_mode='comment'
           gate_reason=""
-          if [ "$allow_rate" = 'true' ] && [ "$decision" = 'allow' ]; then
+          if [ "$allow_rate" = 'true' ] && [ "$decision" != 'block' ]; then
             allow_agent='true'
+            if [ "$decision" = 'allow' ]; then
+              agent_mode='full'
+            else
+              agent_mode='comment'
+            fi
           else
             gate_reason=$(printf "Rate: %s\nSafety: %s" "${reason_rate:-none}" "${reason_safety:-none}")
             printf '%s\n\n%s\n' \
@@ -250,6 +259,7 @@ jobs:
               > .github/auto/ISSUE_COMMENT.md
           fi
           echo "allow_agent=${allow_agent}" >> "$GITHUB_OUTPUT"
+          echo "agent_mode=${agent_mode}" >> "$GITHUB_OUTPUT"
 
       - name: Start local OpenAI proxy (no key to agent)
         timeout-minutes: 5
@@ -307,6 +317,7 @@ jobs:
           # Keep only essentials (PATH, HOME) and the model API key.
           SAFE_PATH="$PATH"
           SAFE_HOME="$HOME"
+          AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
           PROMPT=$(cat << 'EOP'
           <task>
             - Understand the issue and list exact edits needed (paths, snippets).
@@ -329,6 +340,12 @@ jobs:
           </context>
           EOP
           )
+          PROMPT="$PROMPT
+
+          <agent_mode>$AGENT_MODE</agent_mode>
+          - If agent_mode=comment, do NOT change files; only write .github/auto/ISSUE_COMMENT.md.
+          - If agent_mode=full, you may make minimal safe edits.
+          "
           printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
@@ -410,111 +427,145 @@ jobs:
             printf '\nIf these changes are intended, a maintainer can apply them manually or adjust the policy.\n'
           } > .github/auto/ISSUE_COMMENT.md
 
-      - name: If blocked by path policy, post a comment
+      - name: If blocked by path policy, post a comment (PAT→GITHUB_TOKEN fallback)
         timeout-minutes: 5
         if: steps.path_policy.outputs.ok == 'false'
         uses: actions/github-script@v7
+        env:
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
+            const gh = require('@actions/github');
             const body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md', 'utf8');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body
-            });
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const issue_number = gh.context.payload.issue.number;
+            const post = (token) => gh.getOctokit(token).rest.issues.createComment({ owner, repo, issue_number, body });
+            try {
+              await post(process.env.PAT);
+            } catch (e) {
+              if (e && e.status === 403) {
+                await post(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
+            }
 
-      - name: Assign after policy block
+      - name: Assign after policy block (PAT→GITHUB_TOKEN fallback)
         if: steps.path_policy.outputs.ok == 'false'
         uses: actions/github-script@v7
         env:
           ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
+            const gh = require('@actions/github');
             const assignee = (process.env.ASSIGNEE || 'zemaj').trim();
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const issue_number = gh.context.payload.issue.number;
+            const add = (token) => gh.getOctokit(token).rest.issues.addAssignees({ owner, repo, issue_number, assignees: [assignee] });
             try {
-              await github.rest.issues.addAssignees({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number,
-                assignees: [assignee]
-              });
+              await add(process.env.PAT);
             } catch (e) {
-              core.warning('Failed to assign: ' + e.message);
+              if (e && e.status === 403) {
+                await add(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
             }
 
-      - name: If no changes, post a helpful comment
+      - name: If no changes, post a helpful comment (PAT→GITHUB_TOKEN fallback)
         timeout-minutes: 5
         if: steps.changes.outputs.changed == 'false'
         uses: actions/github-script@v7
+        env:
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
-            const path = '.github/auto/ISSUE_COMMENT.md';
+            const gh = require('@actions/github');
+            const p = '.github/auto/ISSUE_COMMENT.md';
             let body = '';
-            if (fs.existsSync(path)) {
-              body = fs.readFileSync(path, 'utf8').trim();
-            }
+            if (fs.existsSync(p)) body = fs.readFileSync(p, 'utf8').trim();
             if (!body) {
               body = [
-                `Thanks @${context.actor}! I reviewed this issue.`,
+                `Thanks @${gh.context.actor}! I reviewed this issue.`,
                 '',
                 'Right now there aren’t concrete code changes to apply.',
                 'Please add reproduction steps, expected vs actual behavior, and any logs so we can proceed.',
               ].join('\n');
             }
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body
-            });
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const issue_number = gh.context.payload.issue.number;
+            const post = (token) => gh.getOctokit(token).rest.issues.createComment({ owner, repo, issue_number, body });
+            try {
+              await post(process.env.PAT);
+            } catch (e) {
+              if (e && e.status === 403) {
+                await post(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
+            }
 
-      - name: Optionally close issue (comment-only)
+      - name: Optionally close issue (comment-only; PAT→GITHUB_TOKEN fallback)
         if: steps.changes.outputs.changed == 'false' && steps.agent_decision.outputs.close_issue == 'true'
         uses: actions/github-script@v7
         env:
           CLOSE_MESSAGE: ${{ steps.agent_decision.outputs.close_message }}
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
+            const gh = require('@actions/github');
             const note = (process.env.CLOSE_MESSAGE || '').trim();
             const body = note ? note : 'Closing as resolved by the bot response.';
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body
-            });
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              state: 'closed'
-            });
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const issue_number = gh.context.payload.issue.number;
+            const comment = (token) => gh.getOctokit(token).rest.issues.createComment({ owner, repo, issue_number, body });
+            const close = (token) => gh.getOctokit(token).rest.issues.update({ owner, repo, issue_number, state: 'closed' });
+            try {
+              await comment(process.env.PAT);
+              await close(process.env.PAT);
+            } catch (e) {
+              if (e && e.status === 403) {
+                await comment(process.env.FALLBACK);
+                await close(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
+            }
 
-      - name: Assign (comment-only path)
+      - name: Assign (comment-only path; PAT→GITHUB_TOKEN fallback)
         if: steps.changes.outputs.changed == 'false'
         uses: actions/github-script@v7
         env:
           ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
+            const gh = require('@actions/github');
             const assignee = (process.env.ASSIGNEE || 'zemaj').trim();
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const issue_number = gh.context.payload.issue.number;
+            const add = (token) => gh.getOctokit(token).rest.issues.addAssignees({ owner, repo, issue_number, assignees: [assignee] });
             try {
-              await github.rest.issues.addAssignees({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number,
-                assignees: [assignee]
-              });
+              await add(process.env.PAT);
             } catch (e) {
-              core.warning('Failed to assign: ' + e.message);
+              if (e && e.status === 403) {
+                await add(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
             }
 
       - name: If changes exist, create branch, commit, push
@@ -551,44 +602,59 @@ jobs:
         timeout-minutes: 5
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/github-script@v7
+        env:
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
+          CLOSE_ISSUE: ${{ steps.agent_decision.outputs.close_issue }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
+            const gh = require('@actions/github');
             const closeIssue = process.env.CLOSE_ISSUE === 'true';
             function readOrDefault(p, dflt) {
               try { const t = fs.readFileSync(p, 'utf8').trim(); return t || dflt; }
               catch { return dflt; }
             }
-            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${context.payload.issue.title}`);
+            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${gh.context.payload.issue.title}`);
             const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
             const footer = [
               '',
               '---',
-              `Auto-generated for issue #${context.payload.issue.number} by a workflow.`,
-              `Author: @${context.actor}`
+              `Auto-generated for issue #${gh.context.payload.issue.number} by a workflow.`,
+              `Author: @${gh.context.actor}`
             ].join('\n');
-            const closing = closeIssue ? `\n\nCloses #${context.payload.issue.number}` : '';
+            const closing = closeIssue ? `\n\nCloses #${gh.context.payload.issue.number}` : '';
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer) + closing;
 
-            const pr = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title,
-              head: process.env.BRANCH_NAME,
-              base: process.env.DEFAULT_BRANCH,
-              body
-            });
-
+            const owner = gh.context.repo.owner;
+            const repo = gh.context.repo.repo;
+            const head = process.env.BRANCH_NAME;
+            const base = process.env.DEFAULT_BRANCH;
+            const issue_number = gh.context.payload.issue.number;
+            const createPR = (token) => gh.getOctokit(token).rest.pulls.create({ owner, repo, title, head, base, body });
+            const commentIssue = (token, msg) => gh.getOctokit(token).rest.issues.createComment({ owner, repo, issue_number, body: msg });
+            let pr;
+            try {
+              pr = await createPR(process.env.PAT);
+            } catch (e) {
+              if (e && e.status === 403) {
+                pr = await createPR(process.env.FALLBACK);
+              } else {
+                throw e;
+              }
+            }
             const msg = closeIssue
               ? `Opened PR #${pr.data.number} to address this issue. This PR includes a closing keyword and will close the issue on merge.`
               : `Opened PR #${pr.data.number} to address this issue.`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: msg
-            });
+            try {
+              await commentIssue(process.env.PAT, msg);
+            } catch (e) {
+              if (e && e.status === 403) {
+                await commentIssue(process.env.FALLBACK, msg);
+              } else {
+                throw e;
+              }
+            }
 
       - name: Assign (PR path)
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
