@@ -2,6 +2,12 @@ Changelog
 
 All notable changes to Code are documented here.
 
+## [0.2.61] - 2025-09-05
+
+- No functional changes; maintenance-only release focused on CI. (d7ac45c)
+- CI: trigger releases only from tags; parse version from tag to prevent unintended runs. (15ad27a8)
+- CI: reduce noise by enforcing [skip ci] on notes-only commits and ignoring notes-only paths. (52a08324, 12511ad2, c36ab3d8)
+
 ## [0.2.60] - 2025-09-05
 
 - Release: collect all `code-*` artifacts recursively to ensure assets. (d9f9ebfd)
