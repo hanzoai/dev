@@ -9,6 +9,8 @@ on:
       - '**/*.test.ts'
       - 'test/**'
       - '*.md'
+      - 'CHANGELOG.md'
+      - 'release-notes/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -511,23 +513,26 @@ jobs:
           - File header stays as-is ("Changelog"). Do not rewrite older sections.
           - Insert the new section at the top (above previous versions), with this header format exactly:
             ## [${NEW_VERSION}] - ${DATE}
-          - Include 2–5 bullets, each a single line, focusing on user‑visible features, fixes, UX, performance, or stability.
-          - Keep bullets concise and scannable; avoid long prose. Prefer present tense.
+          - Include 2–5 bullets (no more, no fewer), each a single line, focusing on user-visible features, fixes, UX, performance, or stability.
+          - Keep bullets concise and scannable; avoid long prose. Use present tense.
           - When helpful, start bullets with a short scope label like "TUI:", "CLI:", or "Core:".
           - At the end of each bullet, include abbreviated commit SHA(s) in parentheses, using 7–8 hex chars, comma‑separated when multiple, like: (abc1234, def5678).
           - Map changes from the git commit log in ${RANGE}; ignore pure chores/merges unless user‑visible.
-          - Do NOT add links, tables, or subheadings. Do NOT include PR author attributions in the changelog.
+          - Do NOT add links, tables, code blocks, or subheadings. Do NOT include PR author attributions in the changelog.
+          - Do NOT add any extra headers inside the changelog entry; only bullets under the version header.
           - Idempotent: if a section for ${NEW_VERSION} already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
 
           Release Notes (release-notes/RELEASE_NOTES.md)
-          - Title: ## @just-every/code v${NEW_VERSION}
-          - Brief intro (1-2 sentences) on core focus of release. This is the one place you can use a more promotional & humorous tone e.g. "**HUGE** performance upgrades! You won't have time for that coffee any more with significantly reduced startup time."
-          - A Changes section with the same 2–5 bullets as in CHANGELOG (you may omit the commit SHAs here).
-          - Installation snippet:
-            npm install -g @just-every/code
-            code
-          - Optional last line: "Compare: ${PREV_TAG:-<none>}...v${NEW_VERSION}" if a previous tag exists.
-          - Keep notes concise; no walls of text.
+          - Write exactly these sections in order and nothing else:
+            1) Title: ## @just-every/code v${NEW_VERSION}
+            2) One brief intro sentence (1–2 lines max).
+            3) Section header: ### Changes
+               - The same 2–5 bullets as in the changelog (you may omit SHAs).
+            4) Section header: ### Install
+               Code block with exactly:
+               npm install -g @just-every/code@latest
+               code
+          - Keep notes concise; no walls of text. No extra sections.
 
           Rules
           - Use the provided git log as source of truth; summarize responsibly.
