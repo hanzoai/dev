@@ -36,6 +36,15 @@ codex-cli/bin/*-darwin
 codex-cli/bin/*-linux-*
 codex-cli/bin/*-windows-*
 
+# Rust build artifacts
+/codex-rs/target/
+
+# Release and CI scratch
+/.code-bin/
+/artifacts/
+/release-assets/
+/npm-binaries/
+
 # caches
 .cache/
 .turbo/
