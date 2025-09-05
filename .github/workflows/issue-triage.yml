@@ -357,7 +357,9 @@ jobs:
               if (typeof j.close_issue === 'boolean') dec.close_issue = j.close_issue;
               if (typeof j.assignee === 'string' && j.assignee) dec.assignee = j.assignee;
               if (typeof j.close_message === 'string') dec.close_message = j.close_message;
-            } catch {}
+            } catch (e) {
+              core.info('No decision file or parse error; using defaults.');
+            }
             core.setOutput('close_issue', dec.close_issue ? 'true' : 'false');
             core.setOutput('assignee', dec.assignee);
             core.setOutput('close_message', dec.close_message || '');
@@ -429,10 +431,12 @@ jobs:
       - name: Assign after policy block
         if: steps.path_policy.outputs.ok == 'false'
         uses: actions/github-script@v7
+        env:
+          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const assignee = `${{ steps.agent_decision.outputs.assignee }}` || 'zemaj';
+            const assignee = (process.env.ASSIGNEE || 'zemaj').trim();
             try {
               await github.rest.issues.addAssignees({
                 owner: context.repo.owner,
@@ -475,10 +479,12 @@ jobs:
       - name: Optionally close issue (comment-only)
         if: steps.changes.outputs.changed == 'false' && steps.agent_decision.outputs.close_issue == 'true'
         uses: actions/github-script@v7
+        env:
+          CLOSE_MESSAGE: ${{ steps.agent_decision.outputs.close_message }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const note = `${{ steps.agent_decision.outputs.close_message }}`.trim();
+            const note = (process.env.CLOSE_MESSAGE || '').trim();
             const body = note ? note : 'Closing as resolved by the bot response.';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -496,10 +502,12 @@ jobs:
       - name: Assign (comment-only path)
         if: steps.changes.outputs.changed == 'false'
         uses: actions/github-script@v7
+        env:
+          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const assignee = `${{ steps.agent_decision.outputs.assignee }}` || 'zemaj';
+            const assignee = (process.env.ASSIGNEE || 'zemaj').trim();
             try {
               await github.rest.issues.addAssignees({
                 owner: context.repo.owner,
@@ -533,9 +541,8 @@ jobs:
           git checkout -b "${BRANCH_NAME}"
           git add -A
           if [ "${CLOSE_ISSUE}" = 'true' ]; then
-            git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}
-
-Closes #${ISSUE_NUMBER}"
+            git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}" \
+              -m "Closes #${ISSUE_NUMBER}"
           else
             git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
           fi
@@ -550,6 +557,7 @@ Closes #${ISSUE_NUMBER}"
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
+            const closeIssue = process.env.CLOSE_ISSUE === 'true';
             function readOrDefault(p, dflt) {
               try { const t = fs.readFileSync(p, 'utf8').trim(); return t || dflt; }
               catch { return dflt; }
@@ -562,7 +570,7 @@ Closes #${ISSUE_NUMBER}"
               `Auto-generated for issue #${context.payload.issue.number} by a workflow.`,
               `Author: @${context.actor}`
             ].join('\n');
-            const closing = `${{ steps.agent_decision.outputs.close_issue }}` === 'true' ? `\n\nCloses #${context.payload.issue.number}` : '';
+            const closing = closeIssue ? `\n\nCloses #${context.payload.issue.number}` : '';
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer) + closing;
 
             const pr = await github.rest.pulls.create({
@@ -574,20 +582,25 @@ Closes #${ISSUE_NUMBER}"
               body
             });
 
+            const msg = closeIssue
+              ? `Opened PR #${pr.data.number} to address this issue. This PR includes a closing keyword and will close the issue on merge.`
+              : `Opened PR #${pr.data.number} to address this issue.`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: `${${'{'}${{ steps.agent_decision.outputs.close_issue }}${'}'} === 'true' ? `Opened PR #${pr.data.number} to address this issue. This PR includes a closing keyword and will close the issue on merge.` : `Opened PR #${pr.data.number} to address this issue.`}`
+              body: msg
             });
 
       - name: Assign (PR path)
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/github-script@v7
+        env:
+          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const assignee = `${{ steps.agent_decision.outputs.assignee }}` || 'zemaj';
+            const assignee = (process.env.ASSIGNEE || 'zemaj').trim();
             try {
               await github.rest.issues.addAssignees({
                 owner: context.repo.owner,
