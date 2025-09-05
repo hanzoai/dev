@@ -544,6 +544,8 @@ jobs:
                - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk.
                - Derive usernames from merge commits, Co-authored-by trailers, or PR references in commit messages. Deduplicate and prefer "@username" form.
           - Keep notes concise; no walls of text. Do not add any other sections beyond the optional Thanks.
+          - Optional final line (only if a previous tag exists):
+            Compare: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${NEW_VERSION}
 
           Rules
           - Use the provided git log as source of truth; summarize responsibly.
