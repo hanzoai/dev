@@ -293,3 +293,34 @@ All notable changes to Code are documented here.
 ## [0.1.8] - 2025-08-13
 
 - TUI history: correct wrapping and height calc; prevent duplication; improve JS harness for browser. (dc31517, 98b26df, 58fd385, 7099f78)
+
+## [0.1.7] - 2025-08-12
+
+- Rebrand foundation: fork as just‑every/coder; major TUI styling/animation upgrades. (aefd1e5, e2930ce)
+- Browser: CDP connect to local Chrome with auto‑discovery, port parsing and stability fixes. (006e4eb, 1d02262, b8f6bcb, 756e4ea)
+- Agents HUD: live agent panel with status; animated sparkline; improved focus behavior. (271ded3, e230be5, 0b631c7)
+
+## [0.1.6] - 2025-08-12
+
+- TUI: show apply‑patch diff; split multiline commands; ctrl‑Z suspend fix. (9cd5ac5, 55f9505, 320f150)
+- Prompts: prompt cache key and caching integration tests. (7781e4f, 0a6cba8)
+- CI/build: resolve workflow compilation errors; dependency bumps; docs refresh. (7440ed1, 38a422c, d17c58b)
+
+## [0.1.5] - 2025-08-12
+
+- Theme UI: live preview and wrapping fixes; improved input (double‑Esc clear, precise history). (96a5922, 1f68fb0)
+- Layout: browser preview URL tracking and layout reorg; mute unnecessary mut warnings. (47bc272, 3778243)
+
+## [0.1.4] - 2025-08-12
+
+- Fork enhancements: mouse scrolling, glitch animation, status bar, improved TUI; configurable agents and browser tools with screenshots. (5d40d09, 55f72d7, a3939a0, cab23924)
+- Packaging: shrink npm package by downloading binaries on install; fix Windows builds and permissions. (aea9845, 240efb8, 2953a7f)
+- Workflows: align release pipeline; fix conflicts/warnings post‑merge. (f2925e9, 52bd7f6, ae47b2f)
+
+## [0.1.3] - 2025-08-10
+
+- Release pipeline cleanup: handle existing tags/npm version conflicts; drop redundant workflow. (cc243b1, 1cc2867)
+
+## [0.1.2] - 2025-08-10
+
+- Initial fork releases: set up rebrand + npm publishing; simplified release workflow; cross‑compilation fixes. (ff8378b, 3676c6a, 40d17e4, 1914e7b)
