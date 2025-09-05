@@ -97,9 +97,14 @@ impl StreamController {
     fn state(&self, kind: StreamKind) -> &StreamState {
         &self.states[Self::idx(kind)]
     }
-    fn state_mut(&mut self, kind: StreamKind) -> &mut StreamState {
-        &mut self.states[Self::idx(kind)]
-    }
+fn state_mut(&mut self, kind: StreamKind) -> &mut StreamState {
+    &mut self.states[Self::idx(kind)]
+}
+
+/// Record the latest provider sequence_number for this stream kind.
+pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<u64>) {
+    self.state_mut(kind).last_sequence_number = seq;
+}
 
     fn emit_header_if_needed(&mut self, kind: StreamKind, out_lines: &mut Lines) -> bool {
         let emitted = self.header.maybe_emit(kind, out_lines);
@@ -125,7 +130,8 @@ impl StreamController {
         // Parse trailing #s<idx>
         let idx = id.split('#').last().and_then(|frag| frag.strip_prefix('s'));
         if let Some(sidx) = idx {
-            let marker = format!("[s{}]", sidx);
+            let seq_part = self.state(kind).last_sequence_number.map(|n| format!(" seq{}", n)).unwrap_or_default();
+            let marker = format!("[s{}{}]", sidx, seq_part);
             let dim = crate::colors::text_dim();
             lines.push(Line::from(ratatui::text::Span::styled(marker, ratatui::style::Style::default().fg(dim))));
         }
@@ -233,7 +239,9 @@ impl StreamController {
             {
                 let mut header_lines = Vec::new();
                 if self.emit_header_if_needed(kind, &mut header_lines) {
-                    sink.insert_history(header_lines);
+                    // Always associate header lines with the active stream id so
+                    // the TUI can enforce strict per-stream ordering.
+                    sink.insert_history_with_kind(self.current_stream_id.clone(), kind, header_lines);
                     self.thinking_placeholder_shown = true;
                     // For answers, optionally insert an empty streaming cell with a hidden header so
                     // the UI can show a body placeholder (ellipsis) before the first text arrives.
@@ -382,7 +390,10 @@ impl StreamController {
                     }
                     (committed, saw_heading)
                 };
-                if saw_heading {
+                // Only early-commit a heading when we are at a line boundary to
+                // avoid truncating partially streamed titles (e.g., "Summar").
+                let at_boundary = { self.state(kind).collector.ends_with_newline() };
+                if saw_heading && at_boundary {
                     let relax_list = self.config.tui.stream.relax_list_holdback;
                     let relax_code = self.config.tui.stream.relax_code_holdback;
                     let mut newly_completed = {
@@ -418,8 +429,12 @@ impl StreamController {
 
     /// Insert a reasoning section break and commit any newly completed lines.
     pub(crate) fn insert_reasoning_section_break(&mut self, sink: &impl HistorySink) {
-        if self.current_stream != Some(StreamKind::Reasoning) {
-            self.begin(StreamKind::Reasoning, sink);
+        // Only insert a section break when we are actively streaming Reasoning
+        // and have a seeded stream id. Without an id, the TUI will drop the
+        // insert per strict ordering rules.
+        if self.current_stream != Some(StreamKind::Reasoning) || self.current_stream_id.is_none() {
+            tracing::debug!("skip section break: no active reasoning stream or missing id");
+            return;
         }
         let cfg = self.config.clone();
         // Scope the mutable borrow of state to collector ops only
@@ -759,11 +774,13 @@ impl StreamController {
             // Fall through to inject the message
         }
         
-        // If no stream is active for this kind, begin a new section now.
-        // Otherwise, preserve the existing stream context (including id)
-        // so finalization can correctly target the matching cell.
+        // Strict ordering policy: We must already have begun this stream with an id.
+        // Do NOT auto-begin without an id; the caller (ChatWidget) is responsible for
+        // seeding the stream with `begin_with_id(kind, Some(id), ...)` prior to applying
+        // a full final. If this is violated, drop and log.
         if self.current_stream != Some(kind) {
-            self.begin(kind, sink);
+            tracing::error!("strict ordering: apply_full_final called without active {:?} stream; missing begin_with_id(id)", kind);
+            return false;
         }
 
         {

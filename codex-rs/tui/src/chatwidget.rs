@@ -649,7 +649,8 @@ impl ChatWidget<'_> {
     }
     
     /// Handle streaming delta for both answer and reasoning
-    fn handle_streaming_delta(&mut self, kind: StreamKind, id: String, delta: String) { streaming::handle_streaming_delta(self, kind, id, delta); }
+    // Legacy helper removed: streaming now requires explicit sequence numbers.
+    // Call sites should invoke `streaming::delta_text(self, kind, id, delta, seq)` directly.
 
     /// Defer or handle an interrupt based on whether we're streaming
     fn defer_or_handle<F1, F2>(&mut self, defer_fn: F1, handle_fn: F2)
@@ -2194,7 +2195,7 @@ impl ChatWidget<'_> {
                 let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.seed_stream_order_key(StreamKind::Answer, &id, ok);
                 // Stream answer delta through StreamController
-                streaming::delta_text(self, StreamKind::Answer, id.clone(), delta);
+                streaming::delta_text(self, StreamKind::Answer, id.clone(), delta, Some(event.event_seq));
                 // Show responding state while assistant streams
                 self.bottom_pane.update_status_text("responding".to_string());
             }
@@ -2246,7 +2247,7 @@ impl ChatWidget<'_> {
                 tracing::info!("[order] EventMsg::AgentReasoningDelta id={} key={:?}", id, ok);
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Stream reasoning delta through StreamController
-                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta);
+                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta, Some(event.event_seq));
                 // Show thinking state while reasoning streams
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
@@ -2390,7 +2391,7 @@ impl ChatWidget<'_> {
                 let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
 
-                self.handle_streaming_delta(StreamKind::Reasoning, id.clone(), delta);
+                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta, Some(event.event_seq));
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 if self.stream_state.drop_streaming {
@@ -6640,7 +6641,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 acc = acc.saturating_add(h);
                 // Spacing rule must mirror the render path: no spacer between
                 // adjacent collapsed reasoning cells.
-                let mut should_add_spacing = idx < all_content.len() - 1 && !item.is_title_only();
+                let mut should_add_spacing = idx < all_content.len() - 1 && h > 0;
                 if should_add_spacing {
                     let this_is_collapsed_reasoning = item
                         .as_any()
@@ -7056,7 +7057,7 @@ impl WidgetRef for &ChatWidget<'_> {
             // Add spacing only if something was actually rendered for this item.
             // Prevent a stray blank when zero-height, and suppress spacing between
             // consecutive collapsed reasoning titles so they appear as a tight list.
-            let mut should_add_spacing = idx < all_content.len() - 1 && !item.is_title_only();
+            let mut should_add_spacing = idx < all_content.len() - 1 && visible_height > 0;
             if should_add_spacing {
                 // Special-case: two adjacent collapsed reasoning cells → no spacer.
                 let this_is_collapsed_reasoning = item

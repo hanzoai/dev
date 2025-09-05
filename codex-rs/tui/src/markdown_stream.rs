@@ -311,6 +311,11 @@ impl MarkdownStreamCollector {
         source
     }
 
+    /// Returns true if the internal buffer currently ends with a newline.
+    pub fn ends_with_newline(&self) -> bool {
+        self.buffer.ends_with('\n')
+    }
+
     /// Render a preview of the current buffer into lines without mutating
     /// internal counters. Unlike `finalize_and_drain`, this does not append a
     /// synthetic trailing newline, so the preview reflects what a soft-commit

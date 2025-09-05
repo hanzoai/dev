@@ -77,18 +77,8 @@ fn final_answer_without_newline_is_flushed_immediately() {
     });
 
     // Drain history insertions and verify the final line is present.
+    // We no longer emit a visible "codex" header during streaming.
     let cells = drain_insert_history(&rx);
-    assert!(
-        cells.iter().any(|lines| {
-            let s = lines
-                .iter()
-                .flat_map(|l| l.spans.iter())
-                .map(|sp| sp.content.clone())
-                .collect::<String>();
-            s.contains("codex")
-        }),
-        "expected 'codex' header to be emitted",
-    );
     let found_final = cells.iter().any(|lines| {
         let s = lines
             .iter()
@@ -1024,7 +1014,7 @@ fn headers_emitted_on_stream_begin_for_answer_and_reasoning() {
         "answer header should not be emitted before first newline commit"
     );
 
-    // Newline arrives, then header is emitted
+    // Newline arrives; no visible header should be emitted for Answer
     chat.handle_codex_event(Event {
         id: "sub-a".into(),
         msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
@@ -1048,8 +1038,8 @@ fn headers_emitted_on_stream_begin_for_answer_and_reasoning() {
         }
     }
     assert!(
-        saw_codex_post,
-        "expected 'codex' header to be emitted after first newline commit"
+        !saw_codex_post,
+        "did not expect a visible 'codex' header to be emitted after first newline commit"
     );
 
     // Reasoning: header immediately
@@ -1118,26 +1108,16 @@ fn multiple_agent_messages_in_single_turn_emit_multiple_headers() {
     });
 
     let cells = drain_insert_history(&rx);
-    let mut header_count = 0usize;
     let mut combined = String::new();
     for lines in &cells {
         for l in lines {
             for sp in &l.spans {
                 let s = &sp.content;
-                if s == "codex" {
-                    header_count += 1;
-                }
                 combined.push_str(s);
             }
             combined.push('\n');
         }
     }
-    assert_eq!(
-        header_count,
-        2,
-        "expected two 'codex' headers for two AgentMessage events in one turn; cells={:?}",
-        cells.len()
-    );
     assert!(
         combined.contains("First message"),
         "missing first message: {combined}"

@@ -14,23 +14,7 @@ pub(super) fn is_write_cycle_active(chat: &ChatWidget<'_>) -> bool {
     chat.stream.is_write_cycle_active()
 }
 
-pub(super) fn handle_streaming_delta(
-    chat: &mut ChatWidget<'_>,
-    kind: StreamKind,
-    id: String,
-    delta: String,
-) {
-    if chat.stream_state.drop_streaming {
-        tracing::debug!(
-            "dropping streaming delta after cancel (kind={:?}, id={})",
-            kind, id
-        );
-        return;
-    }
-    tracing::debug!("handle_streaming_delta kind={:?}, delta={:?}", kind, delta);
-    delta_text(chat, kind, id, delta);
-    chat.mark_needs_redraw();
-}
+// Note: direct streaming is triggered from ChatWidget with explicit sequence numbers
 
 // New facade: begin a stream for a kind, with optional id
 pub(super) fn begin(chat: &mut ChatWidget<'_>, kind: StreamKind, id: Option<String>) {
@@ -40,10 +24,11 @@ pub(super) fn begin(chat: &mut ChatWidget<'_>, kind: StreamKind, id: Option<Stri
 }
 
 // New facade: apply a delta (ensures begin is called for this id/kind)
-pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String, delta: String) {
+pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String, delta: String, seq: Option<u64>) {
     chat.stream_state.current_kind = Some(kind);
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
     chat.stream.begin_with_id(kind, Some(id), &sink);
+    chat.stream.set_last_sequence_number(kind, seq);
     
     chat.stream.push_and_maybe_commit(&delta, &sink);
 }

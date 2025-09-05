@@ -1226,10 +1226,10 @@ impl ChatComposer {
                 return None;
             }
             let potential_ph_start = p - ph.len();
-            if text[potential_ph_start..p] == *ph {
-                Some(ph.clone())
-            } else {
-                None
+            // Use `get` to avoid panicking on non-char-boundary indices.
+            match text.get(potential_ph_start..p) {
+                Some(slice) if slice == ph => Some(ph.clone()),
+                _ => None,
             }
         });
 
