@@ -479,25 +479,46 @@ jobs:
 
           # Build the task prompt (with variables expanded by bash).
           cat > release-notes/prompt.expanded.txt <<PROMPT
-You are Code, running headless during CI for a release.
+You are Code running headless in CI to prepare a new release.
 
-Goal:
-- Review the provided git changes for this release.
-- Update the top-level CHANGELOG.md by inserting a new section for the release.
-- Write rich GitHub release notes to release-notes/RELEASE_NOTES.md.
-
-Requirements:
+Inputs
 - Version: v${NEW_VERSION}
-- Date: ${DATE}
+- Date (UTC): ${DATE}
 - Previous tag: ${PREV_TAG:-none}
-- Range: ${RANGE}
-- Keep the existing changelog style and headings.
-- Categorize entries by feat, fix, perf, refactor, docs, chore, ci, test, build.
-- Link PRs and issues like #123 when present; include contributor handles when visible in commit messages.
-- Keep lines wrapped reasonably; use markdown lists.
-- Ensure idempotence: if a section for this version already exists, replace its contents.
-- After updating files, stage them and commit with: docs(changelog): update for v${NEW_VERSION}
-- Also create release-notes/RELEASE_NOTES.md mirroring the new CHANGELOG section with a brief intro and installation snippet.
+- Commit range: ${RANGE}
+- Working directory: repo root (CHANGELOG.md lives at top-level)
+
+Primary Tasks
+1) Update CHANGELOG.md with a new entry for this version using the EXACT house style below.
+2) Generate GitHub release notes at release-notes/RELEASE_NOTES.md (concise, user‑facing), derived from the same changes.
+
+CHANGELOG.md House Style (strict)
+- File header stays as-is ("Changelog"). Do not rewrite older sections.
+- Insert the new section at the top (above previous versions), with this header format exactly:
+  ## [${NEW_VERSION}] - ${DATE}
+- Include 2–5 bullets, each a single line, focusing on user‑visible features, fixes, UX, performance, or stability.
+- Keep bullets concise and scannable; avoid long prose. Prefer present tense.
+- When helpful, start bullets with a short scope label like "TUI:", "CLI:", or "Core:".
+- At the end of each bullet, include abbreviated commit SHA(s) in parentheses, using 7–8 hex chars, comma‑separated when multiple, like: (abc1234, def5678).
+- Map changes from the git commit log in ${RANGE}; ignore pure chores/merges unless user‑visible.
+- Do NOT add links, tables, or subheadings. Do NOT include PR author attributions in the changelog.
+- Idempotent: if a section for ${NEW_VERSION} already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
+
+Release Notes (release-notes/RELEASE_NOTES.md)
+- Title: ## @just-every/code v${NEW_VERSION}
+- Brief intro (one sentence): "Fork of OpenAI Codex with additional features" or similar — keep neutral.
+- A Changes section with the same 2–5 bullets as in CHANGELOG (you may omit the commit SHAs here).
+- Installation snippet:
+  npm install -g @just-every/code
+  code
+- Optional last line: "Compare: ${PREV_TAG:-<none>}...v${NEW_VERSION}" if a previous tag exists.
+- Keep notes concise; no walls of text.
+
+Rules
+- Use the provided git log as source of truth; summarize responsibly.
+- Keep formatting minimal (headers + list bullets). No bold/italics beyond what’s specified.
+- Never reorder older versions. Only touch the section for v${NEW_VERSION}.
+- After writing files, stage and commit with message: docs(changelog): update for v${NEW_VERSION}
 
 Context (git log excerpt follows):
 PROMPT
