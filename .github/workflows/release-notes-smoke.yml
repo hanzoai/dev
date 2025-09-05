@@ -44,7 +44,15 @@ jobs:
           fi
           out=$(mktemp)
           err=$(mktemp)
-          printf 'This is a smoke test for release notes generation.\n' | \
+          printf '%s\n' \
+            'You are Code running a quick smoke check.' \
+            '' \
+            'Please:' \
+            '1) Run: ls -1 (in the current working directory).' \
+            '2) Briefly describe the top-level files/directories you see.' \
+            '3) Conclude with a short "done" and nothing else.' \
+            'Notes: Do NOT run builds or long tasks.' \
+            | \
             npx -y @just-every/code@latest exec \
               --cd "$GITHUB_WORKSPACE" \
               --full-auto \
