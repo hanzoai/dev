@@ -1,4 +1,4 @@
-We've created this workflow to auto action (response or code a PR) based on public GitHub issues. Does it look secure? Could we improve it further?
+# We've created this workflow to auto action (response or code a PR) based on public GitHub issues. Does it look secure? Could we improve it further?
 
 name: Issue → Auto PR or Reply
 
