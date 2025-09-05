@@ -869,10 +869,14 @@ impl Session {
         rx_approve
     }
 
-    pub fn notify_approval(&self, sub_id: &str, decision: ReviewDecision) {
+    pub fn notify_approval(&self, call_id: &str, decision: ReviewDecision) {
         let mut state = self.state.lock().unwrap();
-        if let Some(tx_approve) = state.pending_approvals.remove(sub_id) {
-            tx_approve.send(decision).ok();
+        if let Some(tx_approve) = state.pending_approvals.remove(call_id) {
+            let _ = tx_approve.send(decision);
+        } else {
+            // If we cannot find a pending approval for this call id, surface a warning
+            // to aid debugging of stuck approvals.
+            tracing::warn!("no pending approval found for call_id={}", call_id);
         }
     }
 
