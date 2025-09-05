@@ -1,0 +1,145 @@
+You are Code running headless in CI to prepare a new release.
+
+Inputs
+- Version: v0.2.59
+- Date (UTC): 2025-09-05
+- Previous tag: v0.2.56
+- Commit range: v0.2.56..HEAD
+- Working directory: repo root (CHANGELOG.md lives at top-level)
+
+Primary Tasks
+1) Update CHANGELOG.md with a new entry for this version using the EXACT house style below.
+2) Generate GitHub release notes at release-notes/RELEASE_NOTES.md (concise, user‑facing), derived from the same changes.
+
+CHANGELOG.md House Style (strict)
+- File header stays as-is ("Changelog"). Do not rewrite older sections.
+- Insert the new section at the top (above previous versions), with this header format exactly:
+  ## [0.2.59] - 2025-09-05
+- Include 2–5 bullets, each a single line, focusing on user‑visible features, fixes, UX, performance, or stability.
+- Keep bullets concise and scannable; avoid long prose. Prefer present tense.
+- When helpful, start bullets with a short scope label like "TUI:", "CLI:", or "Core:".
+- At the end of each bullet, include abbreviated commit SHA(s) in parentheses, using 7–8 hex chars, comma‑separated when multiple, like: (abc1234, def5678).
+- Map changes from the git commit log in v0.2.56..HEAD; ignore pure chores/merges unless user‑visible.
+- Do NOT add links, tables, or subheadings. Do NOT include PR author attributions in the changelog.
+- Idempotent: if a section for 0.2.59 already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
+
+Release Notes (release-notes/RELEASE_NOTES.md)
+- Title: ## @just-every/code v0.2.59
+- Brief intro (1-2 sentences) on core focus of release. This is the one place you can use a more promotional & humorous tone e.g. "**HUGE** performance upgrades! You won't have time for that coffee any more with significantly reduced startup time."
+- A Changes section with the same 2–5 bullets as in CHANGELOG (you may omit the commit SHAs here).
+- Installation snippet:
+  npm install -g @just-every/code
+  code
+- Optional last line: "Compare: v0.2.56...v0.2.59" if a previous tag exists.
+- Keep notes concise; no walls of text.
+
+Rules
+- Use the provided git log as source of truth; summarize responsibly.
+- Explore codebase directly if commit messages are unclear or need additional context.
+- Keep formatting minimal (headers + list bullets). No emojis ever! Basic markdown only.
+- Never reorder older versions. Only touch the section for v0.2.59.
+- After writing files, stage and commit with message: docs(changelog): update for v0.2.59
+
+Context (git log excerpt follows):
+# Commit log (v0.2.56..HEAD)
+* 3166690e chore(release): 0.2.59 [skip ci] (GitHub Action)
+* bbde3435 ci(smoke): remove stray status echo causing 'unbound variable' under set -u (James Peter)
+* fcc7d82d ci(smoke): use a trivial prompt (ls + brief description) to avoid toolchain/build steps and finish quickly (James Peter)
+* 7f937dc1 ci(smoke): default to live run with OPENAI_API_KEY and default model; remove use_api/model inputs (James Peter)
+* 3906ba74 ci(smoke): add options to use OPENAI_API_KEY + model for live request; keep default parse-only mode (James Peter)
+* b0baa3bd ci(smoke): switch to npx @just-every/code to test published release; fix inputs context and minor typo (James Peter)
+* 4f7701c8 ci(smoke): add fast workflow to validate 'code exec --cd' parsing and stdin redirection without full release pipeline (James Peter)
+* 0f67da51 ci(release): use 'exec --cd' instead of unknown top-level '--cwd' and verify locally (James Peter)
+* cef240fd ci(release): publish npm packages last; bump codex-cli to 0.2.58 and compute version across all npm targets to avoid E403 overwrite (James Peter)
+* d497a1aa fix(tui/sanitize): centralize diff/output sanitization; strip OSC/DCS/C1/zero-width and expand tabs via shared util\n\n- Add  with  and  modes\n- Expand tabs (Unicode-aware) and remove zero-width/BiDi controls\n- Strip OSC/DCS/APC/PM/SOS strings and raw C0/C1 bytes; keep CSI when preserving ANSI\n- Apply to diff_render (plain) and history_cell (ANSI-preserving)\n\nValidated with ./build-fast.sh (no warnings).\n\nFixes #22 (James Peter)
+* c2a24afe feat(tui/streaming): animate streaming ellipsis as rotating three dots\n\nReplace static ellipsis (… ) in StreamingContentCell with a subtle three-dot\nanimation using a middle dot (·) cycling through frames: ..., ·.., .·., ..·, ...\nShown only while streaming, in the same places the previous ellipsis appeared.\nFrame cadence ~200ms. Validated via ./build-fast.sh (no warnings). (James Peter)
+* 7373a34f ci(release): fix YAML by indenting heredoc content in run block (James Peter)
+* f6735992 feat(tui/history): add WebFetchToolCell and fix streaming header\n\n- Preserve first content line during streaming by prepending hidden header when absent\n- Replace tool call lines with sectioned web_fetch preview and dim styling\n- Update release notes guidance in workflow docs\n\nValidated with ./build-fast.sh (no warnings) (James Peter)
+* ef397e4f ci(release): align CLI agent prompt with new CHANGELOG/notes house style and idempotent update rules (James Peter)
+* 6647b24a docs(changelog): add v0.1.7–v0.1.2 entries (James Peter)
+* e6e08349 docs(changelog): add v0.1.13–v0.1.8 entries (James Peter)
+* fbc1d720 docs(changelog): add v0.2.9–v0.2.1 entries (James Peter)
+* 70e66507 docs(changelog): add v0.2.24–v0.2.10 entries (James Peter)
+* e65582f4 docs(changelog): add v0.2.36–v0.2.25 entries from tag ranges (James Peter)
+* d4b92125 docs(changelog): add v0.2.46–v0.2.37 and correct v0.2.38/0.2.37 mapping (James Peter)
+* aebff2db docs(changelog): reconstruct notes for v0.2.47–v0.2.56 from tags and commit history (James Peter)
+* bae1b9b6 fix(tui/history): guard missing OrderMeta; synthesize order keys (James Peter)
+* b2fce65e fix(tui/render): clamp bottom spacer compensation to 1 row at end of viewport (James Peter)
+* 7c71037d feat(tui/history): enforce strict global ordering and stream IDs (James Peter)
+* b61d2028 chore: commit all code (James Peter)
+* a2b747d0 fix(tui/status): remove duplicate 'Ctrl+R hide reasoning' hint from top bar (footer already shows it) (James Peter)
+* 7350fd1b fix(tui/redraw): ensure scheduled animation frames are not suppressed by debounce (James Peter)
+* 7fb28154 fix(tui/animation): ensure intro logo visibly completes without perf cost (James Peter)
+* 7577fe4b feat(tui/order): enforce strict global ordering and remove turn-window logic\n\n- Add strict  and global ordered inserts\n- Require  for LLM/tool events; panic if missing\n- Replace unordered pushes with ordered  using synthetic internal keys (out=-1)\n- Remove turn-window fields/logic; delete legacy helpers\n- Seed per-stream keys from ; enforce for Answer/Reasoning/MCP\n- Carry  with pending ExecEnd and flush with correct order\n- Simplify interrupts queue; drop window fields and pass through \n- Clean up dead code and fix warnings (0 warnings)\n\nValidated with ./build-fast.sh (no warnings). (James Peter)
+* 9fe8adfd fix(tui/chrome): import Clear and paint themed background for selection dialog (James Peter)
+* 977d3e63 fix(tui/dialogs): ensure all popups use theme bg/fg and border; update /resume, list/verbosity/reasoning selections, Chrome options, and diff confirm dialog (James Peter)
+* d11f9bb6 fix(tui/diff-confirm): theme-aware dialog (bg/fg + border) and paint inner area (James Peter)
+* f7e857d5 chore(tui): revert unrelated streaming/history changes from previous commit; keep resume dialog theming only (James Peter)
+* 538e3e10 fix(tui/resume): apply theme bg/fg + border to dialog block for consistent theming across all popups (James Peter)
+* 165d52d2 feat(tui/reasoning): render expanded reasoning dim with a subtle left border; implement custom_render_with_skip for CollapsibleReasoningCell (James Peter)
+* d362d096 fix(core/reasoning): separate reasoning summary streams by summary_index and raw content by content_index; include index in stream id (item_id#s<idx>/#c<idx>) and de-dup keys; propagate indices through events (James Peter)
+* c25146b5 chore(tui/reasoning): append live title snapshot to --order overlay; add debug_title_overlay() on CollapsibleReasoningCell (James Peter)
+* 94a9aa51 fix(core): complete upstream integration (James Peter)
+* db5276f8 chore: Clean up verbosity config (#3056) (Dylan)
+* 77fb9f34 [codex] document `use_experimental_reasoning_summary` toml key config (#3118) (Anton Panasenko)
+* 0e827b65 Auto-approve DangerFullAccess patches on non-sandboxed platforms (#2988) (Sing303)
+* daaadfb2 Introduce Rollout Policy (#3116) (Ahmed Ibrahim)
+* c636f821 Add a common way to create HTTP client (#3110) (pakrym-oai)
+* af338cc5 Improve @ file search: include specific hidden dirs such as .github, .gitlab (#2981) (Lionel Cheng)
+* 97000c6e core: correct sandboxed shell tool description (reads allowed anywhere) (#3069) (Jeremy Rose)
+* fb5dfe33 Update guidance on API key permissions (#3112) (Gabriel Peal)
+* 0ec16f00 refactor(core/tools): introduce ToolCallCtx and centralize ordered event emission (James Peter)
+* d7c767d4 fix(core/events): preserve request/output ordering for tool events (James Peter)
+* 715b74ca chore(changelog): note fixes for input on Windows, optional ripgrep, extra CA trust, npm name clarification, and Homebrew helper (James Peter)
+* 5b722e07 fix(tui/input): normalize KeyEvent kind on non-enhanced terminals to restore typing on Git Bash/mintty (Windows) (James Peter)
+* 3e1348da feat(tui/reasoning): overlay title metrics when --order is enabled to debug missing mid‑word chars in collapsed reasoning titles (James Peter)
+* ed50f153 merge(upstream): integrate upstream/main via merge branch; keep TUI fork; fix build\n\n- Create merge branch, merge origin/main and upstream/main with -X ours\n- Resolve conflicts: keep our TUI; drop upstream vt100 tests and snapshots\n- Decouple core from codex-login to break cycle; re-export auth in core\n- apply-patch: robust heredoc parsing via tree-sitter; minor fixes\n- protocol: align FileChange::Delete variants across core/wire code paths\n- TUI: adjust Git repo detection; simplify parsed command labels\n- mcp-server/exec: update imports and Delete handling\n- message_history: use fs2 locks; add dead_code allows\n\nValidated with ./build-fast.sh (James Peter)
+* 2f34578e revert(tui): keep forked TUI; defer upstream integration (James Peter)
+* 06daa92b chore(codex-rs): clean up tree; add CLI order_replay (James Peter)
+* a56eb481 Use the new search tool (#3086) (Ahmed Ibrahim)
+* d77b33de core(rollout): extract rollout module, add listing API, and return file heads (#1634) (Ahmed Ibrahim)
+* 9ad2e726 chore(deps): bump thiserror from 2.0.12 to 2.0.16 in /codex-rs (#2667) (dependabot[bot])
+* 6aa306c5 feat: add stable file locking using std::fs APIs (#2894) (pchuri)
+* 44dce748 feat: add Android/Termux support by gating arboard dependency (#2895) (pchuri)
+* d489690e TUI: fix MCP docs hyperlink in empty_mcp_output (#2907) (Mitch Fultz)
+* 3f762200 docs: fix typo of config.md (#3082) (Zhongsheng Ji)
+* 90725fe3 docs: update link to point to https://agents.md/ (#3089) (Michael Bolin)
+* 53413c72 parse cd foo && ... for exec and apply_patch (#3083) (Jeremy Rose)
+* b127a364 Improve gpt-oss compatibility (#2461) (Dominik Kundel)
+* a93a907c [feat] use experimental reasoning summary (#3071) (Anton Panasenko)
+* 03e2796c Move CodexAuth and AuthManager to the core crate (#3074) (pakrym-oai)
+* 051f185c Added back the logic to handle rate-limit errors when using API key (#3070) (Eric Traut)
+* 6f751146 [apply-patch] Fix lark grammar (#2651) (Dylan)
+* 3baccba0 Show loading state when @ search results are pending (#3061) (Jeremy Rose)
+* 578ff09e prefer ratatui Stylized for constructing lines/spans (#3068) (Jeremy Rose)
+* 0d5ffb00 tui: fix occasional UI flicker (#2918) (Jeremy Rose)
+* 431a10fc chore: unify history loading (#2736) (Ahmed Ibrahim)
+* 8b993b55 fix: include arm64 Windows executable in npm module (#3067) (Michael Bolin)
+* 60fdfc5f tui: catch get_cursor_position errors (#2870) (Jeremy Rose)
+* 13e5b567 fix: install zstd on the windows-11-arm image used to cut a release (#3066) (Michael Bolin)
+* 46e35a23 tui: fix extra blank lines in streamed agent messages (#3065) (Jeremy Rose)
+* 7bcdc5cc fix config reference table (#3063) (Reuben Narad)
+* 4b426f7e fix: leverage windows-11-arm for Windows ARM builds (#3062) (Michael Bolin)
+* fcb62a0f tui: hide '/init' suggestion when AGENTS.md exists (#3038) (Jeremy Rose)
+* eb40fe34 Add logs to know when we users are changing the model (#3060) (Ahmed Ibrahim)
+* b32c79e3 tui: fix laggy typing (#2922) (Jeremy Rose)
+* e442eced rework message styling (#2877) (Jeremy Rose)
+* 3f8d6021 Fix: Adapt pr template with correct link following doc refacto (#2982) (Lionel Cheng)
+* 7ac6194c Bug fix: ignore Enter on empty input to avoid queuing blank messages (#3047) (Uhyeon Park)
+* 619436c5 remove extra quote from disabled-command message (#3035) (Jeremy Rose)
+* 1cc6b972 chore(deps): bump regex-lite from 0.1.6 to 0.1.7 in /codex-rs (#3010) (dependabot[bot])
+* 351642b1 test(tui/history_cell): add ExecAction + merge + parse annotation unit tests (James Peter)
+* 5f59faaa chore(tui): polish maintainability (James Peter)
+* b7c66028 refactor(tui): complete Step 3 and Step 4 (James Peter)
+* b173ae1a refactor(history_cell): adopt ExecAction in key paths (James Peter)
+* c3f989c9 refactor(tui): finish step 3 partials — ID newtypes + broader ExecAction usage (James Peter)
+* 1518768e docs(tui): mark merge API consolidation done; note ExecAction adoption and next steps (James Peter)
+* 7dc0cbfc refactor(tui/history): consolidate merges + introduce ExecAction enum (James Peter)
+* b3696d0f docs(tui): update refactor plan status (James Peter)
+* 23b1d3ec refactor(tui/history): add history_*_and_maybe_merge API and adopt in exec flow (James Peter)
+* 9fb2563c refactor(tui/chatwidget): finish history helper adoption across TUI (James Peter)
+* 6eac0512 chore(tui/onboarding): copy tweak for ChatGPT sign-in message (James Peter)
+* 4837c884 fix(tui/history): restore ReadAggregationCell used by chat widget read grouping (James Peter)
+* 8a4a9508 chore: revert unrelated changes in browser/prompt/history/tui files from prior commit (James Peter)
+* 64491a1f fix(core/exec): kill child on task abort to avoid orphaned commands\n\nWrap spawned child in KillOnDrop guard so user interrupts (which abort the agent\ntask) terminate the process immediately. This ensures the UI no longer shows\ncommands as still running after cancel, and the OS process is not left alive. (James Peter)
+* 74bfed68 fix(tui/core): make cancel + exit immediate during streaming\n\n- TUI: on interrupt, finalize active stream and drop further deltas so output stops instantly.\n- TUI: second Ctrl+C sends ExitRequest immediately (don’t wait for ShutdownComplete).\n- Core: abort running agent on Op::Shutdown to stop model streaming promptly.\n\nThis fixes cases where Ctrl+C/Esc stopped the spinner but the model kept streaming until completion. (James Peter)

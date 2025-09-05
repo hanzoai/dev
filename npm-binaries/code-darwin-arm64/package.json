@@ -1,0 +1,10 @@
+{
+  "name": "@just-every/code-darwin-arm64",
+  "version": "0.2.59",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @just-every/code (aarch64-apple-darwin)",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/"],
+  "private": false
+}
