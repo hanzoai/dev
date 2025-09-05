@@ -2,7 +2,14 @@
 
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
- 
+
+## [0.2.66] - 2025-09-05
+
+- No functional changes; maintenance-only release focused on CI. (a6158474)
+- CI: triage workflow uses REST via fetch; GITHUB_TOKEN fallback. (731c3fce)
+- CI: enforce strict JSON schema and robust response parsing. (22a3d846, b5eaecf4)
+- CI: standardize Responses API usage and model endpoint selection. (118c4581, 9b8c2107, 73b73ba2)
+
 ## [0.2.65] - 2025-09-05
 
 - Core: embed version via rustc-env; fix version reporting. (32c495f6)
