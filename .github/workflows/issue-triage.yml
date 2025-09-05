@@ -363,6 +363,8 @@ jobs:
           SAFE_PATH="$PATH"
           SAFE_HOME="$HOME"
           AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
+          # Normalize agent mode (trim whitespace/CRs)
+          AGENT_MODE=$(printf '%s' "$AGENT_MODE" | tr -d '\r' | xargs)
           PROMPT=$(cat << 'EOP'
           <task>
             - Understand the issue and list exact edits needed (paths, snippets).
@@ -396,12 +398,12 @@ jobs:
             The comment should be self-contained and suitable to post on the issue. Do not include any other XML tags. Avoid code fences inside the tag when unnecessary.
           - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
           "
-          # Choose sandbox mode based on agent_mode
-          if [ "$AGENT_MODE" = "full" ]; then
-            CODE_SANDBOX="workspace-write"
-          else
-            CODE_SANDBOX="read-only"
-          fi
+          # Choose sandbox mode based on agent_mode (robust compare)
+          case "$AGENT_MODE" in
+            full) CODE_SANDBOX="workspace-write" ;;
+            *)    CODE_SANDBOX="read-only" ;;
+          esac
+          echo "Agent mode: $AGENT_MODE -> sandbox: $CODE_SANDBOX"
 
           printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             OPENAI_API_KEY="x" \
