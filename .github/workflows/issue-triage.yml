@@ -390,14 +390,22 @@ jobs:
           - If agent_mode=comment, do NOT change files; only write .github/auto/ISSUE_COMMENT.md.
           - If agent_mode=full, you may make minimal safe edits.
           "
+          # Choose sandbox mode based on agent_mode
+          if [ "$AGENT_MODE" = "full" ]; then
+            CODE_SANDBOX="workspace-write"
+          else
+            CODE_SANDBOX="read-only"
+          fi
+
           printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
             npm_config_cache="$SAFE_HOME/.npm" \
-            npx -y @just-every/code@latest exec \
+            npx -y @just-every/code@latest \
+            -s "$CODE_SANDBOX" -a never \
+            exec \
             --cd "$GITHUB_WORKSPACE" \
-            --full-auto \
             --skip-git-repo-check \
             -
 
