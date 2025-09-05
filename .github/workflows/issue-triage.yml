@@ -218,8 +218,7 @@ jobs:
                             type: 'string',
                             description: 'The decision made by the user',
                             enum: ['allow','block','comment_only']
-                          },
-                          reason: { type: 'string' }
+                          }
                         },
                         additionalProperties: false,
                         required: ['decision']
