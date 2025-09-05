@@ -6950,18 +6950,16 @@ impl WidgetRef for &ChatWidget<'_> {
             let content_y = ps[idx];
 
             // Targeted bottom-row spacer compensation:
-            // If the viewport is at the very bottom (viewport_bottom == total_height)
-            // and this is the last item being considered (idx == end_idx - 1), we
-            // may land inside the 1-row spacer just above this last item. In that
-            // case content_y > scroll_pos and the renderer would not account for
-            // the spacer gap before drawing the item, leaving a 1-row blank at the
-            // bottom. Nudge screen_y down by that exact gap so the last cell sits
-            // flush with the bottom without altering general scroll math.
+            // If we're at the very bottom and the last item starts just after the
+            // spacer row, nudge the draw cursor down by at most that spacer (1 row).
+            // Previously we used the full `gap = content_y - scroll_pos`, which could
+            // be many rows and push the cursor past the viewport, making the bottom
+            // appear blank. Clamp strictly to the spacer size.
             if viewport_bottom == total_height && idx == end_idx.saturating_sub(1) {
                 let gap = content_y.saturating_sub(scroll_pos);
-                if gap > 0 {
+                if gap > 0 && gap <= spacing { // only compensate a single spacer row
                     let remaining = (content_area.y + content_area.height).saturating_sub(screen_y);
-                    let shift = gap.min(remaining);
+                    let shift = spacing.min(remaining);
                     screen_y = screen_y.saturating_add(shift);
                 }
             }
