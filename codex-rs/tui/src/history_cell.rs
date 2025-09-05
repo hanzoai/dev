@@ -449,11 +449,9 @@ impl HistoryCell for PlainHistoryCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         if matches!(self.kind, HistoryCellType::User) {
-            // Match input composer wrapping by reserving 2 columns of right padding.
-            // Composer content width is pane−6; history content is pane−4 (after gutter).
-            // Subtract 2 more so wrapping positions are identical when the message moves
-            // from the composer into history.
-            let inner_w = width.saturating_sub(2);
+            // Match input composer wrapping by reserving shared right padding.
+            // Keep this in sync with the composer constants.
+            let inner_w = width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into());
             let text = Text::from(self.display_lines_trimmed());
             Paragraph::new(text)
                 .wrap(Wrap { trim: false })
@@ -489,10 +487,10 @@ impl HistoryCell for PlainHistoryCell {
         let lines = self.display_lines_trimmed();
         let text = Text::from(lines);
 
-        // Add Block with padding: reserve 2 columns on the right.
+        // Add Block with padding: reserve shared columns on the right.
         let block = Block::default().style(bg_style).padding(Padding {
             left: 0,
-            right: 2,
+            right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
             top: 0,
             bottom: 0,
         });
@@ -4138,7 +4136,7 @@ fn normalize_overwrite_sequences(input: &str) -> String {
 fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
 
     enum Seg<'a> {
@@ -4207,7 +4205,7 @@ fn output_lines(
             format!("Error (exit code {})", exit_code),
             Style::default().fg(crate::colors::error()),
         ));
-        let stderr_norm = sanitize_for_tui(&normalize_overwrite_sequences(stderr), SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+        let stderr_norm = sanitize_for_tui(&normalize_overwrite_sequences(stderr), SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
         for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
@@ -4361,7 +4359,7 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
     // - Parse ANSI sequences into spans so we never emit raw control bytes
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     // Build content lines with ANSI converted to styled spans
     let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
@@ -4387,7 +4385,7 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
     ]));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     let content: Vec<Line<'static>> = sanitized
         .lines()
         .map(|l| ansi_escape_line(l))
@@ -5350,7 +5348,7 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
 fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
     let mut out: Vec<Line<'static>> = Vec::new();
     if non_empty.len() <= head + tail {
@@ -6329,7 +6327,7 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     ];
 
     let norm = normalize_overwrite_sequences(&stderr);
-    let norm = sanitize_for_tui(&norm, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let norm = sanitize_for_tui(&norm, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     for line in norm.lines() {
         if !line.is_empty() {
             lines.push(ansi_escape_line(line).fg(crate::colors::error()));

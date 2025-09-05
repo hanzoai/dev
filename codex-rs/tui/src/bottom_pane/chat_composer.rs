@@ -307,12 +307,9 @@ impl ChatComposer {
             ActivePopup::File(c) => c.calculate_required_height(),
         };
 
-        // IMPORTANT: `width` here is the full BottomPane width. When we render, the
-        // composer is first given an outer horizontal padding of 1 on each side by
-        // BottomPane (−2), then our input Block adds borders (−2), then we add inner
-        // horizontal padding via Margin::new(1, 0) (−2). Net: −6 columns.
-        // To match wrapping exactly, use width−6 for the TextArea content width.
-        let content_width = width.saturating_sub(6);
+        // IMPORTANT: `width` here is the full BottomPane width. Subtract the
+        // configured outer padding, border, and inner padding to match wrapping.
+        let content_width = width.saturating_sub(crate::layout_consts::COMPOSER_CONTENT_WIDTH_OFFSET);
         let content_lines = self.textarea.desired_height(content_width).max(1); // At least 1 line
 
         // Total input height: content + border (2) only, no vertical padding
@@ -350,8 +347,8 @@ impl ChatComposer {
         let input_block = Block::default().borders(Borders::ALL);
         let textarea_rect = input_block.inner(input_area);
 
-        // Apply same padding as in render (1 char horizontal only, no vertical padding)
-        let padded_textarea_rect = textarea_rect.inner(Margin::new(1, 0));
+        // Apply the same inner padding as in render (horizontal only).
+        let padded_textarea_rect = textarea_rect.inner(Margin::new(crate::layout_consts::COMPOSER_INNER_HPAD.into(), 0));
 
         let state = self.textarea_state.borrow();
         self.textarea
