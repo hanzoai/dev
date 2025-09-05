@@ -300,8 +300,6 @@ jobs:
       - name: Run Code agent to implement or respond
         timeout-minutes: 20
         if: steps.gate.outputs.allow_agent == 'true'
-        env:
-          # No OPENAI_API_KEY here by design; the agent talks to the local proxy.
         shell: bash
         run: |
           set -euo pipefail
