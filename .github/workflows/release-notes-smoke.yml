@@ -73,8 +73,5 @@ jobs:
           fi
           echo "CLI + API request succeeded (default model). Showing first lines:"
           sed -n '1,40p' "$out" || true
-          echo "CLI parsed arguments successfully (exit=$status)." 
           echo "stderr (first lines):"
           sed -n '1,40p' "$err" || true
-          echo "stdout (first lines):"
-          sed -n '1,40p' "$out" || true
