@@ -14,19 +14,18 @@ pub enum Mode {
 pub struct Options {
     pub expand_tabs: bool,
     pub tabstop: usize,
+    pub debug_markers: bool,
 }
 
 impl Default for Options {
-    fn default() -> Self {
-        Options { expand_tabs: true, tabstop: 4 }
-    }
+    fn default() -> Self { Options { expand_tabs: true, tabstop: 4, debug_markers: false } }
 }
 
 pub fn sanitize_for_tui(input: &str, mode: Mode, opts: Options) -> String {
     // Optionally expand tabs first so that later stripping does not interact
     // with spaces we insert.
     let mut text = if opts.expand_tabs { expand_tabs_to_spaces(input, opts.tabstop) } else { input.to_string() };
-    text = strip_specials(text, mode);
+    text = strip_specials(text, mode, opts.debug_markers);
     text
 }
 
@@ -57,7 +56,7 @@ fn expand_tabs_to_spaces(input: &str, tabstop: usize) -> String {
     out
 }
 
-fn strip_specials(input: String, mode: Mode) -> String {
+fn strip_specials(input: String, mode: Mode, debug_markers: bool) -> String {
     // Work on chars to detect escape sequences and zero-width/bidi controls.
     let mut out = String::with_capacity(input.len());
     let mut it = input.chars().peekable();
@@ -113,8 +112,8 @@ fn strip_specials(input: String, mode: Mode) -> String {
                         }
                     }
                     // OSC and other string types: strip in all modes
-                    Some(']') => { it.next(); consume_until_st_or_bel(&mut it); }
-                    Some('P') | Some('X') | Some('^') | Some('_') => { it.next(); consume_until_st_or_bel(&mut it); }
+                    Some(']') => { it.next(); if debug_markers { out.push('·'); } consume_until_st_or_bel(&mut it); }
+                    Some('P') | Some('X') | Some('^') | Some('_') => { it.next(); if debug_markers { out.push('·'); } consume_until_st_or_bel(&mut it); }
                     // Other ESC sequences: drop
                     Some(_) | None => {
                         // intermediates 0x20..0x2F then a final 0x40..0x7E
@@ -132,9 +131,9 @@ fn strip_specials(input: String, mode: Mode) -> String {
             // Preserve newlines for layout; tabs must never be re-emitted
             // here (they should have been expanded earlier).
             '\n' => out.push('\n'),
-            c if (c as u32) < 0x20 || c == '\u{007F}' => { /* drop other C0 */ }
-            c if is_c1(c) => { /* drop C1 */ }
-            c if is_zero_width_or_bidi(c) => { /* drop zero-width/bidi */ }
+            c if (c as u32) < 0x20 || c == '\u{007F}' => { if debug_markers { out.push('·'); } }
+            c if is_c1(c) => { if debug_markers { out.push('·'); } }
+            c if is_zero_width_or_bidi(c) => { if debug_markers { out.push('·'); } }
             _ => out.push(ch),
         }
     }

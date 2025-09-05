@@ -58,6 +58,7 @@ mod slash_command;
 mod resume;
 mod streaming;
 mod sanitize;
+mod layout_consts;
 mod terminal_info;
 // mod text_block; // Orphaned after trait-based HistoryCell migration
 mod text_formatting;
@@ -238,7 +239,7 @@ pub async fn run_main(
     #[allow(clippy::print_stderr)]
     #[cfg(not(debug_assertions))]
     if let Some(latest_version) = updates::get_upgrade_version(&config) {
-        let current_version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+        let current_version = codex_version::version();
         let exe = std::env::current_exe()?;
         let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
 
@@ -298,7 +299,7 @@ fn run_ratatui_app(
         use ratatui::text::Line;
         use ratatui::text::Span;
 
-        let current_version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+        let current_version = codex_version::version();
         let exe = std::env::current_exe()?;
         let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
 
