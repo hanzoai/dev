@@ -707,19 +707,21 @@ impl ChatWidget<'_> {
 
 
     /// Handle exec approval request immediately
-    fn handle_exec_approval_now(&mut self, id: String, ev: ExecApprovalRequestEvent) {
-        // Implementation for handling exec approval request
+    fn handle_exec_approval_now(&mut self, _id: String, ev: ExecApprovalRequestEvent) {
+        // Use call_id as the approval correlation id so responses map to the
+        // exact pending approval in core (supports multiple approvals per turn).
+        let approval_id = ev.call_id.clone();
         self.bottom_pane.push_approval_request(ApprovalRequest::Exec {
-            id,
+            id: approval_id,
             command: ev.command,
             reason: ev.reason,
         });
     }
 
     /// Handle apply patch approval request immediately
-    fn handle_apply_patch_approval_now(&mut self, id: String, ev: ApplyPatchApprovalRequestEvent) {
+    fn handle_apply_patch_approval_now(&mut self, _id: String, ev: ApplyPatchApprovalRequestEvent) {
         let ApplyPatchApprovalRequestEvent {
-            call_id: _,
+            call_id,
             changes,
             reason,
             grant_root,
@@ -764,12 +766,8 @@ impl ChatWidget<'_> {
         // Enable Ctrl+D footer hint now that we have diffs to show
         self.bottom_pane.set_diffs_hint(true);
         
-        // Push the approval request to the bottom pane
-        let request = ApprovalRequest::ApplyPatch {
-            id,
-            reason,
-            grant_root,
-        };
+        // Push the approval request to the bottom pane, keyed by call_id
+        let request = ApprovalRequest::ApplyPatch { id: call_id, reason, grant_root };
         self.bottom_pane.push_approval_request(request);
     }
 

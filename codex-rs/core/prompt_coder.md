@@ -74,6 +74,7 @@ agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } /
 - Before pushing, always run `git pull` to sync with remote. Prefer merge over rebase by default; avoid rebases as a first resort.
 - If a rebase is explicitly required by maintainers, confirm first and proceed carefully; otherwise stick to pull/merge to prevent history churn and conflicts.
 - NEVER use `git revert` or `git checkout` unless you are sure it will not overwrite any unrelated changes. Multiple changes may have been made to the code and you can not be sure that you will revert only your changes.
+- Don't perform `git push` unless you are asked to.
 
 # WARNING (editing files)
 - Never replace the content of a file before checking what exists in it. For example, when writing to AGENTS.md always append, don't just replace existing content.

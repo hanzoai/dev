@@ -498,7 +498,7 @@ async fn apply_bespoke_event_handling(
     outgoing: Arc<OutgoingMessageSender>,
     _pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 ) {
-    let Event { id: event_id, msg, .. } = event;
+    let Event { id: _event_id, msg, .. } = event;
     match msg {
         EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
             call_id,
@@ -527,7 +527,7 @@ async fn apply_bespoke_event_handling(
 
             let params = ApplyPatchApprovalParams {
                 conversation_id,
-                call_id,
+                call_id: call_id.clone(),
                 file_changes,
                 reason,
                 grant_root,
@@ -537,8 +537,9 @@ async fn apply_bespoke_event_handling(
                 .send_request(APPLY_PATCH_APPROVAL_METHOD, Some(value))
                 .await;
             // TODO(mbolin): Enforce a timeout so this task does not live indefinitely?
+            let approval_id = call_id.clone(); // correlate by call_id, not event_id
             tokio::spawn(async move {
-                on_patch_approval_response(event_id, rx, conversation).await;
+                on_patch_approval_response(approval_id, rx, conversation).await;
             });
         }
         EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
@@ -549,7 +550,7 @@ async fn apply_bespoke_event_handling(
         }) => {
             let params = ExecCommandApprovalParams {
                 conversation_id,
-                call_id,
+                call_id: call_id.clone(),
                 command,
                 cwd,
                 reason,
@@ -560,8 +561,9 @@ async fn apply_bespoke_event_handling(
                 .await;
 
             // TODO(mbolin): Enforce a timeout so this task does not live indefinitely?
+            let approval_id = call_id.clone(); // correlate by call_id, not event_id
             tokio::spawn(async move {
-                on_exec_approval_response(event_id, rx, conversation).await;
+                on_exec_approval_response(approval_id, rx, conversation).await;
             });
         }
         // No special handling needed for interrupts; responses are sent immediately.
@@ -611,7 +613,7 @@ fn derive_config_from_params(
 }
 
 async fn on_patch_approval_response(
-    event_id: String,
+    approval_id: String,
     receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
     codex: Arc<CodexConversation>,
 ) {
@@ -622,7 +624,7 @@ async fn on_patch_approval_response(
             error!("request failed: {err:?}");
             if let Err(submit_err) = codex
                 .submit(Op::PatchApproval {
-                    id: event_id.clone(),
+                    id: approval_id.clone(),
                     decision: core_protocol::ReviewDecision::Denied,
                 })
                 .await
@@ -643,7 +645,7 @@ async fn on_patch_approval_response(
 
     if let Err(err) = codex
         .submit(Op::PatchApproval {
-            id: event_id,
+            id: approval_id,
             decision: map_review_decision_from_wire(response.decision),
         })
         .await
@@ -653,7 +655,7 @@ async fn on_patch_approval_response(
 }
 
 async fn on_exec_approval_response(
-    event_id: String,
+    approval_id: String,
     receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
     conversation: Arc<CodexConversation>,
 ) {
@@ -679,7 +681,7 @@ async fn on_exec_approval_response(
 
     if let Err(err) = conversation
         .submit(Op::ExecApproval {
-            id: event_id,
+            id: approval_id,
             decision: map_review_decision_from_wire(response.decision),
         })
         .await

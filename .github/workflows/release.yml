@@ -34,15 +34,30 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Determine next version
+      - name: Determine next version (across all npm packages)
         id: version
         working-directory: codex-cli
         shell: bash
         run: |
+          set -euo pipefail
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view @just-every/code version 2>/dev/null || echo "0.0.0")
-          if [ "$CURRENT_VERSION" = "$PUBLISHED_VERSION" ] || [ "$CURRENT_VERSION" \< "$PUBLISHED_VERSION" ]; then
-            IFS='.' read -ra V <<< "$PUBLISHED_VERSION"
+          PKGS=(
+            "@just-every/code"
+            "@just-every/code-darwin-arm64"
+            "@just-every/code-darwin-x64"
+            "@just-every/code-linux-x64-musl"
+            "@just-every/code-linux-arm64-musl"
+            "@just-every/code-win32-x64"
+          )
+          VERS=("$CURRENT_VERSION")
+          for p in "${PKGS[@]}"; do
+            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
+            VERS+=("$v")
+          done
+          MAX_PUBLISHED=$(printf '%s\n' "${VERS[@]}" | sort -V | tail -n1)
+          # If our current version is <= max published, bump the patch of max.
+          if [ "$CURRENT_VERSION" = "$MAX_PUBLISHED" ] || [ "$CURRENT_VERSION" \< "$MAX_PUBLISHED" ]; then
+            IFS='.' read -ra V <<< "$MAX_PUBLISHED"
             NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           else
             NEW_VERSION=$CURRENT_VERSION
@@ -378,8 +393,8 @@ jobs:
 
           ls -R "$stage_root"
 
-      - name: Publish per-target npm binary packages
-        if: ${{ env.NPM_TOKEN != '' }}
+      - name: Publish per-target npm binary packages (disabled; moved to end)
+        if: ${{ false }}
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
         shell: bash
@@ -526,7 +541,9 @@ jobs:
           cat release-notes/context.md >> release-notes/prompt.expanded.txt
 
           # Run Code in fully automated exec mode against the repo root.
-          ./.code-bin/code exec --full-auto --skip-git-repo-check --cwd "$GITHUB_WORKSPACE" < release-notes/prompt.expanded.txt || {
+          # NOTE: `--cwd` is a top-level flag, not an `exec` subcommand flag.
+          # Move it before `exec` to avoid clap parsing errors in CI.
+          ./.code-bin/code --cwd "$GITHUB_WORKSPACE" exec --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
 
@@ -599,3 +616,22 @@ jobs:
             release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish per-target npm binary packages (last)
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in npm-binaries/*; do
+            echo "Publishing $(basename \"$dir\")"
+            (cd "$dir" && npm publish --access public)
+          done
+
+      - name: Publish main npm package (last)
+        if: steps.should_publish.outputs.publish == 'true'
+        working-directory: codex-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
