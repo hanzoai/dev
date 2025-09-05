@@ -506,7 +506,7 @@ CHANGELOG.md House Style (strict)
 
 Release Notes (release-notes/RELEASE_NOTES.md)
 - Title: ## @just-every/code v${NEW_VERSION}
-- Brief intro (one sentence): "Fork of OpenAI Codex with additional features" or similar — keep neutral.
+- Brief intro (1-2 sentences) on core focus of release. This is the one place you can use a more promotional & humorous tone e.g. "**HUGE** performance upgrades! You won't have time for that coffee any more with significantly reduced startup time."
 - A Changes section with the same 2–5 bullets as in CHANGELOG (you may omit the commit SHAs here).
 - Installation snippet:
   npm install -g @just-every/code
@@ -516,7 +516,8 @@ Release Notes (release-notes/RELEASE_NOTES.md)
 
 Rules
 - Use the provided git log as source of truth; summarize responsibly.
-- Keep formatting minimal (headers + list bullets). No bold/italics beyond what’s specified.
+- Explore codebase directly if commit messages are unclear or need additional context.
+- Keep formatting minimal (headers + list bullets). No emojis ever! Basic markdown only.
 - Never reorder older versions. Only touch the section for v${NEW_VERSION}.
 - After writing files, stage and commit with message: docs(changelog): update for v${NEW_VERSION}
 
