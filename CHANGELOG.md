@@ -2,6 +2,14 @@ Changelog
 
 All notable changes to Code are documented here.
 
+## [0.2.59] - 2025-09-05
+
+- TUI: enforce strict global ordering and require stream IDs for stable per‑turn history. (7c71037d, 7577fe4b)
+- TUI/Core: make cancel/exit immediate during streaming; kill child process on abort to avoid orphans. (74bfed68, 64491a1f)
+- TUI: sanitize diff/output (expand tabs; strip OSC/DCS/C1/zero‑width) for safe rendering. (d497a1aa)
+- TUI: add WebFetch tool cell with preview; preserve first line during streaming. (f6735992)
+- TUI: restore typing on Git Bash/mintty by normalizing key event kind (Windows). (5b722e07)
+
 ## [0.2.56] - 2025-09-01
 
 - Strict event ordering in TUI: keep exec/tool cells ahead of the final assistant cell; render tool results from embedded markdown; stabilize interrupt processing. (dfb703a)

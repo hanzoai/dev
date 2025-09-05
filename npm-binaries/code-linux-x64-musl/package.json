@@ -1,0 +1,10 @@
+{
+  "name": "@just-every/code-linux-x64-musl",
+  "version": "0.2.59",
+  "license": "Apache-2.0",
+  "description": "Platform binary for @just-every/code (x86_64-unknown-linux-musl)",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/"],
+  "private": false
+}
