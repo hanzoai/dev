@@ -541,9 +541,8 @@ jobs:
           cat release-notes/context.md >> release-notes/prompt.expanded.txt
 
           # Run Code in fully automated exec mode against the repo root.
-          # NOTE: `--cwd` is a top-level flag, not an `exec` subcommand flag.
-          # Move it before `exec` to avoid clap parsing errors in CI.
-          ./.code-bin/code --cwd "$GITHUB_WORKSPACE" exec --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt || {
+          # Note: the working-directory flag is `--cd` on the `exec` subcommand.
+          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
 
