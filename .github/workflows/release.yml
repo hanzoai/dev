@@ -2,15 +2,9 @@ name: Release
 
 on:
   push:
-    branches: [ main ]
-    paths-ignore:
-      - '.github/workflows/test.yml'
-      - 'examples/**'
-      - '**/*.test.ts'
-      - 'test/**'
-      - '*.md'
-      - 'CHANGELOG.md'
-      - 'release-notes/**'
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -36,33 +30,38 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Determine next version (across all npm packages)
+      - name: Determine version (from tag or compute)
         id: version
         working-directory: codex-cli
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          PKGS=(
-            "@just-every/code"
-            "@just-every/code-darwin-arm64"
-            "@just-every/code-darwin-x64"
-            "@just-every/code-linux-x64-musl"
-            "@just-every/code-linux-arm64-musl"
-            "@just-every/code-win32-x64"
-          )
-          VERS=("$CURRENT_VERSION")
-          for p in "${PKGS[@]}"; do
-            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
-            VERS+=("$v")
-          done
-          MAX_PUBLISHED=$(printf '%s\n' "${VERS[@]}" | sort -V | tail -n1)
-          # If our current version is <= max published, bump the patch of max.
-          if [ "$CURRENT_VERSION" = "$MAX_PUBLISHED" ] || [ "$CURRENT_VERSION" \< "$MAX_PUBLISHED" ]; then
-            IFS='.' read -ra V <<< "$MAX_PUBLISHED"
-            NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
+          # If triggered by tag 'v*', prefer that exact version.
+          ref_name="${GITHUB_REF##*/}"
+          if [[ "$ref_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            NEW_VERSION="${ref_name#v}"
           else
-            NEW_VERSION=$CURRENT_VERSION
+            CURRENT_VERSION=$(node -p "require('./package.json').version")
+            PKGS=(
+              "@just-every/code"
+              "@just-every/code-darwin-arm64"
+              "@just-every/code-darwin-x64"
+              "@just-every/code-linux-x64-musl"
+              "@just-every/code-linux-arm64-musl"
+              "@just-every/code-win32-x64"
+            )
+            VERS=("$CURRENT_VERSION")
+            for p in "${PKGS[@]}"; do
+              v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
+              VERS+=("$v")
+            done
+            MAX_PUBLISHED=$(printf '%s\n' "${VERS[@]}" | sort -V | tail -n1)
+            if [ "$CURRENT_VERSION" = "$MAX_PUBLISHED" ] || [ "$CURRENT_VERSION" \< "$MAX_PUBLISHED" ]; then
+              IFS='.' read -ra V <<< "$MAX_PUBLISHED"
+              NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
+            else
+              NEW_VERSION=$CURRENT_VERSION
+            fi
           fi
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -293,7 +292,7 @@ jobs:
     needs: [determine-version, build-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # On tag or manual dispatch; no need to skip based on commit message
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
