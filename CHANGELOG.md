@@ -111,3 +111,57 @@ All notable changes to Code are documented here.
 
 - Packaging: move platform-specific binaries to npm optionalDependencies; postinstall resolves platform package before GitHub fallback. (5bb9d01)
 - CI: fix env guard for NPM_TOKEN and YAML generation for platform package metadata. (7ae25a9, d29be0a)
+
+## [0.2.36] - 2025-08-27
+
+- Packaging: switch CI to produce a single `code` binary and generate `code-tui`/`code-exec` wrappers. (7cd2b18)
+- CI: stabilize cargo fetch and Windows setup; adjust --frozen/--locked usage to keep builds reliable. (5c6bf9f, 5769cec, 7ebcd9f)
+
+## [0.2.35] - 2025-08-27
+
+- Release artifacts: slimmer assets with dual-format (.zst preferred, .tar.gz fallback) and stripped debuginfo; smaller npm package. (f5f2fd0)
+
+## [0.2.34] - 2025-08-26
+
+- Clipboard: add raw image paste support and upstream TUI integration; fix Windows path separators and ESC/Ctrl+C flow. (0c6f35c, 0996314, 568d6f8, e5283b6)
+- UX polish: reduce bottom padding, improve rate-limit message, queue messages, fix italic styling for queued. (d085f73, ab9250e, 251c4c2, b107918)
+- Stability: token refresh fix; avoid showing timeouts as “sandbox error”. (d63e44a, 17e5077)
+
+## [0.2.33] - 2025-08-26
+
+- Maintenance: housekeeping after successful build; release tag. (2c6bb4d)
+
+## [0.2.32] - 2025-08-25
+
+- Sessions: fast /resume picker with themed table and replay improvements. (0488753)
+- Input UX: double‑Esc behavior and deterministic MCP tool ordering; fix build warnings. (b048248, ee2ccb5, fcf7435)
+- Core/TUI: per-session ExecSessionManager; ToolsConfig fixes with `new_from_params`. (15af899, 7b20db9)
+
+## [0.2.31] - 2025-08-25
+
+- Diff wrapping: add one extra space to continuation hang indent for perfect alignment. (bee040a)
+
+## [0.2.30] - 2025-08-24
+
+- Diff summary: width-aware patch summary rendering with hanging indent; always show gutter icon at top of visible portion. (03beb32, 41b7273)
+
+## [0.2.29] - 2025-08-24
+
+- Version embedding: prefer `CODE_VERSION` env with fallback to Cargo pkg version across codex-rs; update banners and headers. (af3a8bc)
+
+## [0.2.28] - 2025-08-24
+
+- Windows toolchain: refactor vcpkg + lld-link config; ensure Rust binary embeds correct version in release. (9a57ec3, 8d61a2c)
+
+## [0.2.27] - 2025-08-24
+
+- Web search: integrate tool and TUI WebSearch event/handler; keep browser + agent tools; wire configs and tests. (6793a2a, a7c514a, 0994b78)
+- CI: faster cross-platform linking/caching; streamlined Cargo version/lockfile updates. (c7c28f2, 5961330)
+
+## [0.2.26] - 2025-08-24
+
+- CI: improved caching and simplified release workflows for reliability. (e37a2f6, 8402d5a)
+
+## [0.2.25] - 2025-08-24
+
+- Release infra: multiple small workflow fixes (build version echo, Rust release process). (ac6b56c, 64dda2d)
