@@ -2681,7 +2681,7 @@ async fn handle_response_item(
             }
             if sess.show_raw_agent_reasoning && content.is_some() {
                 let content = content.unwrap();
-                for item in content {
+                for item in content.into_iter() {
                     let text = match item {
                         ReasoningItemContent::ReasoningText { text } => text,
                         ReasoningItemContent::Text { text } => text,

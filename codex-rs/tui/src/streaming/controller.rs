@@ -2,6 +2,7 @@
 
 use codex_core::config::Config;
 use ratatui::text::Line;
+use ratatui::style::Modifier;
 
 use super::HeaderEmitter;
 use super::StreamKind;
@@ -106,6 +107,28 @@ impl StreamController {
             tracing::debug!("stream: emitted header for {:?}", kind);
         }
         emitted
+    }
+
+    /// Optionally append a separate dimmed debug marker line indicating the
+    /// current reasoning summary index (parsed from the stream id like "…#s3").
+    /// This avoids mutating the model content so title detection remains intact.
+    fn maybe_append_reasoning_debug_marker(&self, kind: StreamKind, lines: &mut Vec<Line<'static>>) {
+        // Only when explicitly enabled to avoid noise in normal use.
+        let enabled = match std::env::var("CODEX_DEBUG_REASONING_INDEX") {
+            Ok(val) => !val.is_empty() && val != "0",
+            Err(_) => false,
+        };
+        if !enabled || !matches!(kind, StreamKind::Reasoning) {
+            return;
+        }
+        let id = match self.current_stream_id() { Some(s) => s.clone(), None => return };
+        // Parse trailing #s<idx>
+        let idx = id.split('#').last().and_then(|frag| frag.strip_prefix('s'));
+        if let Some(sidx) = idx {
+            let marker = format!("[s{}]", sidx);
+            let dim = crate::colors::text_dim();
+            lines.push(Line::from(ratatui::text::Span::styled(marker, ratatui::style::Style::default().fg(dim))));
+        }
     }
 
     #[inline]
@@ -280,8 +303,11 @@ impl StreamController {
                 let count = styled.len();
                 tracing::debug!("stream.commit {:?} newly_completed_lines={}", kind, count);
                 {
+                    // Add a non-content debug marker line for reasoning
+                    let mut with_marker = styled;
+                    self.maybe_append_reasoning_debug_marker(kind, &mut with_marker);
                     let state = self.state_mut(kind);
-                    state.enqueue(styled);
+                    state.enqueue(with_marker);
                     state.last_commit_instant = Some(std::time::Instant::now());
                     state.tail_chars_since_commit = 0;
                 }
@@ -315,6 +341,67 @@ impl StreamController {
                             styled.push(line);
                         }
                         {
+                            let mut with_marker = styled;
+                            self.maybe_append_reasoning_debug_marker(kind, &mut with_marker);
+                            let state = self.state_mut(kind);
+                            state.enqueue(with_marker);
+                            state.last_commit_instant = Some(std::time::Instant::now());
+                            state.tail_chars_since_commit = 0;
+                        }
+                        sink.start_commit_animation();
+                    }
+                }
+            }
+
+            // Early commit hint for Reasoning titles: if no soft-commit threshold is
+            // configured, opportunistically commit when a new bold-only heading line
+            // appears in the preview. This makes additional section titles visible in
+            // collapsed mode as they stream, instead of waiting until finalization.
+            if self.config.tui.stream.soft_commit_chars.is_none()
+                && self.config.tui.stream.soft_commit_timeout_ms.is_none()
+                && matches!(kind, StreamKind::Reasoning)
+            {
+                let cfg2 = self.config.clone();
+                // Peek at the rendered lines without changing collector state
+                let (committed, saw_heading) = {
+                    let state = self.state(kind);
+                    let committed = state.collector.committed_count();
+                    let preview = state.collector.render_preview_lines(&cfg2);
+                    let mut saw_heading = false;
+                    for l in preview.iter().skip(committed) {
+                        if !l.spans.is_empty()
+                            && l
+                                .spans
+                                .iter()
+                                .all(|s| s.style.add_modifier.contains(Modifier::BOLD)
+                                    || s.content.trim().is_empty())
+                        {
+                            saw_heading = true;
+                            break;
+                        }
+                    }
+                    (committed, saw_heading)
+                };
+                if saw_heading {
+                    let relax_list = self.config.tui.stream.relax_list_holdback;
+                    let relax_code = self.config.tui.stream.relax_code_holdback;
+                    let mut newly_completed = {
+                        let state = self.state_mut(kind);
+                        // This advances committed_count; ensure we enqueue the exact lines.
+                        state
+                            .collector
+                            .commit_soft_lines(&cfg2, relax_list, relax_code)
+                    };
+                    if !newly_completed.is_empty() {
+                        let color = Some(crate::colors::text_dim());
+                        let mut styled: Vec<Line<'static>> = Vec::with_capacity(newly_completed.len());
+                        for mut line in newly_completed.drain(..) {
+                            if let Some(c) = color {
+                                line.style = line.style.patch(ratatui::style::Style::default().fg(c));
+                            }
+                            styled.push(line);
+                        }
+                        {
                             let state = self.state_mut(kind);
                             state.enqueue(styled);
                             state.last_commit_instant = Some(std::time::Instant::now());
@@ -322,6 +409,8 @@ impl StreamController {
                         }
                         sink.start_commit_animation();
                     }
+                } else {
+                    let _ = committed; // silence unused warning when cfg gates change
                 }
             }
         }
@@ -333,13 +422,16 @@ impl StreamController {
             self.begin(StreamKind::Reasoning, sink);
         }
         let cfg = self.config.clone();
-        let state = self.state_mut(StreamKind::Reasoning);
+        // Scope the mutable borrow of state to collector ops only
+        let mut newly_completed = {
+            let state = self.state_mut(StreamKind::Reasoning);
         // Insert an explicit section break so upcoming section titles are
         // rendered on a fresh line. Without this, bold titles that arrive
         // mid-line can be glued to the previous sentence and fail to be
         // recognized as titles in collapsed view.
-        state.collector.insert_section_break();
-        let mut newly_completed = state.collector.commit_complete_lines(&cfg);
+            state.collector.insert_section_break();
+            state.collector.commit_complete_lines(&cfg)
+        };
         // Reduce leading blanks to at most one after section breaks
         if !newly_completed.is_empty() {
             let mut skip_count = 0;
@@ -366,7 +458,10 @@ impl StreamController {
                 line.spans = spans;
                 styled.push(line);
             }
-            state.enqueue(styled);
+            let mut with_marker = styled;
+            self.maybe_append_reasoning_debug_marker(StreamKind::Reasoning, &mut with_marker);
+            let state = self.state_mut(StreamKind::Reasoning);
+            state.enqueue(with_marker);
             sink.start_commit_animation();
         }
     }
@@ -424,7 +519,7 @@ impl StreamController {
                 StreamKind::Reasoning => Some(crate::colors::text_dim()),
                 StreamKind::Answer => Some(crate::colors::text_bright()),
             };
-            let out_lines: Vec<Line<'static>> = out_lines
+            let mut out_lines: Vec<Line<'static>> = out_lines
                 .into_iter()
                 .map(|mut line| {
                     if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
@@ -432,6 +527,23 @@ impl StreamController {
                 })
                 .collect();
 
+            // For finalized Reasoning blocks, include a debug marker as a separate line.
+            if matches!(kind, StreamKind::Reasoning) {
+                // Append a FINAL marker variant to distinguish from streaming commits
+                let enabled = match std::env::var("CODEX_DEBUG_REASONING_INDEX") {
+                    Ok(val) => !val.is_empty() && val != "0",
+                    Err(_) => false,
+                };
+                if enabled {
+                    if let Some(id) = self.current_stream_id() {
+                        if let Some(sidx) = id.split('#').last().and_then(|frag| frag.strip_prefix('s')) {
+                            let marker = format!("[s{} final]", sidx);
+                            let dim = crate::colors::text_dim();
+                            out_lines.push(Line::from(ratatui::text::Span::styled(marker, ratatui::style::Style::default().fg(dim))));
+                        }
+                    }
+                }
+            }
             lines_with_header.extend(out_lines);
             // Don't add extra blank line - markdown renderer handles spacing
             if matches!(kind, StreamKind::Answer) {
@@ -551,13 +663,15 @@ impl StreamController {
                 StreamKind::Reasoning => Some(crate::colors::text_dim()),
                 StreamKind::Answer => Some(crate::colors::text_bright()),
             };
-            let history: Vec<Line<'static>> = history
+            let mut history: Vec<Line<'static>> = history
                 .into_iter()
                 .map(|mut line| {
                     if let Some(c) = color { line.style = line.style.patch(ratatui::style::Style::default().fg(c)); }
                     line
                 })
                 .collect();
+            // Append debug marker to streamed reasoning batches as their own line.
+            self.maybe_append_reasoning_debug_marker(kind, &mut history);
             out.extend(history);
             sink.insert_history_with_kind(self.current_stream_id.clone(), kind, out);
         }
