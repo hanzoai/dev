@@ -3471,15 +3471,25 @@ impl StreamingContentCell {
             }
         }
         // Reuse the same segmentation logic as Assistant, operating on current
-        // lines but explicitly dropping a leading "codex" header if present so
-        // it never renders during streaming.
+        // lines. IMPORTANT: AssistantMarkdownCell::display_lines() hides the
+        // first line as a synthetic header (e.g., "codex"). When we borrow its
+        // layout engine, we must ensure a header line is present so the real
+        // first content line is not dropped. Previously we removed the header
+        // and passed only body lines, which caused the first content line to be
+        // cut off during streaming and only appear once finalized.
         let mut body_lines = self.lines.clone();
+        let mut had_header = false;
         if let Some(first) = body_lines.first() {
             let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
             if flat.trim().eq_ignore_ascii_case("codex") {
-                let _ = body_lines.get(0).is_some();
-                body_lines.remove(0);
+                had_header = true;
             }
+        }
+        // Prepend a hidden header if missing so Assistant layout doesn't drop
+        // the first real content line. The header itself is suppressed by both
+        // streaming and finalized render paths, so it never visibly appears.
+        if !had_header {
+            body_lines.insert(0, ratatui::text::Line::from("codex"));
         }
         let tmp = AssistantMarkdownCell {
             raw: String::new(),
@@ -5252,13 +5262,17 @@ pub(crate) fn new_completed_custom_tool_call(
 }
 
 /// Completed web_fetch tool call with markdown rendering of the `markdown` field.
+// Web fetch preview sizing: show 10 lines at the start and 5 at the end.
+const WEB_FETCH_HEAD_LINES: usize = 10;
+const WEB_FETCH_TAIL_LINES: usize = 5;
+
 pub(crate) fn new_completed_web_fetch_tool_call(
     cfg: &Config,
     args: Option<String>,
     duration: Duration,
     success: bool,
     result: String,
-) -> ToolCallCell {
+) -> WebFetchToolCell {
     let duration = format_duration(duration);
     let status_str = if success { "Complete" } else { "Error" };
     let title_line = if success {
@@ -5279,9 +5293,10 @@ pub(crate) fn new_completed_web_fetch_tool_call(
         format!("{}()", "web_fetch")
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(title_line);
-    lines.push(Line::styled(
+    // Header/preamble (no border)
+    let mut pre_lines: Vec<Line<'static>> = Vec::new();
+    pre_lines.push(title_line);
+    pre_lines.push(Line::styled(
         invocation_str,
         Style::default()
             .fg(crate::colors::text_dim())
@@ -5290,11 +5305,14 @@ pub(crate) fn new_completed_web_fetch_tool_call(
 
     // Try to parse JSON and extract the markdown field
     let mut appended_markdown = false;
+    let mut body_lines: Vec<Line<'static>> = Vec::new();
     if !result.is_empty() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&result) {
             if let Some(md) = value.get("markdown").and_then(|v| v.as_str()) {
-                lines.push(Line::from(""));
-                crate::markdown::append_markdown(md, &mut lines, cfg);
+                // Build a smarter sectioned preview from the raw markdown.
+                let mut sect = build_web_fetch_sectioned_preview(md, cfg);
+                dim_webfetch_emphasis_and_links(&mut sect);
+                body_lines.extend(sect);
                 appended_markdown = true;
             }
         }
@@ -5302,18 +5320,291 @@ pub(crate) fn new_completed_web_fetch_tool_call(
 
     // Fallback: compact preview if JSON parse failed or no markdown present
     if !appended_markdown && !result.is_empty() {
-        lines.push(Line::from(""));
-        let preview = build_preview_lines(&result, true)
-            .into_iter()
-            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
-            .collect::<Vec<_>>();
-        lines.extend(preview);
+        // Fallback to plain text/JSON preview with ANSI preserved.
+        let mut pv = select_preview_from_plain_text(&result, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+        dim_webfetch_emphasis_and_links(&mut pv);
+        body_lines.extend(pv);
     }
 
-    lines.push(Line::from(""));
-    ToolCallCell {
-        lines,
-        state: if success { ToolState::Success } else { ToolState::Failed },
+    // Spacer below header and below body to match exec styling
+    pre_lines.push(Line::from(""));
+    if !body_lines.is_empty() { body_lines.push(Line::from("")); }
+
+    WebFetchToolCell { pre_lines, body_lines, state: if success { ToolState::Success } else { ToolState::Failed } }
+}
+
+// Helper: choose first `head` and last `tail` non-empty lines from a styled line list
+fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) -> Vec<Line<'static>> {
+    fn is_non_empty(l: &Line<'_>) -> bool {
+        let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        !s.trim().is_empty()
+    }
+    let non_empty_idx: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| if is_non_empty(l) { Some(i) } else { None })
+        .collect();
+    if non_empty_idx.len() <= head + tail {
+        return lines.to_vec();
+    }
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for &i in non_empty_idx.iter().take(head) {
+        out.push(lines[i].clone());
+    }
+    out.push(Line::from("⋮".dim()));
+    for &i in non_empty_idx.iter().rev().take(tail).collect::<Vec<_>>().iter().rev() {
+        out.push(lines[*i].clone());
+    }
+    out
+}
+
+// Helper: like build_preview_lines but parameterized and preserving ANSI
+fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
+    let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
+    let processed = normalize_overwrite_sequences(&processed);
+    let processed = expand_tabs_to_spaces(&processed, 4);
+    let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
+    let mut out: Vec<Line<'static>> = Vec::new();
+    if non_empty.len() <= head + tail {
+        for s in non_empty {
+            out.push(ansi_escape_line(s));
+        }
+        return out;
+    }
+    for s in non_empty.iter().take(head) { out.push(ansi_escape_line(s)); }
+    out.push(Line::from("⋮".dim()));
+    let start = non_empty.len().saturating_sub(tail);
+    for s in &non_empty[start..] { out.push(ansi_escape_line(s)); }
+    out
+}
+
+// ==================== WebFetchToolCell ====================
+
+pub(crate) struct WebFetchToolCell {
+    pre_lines: Vec<Line<'static>>,   // header/invocation
+    body_lines: Vec<Line<'static>>,  // bordered, dim preview
+    state: ToolState,
+}
+
+impl HistoryCell for WebFetchToolCell {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Tool { status: match self.state { ToolState::Running => ToolStatus::Running, ToolState::Success => ToolStatus::Success, ToolState::Failed => ToolStatus::Failed } }
+    }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        // Fallback textual representation used only for measurement outside custom render
+        let mut v = Vec::new();
+        v.extend(self.pre_lines.clone());
+        v.extend(self.body_lines.clone());
+        v
+    }
+    fn has_custom_render(&self) -> bool { true }
+    fn desired_height(&self, width: u16) -> u16 {
+        let pre_text = Text::from(trim_empty_lines(self.pre_lines.clone()));
+        let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
+        let pre_total: u16 = Paragraph::new(pre_text).wrap(Wrap { trim: false }).line_count(width).try_into().unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text).wrap(Wrap { trim: false }).line_count(width.saturating_sub(2)).try_into().unwrap_or(0);
+        pre_total.saturating_add(body_total)
+    }
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        // Measure with the same widths we will render with.
+        let pre_text = Text::from(trim_empty_lines(self.pre_lines.clone()));
+        let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
+        let pre_wrap_width = area.width;
+        let body_wrap_width = area.width.saturating_sub(2);
+        let pre_total: u16 = Paragraph::new(pre_text.clone()).wrap(Wrap { trim: false }).line_count(pre_wrap_width).try_into().unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text.clone()).wrap(Wrap { trim: false }).line_count(body_wrap_width).try_into().unwrap_or(0);
+
+        let pre_skip = skip_rows.min(pre_total);
+        let body_skip = skip_rows.saturating_sub(pre_total).min(body_total);
+
+        let pre_remaining = pre_total.saturating_sub(pre_skip);
+        let pre_height = pre_remaining.min(area.height);
+        let body_available = area.height.saturating_sub(pre_height);
+        let body_remaining = body_total.saturating_sub(body_skip);
+        let body_height = body_available.min(body_remaining);
+
+        // Render preamble
+        if pre_height > 0 {
+            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
+            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
+                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
+                    buf[(x, y)].set_char(' ').set_style(bg_style);
+                }
+            }
+            let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
+            Paragraph::new(pre_text).block(pre_block).wrap(Wrap { trim: false }).scroll((pre_skip, 0)).style(Style::default().bg(crate::colors::background())).render(pre_area, buf);
+        }
+
+        // Render body with left border + dim text
+        if body_height > 0 {
+            let body_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: body_height };
+            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim());
+            for y in body_area.y..body_area.y.saturating_add(body_area.height) {
+                for x in body_area.x..body_area.x.saturating_add(body_area.width) {
+                    buf[(x, y)].set_char(' ').set_style(bg_style);
+                }
+            }
+            let block = Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                .style(Style::default().bg(crate::colors::background()))
+                .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+            Paragraph::new(body_text)
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .scroll((body_skip, 0))
+                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                .render(body_area, buf);
+        }
+    }
+}
+
+// Build sectioned preview for web_fetch markdown:
+// - First 2 non-empty lines
+// - Up to 5 sections: a heading line (starts with #) plus the next 4 lines
+// - Last 2 non-empty lines
+// Ellipses (⋮) are inserted between groups. All content is rendered as markdown.
+fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static>> {
+    let lines: Vec<&str> = md.lines().collect();
+
+    // Collect first 1 and last 1 non-empty lines (by raw markdown lines)
+    let first_non_empty: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| if l.trim().is_empty() { None } else { Some(i) })
+        .take(1)
+        .collect();
+    let last_non_empty_rev: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(i, l)| if l.trim().is_empty() { None } else { Some(i) })
+        .take(1)
+        .collect();
+    let mut last_non_empty = last_non_empty_rev.clone();
+    last_non_empty.reverse();
+
+    // Find up to 5 heading indices outside code fences
+    let mut in_code = false;
+    let mut section_heads: Vec<usize> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() && section_heads.len() < 5 {
+        let l = lines[i];
+        let trimmed = l.trim_start();
+        // Toggle code fence state
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_code = !in_code;
+            i += 1;
+            continue;
+        }
+        if !in_code {
+            // Heading: 1-6 leading # followed by a space
+            let mut level = 0usize;
+            for ch in trimmed.chars() {
+                if ch == '#' { level += 1; } else { break; }
+            }
+            if level >= 1 && level <= 6 {
+                if trimmed.chars().nth(level).map_or(false, |c| c == ' ') {
+                    section_heads.push(i);
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Helper to render a slice of raw markdown lines
+    let render_slice = |start: usize, end_excl: usize, out: &mut Vec<Line<'static>>| {
+        if start >= end_excl || start >= lines.len() { return; }
+        let end = end_excl.min(lines.len());
+        let segment = lines[start..end].join("\n");
+        let mut seg_lines: Vec<Line<'static>> = Vec::new();
+        crate::markdown::append_markdown(&segment, &mut seg_lines, cfg);
+        // Trim leading/trailing empties per segment to keep things tight
+        out.extend(trim_empty_lines(seg_lines));
+    };
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+
+    // First 2 lines
+    if !first_non_empty.is_empty() {
+        let start = first_non_empty[0];
+        let end = first_non_empty.last().copied().unwrap_or(start).saturating_add(1);
+        render_slice(start, end, &mut out);
+    }
+
+    // Sections
+    if !section_heads.is_empty() {
+        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
+        for (idx, &h) in section_heads.iter().enumerate() {
+            // heading + next 4 lines (total up to 5)
+            let end = (h + 5).min(lines.len());
+            render_slice(h, end, &mut out);
+            if idx + 1 < section_heads.len() { out.push(Line::from("⋮".dim())); }
+        }
+    }
+
+    // Last 2 lines
+    if !last_non_empty.is_empty() {
+        // Avoid duplicating lines if they overlap with earlier content
+        let last_start = *last_non_empty.first().unwrap_or(&0);
+        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
+        let last_end = last_non_empty.last().copied().unwrap_or(last_start).saturating_add(1);
+        render_slice(last_start, last_end, &mut out);
+    }
+
+    if out.is_empty() {
+        // Fallback: if nothing matched, show head/tail preview
+        let mut all_md_lines: Vec<Line<'static>> = Vec::new();
+        crate::markdown::append_markdown(md, &mut all_md_lines, cfg);
+        return select_preview_from_lines(&all_md_lines, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+    }
+
+    out
+}
+
+// Post-process rendered markdown lines to dim emphasis, lists, and links for web_fetch only.
+fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
+    use ratatui::style::Modifier;
+    let text_dim = crate::colors::text_dim();
+    let code_bg = crate::colors::code_block_bg();
+    // Recompute the link color logic used by the markdown renderer to detect link spans
+    let link_fg = crate::colors::mix_toward(
+        crate::colors::text(),
+        crate::colors::primary(),
+        0.35,
+    );
+    for line in lines.iter_mut() {
+        // Heuristic list detection on the plain text form
+        let s: String = line
+            .spans
+            .iter()
+            .map(|sp| sp.content.as_ref())
+            .collect();
+        let t = s.trim_start();
+        let is_list = t.starts_with('-')
+            || t.starts_with('*')
+            || t.starts_with('+')
+            || t.starts_with('•')
+            || t.starts_with('·')
+            || t.starts_with('⋅')
+            || t.chars().take_while(|c| c.is_ascii_digit()).count() > 0
+                && (t.chars().skip_while(|c| c.is_ascii_digit()).next() == Some('.')
+                    || t.chars().skip_while(|c| c.is_ascii_digit()).next() == Some(')'));
+
+        for sp in line.spans.iter_mut() {
+            // Skip code block spans (have a solid code background)
+            if sp.style.bg == Some(code_bg) { continue; }
+            let style = &mut sp.style;
+            let is_bold = style.add_modifier.contains(Modifier::BOLD);
+            let is_under = style.add_modifier.contains(Modifier::UNDERLINED);
+            let is_link_colored = style.fg == Some(link_fg);
+            if is_list || is_bold || is_under || is_link_colored {
+                style.fg = Some(text_dim);
+            }
+        }
     }
 }
 
