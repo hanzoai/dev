@@ -3,6 +3,7 @@
 node_modules
 .pnpm-store
 .pnpm-debug.log
+.pnpm/
 
 # Keep pnpm-lock.yaml
 !pnpm-lock.yaml
@@ -25,7 +26,9 @@ result
 .history/
 .zed/
 *.swp
+*.swo
 *~
+*.code-workspace
 
 # cli tools
 CLAUDE.md
@@ -38,12 +41,19 @@ codex-cli/bin/*-windows-*
 
 # Rust build artifacts
 /codex-rs/target/
+**/*.rs.bk
 
 # Release and CI scratch
 /.code-bin/
 /artifacts/
 /release-assets/
 /npm-binaries/
+
+# Local GitHub Actions runners and caches
+.act/
+actions-runner/
+.github/workflows/*-local.yml
+.github/workflows/.cache/
 
 # caches
 .cache/
@@ -53,6 +63,12 @@ codex-cli/bin/*-windows-*
 .nyc_output/
 .jest/
 *.tsbuildinfo
+playwright-report/
+
+# temp files
+.tmp/
+tmp/
+temp/
 
 # logs
 *.log
