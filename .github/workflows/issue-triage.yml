@@ -81,6 +81,17 @@ jobs:
           git config user.name "issue-bot[bot]"
           git config user.email "issue-bot@users.noreply.github.com"
 
+      - name: Resolve bot identity (from CODE_GH_PAT)
+        timeout-minutes: 5
+        id: bot
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT }}
+          script: |
+            const { data: me } = await github.rest.users.getAuthenticated();
+            core.setOutput('login', me.login);
+            core.setOutput('id', String(me.id));
+
       - name: Prepare working files for the agent
         timeout-minutes: 5
         run: |
@@ -105,6 +116,7 @@ jobs:
         id: rate_limit
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const windowHours = parseInt(process.env.RATE_WINDOW_HOURS || '24', 10);
             const perActor = parseInt(process.env.RATE_PER_ACTOR || '3', 10);
@@ -115,14 +127,17 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const actor = process.env.ACTOR;
+            const botLogin = process.env.BOT_LOGIN || '';
 
             // Count issues opened by this actor in the window
             const qIssues = `repo:${owner}/${repo} is:issue author:${actor} created:>=${sinceDate}`;
             const issues = await github.rest.search.issuesAndPullRequests({ q: qIssues, per_page: 1 });
             const actorIssueCount = issues.data.total_count;
 
-            // Count auto PRs opened by GitHub Actions app in the window
-            const qPRs = `repo:${owner}/${repo} is:pr author:app/github-actions created:>=${sinceDate}`;
+            // Count auto PRs opened by the PAT identity in the window
+            const qPRs = botLogin
+              ? `repo:${owner}/${repo} is:pr author:${botLogin} created:>=${sinceDate}`
+              : `repo:${owner}/${repo} is:pr author:app/github-actions created:>=${sinceDate}`;
             const prs = await github.rest.search.issuesAndPullRequests({ q: qPRs, per_page: 1 });
             const autoPrCount = prs.data.total_count;
 
@@ -141,6 +156,8 @@ jobs:
             core.setOutput('actor_issue_count', String(actorIssueCount));
             core.setOutput('auto_pr_count', String(autoPrCount));
             core.setOutput('reason', reasons.join(' '));
+        env:
+          BOT_LOGIN: ${{ steps.bot.outputs.login }}
 
       - name: Safety screen (LLM review of issue)
         timeout-minutes: 5
@@ -372,6 +389,7 @@ jobs:
         if: steps.path_policy.outputs.ok == 'false'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md', 'utf8');
@@ -387,6 +405,7 @@ jobs:
         if: steps.changes.outputs.changed == 'false'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
             const path = '.github/auto/ISSUE_COMMENT.md';
@@ -413,12 +432,20 @@ jobs:
         timeout-minutes: 5
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # or use the implicit GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT }}
           REPO: ${{ env.REPO }}
+          BOT_LOGIN: ${{ steps.bot.outputs.login }}
+          BOT_ID: ${{ steps.bot.outputs.id }}
         run: |
           set -euo pipefail
-          git config user.name "issue-bot[bot]"
-          git config user.email "issue-bot@users.noreply.github.com"
+          # Configure commit author to the PAT identity's noreply address when available
+          if [ -n "${BOT_LOGIN:-}" ] && [ -n "${BOT_ID:-}" ]; then
+            git config user.name "${BOT_LOGIN}"
+            git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
+          else
+            git config user.name "issue-bot[bot]"
+            git config user.email "issue-bot@users.noreply.github.com"
+          fi
           git checkout -b "${BRANCH_NAME}"
           git add -A
           git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
@@ -430,6 +457,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const fs = require('fs');
             function readOrDefault(p, dflt) {
