@@ -1,5 +1,6 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -194,6 +195,29 @@ impl TextArea {
     }
 
     pub fn input(&mut self, event: KeyEvent) {
+        // On Windows consoles and some terminals with keyboard enhancement flags,
+        // crossterm reports both Press and Repeat (and sometimes Release) for
+        // printable keys. Processing all kinds causes doubled characters.
+        //
+        // Policy:
+        // - Always ignore Release events.
+        // - For Repeat, only allow navigation and deletion keys to auto-repeat;
+        //   ignore Repeat for character insertion and Enter so typing does not double.
+        match event.kind {
+            KeyEventKind::Release => return,
+            KeyEventKind::Repeat => match event.code {
+                KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::Backspace
+                | KeyCode::Delete => { /* allow auto‑repeat */ }
+                _ => return,
+            },
+            KeyEventKind::Press => { /* handle below */ }
+        }
         match event {
             // Some terminals (or configurations) send Control key chords as
             // C0 control characters without reporting the CONTROL modifier.
