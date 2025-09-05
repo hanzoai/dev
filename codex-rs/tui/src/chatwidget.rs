@@ -5567,15 +5567,7 @@ impl ChatWidget<'_> {
                 }
             }
 
-            // Add reasoning visibility toggle hint only when reasoning is shown
-            if self.is_reasoning_shown() {
-                spans.push(Span::styled("  •  ", Style::default().fg(crate::colors::text_dim())));
-                let reasoning_hint = "Ctrl+R hide reasoning";
-                spans.push(Span::styled(
-                    reasoning_hint,
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-            }
+            // Footer already shows the Ctrl+R hint; avoid duplicating it here.
 
             spans
         };
@@ -6911,6 +6903,28 @@ impl WidgetRef for &ChatWidget<'_> {
                         // but tint both for visual continuity with the assistant block.
                         for x in gutter_area.x..gutter_area.x.saturating_add(gutter_area.width) {
                             buf[(x, y)].set_char(' ').set_style(style);
+                        }
+                    }
+                    // Also tint the single left padding column so the assistant
+                    // gutter visually reaches the outer edge. The content area
+                    // is inset by a uniform padding; when present, paint that
+                    // one column with the same assistant background for the
+                    // vertical span of this item.
+                    if content_area.x > history_area.x {
+                        let left_col_x = content_area.x.saturating_sub(1);
+                        for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
+                            buf[(left_col_x, y)].set_char(' ').set_style(style);
+                        }
+                    }
+                    // Also tint one column immediately to the right of the content area
+                    // so the assistant block is visually bookended. This column lives in the
+                    // right padding stripe; when the scrollbar is visible it will draw over
+                    // the far-right edge, which is fine.
+                    let right_col_x = content_area.x.saturating_add(content_area.width);
+                    let history_right = history_area.x.saturating_add(history_area.width);
+                    if right_col_x < history_right {
+                        for y in item_area.y..item_area.y.saturating_add(item_area.height) {
+                            buf[(right_col_x, y)].set_char(' ').set_style(style);
                         }
                     }
                     if let Some(t0) = _perf_gutter_start {
