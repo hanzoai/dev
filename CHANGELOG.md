@@ -2,6 +2,11 @@
 
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
+ 
+## [0.2.65] - 2025-09-05
+
+- Core: embed version via rustc-env; fix version reporting. (32c495f6)
+- Release: harden publish flow; safer non-FF handling and retries. (6e35f47c)
 
 ## [0.2.63] - 2025-09-05
 
