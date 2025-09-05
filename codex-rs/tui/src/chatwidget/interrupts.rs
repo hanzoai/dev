@@ -84,20 +84,38 @@ impl InterruptManager {
                     chat.handle_apply_patch_approval_now(id, ev);
                 }
                 QueuedInterrupt::ExecBegin { seq: _, ev, order, .. } => {
-                    let ord = order.as_ref().expect("missing OrderMeta in queued ExecBegin");
-                    chat.handle_exec_begin_now(ev, ord);
+                    match order.as_ref() {
+                        Some(ord) => chat.handle_exec_begin_now(ev, ord),
+                        None => {
+                            tracing::warn!("missing OrderMeta in queued ExecBegin; rendering with synthetic order");
+                            // Fall back to immediate render with synthetic ordering inside handler paths.
+                            // Use a minimal OrderMeta surrogate by anchoring to last seen request via internal key downstream.
+                            chat.handle_exec_begin_now(ev, &codex_core::protocol::OrderMeta { request_ordinal: chat.last_seen_request_index, output_index: Some(i32::MAX as u32), sequence_number: Some(0) });
+                        }
+                    }
                 }
-                QueuedInterrupt::ExecEnd { ev, order, .. } => { let ord = order.as_ref().expect("missing OrderMeta in queued ExecEnd"); chat.handle_exec_end_now(ev, ord) },
+                QueuedInterrupt::ExecEnd { ev, order, .. } => {
+                    match order.as_ref() {
+                        Some(ord) => chat.handle_exec_end_now(ev, ord),
+                        None => {
+                            tracing::warn!("missing OrderMeta in queued ExecEnd; rendering with synthetic order");
+                            chat.handle_exec_end_now(ev, &codex_core::protocol::OrderMeta { request_ordinal: chat.last_seen_request_index, output_index: Some(i32::MAX as u32), sequence_number: Some(1) });
+                        }
+                    }
+                },
                 QueuedInterrupt::McpBegin { seq: _, ev, order, .. } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref());
+                    let ok = match order.as_ref() { Some(om) => super::ChatWidget::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued McpBegin; using synthetic key"); chat.next_internal_key() } };
                     tools::mcp_begin(chat, ev, ok);
                 }
-                QueuedInterrupt::McpEnd { ev, order, .. } => { let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref()); tools::mcp_end(chat, ev, ok) },
+                QueuedInterrupt::McpEnd { ev, order, .. } => {
+                    let ok = match order.as_ref() { Some(om) => super::ChatWidget::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued McpEnd; using synthetic key"); chat.next_internal_key() } };
+                    tools::mcp_end(chat, ev, ok)
+                },
                 QueuedInterrupt::PatchEnd { seq: _, ev } => {
                     chat.handle_patch_apply_end_now(ev);
                 }
                 QueuedInterrupt::PlanUpdate { ev, order, .. } => {
-                    let ok = super::ChatWidget::order_key_from_order_meta(order.as_ref());
+                    let ok = match order.as_ref() { Some(om) => super::ChatWidget::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued PlanUpdate; using synthetic key"); chat.next_internal_key() } };
                     let _ = chat.history_insert_with_key_global(Box::new(crate::history_cell::new_plan_update(ev)), ok);
                 }
             }

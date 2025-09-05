@@ -353,9 +353,9 @@ impl ChatWidget<'_> {
     
     pub(crate) fn enable_perf(&mut self, enable: bool) { self.perf_state.enabled = enable; }
     pub(crate) fn perf_summary(&self) -> String { self.perf_state.stats.borrow().summary() }
-    // Build an ordered key from model-provided OrderMeta. Missing metadata is not allowed by policy.
-    fn order_key_from_order_meta(order: Option<&codex_core::protocol::OrderMeta>) -> OrderKey {
-        let om = order.expect("missing OrderMeta: strict ordering requires request_ordinal/output_index/sequence_number");
+    // Build an ordered key from model-provided OrderMeta. Callers must
+    // guarantee presence by passing a concrete reference (compile-time guard).
+    fn order_key_from_order_meta(om: &codex_core::protocol::OrderMeta) -> OrderKey {
         // sequence_number can be None on some terminal events; treat as 0 for stable placement
         OrderKey { req: om.request_ordinal, out: om.output_index.map(|v| v as i32).unwrap_or(0), seq: om.sequence_number.unwrap_or(0) }
     }
@@ -1093,9 +1093,9 @@ impl ChatWidget<'_> {
     fn seed_stream_order_key(&mut self, kind: StreamKind, id: &str, key: OrderKey) {
         self.stream_order_seq.insert((kind, id.to_string()), key);
     }
-    fn ensure_stream_order_key_strict(&self, kind: StreamKind, id: Option<&str>) -> OrderKey {
-        let id = id.expect("missing stream id for strict ordering");
-        *self.stream_order_seq.get(&(kind, id.to_string())).expect("stream order key not seeded")
+    // Try to fetch a seeded stream order key. Callers must handle None.
+    fn try_stream_order_key(&self, kind: StreamKind, id: &str) -> Option<OrderKey> {
+        self.stream_order_seq.get(&(kind, id.to_string())).copied()
     }
     pub(crate) fn new(
         config: Config,
@@ -2190,7 +2190,13 @@ impl ChatWidget<'_> {
             }
             EventMsg::WebSearchBegin(ev) => {
                 // Enforce order presence (tool events should carry it)
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on WebSearchBegin; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 tracing::info!("[order] WebSearchBegin call_id={} seq={}", ev.call_id, event.event_seq);
                 tools::web_search_begin(self, ev.call_id, ev.query, ok)
             },
@@ -2202,7 +2208,13 @@ impl ChatWidget<'_> {
                 }
                 self.stream_state.seq_answer_final = Some(event.event_seq);
                 // Strict order for the stream id
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on AgentMessage; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 self.seed_stream_order_key(StreamKind::Answer, &id, ok);
 
                 tracing::debug!(
@@ -2247,7 +2259,13 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Seed/refresh order key for this Answer stream id (must have OrderMeta)
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on AgentMessageDelta; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 self.seed_stream_order_key(StreamKind::Answer, &id, ok);
                 // Stream answer delta through StreamController
                 streaming::delta_text(
@@ -2273,7 +2291,13 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Seed strict order key for this Reasoning stream
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on AgentReasoning; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 tracing::info!("[order] EventMsg::AgentReasoning id={} key={:?}", id, ok);
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Fallback: if any tools/execs are still marked running, complete them now.
@@ -2308,7 +2332,13 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Seed strict order key for this Reasoning stream
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on AgentReasoningDelta; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 tracing::info!("[order] EventMsg::AgentReasoningDelta id={} key={:?}", id, ok);
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Stream reasoning delta through StreamController
@@ -2466,7 +2496,10 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Seed strict order key for this reasoning stream id
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => { tracing::warn!("missing OrderMeta on Tools::PlanUpdate; using synthetic key"); self.next_internal_key() }
+                };
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
 
                 streaming::delta_text(
@@ -2488,7 +2521,10 @@ impl ChatWidget<'_> {
                     return;
                 }
                 // Seed strict order key now so upcoming insert uses the correct key.
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => { tracing::warn!("missing OrderMeta on Tools::ReasoningBegin; using synthetic key"); self.next_internal_key() }
+                };
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Use StreamController for final raw reasoning
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
@@ -2627,7 +2663,10 @@ impl ChatWidget<'_> {
                 // Enable Ctrl+D footer hint now that we have diffs to show
                 self.bottom_pane.set_diffs_hint(true);
                 // Strict order
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => { tracing::warn!("missing OrderMeta on ExecEnd flush; using synthetic key"); self.next_internal_key() }
+                };
                 let cell = history_cell::new_patch_event(PatchEventType::ApplyBegin { auto_approved }, changes);
                 let _ = self.history_insert_with_key_global(Box::new(cell), ok);
             }
@@ -2674,7 +2713,7 @@ impl ChatWidget<'_> {
             EventMsg::McpToolCallBegin(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let order_ok = match event.order.as_ref() { Some(om) => Self::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta on McpBegin; using synthetic key"); self.next_internal_key() } };
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_mcp_begin(seq, ev, event.order.clone()),
                     |this| {
@@ -2688,7 +2727,7 @@ impl ChatWidget<'_> {
             EventMsg::McpToolCallEnd(ev) => {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
-                let order_ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let order_ok = match event.order.as_ref() { Some(om) => Self::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta on McpEnd; using synthetic key"); self.next_internal_key() } };
                 self.defer_or_handle(
                     move |interrupts| interrupts.push_mcp_end(seq, ev, event.order.clone()),
                     |this| {
@@ -2716,7 +2755,7 @@ impl ChatWidget<'_> {
                     history_cell::new_running_custom_tool_call(tool_name.clone(), params_string.clone())
                 };
                 // Enforce ordering for custom tool begin
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() { Some(om) => Self::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta on CustomToolCallBegin; using synthetic key"); self.next_internal_key() } };
                 let idx = self.history_insert_with_key_global(Box::new(cell), ok);
                 // Track index so we can replace it on completion
                 if idx < self.history_cells.len() {
@@ -2740,7 +2779,7 @@ impl ChatWidget<'_> {
                 duration,
                 result,
             }) => {
-                let ok = Self::order_key_from_order_meta(event.order.as_ref());
+                let ok = match event.order.as_ref() { Some(om) => Self::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta on CustomToolCallEnd; using synthetic key"); self.next_internal_key() } };
                 tracing::info!("[order] CustomToolCallEnd call_id={} tool={} seq={}", call_id, tool_name, event.event_seq);
                 // Convert parameters to String if present
                 let params_string = parameters.map(|p| p.to_string());
@@ -3790,8 +3829,17 @@ impl ChatWidget<'_> {
                 if self.config.tui.show_reasoning { cell.set_collapsed(false); } else { cell.set_collapsed(true); }
                 cell.set_in_progress(true);
 
-                // Use pre-seeded key for this stream id; required by strict ordering.
-                let key = self.ensure_stream_order_key_strict(kind, id.as_deref());
+                // Use pre-seeded key for this stream id when present; otherwise synthesize.
+                let key = match id.as_deref() {
+                    Some(rid) => self.try_stream_order_key(kind, rid).unwrap_or_else(|| {
+                        tracing::warn!("missing stream order key for Reasoning id={}; using synthetic key", rid);
+                        self.next_internal_key()
+                    }),
+                    None => {
+                        tracing::warn!("missing stream id for Reasoning; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 tracing::info!("[order] insert Reasoning new id={:?} {}", id, Self::debug_fmt_order_key(key));
                 let idx = self.history_insert_with_key_global(Box::new(cell), key);
                 if let Some(rid) = id { self.reasoning_index.insert(rid, idx); }
@@ -3901,8 +3949,17 @@ impl ChatWidget<'_> {
                     with_header.extend(lines);
                     lines = with_header;
                 }
-                // Use pre-seeded key for this stream id; required by strict ordering.
-                let key = self.ensure_stream_order_key_strict(kind, id.as_deref());
+                // Use pre-seeded key for this stream id when present; otherwise synthesize.
+                let key = match id.as_deref() {
+                    Some(rid) => self.try_stream_order_key(kind, rid).unwrap_or_else(|| {
+                        tracing::warn!("missing stream order key for Answer id={}; using synthetic key", rid);
+                        self.next_internal_key()
+                    }),
+                    None => {
+                        tracing::warn!("missing stream id for Answer; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
                 tracing::info!("[order] insert Answer new id={:?} {}", id, Self::debug_fmt_order_key(key));
                 let new_idx = self.history_insert_with_key_global(
                     Box::new(history_cell::new_streaming_content_with_id(id.clone(), lines)),
@@ -4080,7 +4137,16 @@ impl ChatWidget<'_> {
 
         // Fallback: no prior assistant cell found; insert at stable sequence position.
         tracing::debug!("final-answer: ordered insert new AssistantMarkdownCell id={:?}", id);
-        let key = self.ensure_stream_order_key_strict(StreamKind::Answer, id.as_deref());
+        let key = match id.as_deref() {
+            Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
+                tracing::warn!("missing stream order key for final Answer id={}; using synthetic key", rid);
+                self.next_internal_key()
+            }),
+            None => {
+                tracing::warn!("missing stream id for final Answer; using synthetic key");
+                self.next_internal_key()
+            }
+        };
         tracing::info!("[order] final Answer ordered insert id={:?} {}", id, Self::debug_fmt_order_key(key));
         let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
         let _ = self.history_insert_with_key_global(Box::new(cell), key);
