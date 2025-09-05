@@ -1,12 +1,12 @@
-## @just-every/code v0.2.60
+## @just-every/code v0.2.61
 
-This release refines packaging and notes to improve asset availability and clarity.
+Maintenance-only release improving release automation; no functional changes.
 
 ### Changes
 
-- Release: collect all `code-*` artifacts recursively to ensure assets.
-- Release notes: add Compare link and optional Thanks; enforce strict sections.
-- Docs: use '@latest' in install snippet; tighten notes format.
+- No functional changes; maintenance-only release focused on CI.
+- CI: trigger releases only from tags; parse version from tag to prevent unintended runs.
+- CI: reduce noise by enforcing [skip ci] on notes-only commits and ignoring notes-only paths.
 
 ### Install
 
@@ -15,5 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.59...v0.2.60
-
+Compare: https://github.com/just-every/code/compare/v0.2.60...v0.2.61
