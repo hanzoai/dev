@@ -153,8 +153,7 @@ pub(crate) struct ChatWidget<'a> {
     live_builder: RowBuilder,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
-    // Store pending non-image file paths keyed by their placeholder text
-    pending_files: HashMap<String, PathBuf>,
+    // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
     welcome_shown: bool,
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
@@ -857,8 +856,8 @@ impl ChatWidget<'_> {
         let mut display_text = text.clone();
         let mut ordered_items: Vec<InputItem> = Vec::new();
 
-        // First, handle [image: ...] and [file: ...] placeholders from drag-and-drop
-        let placeholder_regex = regex_lite::Regex::new(r"\[(image|file): [^\]]+\]").unwrap();
+        // First, handle [image: ...] placeholders from drag-and-drop
+        let placeholder_regex = regex_lite::Regex::new(r"\[image: [^\]]+\]").unwrap();
         let mut cursor = 0usize;
         for mat in placeholder_regex.find_iter(&text) {
             // Push preceding text as a text item (if any)
@@ -879,48 +878,6 @@ impl ChatWidget<'_> {
                     ordered_items.push(InputItem::LocalImage { path });
                 } else {
                     // Unknown placeholder: preserve as text
-                    ordered_items.push(InputItem::Text { text: placeholder.to_string() });
-                }
-            } else if placeholder.starts_with("[file:") {
-                if let Some(path) = self.pending_files.remove(placeholder) {
-                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    // Always include a marker text
-                    ordered_items.push(InputItem::Text { text: format!("[file: {}]", filename) });
-                    // Inline small textual files; otherwise, include a short descriptor
-                    if let Ok(meta) = std::fs::metadata(&path) {
-                        let size = meta.len();
-                        // Threshold ~64 KiB
-                        let inline_limit: u64 = 64 * 1024;
-                        if size <= inline_limit {
-                            match std::fs::read(&path) {
-                                Ok(bytes) => {
-                                    if let Ok(text) = String::from_utf8(bytes) {
-                                        // Detect language by extension for nicer fences
-                                        let lang = path
-                                            .extension()
-                                            .and_then(|s| s.to_str())
-                                            .unwrap_or("");
-                                        let mut block = String::new();
-                                        block.push_str(&format!("\n```{}\n", lang));
-                                        block.push_str(&text);
-                                        if !text.ends_with('\n') { block.push('\n'); }
-                                        block.push_str("```\n");
-                                        ordered_items.push(InputItem::Text { text: block });
-                                    } else {
-                                        ordered_items.push(InputItem::Text { text: format!("(binary or non-UTF8 file, {} bytes; not inlined)", size) });
-                                    }
-                                }
-                                Err(e) => {
-                                    ordered_items.push(InputItem::Text { text: format!("(failed to read file: {})", e) });
-                                }
-                            }
-                        } else {
-                            ordered_items.push(InputItem::Text { text: format!("(large file, {} bytes; not inlined)", size) });
-                        }
-                    } else {
-                        ordered_items.push(InputItem::Text { text: "(file not found at submit)".to_string() });
-                    }
-                } else {
                     ordered_items.push(InputItem::Text { text: placeholder.to_string() });
                 }
             } else {
@@ -955,43 +912,7 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Also handle non-image direct file paths by appending a marker and an inline preview (if small text)
-        for word in &words {
-            if word.starts_with("[file:") || word.starts_with("[image:") { continue; }
-            // Heuristic: treat anything that looks like a path with an extension as a candidate
-            let looks_like_path = word.contains('/') || word.contains('\\');
-            let has_ext = std::path::Path::new(word).extension().is_some();
-            if !(looks_like_path && has_ext) { continue; }
-            let path = Path::new(word);
-            if path.exists() && path.is_file() {
-                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                ordered_items.push(InputItem::Text { text: format!("[file: {}]", filename) });
-                if let Ok(meta) = std::fs::metadata(path) {
-                    let size = meta.len();
-                    let inline_limit: u64 = 64 * 1024;
-                    if size <= inline_limit {
-                        match std::fs::read(path) {
-                            Ok(bytes) => {
-                                if let Ok(text) = String::from_utf8(bytes) {
-                                    let lang = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                                    let mut block = String::new();
-                                    block.push_str(&format!("\n```{}\n", lang));
-                                    block.push_str(&text);
-                                    if !text.ends_with('\n') { block.push('\n'); }
-                                    block.push_str("```\n");
-                                    ordered_items.push(InputItem::Text { text: block });
-                                } else {
-                                    ordered_items.push(InputItem::Text { text: format!("(binary or non-UTF8 file, {} bytes; not inlined)", size) });
-                                }
-                            }
-                            Err(e) => ordered_items.push(InputItem::Text { text: format!("(failed to read file: {})", e) }),
-                        }
-                    } else {
-                        ordered_items.push(InputItem::Text { text: format!("(large file, {} bytes; not inlined)", size) });
-                    }
-                }
-            }
-        }
+        // Non-image paths are left as-is in the text; the model may choose to read them.
 
         // Preserve user formatting (retain newlines) but normalize whitespace:
         // - Normalize CRLF -> LF
@@ -1201,7 +1122,6 @@ impl ChatWidget<'_> {
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
-            pending_files: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
@@ -1325,7 +1245,6 @@ impl ChatWidget<'_> {
             tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
-            pending_files: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
             cached_image_protocol: RefCell::new(None),
@@ -1664,13 +1583,10 @@ impl ChatWidget<'_> {
                     tracing::warn!("Image path does not exist: {:?}", path);
                 }
             } else {
-                // Handle non-image file drop/paste by inserting a [file: name] token
+                // For non-image files, paste the decoded path as plain text.
                 let path = PathBuf::from(&path_str);
                 if path.exists() && path.is_file() {
-                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-                    let placeholder = format!("[file: {}]", filename);
-                    self.pending_files.insert(placeholder.clone(), path);
-                    self.bottom_pane.handle_paste(placeholder);
+                    self.bottom_pane.handle_paste(path_str);
                     self.request_redraw();
                     return;
                 }
