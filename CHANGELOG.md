@@ -265,3 +265,31 @@ All notable changes to Code are documented here.
 ## [0.2.1] - 2025-08-19
 
 - Fork stabilization: large upstream sync while preserving TUI/theme and protocol; add tests and clean colors/styles. (b8548a0, 47ba653, c004ae5)
+
+## [0.1.13] - 2025-08-16
+
+- Rebrand: switch npm bin to `code`, handle collisions; rename Coder → Code across UI and docs. (0f1974a, b3176fe)
+- TUI polish: glitch animations, status handling, stabilized scroll viewport; improved token footer and search suffix. (3375965, 2e42af0, 96913aa, 80fe37d)
+- Core: Rust login server port; sandbox fixes; exec timer; browser console tool. (e9b597c, c26d42a, 2359878, d6da1a4)
+
+## [0.1.12] - 2025-08-14
+
+- CI/build: switch to rust-cache; fix sccache error; optimize builds; improve terminal query and image init. (2d1d974, eb922a7, 3055068, 9ca7661)
+
+## [0.1.11] - 2025-08-14
+
+- Release hygiene: fix version embedding and PowerShell replacement on Windows. (537f50b, 5d50fff)
+
+## [0.1.10] - 2025-08-14
+
+- MCP/Reasoning: JSON‑RPC support; enable reasoning for codex‑prefixed models; parse reasoning text. (e7bad65, de2c6a2, f1be797)
+- TUI: diff preview color tweak, standardized tree glyphs, ctrl‑b/ctrl‑f shortcuts. (d4533a0, bb9ce3c, 0159bc7)
+- CI/docs: restore markdown streaming; interrupt/Esc improvements; user‑agent; tracing; rate‑limit delays respected. (6340acd, 12cf0dd, cb78f23, e8670ad, 41eb59a)
+
+## [0.1.9] - 2025-08-13
+
+- Debug logging system and better conversation history; remove unused APIs. (92793b3, 34f7a50)
+
+## [0.1.8] - 2025-08-13
+
+- TUI history: correct wrapping and height calc; prevent duplication; improve JS harness for browser. (dc31517, 98b26df, 58fd385, 7099f78)
