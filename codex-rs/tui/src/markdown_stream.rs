@@ -85,19 +85,21 @@ impl MarkdownStreamCollector {
     /// Insert a paragraph/section separator if one is not already present at the
     /// end of the buffer. Ensures the next content starts after a blank line.
     pub fn insert_section_break(&mut self) {
-        if self.buffer.is_empty() {
+        if self.buffer.is_empty() { return; }
+        // If we're mid-line, insert a newline immediately so upcoming content
+        // (e.g., a bold section title) starts on its own line. Then request an
+        // extra blank line at the next natural newline boundary to produce a
+        // clean paragraph separation without risking mid-word truncation.
+        if !self.buffer.ends_with('\n') {
+            self.buffer.push('\n');
+            self.pending_section_break = true; // will add the second newline later
             return;
         }
-        // If we're already at a line boundary, append one more newline. Otherwise,
-        // defer the extra newline until push_delta hits a natural boundary.
-        if self.buffer.ends_with('\n') {
-            if !self.buffer.ends_with("\n\n") {
-                self.buffer.push('\n');
-            }
-            self.pending_section_break = false;
-        } else {
-            self.pending_section_break = true;
+        // Already at a boundary: ensure exactly one blank line (double newline)
+        if !self.buffer.ends_with("\n\n") {
+            self.buffer.push('\n');
         }
+        self.pending_section_break = false;
     }
 
     /// Render the full buffer and return only the newly completed logical lines
@@ -307,6 +309,22 @@ impl MarkdownStreamCollector {
         let source = unwrap_markdown_language_fence_if_enabled(source);
         let source = strip_empty_fenced_code_blocks(&source);
         source
+    }
+
+    /// Render a preview of the current buffer into lines without mutating
+    /// internal counters. Unlike `finalize_and_drain`, this does not append a
+    /// synthetic trailing newline, so the preview reflects what a soft-commit
+    /// would render at this moment.
+    pub fn render_preview_lines(&self, config: &Config) -> Vec<Line<'static>> {
+        let source = unwrap_markdown_language_fence_if_enabled(self.buffer.clone());
+        let source = strip_empty_fenced_code_blocks(&source);
+        let mut rendered: Vec<Line<'static>> = Vec::new();
+        if self.bold_first_sentence {
+            markdown::append_markdown_with_bold_first(&source, &mut rendered, config);
+        } else {
+            markdown::append_markdown(&source, &mut rendered, config);
+        }
+        rendered
     }
 }
 

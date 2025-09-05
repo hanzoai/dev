@@ -2984,7 +2984,8 @@ impl HistoryCell for CollapsibleReasoningCell {
                     ));
                     titles.push(Line::from(spans));
                 } else {
-                    titles.push(Line::from("…"));
+                    // No title yet — show a dim ellipsis placeholder
+                    titles.push(Line::from("…".dim()));
                 }
             }
             titles
