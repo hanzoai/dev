@@ -180,9 +180,8 @@ jobs:
               core.setOutput('reason', 'Missing OPENAI_API_KEY for safety screening.');
               core.notice('Safety: block (no OPENAI_API_KEY)');
             } else {
-              async function callModelAuto(model) {
-                const isResponses = model && model.startsWith('gpt-5');
-                const common = [
+              async function callResponses(model) {
+                const input = [
                   {
                     role: 'system',
                     content: [
@@ -203,28 +202,19 @@ jobs:
                     })
                   }
                 ];
-                if (isResponses) {
-                  const payload = { model, input: common, temperature: 0.1, response_format: { type: 'json_object' } };
-                  return fetch('https://api.openai.com/v1/responses', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify(payload)
-                  });
-                } else {
-                  const payload = { model, messages: common, temperature: 0.1, response_format: { type: 'json_object' } };
-                  return fetch('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify(payload)
-                  });
-                }
+                const payload = { model, input, response_format: { type: 'json_object' } };
+                return fetch('https://api.openai.com/v1/responses', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                  body: JSON.stringify(payload)
+                });
               }
 
-              // Prefer gpt-5 via responses; on failure fall back to gpt-4o-mini via chat
-              let res = await callModelAuto('gpt-5');
+              // Always use Responses API. Try gpt-5, then fall back to gpt-4o-mini on error.
+              let res = await callResponses('gpt-5');
               if (!res.ok) {
                 core.notice(`Safety: gpt-5 API ${res.status} ${res.statusText}; falling back to gpt-4o-mini`);
-                res = await callModelAuto('gpt-4o-mini');
+                res = await callResponses('gpt-4o-mini');
               }
               if (!res.ok) {
                 core.setOutput('decision', 'comment_only');
