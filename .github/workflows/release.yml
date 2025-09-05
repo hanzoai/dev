@@ -245,7 +245,10 @@ jobs:
         if: contains(matrix.os, 'ubuntu')
         shell: bash
         run: |
+          shopt -s nullglob
           for f in artifacts/*; do
+            # Only process regular files; skip any directories
+            [ -f "$f" ] || continue
             base=$(basename "$f")
             # .zst (size-optimized)
             zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
@@ -258,7 +261,10 @@ jobs:
         if: startsWith(matrix.os, 'macos-')
         shell: bash
         run: |
+          shopt -s nullglob
           for f in artifacts/*; do
+            # Only process regular files; skip any directories
+            [ -f "$f" ] || continue
             base=$(basename "$f")
             # .zst (size-optimized)
             zstd -T0 -19 --force -o "artifacts/${base}.zst" "$f"
@@ -523,7 +529,7 @@ jobs:
           - Idempotent: if a section for ${NEW_VERSION} already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
 
           Release Notes (release-notes/RELEASE_NOTES.md)
-          - Write exactly these sections in order and nothing else:
+          - Write exactly these sections in order; include the optional Thanks section only when applicable:
             1) Title: ## @just-every/code v${NEW_VERSION}
             2) One brief intro sentence (1–2 lines max).
             3) Section header: ### Changes
@@ -532,7 +538,12 @@ jobs:
                Code block with exactly:
                npm install -g @just-every/code@latest
                code
-          - Keep notes concise; no walls of text. No extra sections.
+            5) Optional section header: ### Thanks
+               - Include ONE line like: "Thanks to @alice and @bob for contributions!"
+               - Only include if at least one merged PR in ${RANGE} is authored by an external contributor.
+               - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk.
+               - Derive usernames from merge commits, Co-authored-by trailers, or PR references in commit messages. Deduplicate and prefer "@username" form.
+          - Keep notes concise; no walls of text. Do not add any other sections beyond the optional Thanks.
 
           Rules
           - Use the provided git log as source of truth; summarize responsibly.
