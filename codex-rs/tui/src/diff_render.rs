@@ -10,12 +10,14 @@ use std::path::PathBuf;
 use codex_core::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
+use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
 // Sanitize diff content so tabs and control characters don’t break terminal layout.
 // Mirrors the behavior we use for user input and command output:
 // - Expand tabs to spaces using a fixed tab stop (4)
 // - Remove ASCII control characters (including ESC/CSI sequences) that could
 //   confuse terminal rendering; keep plain text only
+#[allow(dead_code)]
 fn expand_tabs_to_spaces(input: &str, tabstop: usize) -> String {
     let ts = tabstop.max(1);
     let mut out = String::with_capacity(input.len());
@@ -38,44 +40,137 @@ fn expand_tabs_to_spaces(input: &str, tabstop: usize) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn strip_control_sequences(input: &str) -> String {
+    fn is_c1(ch: char) -> bool {
+        let u = ch as u32;
+        (0x80..=0x9F).contains(&u)
+    }
+
+    fn is_zero_width_or_bidi(ch: char) -> bool {
+        matches!(
+            ch,
+            // Zero-width, joiners, BOM
+            '\u{200B}' /* ZWSP */
+                | '\u{200C}' /* ZWNJ */
+                | '\u{200D}' /* ZWJ */
+                | '\u{2060}' /* WJ */
+                | '\u{FEFF}' /* BOM */
+                | '\u{00AD}' /* SOFT HYPHEN */
+                | '\u{180E}' /* MONGOLIAN VOWEL SEPARATOR (historic) */
+                // BiDi controls and isolates
+                | '\u{200E}' /* LRM */
+                | '\u{200F}' /* RLM */
+                | '\u{061C}' /* ALM */
+                | '\u{202A}' /* LRE */
+                | '\u{202B}' /* RLE */
+                | '\u{202D}' /* LRO */
+                | '\u{202E}' /* RLO */
+                | '\u{202C}' /* PDF */
+                | '\u{2066}' /* LRI */
+                | '\u{2067}' /* RLI */
+                | '\u{2068}' /* FSI */
+                | '\u{2069}' /* PDI */
+        )
+    }
+
+    fn consume_until_st_or_bel<I: Iterator<Item = char>>(it: &mut std::iter::Peekable<I>) {
+        while let Some(&c) = it.peek() {
+            match c {
+                // BEL terminator for OSC
+                '\u{0007}' => {
+                    it.next(); // eat BEL
+                    break;
+                }
+                // ST = ESC \
+                '\u{001B}' => {
+                    // lookahead for '\\'
+                    let _ = it.next(); // ESC
+                    if matches!(it.peek(), Some('\\')) {
+                        let _ = it.next(); // '\\'
+                        break;
+                    }
+                    // Otherwise, keep eating (this also drops nested sequences defensively)
+                }
+                _ => {
+                    let _ = it.next();
+                }
+            }
+        }
+    }
+
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '\u{001B}' {
-            // Skip a simple ESC [...] <alpha> CSI sequence, or generic ESC-seq until letter
-            if matches!(chars.peek(), Some('[')) {
-                // consume '['
-                let _ = chars.next();
-                // consume params until we hit an alphabetic final byte or end
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_alphabetic() { chars.next(); break; }
-                    let _ = chars.next();
+        match ch {
+            // ESC-prefixed sequences
+            '\u{001B}' => {
+                match chars.peek().copied() {
+                    // CSI: ESC [ params/intermediates final
+                    Some('[') => {
+                        let _ = chars.next(); // '['
+                        // params 0x30..0x3F, intermediates 0x20..0x2F, final 0x40..0x7E
+                        while let Some(&c) = chars.peek() {
+                            let u = c as u32;
+                            if (0x40..=0x7E).contains(&u) {
+                                let _ = chars.next();
+                                break;
+                            } else {
+                                let _ = chars.next();
+                            }
+                        }
+                    }
+                    // OSC: ESC ] ... (BEL | ST)
+                    Some(']') => {
+                        let _ = chars.next(); // ']'
+                        consume_until_st_or_bel(&mut chars);
+                    }
+                    // String types (DCS/SOS/PM/APC): ESC P | X | ^ | _ ... ST
+                    Some('P') | Some('X') | Some('^') | Some('_') => {
+                        let _ = chars.next();
+                        consume_until_st_or_bel(&mut chars);
+                    }
+                    // Other ESC: consume optional intermediates then a final (0x40..0x7E)
+                    Some(_) | None => {
+                        // intermediates 0x20..0x2F
+                        while let Some(&c) = chars.peek() {
+                            let u = c as u32;
+                            if (0x20..=0x2F).contains(&u) {
+                                let _ = chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        if let Some(&c) = chars.peek() {
+                            let u = c as u32;
+                            if (0x40..=0x7E).contains(&u) {
+                                let _ = chars.next();
+                            }
+                        }
+                    }
                 }
-            } else {
-                // Consume until an alphabetic; best‑effort strip of non‑CSI
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_alphabetic() { let _ = chars.next(); break; }
-                    let _ = chars.next();
-                }
+                // In all ESC cases: skip emission
             }
-            continue;
+            // Drop other C0 control characters (0x00..0x1F, 0x7F)
+            c if (c as u32) < 0x20 || c == '\u{007F}' => {}
+            // Drop raw C1 controls if present (0x80..0x9F)
+            c if is_c1(c) => {}
+            // Drop zero-width and bidi controls that can affect layout
+            c if is_zero_width_or_bidi(c) => {}
+            // Keep printable character
+            _ => out.push(ch),
         }
-        // Drop other ASCII control characters (0x00..0x1F, 0x7F)
-        if (ch as u32) < 0x20 || ch == '\u{007F}' {
-            continue;
-        }
-        out.push(ch);
     }
     out
 }
 
 #[inline]
 fn sanitize_diff_text(s: &str) -> String {
-    // Order: first expand tabs (so control stripping doesn’t accidentally
-    // touch spaces we insert), then remove control sequences.
-    let expanded = expand_tabs_to_spaces(s, 4);
-    strip_control_sequences(&expanded)
+    sanitize_for_tui(
+        s,
+        SanitizeMode::Plain,
+        SanitizeOptions { expand_tabs: true, tabstop: 4 },
+    )
 }
 
 #[allow(dead_code)]
