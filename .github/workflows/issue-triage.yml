@@ -26,6 +26,9 @@ jobs:
       REPO: ${{ github.repository }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BRANCH_NAME: issue-${{ github.event.issue.number }}-${{ github.run_id }}
+      # Control whether to fall back to GITHUB_TOKEN when CODE_GH_PAT gets 403s.
+      # Default is strict (no fallback) to preserve bot authorship.
+      ALLOW_GITHUB_TOKEN_FALLBACK: 'false'
       # Rate limiting configuration
       RATE_WINDOW_HOURS: '24'
       RATE_PER_ACTOR: '5'         # Max issues per actor in window to auto-act
@@ -427,9 +430,18 @@ jobs:
           const p = '.github/auto/AGENT_STDOUT.txt';
           if (!fs.existsSync(p)) process.exit(0);
           const t = fs.readFileSync(p,'utf8');
-          const m = t.match(/<comment>([\s\S]*?)<\/comment>/i);
-          if (!m) process.exit(0);
-          const body = m[1].trim();
+          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
+          if (!all.length) process.exit(0);
+          // Prefer the last occurrence and ignore placeholder examples if present
+          const placeholder = '…your single, final maintainer-quality comment in Markdown…';
+          let body = '';
+          for (let i = all.length - 1; i >= 0; i--) {
+            const cand = (all[i][1] || '').trim();
+            if (!cand) continue;
+            if (cand.includes(placeholder)) continue;
+            body = cand; break;
+          }
+          if (!body) body = (all[all.length-1][1] || '').trim();
           if (body) {
             fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
@@ -533,6 +545,7 @@ jobs:
         env:
           PAT: ${{ secrets.CODE_GH_PAT }}
           FALLBACK: ${{ github.token }}
+          ALLOW_FALLBACK: ${{ env.ALLOW_GITHUB_TOKEN_FALLBACK }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
@@ -542,7 +555,7 @@ jobs:
             try {
               await github.rest.issues.createComment(payload);
             } catch (e) {
-              if (e && e.status === 403) {
+              if (e && e.status === 403 && (process.env.ALLOW_FALLBACK === 'true')) {
                 const r = await fetch(`https://api.github.com/repos/${payload.owner}/${payload.repo}/issues/${payload.issue_number}/comments`,{ method:'POST', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ body }) });
                 if (!r.ok) throw new Error(`fallback failed: ${r.status} ${r.statusText}`);
               } else {
@@ -557,6 +570,7 @@ jobs:
           ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
           PAT: ${{ secrets.CODE_GH_PAT }}
           FALLBACK: ${{ github.token }}
+          ALLOW_FALLBACK: ${{ env.ALLOW_GITHUB_TOKEN_FALLBACK }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
@@ -565,7 +579,7 @@ jobs:
             try {
               await github.rest.issues.addAssignees(payload);
             } catch (e) {
-              if (e && e.status === 403) {
+              if (e && e.status === 403 && (process.env.ALLOW_FALLBACK === 'true')) {
                 const r = await fetch(`https://api.github.com/repos/${payload.owner}/${payload.repo}/issues/${payload.issue_number}/assignees`,{ method:'POST', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ assignees: [assignee] }) });
                 if (!r.ok) core.warning(`fallback assign failed: ${r.status} ${r.statusText}`);
               } else {
@@ -580,6 +594,7 @@ jobs:
         env:
           PAT: ${{ secrets.CODE_GH_PAT }}
           FALLBACK: ${{ github.token }}
+          ALLOW_FALLBACK: ${{ env.ALLOW_GITHUB_TOKEN_FALLBACK }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
@@ -599,7 +614,7 @@ jobs:
             try {
               await github.rest.issues.createComment(payload);
             } catch (e) {
-              if (e && e.status === 403) {
+              if (e && e.status === 403 && (process.env.ALLOW_FALLBACK === 'true')) {
                 const r = await fetch(`https://api.github.com/repos/${payload.owner}/${payload.repo}/issues/${payload.issue_number}/comments`,{ method:'POST', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ body }) });
                 if (!r.ok) throw new Error(`fallback failed: ${r.status} ${r.statusText}`);
               } else {
@@ -614,6 +629,7 @@ jobs:
           CLOSE_MESSAGE: ${{ steps.agent_decision.outputs.close_message }}
           PAT: ${{ secrets.CODE_GH_PAT }}
           FALLBACK: ${{ github.token }}
+          ALLOW_FALLBACK: ${{ env.ALLOW_GITHUB_TOKEN_FALLBACK }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
@@ -626,7 +642,7 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
               await github.rest.issues.update({ owner, repo, issue_number, state: 'closed' });
             } catch (e) {
-              if (e && e.status === 403) {
+              if (e && e.status === 403 && (process.env.ALLOW_FALLBACK === 'true')) {
                 let r = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`,{ method:'POST', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ body }) });
                 if (!r.ok) throw new Error(`fallback comment failed: ${r.status} ${r.statusText}`);
                 r = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}`,{ method:'PATCH', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ state:'closed' }) });
@@ -643,6 +659,7 @@ jobs:
           ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
           PAT: ${{ secrets.CODE_GH_PAT }}
           FALLBACK: ${{ github.token }}
+          ALLOW_FALLBACK: ${{ env.ALLOW_GITHUB_TOKEN_FALLBACK }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
@@ -651,7 +668,7 @@ jobs:
             try {
               await github.rest.issues.addAssignees(payload);
             } catch (e) {
-              if (e && e.status === 403) {
+              if (e && e.status === 403 && (process.env.ALLOW_FALLBACK === 'true')) {
                 const r = await fetch(`https://api.github.com/repos/${payload.owner}/${payload.repo}/issues/${payload.issue_number}/assignees`,{ method:'POST', headers:{authorization:`Bearer ${process.env.FALLBACK}`,'content-type':'application/json'}, body: JSON.stringify({ assignees: [assignee] }) });
                 if (!r.ok) core.warning(`fallback assign failed: ${r.status} ${r.statusText}`);
               } else {
