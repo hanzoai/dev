@@ -16,6 +16,7 @@ pub(crate) struct StreamState {
     pub(crate) has_seen_delta: bool,
     pub(crate) last_commit_instant: Option<std::time::Instant>,
     pub(crate) tail_chars_since_commit: usize,
+    pub(crate) last_sequence_number: Option<u64>,
 }
 
 impl StreamState {
@@ -26,6 +27,7 @@ impl StreamState {
             has_seen_delta: false,
             last_commit_instant: None,
             tail_chars_since_commit: 0,
+            last_sequence_number: None,
         }
     }
     
@@ -41,6 +43,7 @@ impl StreamState {
             has_seen_delta: false,
             last_commit_instant: None,
             tail_chars_since_commit: 0,
+            last_sequence_number: None,
         }
     }
     pub(crate) fn clear(&mut self) {
@@ -50,6 +53,7 @@ impl StreamState {
         self.has_seen_delta = false;
         self.last_commit_instant = None;
         self.tail_chars_since_commit = 0;
+        self.last_sequence_number = None;
     }
     pub(crate) fn step(&mut self) -> crate::markdown_stream::StepResult {
         self.streamer.step()
@@ -122,7 +126,7 @@ impl HeaderEmitter {
     pub(crate) fn maybe_emit(
         &mut self,
         kind: StreamKind,
-        out_lines: &mut Vec<ratatui::text::Line<'static>>,
+        _out_lines: &mut Vec<ratatui::text::Line<'static>>,
     ) -> bool {
         let already_emitted_this_turn = match kind {
             StreamKind::Reasoning => self.reasoning_emitted_this_turn,
@@ -130,10 +134,10 @@ impl HeaderEmitter {
         };
         let already_emitted_in_stream = self.has_emitted_for_stream(kind);
         if !already_emitted_in_stream && !already_emitted_this_turn {
-            // Do not render a visible header for Reasoning; only mark emission.
-            if matches!(kind, StreamKind::Answer) {
-                out_lines.push(render_header_line(kind));
-            }
+            // Do not render a visible header line for either stream kind.
+            // We still mark the header as emitted to preserve per-turn gating
+            // and stream state, but the UI should not show the "codex" prefix
+            // on streaming assistant messages.
             match kind {
                 StreamKind::Reasoning => {
                     self.reasoning_emitted_in_stream = true;

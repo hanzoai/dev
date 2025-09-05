@@ -624,6 +624,18 @@ impl App<'_> {
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
+                AppEvent::BackendFailure(msg) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        // Surface a small notice in history, then reset UI state.
+                        let note = crate::history_cell::new_background_event(
+                            format!("backend error: {} — restarting session…", msg),
+                        );
+                        widget.insert_history_lines(note.display_lines());
+                        // ChatWidget no longer exposes `restart_backend`; start a fresh
+                        // conversation UI so the next input re-initializes cleanly.
+                        widget.new_conversation(self.enhanced_keys_supported);
+                    }
+                }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
                     self.commit_anim_running.store(false, Ordering::Release);
@@ -1255,3 +1267,4 @@ impl TimingStats {
         )
     }
 }
+use crate::history_cell::HistoryCell;
