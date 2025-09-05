@@ -4,14 +4,13 @@ on:
   push:
     branches: [ main ]
     paths-ignore:
-      - '.github/workflows/test.yml'
+      - '.github/workflows/**'
       - 'examples/**'
       - '**/*.test.ts'
       - 'test/**'
       - '*.md'
       - 'CHANGELOG.md'
       - 'release-notes/**'
-      - '.github/workflows/release.yml'
       - 'codex-cli/package.json'
 
 concurrency:

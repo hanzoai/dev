@@ -1,6 +1,7 @@
-Changelog
+# Changelog
 
-All notable changes to Code are documented here.
+> [!TIP]
+> We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
 ## [0.2.61] - 2025-09-05
 
