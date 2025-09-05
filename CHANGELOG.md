@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.67] - 2025-09-05
+
+- TUI: prevent doubled characters on Windows by ignoring Repeat/Release for printable keys. (73a22bd6)
+- CI: issue triage improves comment‑mode capture, writes DECISION.json, and adds token fallbacks for comment/assign/close steps. (8b4ea0f4, 544c8f15, 980aa10b)
+
 ## [0.2.66] - 2025-09-05
 
 - No functional changes; maintenance-only release focused on CI. (a6158474)

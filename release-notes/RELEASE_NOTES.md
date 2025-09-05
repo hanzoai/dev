@@ -1,13 +1,11 @@
-## @just-every/code v0.2.66
+## @just-every/code v0.2.67
 
-Maintenance release with CI triage workflow improvements; no functional changes.
+This release improves Windows typing reliability and refines our issue triage automation.
 
 ### Changes
 
-- No functional changes; maintenance-only release focused on CI.
-- CI: triage workflow uses REST via fetch; GITHUB_TOKEN fallback.
-- CI: enforce strict JSON schema and robust response parsing.
-- CI: standardize Responses API usage and model endpoint selection.
+- TUI: prevent doubled characters on Windows by ignoring Repeat/Release for printable keys.
+- CI: issue triage improves comment-mode capture, writes DECISION.json, and adds token fallbacks for comment/assign/close steps.
 
 ### Install
 
@@ -16,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.65...v0.2.66
+Compare: https://github.com/just-every/code/compare/v0.2.66...v0.2.67
