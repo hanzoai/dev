@@ -37,7 +37,7 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tracing::error;
-use unicode_width::UnicodeWidthChar;
+use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
 // ==================== Core Types ====================
 
@@ -4138,7 +4138,7 @@ fn normalize_overwrite_sequences(input: &str) -> String {
 fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = expand_tabs_to_spaces(&processed, 4);
+    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
 
     enum Seg<'a> {
@@ -4207,7 +4207,7 @@ fn output_lines(
             format!("Error (exit code {})", exit_code),
             Style::default().fg(crate::colors::error()),
         ));
-        let stderr_norm = expand_tabs_to_spaces(&normalize_overwrite_sequences(stderr), 4);
+        let stderr_norm = sanitize_for_tui(&normalize_overwrite_sequences(stderr), SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
         for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
@@ -4361,9 +4361,9 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
     // - Parse ANSI sequences into spans so we never emit raw control bytes
     let normalized = normalize_overwrite_sequences(&message);
-    let expanded = expand_tabs_to_spaces(&normalized, 4);
+    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
     // Build content lines with ANSI converted to styled spans
-    let content: Vec<Line<'static>> = expanded.lines().map(|l| ansi_escape_line(l)).collect();
+    let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
     lines.extend(content);
     // No empty line at end - trimming and spacing handled by renderer
@@ -4387,8 +4387,8 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
     ]));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
-    let expanded = expand_tabs_to_spaces(&normalized, 4);
-    let content: Vec<Line<'static>> = expanded
+    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
+    let content: Vec<Line<'static>> = sanitized
         .lines()
         .map(|l| ansi_escape_line(l))
         .collect();
@@ -4401,34 +4401,7 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
 /// This prevents terminals from applying their own tab expansion after
 /// ratatui has computed layout, which can otherwise cause glyphs to appear
 /// to "hang" or smear until overwritten.
-fn expand_tabs_to_spaces(input: &str, tabstop: usize) -> String {
-    let ts = tabstop.max(1);
-    let mut out = String::with_capacity(input.len());
-    for line in input.split_inclusive('\n') {
-        let mut col = 0usize; // display columns in this logical line
-        for ch in line.chars() {
-            match ch {
-                '\t' => {
-                    let spaces = ts - (col % ts);
-                    out.extend(std::iter::repeat(' ').take(spaces));
-                    col += spaces;
-                }
-                '\n' => {
-                    out.push('\n');
-                    col = 0;
-                }
-                _ => {
-                    out.push(ch);
-                    // Use Unicode width to advance columns for wide glyphs
-                    col += UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
-                }
-            }
-        }
-        // If the line did not end with a newline, `split_inclusive` ensures we
-        // won't add one here (preserve exact trailing newline semantics).
-    }
-    out
-}
+// Tab expansion and control stripping are centralized in crate::sanitize
 
 #[allow(dead_code)]
 pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
@@ -5377,7 +5350,7 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
 fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = expand_tabs_to_spaces(&processed, 4);
+    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
     let mut out: Vec<Line<'static>> = Vec::new();
     if non_empty.len() <= head + tail {
@@ -6356,7 +6329,7 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     ];
 
     let norm = normalize_overwrite_sequences(&stderr);
-    let norm = expand_tabs_to_spaces(&norm, 4);
+    let norm = sanitize_for_tui(&norm, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4 });
     for line in norm.lines() {
         if !line.is_empty() {
             lines.push(ansi_escape_line(line).fg(crate::colors::error()));

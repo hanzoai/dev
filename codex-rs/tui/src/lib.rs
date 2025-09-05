@@ -57,6 +57,7 @@ mod shimmer;
 mod slash_command;
 mod resume;
 mod streaming;
+mod sanitize;
 mod terminal_info;
 // mod text_block; // Orphaned after trait-based HistoryCell migration
 mod text_formatting;
