@@ -644,12 +644,7 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to npm
-        if: steps.should_publish.outputs.publish == 'true'
-        working-directory: codex-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+      # Defer npm publish until after pushing changes and tags; platform packages first
 
       - name: Push tag
         shell: bash

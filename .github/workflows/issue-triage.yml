@@ -180,9 +180,10 @@ jobs:
               core.setOutput('reason', 'Missing OPENAI_API_KEY for safety screening.');
               core.notice('Safety: block (no OPENAI_API_KEY)');
             } else {
-              const payload = {
-                model: 'gpt-5',
-                messages: [
+              async function callModel(model) {
+                const payload = {
+                  model,
+                  messages: [
                   {
                     role: 'system',
                     content: [
@@ -202,16 +203,26 @@ jobs:
                       actor: context.actor
                     })
                   }
-                ],
-                temperature: 0.1,
-                response_format: { type: 'json_object' }
-              };
+                  ],
+                  temperature: 0.1,
+                  response_format: { type: 'json_object' }
+                };
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                  body: JSON.stringify(payload)
+                });
+                return res;
+              }
 
-              const res = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                body: JSON.stringify(payload)
-              });
+              // Try requested model first, then fall back on 400 to a known-good
+              let res = await callModel('gpt-5');
+              if (!res.ok) {
+                if (res.status === 400) {
+                  core.notice('Safety: gpt-5 returned 400; falling back to gpt-4o-mini');
+                  res = await callModel('gpt-4o-mini');
+                }
+              }
               if (!res.ok) {
                 core.setOutput('decision', 'comment_only');
                 core.setOutput('reason', `Safety API error: ${res.status} ${res.statusText}`);
