@@ -387,8 +387,10 @@ jobs:
           PROMPT="$PROMPT
 
           <agent_mode>$AGENT_MODE</agent_mode>
-          - If agent_mode=comment, do NOT change files; only write .github/auto/ISSUE_COMMENT.md.
-          - If agent_mode=full, you may make minimal safe edits.
+          - If agent_mode=comment: do NOT change any files. Instead, include exactly one XML-style wrapper in your final output:
+            <comment>…your single, final maintainer-quality comment in Markdown…</comment>
+            The comment should be self-contained and suitable to post on the issue. Do not include any other XML tags. Avoid code fences inside the tag when unnecessary.
+          - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
           "
           # Choose sandbox mode based on agent_mode
           if [ "$AGENT_MODE" = "full" ]; then
@@ -407,7 +409,25 @@ jobs:
             exec \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
-            -
+            - | tee .github/auto/AGENT_STDOUT.txt
+
+      - name: Extract agent comment (comment mode)
+        if: steps.gate.outputs.agent_mode == 'comment'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs = require('fs');
+          const p = '.github/auto/AGENT_STDOUT.txt';
+          if (!fs.existsSync(p)) process.exit(0);
+          const t = fs.readFileSync(p,'utf8');
+          const m = t.match(/<comment>([\s\S]*?)<\/comment>/i);
+          if (!m) process.exit(0);
+          const body = m[1].trim();
+          if (body) {
+            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
+          }
+          JS
 
       - name: Parse agent decision
         id: agent_decision
