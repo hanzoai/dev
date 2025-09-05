@@ -139,7 +139,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     /// for the session. This mirrors the information shown in the TUI welcome
     /// screen.
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
-        let version = option_env!("CODE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+        let version = codex_version::version();
         ts_println!(
             self,
             "Code v{}\n--------",

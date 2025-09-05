@@ -62,9 +62,7 @@ async fn main() -> Result<()> {
         },
         client_info: Implementation {
             name: "code-mcp-client".to_owned(),
-            version: option_env!("CODE_VERSION")
-                .unwrap_or(env!("CARGO_PKG_VERSION"))
-                .to_owned(),
+            version: codex_version::version().to_owned(),
             title: Some("Code".to_string()),
         },
         protocol_version: MCP_SCHEMA_VERSION.to_owned(),

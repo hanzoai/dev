@@ -262,9 +262,7 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
                     [
                         (
                             "version".to_string(),
-                            option_env!("CODE_VERSION")
-                                .unwrap_or(env!("CARGO_PKG_VERSION"))
-                                .to_string(),
+                            codex_version::version().to_string(),
                         ),
                     ]
                     .into_iter()

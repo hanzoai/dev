@@ -812,6 +812,7 @@ dependencies = [
  "codex-protocol",
  "codex-protocol-ts",
  "codex-tui",
+ "codex-version",
  "regex",
  "serde",
  "serde_json",
@@ -845,6 +846,7 @@ dependencies = [
  "codex-browser",
  "codex-mcp-client",
  "codex-protocol",
+ "codex-version",
  "core_test_support",
  "dirs",
  "env-flags",
@@ -909,6 +911,7 @@ dependencies = [
  "codex-login",
  "codex-ollama",
  "codex-protocol",
+ "codex-version",
  "core_test_support",
  "libc",
  "owo-colors",
@@ -998,6 +1001,7 @@ name = "codex-mcp-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "codex-version",
  "mcp-types",
  "serde",
  "serde_json",
@@ -1017,6 +1021,7 @@ dependencies = [
  "codex-core",
  "codex-login",
  "codex-protocol",
+ "codex-version",
  "mcp-types",
  "mcp_test_support",
  "pretty_assertions",
@@ -1098,6 +1103,7 @@ dependencies = [
  "codex-login",
  "codex-ollama",
  "codex-protocol",
+ "codex-version",
  "color-eyre",
  "crossterm",
  "diffy",
@@ -1136,6 +1142,10 @@ dependencies = [
  "vt100",
  "which",
 ]
+
+[[package]]
+name = "codex-version"
+version = "0.0.0"
 
 [[package]]
 name = "color-eyre"
