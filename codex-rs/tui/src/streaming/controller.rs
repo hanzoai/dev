@@ -738,24 +738,17 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
             let has_delta = state.has_seen_delta;
 
             if has_delta {
-                // Many providers send a final reasoning/message that may include
-                // text not present in prior deltas. For Reasoning, prefer to
-                // merge the final message into the collector to avoid losing
-                // content, preserving the number of already committed lines so
-                // we don't duplicate what the user already saw.
-                if matches!(kind, StreamKind::Reasoning) && !message.is_empty() {
+                // Key-based deduplication for Reasoning:
+                // If we have already streamed deltas for this reasoning section
+                // (same stream id within this request), do NOT inject the final
+                // full text again. Finalize the stream using the accumulated
+                // deltas only. This avoids duplicate headings/paragraphs without
+                // relying on string comparisons.
+                if matches!(kind, StreamKind::Reasoning) {
                     tracing::debug!(
-                        "Merging final {:?} content into collector before finalize (len={})",
-                        kind,
-                        message.len()
+                        "Dedup: ignoring final {:?} after deltas; finalizing existing content",
+                        kind
                     );
-                    let committed = state.collector.committed_count();
-                    let mut msg = message.to_owned();
-                    if !msg.ends_with('\n') { msg.push('\n'); }
-                    let state_mut = self.state_mut(kind);
-                    state_mut
-                        .collector
-                        .replace_with_and_mark_committed(&msg, committed);
                     return self.finalize(kind, immediate, sink);
                 }
                 // For Answer (or empty message), finalize existing streamed content.

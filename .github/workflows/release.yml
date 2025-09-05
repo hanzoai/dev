@@ -273,6 +273,7 @@ jobs:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Checkout code
@@ -425,6 +426,119 @@ jobs:
           fi
           echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Generate CHANGELOG and release notes by running our own `code` CLI in headless mode.
+      # It will:
+      #  - Review changes between the previous tag and the new version
+      #  - Update CHANGELOG.md with a new section for vNEW_VERSION
+      #  - Write rich release notes to release-notes/RELEASE_NOTES.md
+      - name: Generate CHANGELOG + release notes (Code)
+        if: env.OPENAI_API_KEY != ''
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Determine previous tag (the most recent tag before the new one).
+          # If none exists, use the initial commit as the base.
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p' || true)
+          if [ -z "$PREV_TAG" ]; then
+            BASE=$(git rev-list --max-parents=0 HEAD | tail -n1)
+            RANGE="$BASE..HEAD"
+          else
+            RANGE="$PREV_TAG..HEAD"
+          fi
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+          echo "Range: $RANGE"
+
+          # Extract a Linux x86_64 Code binary from artifacts and make it runnable.
+          mkdir -p .code-bin release-notes
+          LNX_ZST=$(ls -1 release-assets/code-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
+          if [ -z "$LNX_ZST" ]; then
+            echo "Could not find linux x86_64 Code artifact in release-assets/" >&2
+            exit 1
+          fi
+          case "$LNX_ZST" in
+            *.zst)
+              zstd -d -q --force "$LNX_ZST" -o .code-bin/code ;;
+            *.tar.gz)
+              tar -xzf "$LNX_ZST" -C .code-bin && mv .code-bin/code-x86_64-unknown-linux-musl .code-bin/code ;;
+            *.zip)
+              unzip -q -o "$LNX_ZST" -d .code-bin && mv .code-bin/code-x86_64-unknown-linux-musl .code-bin/code ;;
+            *)
+              cp "$LNX_ZST" .code-bin/code ;;
+          esac
+          chmod +x .code-bin/code
+
+          # Prepare context for the model.
+          DATE=$(date -u +%Y-%m-%d)
+          echo "# Commit log ($RANGE)" > release-notes/context.md
+          git log --no-color --format='* %h %s (%an)' --abbrev=8 --no-merges $RANGE >> release-notes/context.md || true
+
+          # Build the task prompt (with variables expanded by bash).
+          cat > release-notes/prompt.expanded.txt <<PROMPT
+You are Code, running headless during CI for a release.
+
+Goal:
+- Review the provided git changes for this release.
+- Update the top-level CHANGELOG.md by inserting a new section for the release.
+- Write rich GitHub release notes to release-notes/RELEASE_NOTES.md.
+
+Requirements:
+- Version: v${NEW_VERSION}
+- Date: ${DATE}
+- Previous tag: ${PREV_TAG:-none}
+- Range: ${RANGE}
+- Keep the existing changelog style and headings.
+- Categorize entries by feat, fix, perf, refactor, docs, chore, ci, test, build.
+- Link PRs and issues like #123 when present; include contributor handles when visible in commit messages.
+- Keep lines wrapped reasonably; use markdown lists.
+- Ensure idempotence: if a section for this version already exists, replace its contents.
+- After updating files, stage them and commit with: docs(changelog): update for v${NEW_VERSION}
+- Also create release-notes/RELEASE_NOTES.md mirroring the new CHANGELOG section with a brief intro and installation snippet.
+
+Context (git log excerpt follows):
+PROMPT
+          cat release-notes/context.md >> release-notes/prompt.expanded.txt
+
+          # Run Code in fully automated exec mode against the repo root.
+          ./.code-bin/code exec --full-auto --skip-git-repo-check --cwd "$GITHUB_WORKSPACE" < release-notes/prompt.expanded.txt || {
+            echo "Code exec returned non-zero; continuing to check for outputs..." >&2
+          }
+
+          # If the agent forgot to write release notes, synthesize a minimal one from CHANGELOG.
+          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
+            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
+          fi
+
+          # Commit CHANGELOG changes if any.
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git add CHANGELOG.md release-notes/RELEASE_NOTES.md || true
+            git commit -m "docs(changelog): update for v${NEW_VERSION} [skip ci]" || true
+          fi
+
+      - name: Fallback release notes from CHANGELOG (no OPENAI_API_KEY)
+        if: env.OPENAI_API_KEY == ''
+        shell: bash
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-notes
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
+          fi
+          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
+            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+          fi
+
+      - name: Assert release notes exist
+        shell: bash
+        run: |
+          test -s release-notes/RELEASE_NOTES.md || { echo "release-notes/RELEASE_NOTES.md missing" >&2; exit 1; }
+
       - name: Check if we should publish
         id: should_publish
         shell: bash
@@ -458,22 +572,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Release v${{ steps.version.outputs.version }}
-          body: |
-            ## @just-every/code v${{ steps.version.outputs.version }}
-
-            Fork of OpenAI Codex with additional features:
-            - Enhanced image handling (drag-and-drop, paste, file path detection)
-            - /reasoning slash command for dynamic reasoning effort
-
-            ### Installation
-            ```bash
-            npm install -g @just-every/code
-            ```
-
-            ### Usage
-            ```bash
-            code
-            ```
+          body_path: release-notes/RELEASE_NOTES.md
           files: |
             release-assets/*
         env:

@@ -189,6 +189,9 @@ pub(crate) struct ChatWidget<'a> {
 
     // Guard for out-of-order exec events: track call_ids that already ended
     ended_call_ids: HashSet<ExecCallId>,
+    /// Exec call_ids that were explicitly cancelled by user interrupt. Used to
+    /// drop any late ExecEnd events so we don't render duplicate cells.
+    canceled_exec_call_ids: HashSet<ExecCallId>,
 
     // Accumulated diff/session state
     diffs: DiffsState,
@@ -400,6 +403,15 @@ impl ChatWidget<'_> {
         let req = self.last_seen_request_index.saturating_add(1);
         self.internal_seq = self.internal_seq.saturating_add(1);
         OrderKey { req, out: i32::MIN + 1, seq: self.internal_seq }
+    }
+
+    // Synthetic key for internal notices tied to the upcoming turn that
+    // should appear immediately after the user prompt but still before any
+    // model output for that turn.
+    fn next_req_key_after_prompt(&mut self) -> OrderKey {
+        let req = self.last_seen_request_index.saturating_add(1);
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq }
     }
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
@@ -1057,6 +1069,20 @@ impl ChatWidget<'_> {
             // Defensive: clear transient flags so UI can quiesce
             self.agents_ready_to_start = false;
             self.active_task_ids.clear();
+            // Restore any queued messages back into the composer so the user can
+            // immediately press Enter to resume the conversation where they left off.
+            if !self.queued_user_messages.is_empty() {
+                let mut prefill = String::new();
+                for (i, qm) in self.queued_user_messages.iter().enumerate() {
+                    if i > 0 { prefill.push('\n'); }
+                    prefill.push_str(qm.display_text.trim_end());
+                }
+                self.clear_composer();
+                if !prefill.is_empty() { self.insert_str(&prefill); }
+                self.queued_user_messages.clear();
+                // Clear any sticky status like "queued for next turn" now that we returned text
+                self.bottom_pane.update_status_text(String::new());
+            }
             self.maybe_hide_spinner();
             self.request_redraw();
         }
@@ -1098,8 +1124,20 @@ impl ChatWidget<'_> {
             {
                 Ok(conv) => conv,
                 Err(e) => {
-                    // TODO: surface this error to the user.
                     tracing::error!("failed to initialize conversation: {e}");
+                    // Surface a visible background event so users see why nothing starts.
+                    let ev = Event {
+                        id: "diagnostic".to_string(),
+                        event_seq: 0,
+                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                            message: format!(
+                                "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
+                                e
+                            ),
+                        }),
+                        order: None,
+                    };
+                    app_event_tx_clone.send(AppEvent::CodexEvent(ev));
                     return;
                 }
             };
@@ -1110,11 +1148,13 @@ impl ChatWidget<'_> {
 
             let conversation = new_conversation.conversation;
             let conversation_clone = conversation.clone();
+            let app_event_tx_submit = app_event_tx_clone.clone();
             tokio::spawn(async move {
                 while let Some(op) = codex_op_rx.recv().await {
-                    let id = conversation_clone.submit(op).await;
-                    if let Err(e) = id {
+                    if let Err(e) = conversation_clone.submit(op).await {
                         tracing::error!("failed to submit op: {e}");
+                        let ev = Event { id: "diagnostic".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("⚠️ Failed to submit Op to core: {}", e) }), order: None };
+                        app_event_tx_submit.send(AppEvent::CodexEvent(ev));
                     }
                 }
             });
@@ -1122,6 +1162,7 @@ impl ChatWidget<'_> {
             while let Ok(event) = conversation.next_event().await {
                 app_event_tx_clone.send(AppEvent::CodexEvent(event));
             }
+            // (debug end notice removed)
         });
 
         // Browser manager is now handled through the global state
@@ -1155,7 +1196,8 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
+    exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
+    canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -1280,7 +1322,8 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
-            exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
+    exec: ExecState { running_commands: HashMap::new(), running_read_agg_index: None, pending_exec_ends: HashMap::new() },
+    canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState { running_custom_tools: HashMap::new(), running_web_search: HashMap::new() },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
@@ -1714,9 +1757,17 @@ impl ChatWidget<'_> {
                         .collect();
                     // Truncate preview to avoid overflow in narrow panes
                     let mut preview = text.clone();
-                    if preview.len() > 120 {
-                        preview.truncate(120);
-                        preview.push_str("…");
+                    // Truncate preview by display width, not bytes, to avoid splitting
+                    // a multi-byte character at an invalid boundary.
+                    {
+                        use unicode_width::UnicodeWidthStr as _;
+                        let maxw = 120usize;
+                        if preview.width() > maxw {
+                            preview = format!(
+                                "{}…",
+                                crate::live_wrap::take_prefix_by_width(&preview, maxw.saturating_sub(1)).0
+                            );
+                        }
                     }
                     Some(format!(
                         "title='{}' bytes={} chars={} width={} spans={} span_bytes={:?}",
@@ -1850,6 +1901,9 @@ impl ChatWidget<'_> {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        // Surface a local diagnostic note and anchor it to the NEXT turn,
+        // placing it directly after the user prompt so ordering is stable.
+        // (debug message removed)
         // Fade the welcome cell only when a user actually posts a message.
         for cell in &self.history_cells { cell.trigger_fade(); }
         let UserMessage { display_text, mut ordered_items } = user_message;
@@ -2051,16 +2105,12 @@ impl ChatWidget<'_> {
             );
         }
 
-        // If a task is running, queue this message to be sent when the
-        // current turn completes. Keep it visible at the bottom as
-        // "user (queued)" until then.
-        let task_is_running = self.bottom_pane.is_task_running() || !self.active_task_ids.is_empty();
-        if task_is_running {
-            self.queued_user_messages.push_back(UserMessage { display_text: original_text.clone(), ordered_items: items });
-            // Show a subtle status so users know it's queued
-            self.bottom_pane.update_status_text("queued for next turn".to_string());
-            self.request_redraw();
-            return;
+        // New policy: always send immediately even if a task is running.
+        // The core will abort any current task on UserInput and start a new turn.
+        // This prevents messages from being stranded in `queued_user_messages`
+        // after an interrupt (there is no TaskComplete after Op::Interrupt).
+        if self.bottom_pane.is_task_running() || !self.active_task_ids.is_empty() {
+            self.bottom_pane.update_status_text("interrupting & starting new turn".to_string());
         }
 
         // Idle path: append the user cell first so the upcoming TaskStarted
@@ -2071,14 +2121,14 @@ impl ChatWidget<'_> {
         }
 
         // Now send to the agent
-        self.codex_op_tx
-            .send(Op::UserInput { items })
-            .unwrap_or_else(|e| tracing::error!("failed to send message: {e}"));
+        let _ = self.codex_op_tx.send(Op::UserInput { items });
         if !original_text.is_empty() {
             self.codex_op_tx
                 .send(Op::AddToHistory { text: original_text.clone() })
                 .unwrap_or_else(|e| tracing::error!("failed to send AddHistory op: {e}"));
         }
+
+        // (debug watchdog removed)
     }
 
     #[allow(dead_code)]
@@ -2186,6 +2236,11 @@ impl ChatWidget<'_> {
             EventMsg::WebSearchComplete(ev) => tools::web_search_complete(self, ev.call_id, ev.query),
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
+                // If the user requested an interrupt, ignore late deltas.
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring Answer delta after interrupt");
+                    return;
+                }
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_answer_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Answer delta for closed id={}", id);
@@ -2195,7 +2250,13 @@ impl ChatWidget<'_> {
                 let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.seed_stream_order_key(StreamKind::Answer, &id, ok);
                 // Stream answer delta through StreamController
-                streaming::delta_text(self, StreamKind::Answer, id.clone(), delta, Some(event.event_seq));
+                streaming::delta_text(
+                    self,
+                    StreamKind::Answer,
+                    id.clone(),
+                    delta,
+                    event.order.as_ref().and_then(|o| o.sequence_number),
+                );
                 // Show responding state while assistant streams
                 self.bottom_pane.update_status_text("responding".to_string());
             }
@@ -2237,6 +2298,10 @@ impl ChatWidget<'_> {
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 tracing::debug!("AgentReasoningDelta: {:?}", delta);
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring Reasoning delta after interrupt");
+                    return;
+                }
                 // Ignore late deltas for ids that have already finalized in this turn
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring Reasoning delta for closed id={}", id);
@@ -2247,7 +2312,13 @@ impl ChatWidget<'_> {
                 tracing::info!("[order] EventMsg::AgentReasoningDelta id={} key={:?}", id, ok);
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
                 // Stream reasoning delta through StreamController
-                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta, Some(event.event_seq));
+                streaming::delta_text(
+                    self,
+                    StreamKind::Reasoning,
+                    id.clone(),
+                    delta,
+                    event.order.as_ref().and_then(|o| o.sequence_number),
+                );
                 // Show thinking state while reasoning streams
                 self.bottom_pane.update_status_text("thinking".to_string());
             }
@@ -2257,6 +2328,9 @@ impl ChatWidget<'_> {
                 self.stream.insert_reasoning_section_break(&sink);
             }
             EventMsg::TaskStarted => {
+                // This begins the new turn; clear the pending prompt anchor count
+                // so subsequent background events use standard placement.
+                self.pending_user_prompts_for_next_turn = 0;
                 // Reset stream headers for new turn
                 self.stream.reset_headers_for_new_turn();
                 self.stream_state.current_kind = None;
@@ -2382,6 +2456,10 @@ impl ChatWidget<'_> {
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }) => {
+                if self.stream_state.drop_streaming {
+                    tracing::debug!("Ignoring RawContent delta after interrupt");
+                    return;
+                }
                 // Treat raw reasoning content the same as summarized reasoning
                 if self.stream_state.closed_reasoning_ids.contains(&StreamId(id.clone())) {
                     tracing::debug!("Ignoring RawContent delta for closed id={}", id);
@@ -2391,7 +2469,13 @@ impl ChatWidget<'_> {
                 let ok = Self::order_key_from_order_meta(event.order.as_ref());
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
 
-                streaming::delta_text(self, StreamKind::Reasoning, id.clone(), delta, Some(event.event_seq));
+                streaming::delta_text(
+                    self,
+                    StreamKind::Reasoning,
+                    id.clone(),
+                    delta,
+                    event.order.as_ref().and_then(|o| o.sequence_number),
+                );
             }
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
                 if self.stream_state.drop_streaming {
@@ -2711,6 +2795,7 @@ impl ChatWidget<'_> {
                     .on_history_entry_response(log_id, offset, entry.map(|e| e.text));
             }
             EventMsg::ShutdownComplete => {
+                self.history_push(history_cell::new_background_event("🟡 ShutdownComplete".to_string()));
                 self.app_event_tx.send(AppEvent::ExitRequest);
             }
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
@@ -2720,7 +2805,19 @@ impl ChatWidget<'_> {
                 info!("BackgroundEvent: {message}");
                 // Surface lightweight background events in the history feed
                 // so users see confirmations (e.g., CDP connect success).
-                self.history_push(history_cell::new_background_event(message.clone()));
+                // If a user prompt was just inserted for the upcoming turn,
+                // anchor these background events to that next turn so they
+                // render below the prompt and above model output.
+                if self.pending_user_prompts_for_next_turn > 0 {
+                    let key = self.next_req_key_after_prompt();
+                    let _ = self.history_insert_with_key_global_tagged(
+                        Box::new(history_cell::new_background_event(message.clone())),
+                        key,
+                        "bg-next-turn",
+                    );
+                } else {
+                    self.history_push(history_cell::new_background_event(message.clone()));
+                }
 
                 // Also reflect CDP connect success in the status line.
                 if message.starts_with("✅ Connected to Chrome via CDP") {
@@ -3651,7 +3748,7 @@ impl ChatWidget<'_> {
                                 .downcast_mut::<history_cell::CollapsibleReasoningCell>()
                             {
                                 tracing::debug!("Appending {} lines to Reasoning(id={})", lines.len(), rid);
-                                reasoning_cell.lines.extend(lines);
+                                reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
@@ -3674,7 +3771,7 @@ impl ChatWidget<'_> {
                                 // Refresh the cache with the corrected index
                                 self.reasoning_index.insert(rid.clone(), found_idx);
                                 tracing::debug!("Recovered stale reasoning index; appending at {} for id={}", found_idx, rid);
-                                reasoning_cell.lines.extend(lines);
+                                reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
@@ -6851,6 +6948,24 @@ impl WidgetRef for &ChatWidget<'_> {
             };
 
             let content_y = ps[idx];
+
+            // Targeted bottom-row spacer compensation:
+            // If the viewport is at the very bottom (viewport_bottom == total_height)
+            // and this is the last item being considered (idx == end_idx - 1), we
+            // may land inside the 1-row spacer just above this last item. In that
+            // case content_y > scroll_pos and the renderer would not account for
+            // the spacer gap before drawing the item, leaving a 1-row blank at the
+            // bottom. Nudge screen_y down by that exact gap so the last cell sits
+            // flush with the bottom without altering general scroll math.
+            if viewport_bottom == total_height && idx == end_idx.saturating_sub(1) {
+                let gap = content_y.saturating_sub(scroll_pos);
+                if gap > 0 {
+                    let remaining = (content_area.y + content_area.height).saturating_sub(screen_y);
+                    let shift = gap.min(remaining);
+                    screen_y = screen_y.saturating_add(shift);
+                }
+            }
+
             let skip_top = if content_y < scroll_pos { scroll_pos - content_y } else { 0 };
 
             // Stop if we've gone past the bottom of the screen
@@ -7039,14 +7154,24 @@ impl WidgetRef for &ChatWidget<'_> {
                         let below_y = item_area.y.saturating_add(visible_height);
                         let bottom_y = content_area.y.saturating_add(content_area.height);
                         let maxw = item_area.width as usize;
-                        if text.len() > maxw { text.truncate(maxw); }
+                        // Truncate safely by display width, not by bytes, to avoid
+                        // panics on non-UTF-8 boundaries (e.g., emoji/CJK). Use the
+                        // same width logic as our live wrap utilities.
+                        let draw_text = {
+                            use unicode_width::UnicodeWidthStr as _;
+                            if text.width() > maxw {
+                                crate::live_wrap::take_prefix_by_width(&text, maxw).0
+                            } else {
+                                text.clone()
+                            }
+                        };
                         if item_area.width > 0 {
                             if below_y < bottom_y {
-                                buf.set_string(item_area.x, below_y, text.clone(), style);
+                                buf.set_string(item_area.x, below_y, draw_text.clone(), style);
                             } else if item_area.y > content_area.y {
                                 // Fall back to above the item if no space below
                                 let above_y = item_area.y.saturating_sub(1);
-                                buf.set_string(item_area.x, above_y, text.clone(), style);
+                                buf.set_string(item_area.x, above_y, draw_text.clone(), style);
                             }
                         }
                     }
