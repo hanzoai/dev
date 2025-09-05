@@ -2,6 +2,12 @@ Changelog
 
 All notable changes to Code are documented here.
 
+## [0.2.63] - 2025-09-05
+
+- TUI: inline images only; keep non-image paths as text; drop pending file tracking. (ff19a9d9)
+- TUI: align composer/history wrapping; add sanitize markers. (9e3e0d86)
+- Core: embed display version via tiny crate; remove CODE_VERSION env. (32f18333)
+
 ## [0.2.61] - 2025-09-05
 
 - No functional changes; maintenance-only release focused on CI. (d7ac45c)
