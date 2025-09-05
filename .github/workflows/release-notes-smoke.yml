@@ -7,15 +7,6 @@ on:
         description: "Additional flags to pass to 'code exec' (optional)"
         default: ""
         required: false
-      use_api:
-        description: "Use OPENAI_API_KEY secret (true = real API call)"
-        type: boolean
-        default: false
-        required: false
-      model:
-        description: "Model when use_api=true (e.g., gpt-4o-mini)"
-        default: "gpt-4o-mini"
-        required: false
 
 permissions:
   contents: read
@@ -41,27 +32,16 @@ jobs:
           set -euo pipefail
           npx -y @just-every/code@latest exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check --help | sed -n '1,80p'
 
-      - name: Parse-only dry run with redirection (published package)
+      - name: Live smoke run with default model (published package)
         shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event.inputs.use_api }}" = "true" ]; then
-            if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-              echo "Using OPENAI_API_KEY secret for live request" >&2
-              export OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}'
-              MODEL_FLAG=( -m '${{ github.event.inputs.model }}' )
-            else
-              echo "use_api=true but no OPENAI_API_KEY secret configured; failing." >&2
-              exit 1
-            fi
-          else
-            # Intentionally blank: parse-only path
-            export OPENAI_API_KEY=""
-            MODEL_FLAG=()
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY secret is not configured; cannot run live smoke. Configure the secret or pass a key at runtime." >&2
+            exit 1
           fi
-          # We expect this to exit non-zero due to missing API key, but only AFTER clap parses args.
-          # So we treat any exit as success as long as stderr DOES NOT contain an arg‑parse error.
-          set +e
           out=$(mktemp)
           err=$(mktemp)
           printf 'This is a smoke test for release notes generation.\n' | \
@@ -69,25 +49,22 @@ jobs:
               --cd "$GITHUB_WORKSPACE" \
               --full-auto \
               --skip-git-repo-check \
-              -c model_providers.openai.request_max_retries=0 \
-              -c model_providers.openai.stream_max_retries=0 \
-              -c model_providers.openai.stream_idle_timeout_ms=1 \
-              "${MODEL_FLAG[@]}" \
               ${{ github.event.inputs.extra_flags }} - \
             > "$out" 2> "$err"
-          status=$?
-          set -e
+          # Fail fast on CLI parse errors
           if grep -E "unexpected argument|For more information, try '--help'\." "$err"; then
             echo "Arg parsing failed (see stderr above)" >&2
             cat "$err" >&2
             exit 1
           fi
-          if [ "${{ github.event.inputs.use_api }}" = "true" ]; then
-            if grep -qiE "unauthorized|invalid api key|exceeded retry limit" "$err"; then
-              echo "Live API call failed (see stderr above)" >&2
-              exit 1
-            fi
+          # Fail on auth issues
+          if grep -qiE "unauthorized|invalid api key|exceeded retry limit" "$err"; then
+            echo "Live API call failed (see stderr above)" >&2
+            cat "$err" >&2
+            exit 1
           fi
+          echo "CLI + API request succeeded (default model). Showing first lines:"
+          sed -n '1,40p' "$out" || true
           echo "CLI parsed arguments successfully (exit=$status)." 
           echo "stderr (first lines):"
           sed -n '1,40p' "$err" || true
