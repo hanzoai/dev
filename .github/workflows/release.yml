@@ -655,12 +655,45 @@ jobs:
         shell: bash
         run: git push origin "v${{ steps.version.outputs.version }}" || true
 
-      - name: Push changes
+      - name: Push changes (fast-forward or policy merge)
         if: steps.version.outputs.skip_push != 'true'
         shell: bash
         run: |
+          set -euo pipefail
+          # First attempt a simple push
+          if git push origin main; then
+            git push origin --tags || true
+            exit 0
+          fi
+          echo "Push rejected (non-fast-forward). Attempting fetch + fast-forward..."
+          git fetch origin --tags
+          # Try fast-forward only; succeeds when our HEAD is descendant of origin/main
+          if git merge --ff-only origin/main; then
+            echo "Fast-forward merge succeeded; retrying push."
+            git push origin main
+            git push origin --tags || true
+            exit 0
+          fi
+          echo "Non-FF merge required; applying merge-with-policy fallback."
+          # Non-interactive merge that prefers our current changes, but adopts remote for workflow files.
+          git merge --no-ff --no-commit origin/main || true
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            # Default to ours for all files
+            git checkout --ours . || true
+            # Adopt remote version for workflow files (release-ignore path)
+            # Only adjust if those files are in conflict/unmerged
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              case "$f" in
+                .github/workflows/*) git checkout --theirs -- "$f" || true ;;
+              esac
+            done < <(git ls-files --unmerged | cut -f2 | sort -u)
+            git add -A
+            git commit -m "Merge origin/main: adopt remote workflow changes; keep release changes"
+          fi
+          echo "Retrying push after policy merge..."
           git push origin main
-          git push origin --tags
+          git push origin --tags || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
