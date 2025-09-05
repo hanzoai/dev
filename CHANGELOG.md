@@ -2,6 +2,12 @@ Changelog
 
 All notable changes to Code are documented here.
 
+## [0.2.60] - 2025-09-05
+
+- Release: collect all `code-*` artifacts recursively to ensure assets. (d9f9ebfd)
+- Release notes: add Compare link and optional Thanks; enforce strict sections. (f7a5cc88, 84253961)
+- Docs: use '@latest' in install snippet; tighten notes format. (b5aee550)
+
 ## [0.2.59] - 2025-09-05
 
 - TUI: enforce strict global ordering and require stream IDs for stable per‑turn history. (7c71037d, 7577fe4b)
