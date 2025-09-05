@@ -21,43 +21,9 @@ permissions:
   contents: write
 
 jobs:
-  guard:
-    name: Guard (skip on notes-only commits)
-    runs-on: ubuntu-latest
-    outputs:
-      skip: ${{ steps.check.outputs.skip }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Check changed paths
-        id: check
-        shell: bash
-        run: |
-          set -euo pipefail
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.sha }}"
-          # Fallback for single-commit push events
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            BEFORE="HEAD^"
-          fi
-          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" | tr '\n' ' ')
-          echo "Changed: $CHANGED"
-          # Allow list: only these may appear to qualify as notes-only
-          notes_only=true
-          for f in $CHANGED; do
-            case "$f" in
-              CHANGELOG.md|release-notes/RELEASE_NOTES.md) ;; # allowed
-              *) notes_only=false ;;
-            esac
-          done
-          echo "notes_only=$notes_only" >> "$GITHUB_OUTPUT"
-          if [ "$notes_only" = true ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
   determine-version:
     name: Determine Version
     runs-on: ubuntu-latest
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -103,8 +69,7 @@ jobs:
 
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs: [guard, determine-version]
-    if: needs.guard.outputs.skip != 'true'
+    needs: determine-version
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -326,8 +291,7 @@ jobs:
 
   release:
     name: Publish to npm
-    needs: [guard, determine-version, build-binaries]
-    if: needs.guard.outputs.skip != 'true'
+    needs: [determine-version, build-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # On tag or manual dispatch; no need to skip based on commit message
