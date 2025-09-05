@@ -1,6 +1,6 @@
 Changelog
 
-All notable changes to this project are documented here. This file is reconstructed from GitHub releases and mapped commit summaries. Dates use UTC tag dates.
+All notable changes to Code are documented here.
 
 ## [0.2.56] - 2025-09-01
 
@@ -55,3 +55,59 @@ All notable changes to this project are documented here. This file is reconstruc
 - Core git UX: avoid false branch-change detection by ignoring quoted text and tokenizing git subcommands; show suggested confirm argv when blocking branch change. (7111b30, a061dc8)
 - Exec cells: clearer visual status — black ❯ on completed commands, tinting for completed lines, and concise tree guides. (f2d31bb)
 - Syntax highlighting: derive syntect theme from the active UI theme for cohesive code styling. (b8c06b5)
+
+## [0.2.46] - 2025-08-30
+
+- CLI postinstall: print clear guidance when a PATH collision with VS Code’s `code` is detected; suggest using `coder`. (09ebae9)
+- Maintenance: upstream sync prior to release. (d2234fb)
+
+## [0.2.45] - 2025-08-30
+
+- TUI “glitch” animation: compute render rect first, scale safely, and cap height; bail early on tiny areas. (8268dd1)
+- Upstream integration: adopt MCP unbounded channels and Windows target updates while keeping forked TUI hooks. (70bd689, 3b062ea)
+- CI/infra: various stability fixes (Windows cache priming; clippy profile; unbounded channel). (7eee69d, 5d2d300, 970e466, 3f81840)
+
+## [0.2.44] - 2025-08-29
+
+- Exec UX: show suggested confirm argv when branch-change is blocked. (a061dc8)
+- File completion: prioritize CWD matches for more relevant suggestions. (7d4cf9b)
+- Assistant code cards: unify streaming/final layout; refine padding and colors; apply consistent background for code blocks. (e12f31c, 986a764, e4601bd, 97a91e8, beaa1c7)
+- Syntax highlighting: theme-aware syntect mapping for better readability. (b8c06b5)
+
+## [0.2.43] - 2025-08-29
+
+- npx/bin behavior: always run bundled binary and show exact path; stop delegating to system VS Code. (448b176)
+- Postinstall safety: remove global `code` shim if any conflicting `code` is on PATH; keep `coder` as the entrypoint. (1dc19da)
+- Exec cells: clearer completed-state visuals and line tinting. (f2d31bb)
+
+## [0.2.42] - 2025-08-29
+
+- Housekeeping: release and sync tasks for CLI, core, and TUI. (eea7d98, 6d80b3a)
+
+## [0.2.41] - 2025-08-29
+
+- Housekeeping: release and pre-sync commits ahead of broader upstream merges. (75bb264, 75ed347)
+
+## [0.2.40] - 2025-08-29
+
+- Upstream sync: align web_search events and TUI popup APIs; clean warnings; maintain forked behaviors. (f20bffe, 4d9874f)
+- Features: custom `/prompts`; deadlock fix in message routing. (b8e8454, f7cb2f8)
+- Docs: clarify merge-only push policy. (7c7b63e)
+
+## [0.2.39] - 2025-08-29
+
+- Upstream integration: reconcile core/TUI APIs; add pager overlay stubs; keep transcript app specifics; ensure clean build. (c90d140, b1b01d0)
+- Tools: add “View Image” tool; improve cursor after suspend; fix doubled lines/hanging markers. (4e9ad23, 3e30980, 488a402)
+- UX: welcome message polish, issue templates, slash command restrictions while running. (bbcfd63, c3a8b96, e5611aa)
+
+## [0.2.38] - 2025-08-29
+
+- TUI: code-block background styling and improved syntax highlighting. (bb29c30)
+- Markdown: strip OSC 8 hyperlinks; refine rendering and syntax handling. (a30c019)
+- Exec rendering: highlight executed commands as bash and show inline durations. (38dc45a)
+- Maintenance: merged fixes from feature branches (`feat/codeblock-bg`, `fix/strip-osc8-in-markdown`). (6b30005, 0704775)
+
+## [0.2.37] - 2025-08-27
+
+- Packaging: move platform-specific binaries to npm optionalDependencies; postinstall resolves platform package before GitHub fallback. (5bb9d01)
+- CI: fix env guard for NPM_TOKEN and YAML generation for platform package metadata. (7ae25a9, d29be0a)
