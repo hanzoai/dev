@@ -34,6 +34,8 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tracing::error;
 use unicode_width::UnicodeWidthChar;
 
@@ -3231,9 +3233,22 @@ impl HistoryCell for StreamingContentCell {
         let text_wrap_width = area.width;
         let mut segs = plan.segs.clone();
         let mut seg_rows = plan.seg_rows.clone();
-        if self.show_ellipsis { 
-            segs.push(AssistantSeg::Text(vec![Line::from("…".dim())]));
-            seg_rows.push(Paragraph::new(Text::from(vec![Line::from("…")]))
+        if self.show_ellipsis {
+            // Animated three-dot indicator with a rotating middle dot (·):
+            // frames: "...", "·..", ".·.", "..·", "...".
+            // Keep it subtle and only show during streaming like the old ellipsis.
+            const FRAMES: [&str; 5] = ["...", "·..", ".·.", "..·", "..."];
+            let frame_idx = (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                / 200) as usize % FRAMES.len();
+            let frame = FRAMES[frame_idx];
+
+            segs.push(AssistantSeg::Text(vec![
+                Line::styled(frame.to_string(), Style::default().fg(crate::colors::text_dim())),
+            ]));
+            seg_rows.push(Paragraph::new(Text::from(vec![Line::from(frame)]))
                 .wrap(Wrap { trim: false })
                 .line_count(text_wrap_width)
                 .try_into()
