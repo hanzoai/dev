@@ -8,3 +8,50 @@ All notable changes to this project are documented here. This file is reconstruc
 - Reasoning titles: better collapsed-title extraction and formatting rules; remove brittle phrase checks. (5ca1670, 7f4c569, 6d029d5)
 - Plan streaming: queue PlanUpdate history while streaming to prevent interleaving; flush on finalize. (770d72c)
 - De-dup reasoning: ignore duplicate final Reasoning events and guard out-of-order deltas. (f1098ad)
+
+## [0.2.55] - 2025-09-01
+
+- Reasoning delta ordering: key by `(item_id, output_index, content_index)`, record `sequence_number`, and drop duplicates/out-of-order fragments. (b39ed09, 509fc87)
+- Merge streamed + final reasoning so text is not lost on finalize. (2e5f4f8)
+- Terminal color detection: unify truecolor checks; avoid 256-color fallback on Windows Terminal; smoother shimmer gradients. (90fdb6a)
+- Startup rendering: skip full-screen background paint on Windows Terminal; gate macOS Terminal behavior behind `TERM_PROGRAM` and `CODE_FORCE_FULL_BG_PAINT`. (6d7bc98)
+
+## [0.2.54] - 2025-09-01
+
+- Clipboard image paste: show `[image: filename]` placeholders; accept raw base64 and data-URI images; enable PNG encoding; add paste shortcut fallback to read raw images. (d597f0e, 6f068d8, d4287d2, 7c32e8e)
+- Exec event ordering: ensure `ExecCommandBegin` is handled before flushing queued interrupts to avoid out-of-order “End” lines. (74427d4)
+- ANSI color mapping: fix 256-indexed → RGB conversion and luminance decisions. (ddf6b68)
+
+## [0.2.53] - 2025-09-01
+
+- Browser + HUD: add CDP console log capture, collapsible HUD, and coalesced redraws; raise expanded HUD minimum height to 25 rows. (34f68b0, 1fa906d, d6fd6e5, 95ba819)
+- General: improve internal browser launch diagnostics and log path. (95ba819)
+
+## [0.2.52] - 2025-08-30
+
+- Diff rendering: sanitize diff content like input/output (expand tabs, strip control sequences) to avoid layout issues. (7985c70)
+
+## [0.2.51] - 2025-08-30
+
+- CLI: de-duplicate `validateBinary` to avoid ESM redeclare errors under Bun/Node 23. (703e080)
+
+## [0.2.50] - 2025-08-30
+
+- CLI bootstrap: make bootstrap helper async and correctly await in the entry; fixes Bun global installs when postinstall is blocked. (9b9e50c)
+
+## [0.2.49] - 2025-08-30
+
+- CLI install: bootstrap the native binary on first run when postinstall is blocked; prefer cached/platform pkg then fall back to GitHub release. (27a0b4e)
+- Packaging: adjust Windows optional dependency metadata for parity with published packages. (030e9ae)
+
+## [0.2.48] - 2025-08-30
+
+- TUI Help: show environment summary and resolved tool paths in the Help panel. (01b4a8c)
+- CLI install safety: stop publishing a `code` bin by default; create a wrapper only when no PATH collision exists and remove on collision to avoid overriding VS Code. (1a95e83)
+
+## [0.2.47] - 2025-08-30
+
+- Agents: add `/agents` command; smoother TUI animations and safe branch names. (0b49a37)
+- Core git UX: avoid false branch-change detection by ignoring quoted text and tokenizing git subcommands; show suggested confirm argv when blocking branch change. (7111b30, a061dc8)
+- Exec cells: clearer visual status — black ❯ on completed commands, tinting for completed lines, and concise tree guides. (f2d31bb)
+- Syntax highlighting: derive syntect theme from the active UI theme for cohesive code styling. (b8c06b5)
