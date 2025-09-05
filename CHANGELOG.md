@@ -1,8 +1,10 @@
-## Unreleased
+Changelog
 
-- TUI: Support pasting images from the clipboard and data‑URI/base64 into the composer. Pasted images now appear as `[image: filename.png]` and are attached to the message. Fixes #10.
-- TUI/Input: Normalize key events on non‑enhanced terminals (e.g., Git Bash/mintty on Windows) so typing and Ctrl+C work reliably. Closes #18, #14.
-- NPM: Make `@vscode/ripgrep` an optional dependency to prevent global installs from failing when its postinstall cannot download. Closes #16.
-- Core/HTTP: Honor extra CA certs via `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, and `SSL_CERT_DIR` to work behind corporate/mitm proxies. Closes #17.
-- Docs: Clarify npm package name; `@just-every/coder` is deprecated in favor of `@just-every/code`. Closes #12.
-- Docs: Add Homebrew formula generator and instructions for maintainers. Refs #19.
+All notable changes to this project are documented here. This file is reconstructed from GitHub releases and mapped commit summaries. Dates use UTC tag dates.
+
+## [0.2.56] - 2025-09-01
+
+- Strict event ordering in TUI: keep exec/tool cells ahead of the final assistant cell; render tool results from embedded markdown; stabilize interrupt processing. (dfb703a)
+- Reasoning titles: better collapsed-title extraction and formatting rules; remove brittle phrase checks. (5ca1670, 7f4c569, 6d029d5)
+- Plan streaming: queue PlanUpdate history while streaming to prevent interleaving; flush on finalize. (770d72c)
+- De-dup reasoning: ignore duplicate final Reasoning events and guard out-of-order deltas. (f1098ad)
