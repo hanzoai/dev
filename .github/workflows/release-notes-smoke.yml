@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   smoke:
-    name: CLI smoke (exec --cd)
+    name: CLI smoke via npm (@just-every/code)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -21,33 +21,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust (minimal)
-        shell: bash
-        run: |
-          rustup set profile minimal
-          rustup toolchain install 1.89.0 --profile minimal
-          rustup default 1.89.0
-
-      - name: Cache Cargo (target + registries)
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          prefix-key: v5-rust
-          shared-key: codex-smoke-toolchain-1.89
-          workspaces: |
-            codex-rs -> target
-          cache-targets: true
-          cache-workspace-crates: true
+          node-version: '20'
 
-      - name: Build fast (dev-fast)
-        run: ./build-fast.sh
-
-      - name: Show CLI help (exec)
+      - name: Show CLI help (exec) using published package
         shell: bash
         run: |
           set -euo pipefail
-          ./codex-rs/target/dev-fast/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check --help | sed -n '1,80p'
+          npx -y @just-every/code@latest exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check --help | sed -n '1,80p'
 
-      - name: Parse-only dry run with redirection
+      - name: Parse-only dry run with redirection (published package)
         shell: bash
         env:
           # Intentionally blank: we only validate argument parsing, not a full model run
@@ -60,7 +45,7 @@ jobs:
           out=$(mktemp)
           err=$(mktemp)
           printf 'This is a smoke test for release notes generation.\n' | \
-            ./codex-rs/target/dev-fast/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check ${{ inputs.extra_flags }} - \
+            npx -y @just-every/code@latest exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check ${{ github.event.inputs.extra_flags }} - \
             > "$out" 2> "$err"
           status=$?
           set -e
@@ -74,4 +59,3 @@ jobs:
           sed -n '1,40p' "$err" || true
           echo "stdout (first lines):"
           sed -n '1,40p' "$out" || true
-
