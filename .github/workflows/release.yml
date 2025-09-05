@@ -319,12 +319,15 @@ jobs:
       - name: Prepare release assets
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release-assets
-          for dir in artifacts/binaries-*; do
-            cp "$dir"/* release-assets/
-          done
-          chmod +x release-assets/* || true
-          ls -la release-assets/
+          shopt -s nullglob
+          # Gather all built "code-*" files (zst/tar.gz/zip or raw) recursively under artifacts/
+          while IFS= read -r -d '' f; do
+            cp "$f" release-assets/
+          done < <(find artifacts -type f -name 'code-*' -print0)
+          # Show what we collected
+          ls -la release-assets/ || true
 
       - name: Build per-target npm binary packages
         shell: bash
