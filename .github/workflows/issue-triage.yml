@@ -5,7 +5,7 @@ on:
     types: [opened, reopened]
 
 concurrency:
-  group: issue-autopilot-${{ github.event.issue.number }}
+  group: issue-triage-${{ github.event.issue.number }}
   cancel-in-progress: true
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
   issues: write
 
 jobs:
-  issue_autopilot:
+  issue_triage:
     runs-on: ubuntu-latest
 
     env:
@@ -78,37 +78,36 @@ jobs:
           - Be concise. Avoid touching unrelated files. Fix any compiler warnings you introduce.
           EOF
 
-      - name: Run Code agent to implement or respond (published package)
+      - name: Run Code agent to implement or respond
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "OPENAI_API_KEY secret is required for issue autopilot." >&2
+            echo "OPENAI_API_KEY secret is required for issue triage." >&2
             exit 1
           fi
           PROMPT=$(cat << 'EOP'
-          /plan
-          - Understand the issue and list exact edits needed (paths, snippets).
-          - If edits are warranted, make them and ensure the repo still builds locally if applicable (use ./build-fast.sh).
-          - If no edits are warranted, prepare a high-signal maintainer comment.
+          <task>
+            - Understand the issue and list exact edits needed (paths, snippets).
+            - If edits are warranted, make them and ensure the repo still builds locally if applicable (use ./build-fast.sh).
+            - If no edits are warranted, prepare a high-signal maintainer comment.
+          </task>
 
-          /solve
+          <context>
+            Repository: ${{ env.REPO }}
+            Default branch: ${{ env.DEFAULT_BRANCH }}
+            Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
 
-          Context
-          --------
-          Repository: ${{ env.REPO }}
-          Default branch: ${{ env.DEFAULT_BRANCH }}
-          Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
+            Issue body:
+            ${{ env.ISSUE_BODY }}
 
-          Issue body:
-          ${{ env.ISSUE_BODY }}
+            Actor: ${{ env.ACTOR }}
 
-          Actor: ${{ env.ACTOR }}
-
-          Instructions:
-          $(cat .github/auto/CONTEXT.md)
+            Instructions:
+            $(cat .github/auto/CONTEXT.md)
+          </context>
           EOP
           )
           printf '%s' "$PROMPT" | npx -y @just-every/code@latest exec \
