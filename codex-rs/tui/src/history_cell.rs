@@ -236,14 +236,6 @@ pub(crate) trait HistoryCell {
         false // Default: most cells should not be removed
     }
 
-    /// Check if this cell is ONLY a title line (no content after it)
-    /// Used to avoid spacing between standalone titles and their content
-    fn is_title_only(&self) -> bool {
-        let lines = self.display_lines_trimmed();
-        // Cell is title-only if it has exactly 1 line and that line is a title
-        lines.len() == 1 && lines.first().map_or(false, is_title_line)
-    }
-
     /// Returns the gutter symbol for this cell type
     /// Returns None if no symbol should be displayed
     fn gutter_symbol(&self) -> Option<&'static str> {
@@ -329,10 +321,6 @@ impl HistoryCell for Box<dyn HistoryCell> {
 
     fn should_remove(&self) -> bool {
         self.as_ref().should_remove()
-    }
-
-    fn is_title_only(&self) -> bool {
-        self.as_ref().is_title_only()
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
@@ -2263,7 +2251,7 @@ fn exec_render_parts_parsed(
                         ));
                     }
                 }
-                "List" => {
+                "List Files" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
@@ -2292,6 +2280,21 @@ fn exec_render_parts_parsed(
         }
     }
 
+    // If this is a List Files cell and nothing emitted (e.g., suppressed due to matching Search path),
+    // still show a single contextual line so users can see where we listed.
+    if matches!(action, ExecAction::List) && !any_content_emitted {
+        let display_p = match &ctx_path {
+            Some(p) if !p.is_empty() => {
+                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+            }
+            _ => "./".to_string(),
+        };
+        pre.push(Line::from(vec![
+            Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+        ]));
+    }
+
     // Collapse adjacent Read ranges for the same file inside a single exec's preamble
     coalesce_read_ranges_in_lines_local(&mut pre);
 
@@ -2301,78 +2304,116 @@ fn exec_render_parts_parsed(
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
+    use ratatui::style::{Modifier, Style};
     use ratatui::text::Span;
-    if lines.len() <= 1 {
-        return;
-    }
-    fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32, String)> {
-        if line.spans.is_empty() {
-            return None;
-        }
+    // Nothing to do for empty/single line vectors
+    if lines.len() <= 1 { return; }
+
+    // Parse a content line of the form
+    //   "└ <file> (lines A to B)" or "  <file> (lines A to B)"
+    // into (filename, start, end, prefix, original_index).
+    fn parse_read_line_with_index(idx: usize, line: &Line<'_>) -> Option<(String, u32, u32, String, usize)> {
+        if line.spans.is_empty() { return None; }
         let prefix = line.spans[0].content.to_string();
-        if !(prefix == "└ " || prefix == "  ") {
-            return None;
-        }
-        let rest: String = line
-            .spans
-            .iter()
-            .skip(1)
-            .map(|s| s.content.as_ref())
-            .collect();
-        if let Some(idx) = rest.rfind(" (lines ") {
-            let fname = rest[..idx].to_string();
-            let tail = &rest[idx + 1..];
+        if !(prefix == "└ " || prefix == "  ") { return None; }
+        let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+        if let Some(i) = rest.rfind(" (lines ") {
+            let fname = rest[..i].to_string();
+            let tail = &rest[i + 1..];
             if tail.starts_with("(lines ") && tail.ends_with(")") {
                 let inner = &tail[7..tail.len() - 1];
                 if let Some((s1, s2)) = inner.split_once(" to ") {
                     if let (Ok(a), Ok(b)) = (s1.trim().parse::<u32>(), s2.trim().parse::<u32>()) {
-                        return Some((fname, a, b, prefix));
+                        return Some((fname, a, b, prefix, idx));
                     }
                 }
             }
         }
         None
     }
-    // Merge overlapping or touching ranges for the same file, regardless of adjacency.
-    let mut i: usize = 0;
-    while i < lines.len() {
-        let Some((fname_a, mut a1, mut a2, prefix_a)) = parse_read_line(&lines[i]) else {
-            i += 1;
-            continue;
-        };
-        let mut k = i + 1;
-        while k < lines.len() {
-            if let Some((fname_b, b1, b2, _prefix_b)) = parse_read_line(&lines[k]) {
-                if fname_b == fname_a {
-                    // Merge if overlapping or contiguous
-                    let touch_or_overlap = b1 <= a2.saturating_add(1) && b2.saturating_add(1) >= a1;
-                    if touch_or_overlap {
-                        a1 = a1.min(b1);
-                        a2 = a2.max(b2);
-                        let new_spans: Vec<Span<'static>> = vec![
-                            Span::styled(
-                                prefix_a.clone(),
-                                Style::default().add_modifier(Modifier::DIM),
-                            ),
-                            Span::styled(
-                                fname_a.clone(),
-                                Style::default().fg(crate::colors::text()),
-                            ),
-                            Span::styled(
-                                format!(" (lines {} to {})", a1, a2),
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                        ];
-                        lines[i] = Line::from(new_spans);
-                        lines.remove(k);
-                        continue; // keep checking more occurrences of the same file
-                    }
-                }
+
+    // Collect read ranges grouped by filename, preserving first-seen order.
+    // Also track the earliest prefix to reuse when emitting a single line per file.
+    #[derive(Default)]
+    struct FileRanges { prefix: String, first_index: usize, ranges: Vec<(u32, u32)> }
+
+    let mut files: Vec<(String, FileRanges)> = Vec::new();
+    let mut non_read_lines: Vec<Line<'static>> = Vec::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some((fname, a, b, prefix, orig_idx)) = parse_read_line_with_index(idx, line) {
+            // Insert or update entry for this file, preserving encounter order
+            if let Some((_name, fr)) = files.iter_mut().find(|(n, _)| n == &fname) {
+                fr.ranges.push((a.min(b), a.max(b)));
+                // Keep earliest index as stable ordering anchor
+                if orig_idx < fr.first_index { fr.first_index = orig_idx; }
+            } else {
+                files.push((fname, FileRanges { prefix, first_index: orig_idx, ranges: vec![(a.min(b), a.max(b))] }));
             }
-            k += 1;
+        } else {
+            non_read_lines.push(line.clone());
         }
-        i += 1;
     }
+
+    if files.is_empty() { return; }
+
+    // For each file: merge overlapping/touching ranges; then sort ascending and emit one line.
+    fn merge_and_sort(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+        if v.len() <= 1 { return v; }
+        v.sort_by_key(|(s, _)| *s);
+        let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
+        let mut cur = v[0];
+        for &(s, e) in v.iter().skip(1) {
+            if s <= cur.1.saturating_add(1) { // touching or overlap
+                cur.1 = cur.1.max(e);
+            } else {
+                out.push(cur);
+                cur = (s, e);
+            }
+        }
+        out.push(cur);
+        out
+    }
+
+    // Rebuild the lines vector: keep header (if present) and any non-read lines,
+    // then append one consolidated line per file in first-seen order by index.
+    let mut rebuilt: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+
+    // Heuristic: preserve an initial header line that does not start with a connector.
+    if !lines.is_empty() {
+        if lines[0].spans.first().map(|s| s.content.as_ref() != "└ " && s.content.as_ref() != "  ").unwrap_or(false) {
+            rebuilt.push(lines[0].clone());
+        }
+    }
+
+    // Sort files by their first appearance index to keep stable ordering with other files.
+    files.sort_by_key(|(_n, fr)| fr.first_index);
+
+    for (name, mut fr) in files.into_iter() {
+        fr.ranges = merge_and_sort(fr.ranges);
+        // Build range annotation: " (lines S1 to E1, S2 to E2, ...)"
+        let mut ann = String::new();
+        ann.push_str(" (");
+        ann.push_str("lines ");
+        for (i, (s, e)) in fr.ranges.iter().enumerate() {
+            if i > 0 { ann.push_str(", "); }
+            ann.push_str(&format!("{} to {}", s, e));
+        }
+        ann.push(')');
+
+        let spans: Vec<Span<'static>> = vec![
+            Span::styled(fr.prefix, Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(name, Style::default().fg(crate::colors::text())),
+            Span::styled(ann, Style::default().fg(crate::colors::text_dim())),
+        ];
+        rebuilt.push(Line::from(spans));
+    }
+
+    // Append any other non-read lines (rare for Read sections, but safe)
+    // Note: keep their original order after consolidated entries
+    rebuilt.extend(non_read_lines.into_iter());
+
+    *lines = rebuilt;
 }
 
 impl WidgetRef for &ExecCell {
@@ -2774,6 +2815,74 @@ impl CollapsibleReasoningCell {
         }
     }
 
+    /// Append lines with conservative de-duplication:
+    /// - Drops exact adjacent duplicates (same plain text as last line).
+    /// - Drops any leading prefix of `new_lines` that exactly matches the
+    ///   existing tail (overlap), ignoring ephemeral debug marker lines like
+    ///   "[sN ...]" on both sides so markers don't break matching.
+    pub fn append_lines_dedup(&mut self, mut new_lines: Vec<Line<'static>>) {
+        if new_lines.is_empty() { return; }
+
+        let to_plain = |l: &Line<'_>| -> String {
+            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+        };
+        let is_marker = |l: &Line<'_>| -> bool {
+            let t = to_plain(l).trim().to_string();
+            t.starts_with('[') && t.ends_with(']')
+        };
+
+        // Compute overlap (suffix/prefix match) while skipping marker lines.
+        let mut existing_plain: Vec<String> = self
+            .lines
+            .iter()
+            .rev()
+            .filter(|l| !is_marker(l))
+            .take(64)
+            .map(|l| to_plain(l))
+            .collect();
+        existing_plain.reverse();
+
+        let incoming_plain: Vec<String> = new_lines
+            .iter()
+            .filter(|l| !is_marker(l))
+            .map(|l| to_plain(l))
+            .collect();
+
+        let max_overlap = existing_plain.len().min(incoming_plain.len());
+        let mut overlap = 0usize;
+        for k in (1..=max_overlap).rev() {
+            if existing_plain.len() >= k && incoming_plain.len() >= k {
+                if existing_plain[existing_plain.len()-k..] == incoming_plain[..k] {
+                    overlap = k;
+                    break;
+                }
+            }
+        }
+        if overlap > 0 {
+            // Drop the first `overlap` non-marker lines from `new_lines`, preserving markers.
+            let mut to_drop = overlap;
+            let mut trimmed: Vec<Line<'static>> = Vec::with_capacity(new_lines.len());
+            for l in new_lines.into_iter() {
+                if to_drop > 0 && !is_marker(&l) {
+                    to_drop -= 1;
+                    continue;
+                }
+                trimmed.push(l);
+            }
+            new_lines = trimmed;
+        }
+
+        // Append, dropping immediate exact duplicates (plain text) to reduce noise.
+        for nl in new_lines.drain(..) {
+            let dup = self
+                .lines
+                .last()
+                .map(|last| to_plain(last) == to_plain(&nl))
+                .unwrap_or(false);
+            if !dup { self.lines.push(nl); }
+        }
+    }
+
     /// Build a compact debug summary of detected section titles and line metrics
     /// for on-screen overlays. Only used when the TUI `--order` overlay is active.
     pub(crate) fn debug_title_overlay(&self) -> String {
@@ -2950,13 +3059,6 @@ impl HistoryCell for CollapsibleReasoningCell {
     }
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Reasoning
-    }
-
-    // Ensure collapsed reasoning always gets standard spacing after it.
-    // Treating it as a title-only cell suppresses the inter-cell spacer,
-    // which causes the missing blank line effect users observed.
-    fn is_title_only(&self) -> bool {
-        false
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
@@ -4820,6 +4922,23 @@ fn new_parsed_command(
             lines.push(Line::from(spans));
             any_content_emitted = true;
         }
+    }
+
+    // If this is a List Files cell and the loop above produced no content (e.g.,
+    // the list path was suppressed because a Search referenced the same path),
+    // emit a single contextual line so the location is always visible.
+    if matches!(action, ExecAction::List) && !any_content_emitted {
+        let display_p = match &ctx_path {
+            Some(p) if !p.is_empty() => {
+                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+            }
+            _ => "./".to_string(),
+        };
+        lines.push(Line::from(vec![
+            Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
+            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+        ]));
+        // no-op: avoid unused assignment warning; the variable's value is not consumed later
     }
 
     // Show stdout for real run commands; keep read/search/list concise unless error
