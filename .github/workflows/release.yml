@@ -2,9 +2,16 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches: [ main ]
+    paths-ignore:
+      - '.github/workflows/test.yml'
+      - 'examples/**'
+      - '**/*.test.ts'
+      - 'test/**'
+      - '*.md'
+      - 'CHANGELOG.md'
+      - 'release-notes/**'
+      - '.github/workflows/release.yml'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,9 +21,43 @@ permissions:
   contents: write
 
 jobs:
+  guard:
+    name: Guard (skip on notes-only commits)
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Check changed paths
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          # Fallback for single-commit push events
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="HEAD^"
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" | tr '\n' ' ')
+          echo "Changed: $CHANGED"
+          # Allow list: only these may appear to qualify as notes-only
+          notes_only=true
+          for f in $CHANGED; do
+            case "$f" in
+              CHANGELOG.md|release-notes/RELEASE_NOTES.md) ;; # allowed
+              *) notes_only=false ;;
+            esac
+          done
+          echo "notes_only=$notes_only" >> "$GITHUB_OUTPUT"
+          if [ "$notes_only" = true ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
   determine-version:
     name: Determine Version
     runs-on: ubuntu-latest
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -30,44 +71,40 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Determine version (from tag or compute)
+      - name: Determine next version (across all npm packages)
         id: version
         working-directory: codex-cli
         shell: bash
         run: |
           set -euo pipefail
-          # If triggered by tag 'v*', prefer that exact version.
-          ref_name="${GITHUB_REF##*/}"
-          if [[ "$ref_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            NEW_VERSION="${ref_name#v}"
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          PKGS=(
+            "@just-every/code"
+            "@just-every/code-darwin-arm64"
+            "@just-every/code-darwin-x64"
+            "@just-every/code-linux-x64-musl"
+            "@just-every/code-linux-arm64-musl"
+            "@just-every/code-win32-x64"
+          )
+          VERS=("$CURRENT_VERSION")
+          for p in "${PKGS[@]}"; do
+            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
+            VERS+=("$v")
+          done
+          MAX_PUBLISHED=$(printf '%s\n' "${VERS[@]}" | sort -V | tail -n1)
+          # If our current version is <= max published, bump the patch of max.
+          if [ "$CURRENT_VERSION" = "$MAX_PUBLISHED" ] || [ "$CURRENT_VERSION" \< "$MAX_PUBLISHED" ]; then
+            IFS='.' read -ra V <<< "$MAX_PUBLISHED"
+            NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           else
-            CURRENT_VERSION=$(node -p "require('./package.json').version")
-            PKGS=(
-              "@just-every/code"
-              "@just-every/code-darwin-arm64"
-              "@just-every/code-darwin-x64"
-              "@just-every/code-linux-x64-musl"
-              "@just-every/code-linux-arm64-musl"
-              "@just-every/code-win32-x64"
-            )
-            VERS=("$CURRENT_VERSION")
-            for p in "${PKGS[@]}"; do
-              v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
-              VERS+=("$v")
-            done
-            MAX_PUBLISHED=$(printf '%s\n' "${VERS[@]}" | sort -V | tail -n1)
-            if [ "$CURRENT_VERSION" = "$MAX_PUBLISHED" ] || [ "$CURRENT_VERSION" \< "$MAX_PUBLISHED" ]; then
-              IFS='.' read -ra V <<< "$MAX_PUBLISHED"
-              NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
-            else
-              NEW_VERSION=$CURRENT_VERSION
-            fi
+            NEW_VERSION=$CURRENT_VERSION
           fi
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs: determine-version
+    needs: [guard, determine-version]
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -289,7 +326,8 @@ jobs:
 
   release:
     name: Publish to npm
-    needs: [determine-version, build-binaries]
+    needs: [guard, determine-version, build-binaries]
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # On tag or manual dispatch; no need to skip based on commit message
