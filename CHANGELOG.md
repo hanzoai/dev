@@ -225,3 +225,43 @@ All notable changes to Code are documented here.
 ## [0.2.10] - 2025-08-23
 
 - Stability: align protocol/core with upstream; fix TUI E0423 and history clearing; regenerate Cargo.lock for locked builds. (52d29c5, 663d1ad, 2317707, da80a25)
+
+## [0.2.9] - 2025-08-21
+
+- Transcript mode: add transcript view; hide chain-of-thought by default; show “thinking” headers. (2ec5a28, e95cad1, 9193eb6)
+- Exec ordering: insert running exec into history and replace in place on completion to prevent out-of-order rendering. (c1a50d7)
+- Onboarding: split onboarding screen to its own app; improve login handling. (0d12380, c579ae4)
+
+## [0.2.8] - 2025-08-21
+
+- Exec previews: use middle-dot ellipsis and concise head/tail previews; rely on Block borders for visuals. (1ac3a67, 352ce75, 5ca0e06)
+
+## [0.2.7] - 2025-08-20
+
+- Browser tool: robust reconnect when cached Chrome WS URL is stale; clearer screenshot strategy and retries. (9516794)
+- Merge hygiene and build fixes from upstream while keeping forked UX. (fb08c84, d79b51c)
+
+## [0.2.6] - 2025-08-20
+
+- History: live timers for custom/MCP tools; stdout preview for run commands; clearer background events. (f24446b, 5edbbe4, 2b9c1c9)
+- Apply patch: auto-convert more shell-wrapped forms; suppress noisy screenshot-captured lines. (2fb30b7, 3da06e5)
+
+## [0.2.5] - 2025-08-19
+
+- CLI downloads: verify Content-Length, add timeouts/retries, and improve WSL guidance for missing/invalid binaries. (ca55c2e)
+
+## [0.2.4] - 2025-08-19
+
+- Windows CLI: guard against corrupt/empty downloads; clearer spawn error guidance (EFTYPE/ENOEXEC/EACCES). (bb21419)
+
+## [0.2.3] - 2025-08-19
+
+- Release CI: enable sccache and mold; tune incremental to improve cache hit rate. (69f6c3c)
+
+## [0.2.2] - 2025-08-19
+
+- Protocol alignment and dep bumps across codex-rs; login flow async-ified; smaller fixes. (4db0749, 6e8c055, 38b84ff)
+
+## [0.2.1] - 2025-08-19
+
+- Fork stabilization: large upstream sync while preserving TUI/theme and protocol; add tests and clean colors/styles. (b8548a0, 47ba653, c004ae5)
