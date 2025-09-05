@@ -324,7 +324,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
         let idx = if let Some(i) = agg_index { i } else {
             // Reserve an ordered slot for the read aggregation header if the provider
             // supplied OrderMeta; otherwise it will fall back to unordered.
-            let key = ChatWidget::order_key_from_order_meta(Some(order));
+            let key = ChatWidget::order_key_from_order_meta(order);
             let i = chat.history_insert_with_key_global(Box::new(history_cell::ReadAggregationCell::new()), key);
             // If the immediately-previous cell is also a ReadAggregationCell (from an
             // earlier attempt), merge into it so consecutive Read blocks collapse into
@@ -384,7 +384,7 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
     }
 
     let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
-    let key = ChatWidget::order_key_from_order_meta(Some(order));
+    let key = ChatWidget::order_key_from_order_meta(order);
     let idx = chat.history_insert_with_key_global(Box::new(cell), key);
     chat.exec.running_commands.insert(
         super::ExecCallId(ev.call_id.clone()),
@@ -499,7 +499,7 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
 
     if !replaced {
         if let Some(c) = completed_opt.take() {
-            let key = ChatWidget::order_key_from_order_meta(Some(order));
+            let key = ChatWidget::order_key_from_order_meta(order);
             let idx = chat.history_insert_with_key_global(Box::new(c), key);
             // Attempt standard merge with previous Exec if applicable.
             crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
