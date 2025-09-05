@@ -224,7 +224,17 @@ jobs:
                 const data = await res.json();
                 let json = {};
                 try {
-                  json = JSON.parse(data.choices[0].message.content || '{}');
+                  // Responses API: find first 'message' item and extract output_text
+                  let txt = '';
+                  if (Array.isArray(data.output)) {
+                    const msg = data.output.find(o => o && o.type === 'message');
+                    if (msg && Array.isArray(msg.content)) {
+                      const c = msg.content.find(p => p && (p.type === 'output_text' || p.type === 'text'));
+                      if (c && typeof c.text === 'string') txt = c.text;
+                    }
+                  }
+                  if (!txt && typeof data.output_text === 'string') txt = data.output_text;
+                  json = JSON.parse(txt || '{}');
                 } catch (e) {
                   json = {};
                 }
