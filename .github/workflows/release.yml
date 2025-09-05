@@ -701,6 +701,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
+      # --- Homebrew Tap Update -------------------------------------------------
+      - name: Generate Homebrew formula (Code.rb)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/generate-homebrew-formula.sh
+          test -s Formula/Code.rb || { echo "Formula/Code.rb missing" >&2; exit 1; }
+
+      - name: Publish Homebrew formula to just-every/homebrew-tap
+        shell: bash
+        env:
+          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_PAT:-}" ]; then
+            echo "GH_PAT/GITHUB_TOKEN not available; skipping tap publish" >&2
+            exit 0
+          fi
+          tmpdir=$(mktemp -d)
+          git clone "https://x-access-token:${GH_PAT}@github.com/just-every/homebrew-tap.git" "$tmpdir"
+          mkdir -p "$tmpdir/Formula"
+          cp -f Formula/Code.rb "$tmpdir/Formula/Code.rb"
+          cd "$tmpdir"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No tap changes to commit." >&2
+            exit 0
+          fi
+          ver="${{ steps.version.outputs.version }}"
+          git commit -m "chore(homebrew): bump Code formula to v${ver}"
+          # Ensure default branch exists
+          if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+            git branch -M main || true
+          fi
+          git push -u origin HEAD:main
+
       - name: Publish per-target npm binary packages (last)
         if: ${{ env.NPM_TOKEN != '' }}
         env:
