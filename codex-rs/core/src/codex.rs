@@ -1034,6 +1034,7 @@ impl Session {
         exec_command_context: ExecCommandContext,
         seq_hint: Option<u64>,
         output_index: Option<u32>,
+        attempt_req: u64,
     ) {
         let ExecCommandContext {
             sub_id,
@@ -1062,7 +1063,7 @@ impl Session {
                 parsed_cmd: parse_command(&command_for_display),
             }),
         };
-        let order = crate::protocol::OrderMeta { request_ordinal: self.current_request_ordinal(), output_index, sequence_number: seq_hint };
+        let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
         let event = self.make_event_with_order(&sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
     }
@@ -1076,6 +1077,7 @@ impl Session {
         is_apply_patch: bool,
         seq_hint: Option<u64>,
         output_index: Option<u32>,
+        attempt_req: u64,
     ) {
         let ExecToolCallOutput {
             stdout,
@@ -1107,7 +1109,7 @@ impl Session {
                 duration: *duration,
             })
         };
-        let order = crate::protocol::OrderMeta { request_ordinal: self.current_request_ordinal(), output_index, sequence_number: seq_hint };
+        let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
         let event = self.make_event_with_order(sub_id, msg, order, seq_hint);
         let _ = self.tx_event.send(event).await;
 
@@ -1133,12 +1135,13 @@ impl Session {
         exec_args: ExecInvokeArgs<'a>,
         seq_hint: Option<u64>,
         output_index: Option<u32>,
+        attempt_req: u64,
     ) -> crate::error::Result<ExecToolCallOutput> {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
 
-        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index)
+        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
             .await;
 
             let result = process_exec_tool_call(
@@ -1172,6 +1175,7 @@ impl Session {
             is_apply_patch,
             seq_hint.map(|h| h.saturating_add(1)),
             output_index,
+            attempt_req,
         )
         .await;
 
@@ -2144,9 +2148,11 @@ async fn run_turn(
     let mut attempt_input: Vec<ResponseItem> = input.clone();
     loop {
         // Each loop iteration corresponds to a single provider HTTP request.
-        // Increment the attempt ordinal first so all OrderMeta emitted during
-        // this attempt share the same `req`.
+        // Increment the attempt ordinal first and capture its value so all
+        // OrderMeta emitted during this attempt share the same `req`, even if
+        // later attempts start before all events have been delivered.
         sess.begin_http_attempt();
+        let attempt_req = sess.current_request_ordinal();
         // Build status items (screenshots, system status) fresh for each attempt
         let status_items = build_turn_status_items(sess).await;
 
@@ -2168,7 +2174,7 @@ async fn run_turn(
         // Start a new scratchpad for this HTTP attempt
         sess.begin_attempt_scratchpad();
 
-        match try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt).await {
+        match try_run_turn(sess, turn_diff_tracker, &sub_id, &prompt, attempt_req).await {
             Ok(output) => {
                 // Record status items to conversation history after successful turn
                 // This ensures they persist for future requests in the right chronological order
@@ -2373,6 +2379,7 @@ async fn try_run_turn(
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: &str,
     prompt: &Prompt,
+    attempt_req: u64,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
     // call_ids that are part of this response.
     let completed_call_ids = prompt
@@ -2459,7 +2466,7 @@ async fn try_run_turn(
             ResponseEvent::Created => {}
             ResponseEvent::OutputItemDone { item, sequence_number, output_index } => {
                 let response =
-                    handle_response_item(sess, turn_diff_tracker, sub_id, item.clone(), sequence_number, output_index).await?;
+                    handle_response_item(sess, turn_diff_tracker, sub_id, item.clone(), sequence_number, output_index, attempt_req).await?;
 
                 // Save into scratchpad so we can seed a retry if the stream drops later.
                 sess.scratchpad_push(&item, &response);
@@ -2510,7 +2517,7 @@ async fn try_run_turn(
                 // Use the item_id if present, otherwise fall back to sub_id
                 let event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 let order = crate::protocol::OrderMeta {
-                    request_ordinal: sess.current_request_ordinal(),
+                    request_ordinal: attempt_req,
                     output_index,
                     sequence_number,
                 };
@@ -2526,7 +2533,7 @@ async fn try_run_turn(
                 // Use the item_id if present, otherwise fall back to sub_id
                 let mut event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                 if let Some(si) = summary_index { event_id = format!("{}#s{}", event_id, si); }
-                let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
+                let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number };
                 let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta: delta.clone() }), order, sequence_number);
                 sess.tx_event.send(stamped).await.ok();
 
@@ -2542,7 +2549,7 @@ async fn try_run_turn(
                     // Use the item_id if present, otherwise fall back to sub_id
                     let mut event_id = item_id.unwrap_or_else(|| sub_id.to_string());
                     if let Some(ci) = content_index { event_id = format!("{}#c{}", event_id, ci); }
-                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number };
+                    let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number };
                     let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent { delta }), order, sequence_number);
                     sess.tx_event.send(stamped).await.ok();
                 }
@@ -2643,6 +2650,7 @@ async fn handle_response_item(
     item: ResponseItem,
     seq_hint: Option<u64>,
     output_index: Option<u32>,
+    attempt_req: u64,
 ) -> CodexResult<Option<ResponseInputItem>> {
     debug!(?item, "Output item");
     let output = match item {
@@ -2651,7 +2659,7 @@ async fn handle_response_item(
             let event_id = id.unwrap_or_else(|| sub_id.to_string());
             for item in content {
                 if let ContentItem::OutputText { text } = item {
-                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                    let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
                     let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentMessage(AgentMessageEvent { message: text }), order, seq_hint);
                     sess.tx_event.send(stamped).await.ok();
                 }
@@ -2675,7 +2683,7 @@ async fn handle_response_item(
                     ReasoningItemReasoningSummary::SummaryText { text } => text,
                 };
                 let eid = format!("{}#s{}", event_id, i);
-                let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
                 let stamped = sess.make_event_with_order(&eid, EventMsg::AgentReasoning(AgentReasoningEvent { text }), order, seq_hint);
                 sess.tx_event.send(stamped).await.ok();
             }
@@ -2686,7 +2694,7 @@ async fn handle_response_item(
                         ReasoningItemContent::ReasoningText { text } => text,
                         ReasoningItemContent::Text { text } => text,
                     };
-                    let order = crate::protocol::OrderMeta { request_ordinal: sess.current_request_ordinal(), output_index, sequence_number: seq_hint };
+                    let order = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint };
                     let stamped = sess.make_event_with_order(&event_id, EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }), order, seq_hint);
                     sess.tx_event.send(stamped).await.ok();
                 }
@@ -2710,6 +2718,7 @@ async fn handle_response_item(
                     call_id,
                     seq_hint,
                     output_index,
+                    attempt_req,
                 )
                 .await,
             )
@@ -2754,6 +2763,7 @@ async fn handle_response_item(
                 effective_call_id,
                 seq_hint,
                 output_index,
+                attempt_req,
             )
             .await,
             )
@@ -2826,6 +2836,7 @@ async fn handle_function_call(
     call_id: String,
     seq_hint: Option<u64>,
     output_index: Option<u32>,
+    attempt_req: u64,
 ) -> ResponseInputItem {
     let ctx = ToolCallCtx::new(sub_id.clone(), call_id.clone(), seq_hint, output_index);
     match name.as_str() {
@@ -2836,7 +2847,7 @@ async fn handle_function_call(
                     return *output;
                 }
             };
-            handle_container_exec_with_params(params, sess, turn_diff_tracker, sub_id, call_id, seq_hint, output_index)
+            handle_container_exec_with_params(params, sess, turn_diff_tracker, sub_id, call_id, seq_hint, output_index, attempt_req)
                 .await
         }
         "update_plan" => handle_update_plan(sess, &ctx, arguments).await,
@@ -4654,6 +4665,7 @@ async fn handle_container_exec_with_params(
     call_id: String,
     seq_hint: Option<u64>,
     output_index: Option<u32>,
+    attempt_req: u64,
 ) -> ResponseInputItem {
     // Intercept risky git branch-changing commands and require an explicit confirm prefix.
     // We support a simple convention: prefix the script with `confirm:` to proceed.
@@ -4996,6 +5008,7 @@ async fn handle_container_exec_with_params(
             },
             seq_hint,
             output_index,
+            attempt_req,
         )
         .await;
 
@@ -5021,6 +5034,7 @@ async fn handle_container_exec_with_params(
                 error,
                 sandbox_type,
                 sess,
+                attempt_req,
             )
             .await
         }
@@ -5041,6 +5055,7 @@ async fn handle_sandbox_error(
     error: SandboxErr,
     sandbox_type: SandboxType,
     sess: &Session,
+    attempt_req: u64,
 ) -> ResponseInputItem {
     let call_id = exec_command_context.call_id.clone();
     let sub_id = exec_command_context.sub_id.clone();
@@ -5112,6 +5127,8 @@ async fn handle_sandbox_error(
 
             // This is an escalated retry; the policy will not be
             // examined and the sandbox has been set to `None`.
+            // Use the same attempt_req as the tool call that failed; this retry
+            // is still part of the current provider attempt.
             let retry_output_result = sess
                 .run_exec_with_events(
                     turn_diff_tracker,
@@ -5133,6 +5150,7 @@ async fn handle_sandbox_error(
                     },
                     None,
                     None,
+                    attempt_req,
                 )
                 .await;
 

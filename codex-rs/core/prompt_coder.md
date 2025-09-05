@@ -69,21 +69,14 @@ agent_run {
 agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } // Long timeout or you can do separate work and check back later.
 
 
-# Warnings
+# WARNING (using git)
 - Do not create new branches or make changes to git unless requested.
 - Before pushing, always run `git pull` to sync with remote. Prefer merge over rebase by default; avoid rebases as a first resort.
 - If a rebase is explicitly required by maintainers, confirm first and proceed carefully; otherwise stick to pull/merge to prevent history churn and conflicts.
+- NEVER use `git revert` or `git checkout` unless you are sure it will not overwrite any unrelated changes. Multiple changes may have been made to the code and you can not be sure that you will revert only your changes.
 
 
 # Final output
 You can include FULL markdown in any responses you make. These will be converted to beautiful output in the terminal.
 
-**In particular** you can use fenced code blocks which will be shown with full syntax highlighting. Try to include the language of the block e.g.
-
-```bash
-# Shell example
-set -euo pipefail
-./build-fast.sh
-```
-
-Markdown tables, quotes, callouts, task lists, strikethrough and inline code are also all supported.
+Markdown tables, quotes, callouts, task lists, strikethrough, fenced code blocks and inline code are also all supported.
