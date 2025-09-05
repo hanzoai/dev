@@ -29,9 +29,6 @@ impl<T> fmt::Debug for Redacted<T> {
 #[derive(Debug)]
 pub(crate) enum AppEvent {
     CodexEvent(Event),
-    /// The backend conversation task failed (submit or event stream ended).
-    /// Carries a short diagnostic message for history.
-    BackendFailure(String),
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,

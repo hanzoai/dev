@@ -44,6 +44,10 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
             finalize_exec_cell_at(chat, idx, 130, stdout_empty.clone(), interrupted_msg.clone());
         }
     }
+    // Track cancelled exec call_ids so late ExecEnd events are dropped.
+    for (call_id, _) in chat.exec.running_commands.iter() {
+        chat.canceled_exec_call_ids.insert(call_id.clone());
+    }
     chat.exec.running_commands.clear();
 
     if !chat.tools_state.running_custom_tools.is_empty() {
@@ -409,6 +413,15 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
 
 pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndEvent, order: &OrderMeta) {
     chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
+    // If this call was already marked as cancelled, drop the End to avoid
+    // inserting a duplicate completed cell after the user interrupt.
+    if chat
+        .canceled_exec_call_ids
+        .remove(&super::ExecCallId(ev.call_id.clone()))
+    {
+        chat.maybe_hide_spinner();
+        return;
+    }
     let ExecCommandEndEvent { call_id, exit_code, duration: _, stdout, stderr } = ev;
     let cmd = chat.exec.running_commands.remove(&super::ExecCallId(call_id.clone()));
     chat.height_manager.borrow_mut().record_event(HeightEvent::RunEnd);

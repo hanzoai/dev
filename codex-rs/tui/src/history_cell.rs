@@ -2901,7 +2901,13 @@ impl CollapsibleReasoningCell {
             if is_title {
                 title_idxs.push(i);
                 let mut text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-                if text.len() > 60 { text.truncate(60); text.push_str("…"); }
+                // Truncate preview by display width to avoid slicing inside a UTF-8 codepoint.
+                // Reserve 1 col for the ellipsis when truncation occurs.
+                let maxw = 60usize;
+                if text.width() > maxw {
+                    let (prefix, _suffix, _w) = crate::live_wrap::take_prefix_by_width(&text, maxw.saturating_sub(1));
+                    text = format!("{}…", prefix);
+                }
                 title_previews.push(text);
             }
         }
@@ -3426,15 +3432,19 @@ impl HistoryCell for StreamingContentCell {
         let _ = (cur_y, remaining_skip);
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        // Hide the header line (e.g., "codex") when using a gutter symbol
-        if self.gutter_symbol().is_some() {
-            if self.lines.len() == 1 {
-                // Single-line cell with gutter symbol = just a header, hide it completely
-                Vec::new()
-            } else {
-                // Multi-line cell with gutter symbol = skip the title line
-                self.lines[1..].to_vec()
-            }
+        // Hide a leading title header line (e.g., "codex") if present.
+        // This mirrors AssistantMarkdownCell behavior so streaming and final
+        // cells render identically with the header suppressed.
+        let has_leading_header = self
+            .lines
+            .first()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+                .trim()
+                .eq_ignore_ascii_case("codex"))
+            .unwrap_or(false);
+
+        if has_leading_header {
+            if self.lines.len() == 1 { Vec::new() } else { self.lines[1..].to_vec() }
         } else {
             self.lines.clone()
         }
@@ -3460,11 +3470,22 @@ impl StreamingContentCell {
                 return cache.clone();
             }
         }
-        // Reuse the same segmentation logic as Assistant, operating on current lines
+        // Reuse the same segmentation logic as Assistant, operating on current
+        // lines but explicitly dropping a leading "codex" header if present so
+        // it never renders during streaming.
+        let mut body_lines = self.lines.clone();
+        if let Some(first) = body_lines.first() {
+            let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+            if flat.trim().eq_ignore_ascii_case("codex") {
+                let _ = body_lines.get(0).is_some();
+                body_lines.remove(0);
+            }
+        }
         let tmp = AssistantMarkdownCell {
             raw: String::new(),
             id: None,
-            lines: std::iter::once(Line::from("codex")).chain(self.lines.clone()).collect(),
+            // We do not prepend a header; segmentation should be based on body only.
+            lines: body_lines,
             cached_layout: std::cell::RefCell::new(None),
         };
         let cache = tmp.ensure_layout(width);

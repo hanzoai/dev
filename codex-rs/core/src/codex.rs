@@ -451,7 +451,9 @@ impl Codex {
         // experimental resume path (undocumented)
         let resume_path = config.experimental_resume.clone();
         info!("resume_path: {resume_path:?}");
-        let (tx_sub, rx_sub) = async_channel::bounded(64);
+        // Use an unbounded submission queue to avoid any possibility of back‑pressure
+        // between the TUI submit worker and the core loop during interrupts/cancels.
+        let (tx_sub, rx_sub) = async_channel::unbounded();
         let (tx_event, rx_event) = async_channel::unbounded();
 
         let user_instructions = get_user_instructions(&config).await;
@@ -1356,18 +1358,32 @@ impl Session {
 
     fn abort(&self) {
         info!("Aborting existing session");
+        // (debug removed)
+
         let mut state = self.state.lock().unwrap();
+        // (debug removed)
         state.pending_approvals.clear();
-        state.pending_input.clear();
+        // Do not clear `pending_input` here. When a user submits a new message
+        // immediately after an interrupt, it may have been routed to
+        // `pending_input` by an earlier code path. Clearing it would drop the
+        // user's message and prevent the next turn from ever starting.
         state.turn_scratchpad = None;
-        if let Some(agent) = state.current_agent.take() {
+        // Take current agent while holding the lock, then drop the lock BEFORE calling abort
+        let current = state.current_agent.take();
+        drop(state);
+        if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
+            // (debug removed)
+        } else {
+            // (debug removed)
         }
         // Also terminate any running exec sessions (PTY-based) so child processes do not linger.
         // Best-effort cleanup for PTY-based exec sessions would go here. The
         // PTY implementation already kills processes on session drop; in the
         // common LocalShellCall path we also kill processes immediately via
         // KillOnDrop in exec.rs.
+
+        // (debug removed)
     }
 
     /// Spawn the configured notifier (if any) with the given JSON payload as
@@ -1441,8 +1457,7 @@ pub(crate) struct AgentAgent {
 
 impl AgentAgent {
     fn spawn(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) -> Self {
-        let handle =
-            tokio::spawn(run_agent(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
+        let handle = tokio::spawn(run_agent(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
         Self {
             sess,
             sub_id,
@@ -1508,16 +1523,17 @@ async fn submission_loop(
     // To break out of this loop, send Op::Shutdown.
     while let Ok(sub) = rx_sub.recv().await {
         debug!(?sub, "Submission");
+        // (submission diagnostics removed)
         match sub.op {
             Op::Interrupt => {
                 let sess = match sess.as_ref() {
-                    Some(sess) => sess,
+                    Some(sess) => sess.clone(),
                     None => {
                         send_no_session_event(sub.id).await;
                         continue;
                     }
                 };
-                sess.abort();
+                tokio::spawn(async move { sess.abort() });
             }
             Op::ConfigureSession {
                 provider,
@@ -1753,12 +1769,13 @@ async fn submission_loop(
                 // This prevents token buildup from old screenshots/status messages
                 sess.cleanup_old_status_items().await;
 
-                // attempt to inject input into current agent
-                if let Err(items) = sess.inject_input(items) {
-                    // no current agent, spawn a new one
-                    let agent = AgentAgent::spawn(Arc::clone(sess), sub.id, items);
-                    sess.set_agent(agent);
-                }
+                // Abort synchronously here to avoid a race that can kill the
+                // newly spawned agent if the async abort runs after set_agent.
+                sess.abort();
+
+                // Spawn a new agent for this user input.
+                let agent = AgentAgent::spawn(Arc::clone(sess), sub.id, items);
+                sess.set_agent(agent);
             }
             Op::ExecApproval { id, decision } => {
                 let sess = match sess.as_ref() {
@@ -1865,7 +1882,8 @@ async fn submission_loop(
 
                 // Ensure any running agent is aborted so streaming stops promptly.
                 if let Some(sess_arc) = sess.as_ref() {
-                    sess_arc.abort();
+                    let s2 = sess_arc.clone();
+                    tokio::spawn(async move { s2.abort(); });
                 }
 
                 // Gracefully flush and shutdown rollout recorder on session end so tests

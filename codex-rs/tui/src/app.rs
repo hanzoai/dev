@@ -431,8 +431,8 @@ impl App<'_> {
                             // Unified Esc policy with modal-first handling:
                             // - If any modal is active, forward Esc to the widget so the modal can close itself.
                             // - Otherwise apply global Esc ordering:
-                            //   1) If there's text, clear it.
-                            //   2) Else if agent is running, stop it.
+                            //   1) If agent is running, stop it (even if the composer has text).
+                            //   2) Else if there's text, clear it.
                             //   3) Else double‑Esc engages backtrack/edit‑previous.
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 // Modal-first: give active modal views priority to handle Esc.
@@ -448,18 +448,18 @@ impl App<'_> {
                                     let now = Instant::now();
                                     const THRESHOLD: Duration = Duration::from_millis(600);
 
-                                    // Step 1: clear composer text if present.
-                                    if !widget.composer_is_empty() {
-                                        widget.clear_composer();
-                                        // Arm double‑Esc so a quick second Esc proceeds to steps 2/3.
+                                    // Step 1: stop agent if running, regardless of composer content.
+                                    if widget.is_task_running() {
+                                        let _ = widget.on_ctrl_c();
+                                        // Arm double‑Esc so next Esc can trigger backtrack.
                                         self.last_esc_time = Some(now);
                                         continue;
                                     }
 
-                                    // Step 2: stop agent if running.
-                                    if widget.is_task_running() {
-                                        let _ = widget.on_ctrl_c();
-                                        // Arm double‑Esc so next Esc can trigger backtrack.
+                                    // Step 2: clear composer text if present.
+                                    if !widget.composer_is_empty() {
+                                        widget.clear_composer();
+                                        // Arm double‑Esc so a quick second Esc proceeds to step 3.
                                         self.last_esc_time = Some(now);
                                         continue;
                                     }
@@ -623,18 +623,6 @@ impl App<'_> {
                 }
                 AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
-                }
-                AppEvent::BackendFailure(msg) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        // Surface a small notice in history, then reset UI state.
-                        let note = crate::history_cell::new_background_event(
-                            format!("backend error: {} — restarting session…", msg),
-                        );
-                        widget.insert_history_lines(note.display_lines());
-                        // ChatWidget no longer exposes `restart_backend`; start a fresh
-                        // conversation UI so the next input re-initializes cleanly.
-                        widget.new_conversation(self.enhanced_keys_supported);
-                    }
                 }
                 AppEvent::ExitRequest => {
                     // Stop background threads and break the UI loop.
@@ -1267,4 +1255,3 @@ impl TimingStats {
         )
     }
 }
-use crate::history_cell::HistoryCell;
