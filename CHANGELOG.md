@@ -165,3 +165,63 @@ All notable changes to Code are documented here.
 ## [0.2.25] - 2025-08-24
 
 - Release infra: multiple small workflow fixes (build version echo, Rust release process). (ac6b56c, 64dda2d)
+
+## [0.2.24] - 2025-08-24
+
+- Release workflow: update Rust build process for reliability. (64dda2d)
+
+## [0.2.23] - 2025-08-24
+
+- CI: fix build version echo in release workflow. (2f0bdd1)
+
+## [0.2.22] - 2025-08-24
+
+- Release workflow: incremental YAML fixes and cleanup. (3a88196, 7e4cea1)
+
+## [0.2.21] - 2025-08-24
+
+- CI cache: use `SCCACHE_GHA_VERSION` to restore sccache effectiveness. (43e4c05)
+
+## [0.2.20] - 2025-08-24
+
+- Docs: add module description to trigger CI and verify doc gating. (e4c4456)
+
+## [0.2.19] - 2025-08-24
+
+- CI: move sccache key configuration; tighten input responsiveness and diff readability in TUI. (46e57f0, 9bcf7c7)
+
+## [0.2.18] - 2025-08-24
+
+- TUI: clean unused `mut` and normalize overwrite sequences; preserve warning-free builds. (621f4f9)
+
+## [0.2.17] - 2025-08-24
+
+- TUI: housekeeping and stable sccache cache keys. (85089e1, 17bbc71)
+
+## [0.2.16] - 2025-08-23
+
+- Navigation: gate Up/Down history keys when history isn’t scrollable to avoid dual behavior. (150754a)
+
+## [0.2.15] - 2025-08-23
+
+- CI: stabilize sccache startup to fix slow releases. (f00ea33)
+
+## [0.2.14] - 2025-08-23
+
+- CI: small test to validate caching; no product changes. (7ebd744)
+
+## [0.2.13] - 2025-08-23
+
+- Build cleanliness: fix all warnings under build-fast. (0356a99)
+
+## [0.2.12] - 2025-08-23
+
+- CI: correct SCCACHE_DIR usage, export/guard env, and make caching resilient; better heredoc detection for apply_patch. (0a59600, b10c86a, c263b05, 39a3ec8, de54dbe)
+
+## [0.2.11] - 2025-08-23
+
+- Rendering: fully paint history region and margins to remove artifacts; add transcript hint and aggregated-output support. (b6ee050, ffd1120, eca97d8, 957d449)
+
+## [0.2.10] - 2025-08-23
+
+- Stability: align protocol/core with upstream; fix TUI E0423 and history clearing; regenerate Cargo.lock for locked builds. (52d29c5, 663d1ad, 2317707, da80a25)
