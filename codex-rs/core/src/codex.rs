@@ -826,7 +826,7 @@ impl Session {
         let event = self.make_event(
             &sub_id,
             EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
-                call_id,
+                call_id: call_id.clone(),
                 command,
                 cwd,
                 reason,
@@ -835,7 +835,9 @@ impl Session {
         let _ = self.tx_event.send(event).await;
         {
             let mut state = self.state.lock().unwrap();
-            state.pending_approvals.insert(sub_id, tx_approve);
+            // Track pending approval by call_id (unique per request) rather than sub_id
+            // so parallel approvals in the same turn do not clobber each other.
+            state.pending_approvals.insert(call_id, tx_approve);
         }
         rx_approve
     }
@@ -852,7 +854,7 @@ impl Session {
         let event = self.make_event(
             &sub_id,
             EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
-                call_id,
+                call_id: call_id.clone(),
                 changes: convert_apply_patch_to_protocol(action),
                 reason,
                 grant_root,
@@ -861,7 +863,8 @@ impl Session {
         let _ = self.tx_event.send(event).await;
         {
             let mut state = self.state.lock().unwrap();
-            state.pending_approvals.insert(sub_id, tx_approve);
+            // Track pending approval by call_id to avoid collisions.
+            state.pending_approvals.insert(call_id, tx_approve);
         }
         rx_approve
     }
