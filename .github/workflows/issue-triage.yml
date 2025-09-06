@@ -468,6 +468,7 @@ jobs:
             npx -y @just-every/code@latest \
             exec \
             -s "$CODE_SANDBOX" \
+            -c sandbox_workspace_write.network_access=true \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt

@@ -173,7 +173,9 @@ jobs:
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
             exec \
-            -s workspace-write -c sandbox_workspace_write.allow_git_writes=true \
+            -s workspace-write \
+            -c sandbox_workspace_write.allow_git_writes=true \
+            -c sandbox_workspace_write.network_access=true \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
