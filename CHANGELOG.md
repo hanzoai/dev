@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.71] - 2025-09-06
+
+- TUI/Onboarding: apply themed background to auth picker surface. (ac994e87)
+- Login: remove /oauth2/token fallback; adopt upstream-visible request shape. (d43eb23e)
+- Login/Success: fix background and theme variables. (c4e586cf)
+
 ## [0.2.70] - 2025-09-06
 
 - TUI: add time-based greeting placeholder across composer, welcome, and history; map 10–13 to "today". (26b6d3c5, a97dc542)
