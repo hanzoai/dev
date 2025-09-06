@@ -55,6 +55,11 @@ jobs:
         with:
           toolchain: 1.89.0
 
+      - name: Install tools (ripgrep)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
       - name: Cache Rust build (cargo + target)
         uses: Swatinem/rust-cache@v2
         with:
@@ -121,8 +126,28 @@ jobs:
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
+      - name: Quick no-op check (skip if upstream/main already in origin)
+        id: check_upstream
+        shell: bash
+        env:
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
+          git fetch origin --depth=1
+          git fetch upstream --depth=1 "${UPSTREAM_BRANCH}"
+          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits; skipping agent run."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Code agent to perform upstream merge
         id: agent
+        if: steps.check_upstream.outputs.skip != 'true'
         env:
           UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
           UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
