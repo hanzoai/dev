@@ -81,6 +81,9 @@ enum Subcommand {
     /// Internal: generate TypeScript protocol bindings.
     #[clap(hide = true)]
     GenerateTs(GenerateTsCommand),
+
+    /// Diagnose PATH, binary collisions, and versions.
+    Doctor,
 }
 
 #[derive(Debug, Parser)]
@@ -228,6 +231,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         Some(Subcommand::OrderReplay(args)) => {
             order_replay_main(args)?;
         }
+        Some(Subcommand::Doctor) => {
+            doctor_main().await?;
+        }
     }
 
     Ok(())
@@ -324,6 +330,129 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     if let (Some(p1), Some(p2)) = (pos_out1, pos_out2) {
         if p1 < p2 { println!("Result: OK (assistant precedes tool)"); } else { println!("Result: WRONG (tool precedes assistant)"); }
     }
+
+    Ok(())
+}
+
+async fn doctor_main() -> anyhow::Result<()> {
+    use std::env;
+    use std::process::Stdio;
+    use tokio::process::Command;
+
+    // Print current executable and version
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
+    println!("code version: {}", codex_version::version());
+    println!("current_exe: {}", exe);
+
+    // PATH
+    let path = env::var("PATH").unwrap_or_default();
+    println!("PATH: {}", path);
+
+    // Helper to run a shell command and capture stdout (best-effort)
+    async fn run_cmd(cmd: &str, args: &[&str]) -> String {
+        let mut c = Command::new(cmd);
+        c.args(args).stdin(Stdio::null()).stderr(Stdio::null());
+        match c.output().await {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            Err(_) => String::new(),
+        }
+    }
+
+    #[cfg(target_family = "unix")]
+    let which_all = |name: &str| {
+        let name = name.to_string();
+        async move {
+            let out = run_cmd("/bin/bash", &["-lc", &format!("which -a {} 2>/dev/null || true", name)]).await;
+            out.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<_>>()
+        }
+    };
+    #[cfg(target_family = "windows")]
+    let which_all = |name: &str| {
+        let name = name.to_string();
+        async move {
+            let out = run_cmd("where", &[&name]).await;
+            out.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<_>>()
+        }
+    };
+
+    // Gather candidates for code/coder
+    let code_paths = which_all("code").await;
+    let coder_paths = which_all("coder").await;
+
+    println!("\nFound 'code' on PATH (in order):");
+    if code_paths.is_empty() {
+        println!("  <none>");
+    } else {
+        for p in &code_paths { println!("  {}", p); }
+    }
+    println!("\nFound 'coder' on PATH (in order):");
+    if coder_paths.is_empty() {
+        println!("  <none>");
+    } else {
+        for p in &coder_paths { println!("  {}", p); }
+    }
+
+    // Try to run --version for each resolved binary to show where mismatches come from
+    async fn show_versions(caption: &str, paths: &[String]) {
+        println!("\n{}:", caption);
+        for p in paths {
+            let out = run_cmd(p, &["--version"]).await;
+            if out.is_empty() {
+                println!("  {} -> (no output)", p);
+            } else {
+                println!("  {} -> {}", p, out);
+            }
+        }
+    }
+    show_versions("code --version by path", &code_paths).await;
+    show_versions("coder --version by path", &coder_paths).await;
+
+    // Detect Bun shims
+    let bun_home = env::var("BUN_INSTALL").ok().or_else(|| {
+        env::var("HOME").ok().map(|h| format!("{}/.bun", h))
+    });
+    if let Some(bun) = bun_home {
+        let bun_bin = format!("{}/bin", bun);
+        let bun_coder = format!("{}/coder", bun_bin);
+        if coder_paths.iter().any(|p| p == &bun_coder) {
+            println!("\nBun shim detected for 'coder': {}", bun_coder);
+            println!("Suggestion: remove old Bun global with: bun remove -g @just-every/code");
+        }
+        let bun_code = format!("{}/code", bun_bin);
+        if code_paths.iter().any(|p| p == &bun_code) {
+            println!("Bun shim detected for 'code': {}", bun_code);
+            println!("Suggestion: prefer 'coder' or remove Bun shim if it conflicts.");
+        }
+    }
+
+    // Detect Homebrew overshadow of VS Code
+    #[cfg(target_os = "macos")]
+    {
+        let brew_code = code_paths.iter().find(|p| p.contains("/homebrew/bin/code") || p.contains("/Cellar/code/"));
+        let vscode_code = code_paths.iter().find(|p| p.contains("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"));
+        if brew_code.is_some() && vscode_code.is_some() {
+            println!("\nHomebrew 'code' precedes VS Code CLI in PATH.");
+            println!("Suggestion: uninstall Homebrew formula 'code' (brew uninstall code) or reorder PATH so /usr/local/bin comes before /usr/local/homebrew/bin.");
+        }
+    }
+
+    // npm global hints
+    let npm_root = run_cmd("npm", &["root", "-g"]).await;
+    let npm_prefix = run_cmd("npm", &["prefix", "-g"]).await;
+    if !npm_root.is_empty() {
+        println!("\nnpm root -g: {}", npm_root);
+    }
+    if !npm_prefix.is_empty() {
+        println!("npm prefix -g: {}", npm_prefix);
+    }
+
+    println!("\nIf versions differ, remove older installs and keep one package manager:");
+    println!("  - Bun: bun remove -g @just-every/code");
+    println!("  - npm/pnpm: npm uninstall -g @just-every/code");
+    println!("  - Homebrew: brew uninstall code");
+    println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
 
     Ok(())
 }
