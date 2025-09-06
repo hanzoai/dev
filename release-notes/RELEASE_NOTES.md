@@ -1,11 +1,11 @@
-## @just-every/code v0.2.67
+## @just-every/code v0.2.68
 
-This release improves Windows typing reliability and refines our issue triage automation.
+This release improves core path handling and approval diagnostics.
 
 ### Changes
 
-- TUI: prevent doubled characters on Windows by ignoring Repeat/Release for printable keys.
-- CI: issue triage improves comment-mode capture, writes DECISION.json, and adds token fallbacks for comment/assign/close steps.
+- Core: normalize working directory to Git repo root for consistent path resolution.
+- Approvals: warn when approval policy is missing to avoid silent failures.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.66...v0.2.67
+Compare: https://github.com/just-every/code/compare/v0.2.67...v0.2.68
