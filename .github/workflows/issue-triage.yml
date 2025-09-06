@@ -2,7 +2,9 @@ name: Issue Triage
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, assigned]
+  issue_comment:
+    types: [created, edited]
 
 concurrency:
   group: issue-triage-${{ github.event.issue.number }}
@@ -15,6 +17,20 @@ permissions:
 
 jobs:
   triage:
+    # Run on:
+    # - New or reopened issues
+    # - When the bot is manually assigned to an issue
+    # - When someone comments on an open issue currently assigned to the bot
+    if: >-
+      (github.event_name == 'issues' &&
+        (github.event.action == 'opened' || github.event.action == 'reopened' ||
+         (github.event.action == 'assigned' && github.event.assignee.login == 'just-every-code')))
+      ||
+      (github.event_name == 'issue_comment' &&
+        (github.event.action == 'created' || github.event.action == 'edited') &&
+        github.event.issue.state == 'open' &&
+        contains(toJson(github.event.issue.assignees), 'just-every-code') &&
+        github.actor != 'just-every-code')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
