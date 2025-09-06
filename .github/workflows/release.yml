@@ -558,7 +558,8 @@ jobs:
             5) Optional section header: ### Thanks
                - Include ONE line like: "Thanks to @alice and @bob for contributions!"
                - Only include if at least one merged PR in ${RANGE} is authored by an external contributor.
-               - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk.
+               - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk, and NOT upstream contributors.
+               - Treat a username as upstream if it matches the regex /-oai$/i, or clearly belongs to the upstream org (e.g., OpenAI maintainers). Exclude such users from Thanks.
                - Derive usernames from merge commits, Co-authored-by trailers, or PR references in commit messages. Deduplicate and prefer "@username" form.
           - Keep notes concise; no walls of text. Do not add any other sections beyond the optional Thanks.
           - Optional final line (only if a previous tag exists):
@@ -580,6 +581,45 @@ jobs:
           ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
+
+          # Post-process: scrub upstream contributors from the Thanks section (e.g., usernames ending with -oai)
+          if [ -s release-notes/RELEASE_NOTES.md ]; then
+            node - <<'JS'
+            const fs = require('fs');
+            const p = 'release-notes/RELEASE_NOTES.md';
+            if (!fs.existsSync(p)) process.exit(0);
+            const src = fs.readFileSync(p,'utf8');
+            const lines = src.split(/\r?\n/);
+            const start = lines.findIndex(l => /^###\s+Thanks\s*$/i.test(l));
+            if (start === -1) process.exit(0);
+            let end = lines.length;
+            for (let i = start + 1; i < lines.length; i++) { if (/^###\s+/.test(lines[i])) { end = i; break; } }
+            const body = lines.slice(start + 1, end).join(' ');
+            const seen = new Set();
+            const keep = [];
+            for (const m of body.matchAll(/@([A-Za-z0-9](?:[A-Za-z0-9_-]{0,38}))/g)) {
+              const u = m[1];
+              const uname = '@' + u;
+              if (seen.has(uname)) continue;
+              seen.add(uname);
+              const lower = u.toLowerCase();
+              // Local maintainers we never thank in Thanks
+              if (lower === 'zemaj' || lower === 'andrej-griniuk') continue;
+              // Exclude upstream-style usernames: suffix -oai (case-insensitive)
+              if (/-oai$/i.test(u)) continue;
+              keep.push(uname);
+            }
+            const out = lines.slice();
+            if (keep.length === 0) {
+              // Remove entire Thanks section
+              out.splice(start, end - start);
+            } else {
+              const msg = `Thanks to ${keep.join(' and ')} for contributions!`;
+              out.splice(start + 1, end - (start + 1), msg);
+            }
+            fs.writeFileSync(p, out.join('\n'));
+            JS
+          fi
 
           # If the agent forgot to write release notes, synthesize a minimal one from CHANGELOG.
           if [ ! -s release-notes/RELEASE_NOTES.md ]; then
