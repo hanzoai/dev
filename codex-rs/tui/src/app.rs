@@ -1034,8 +1034,15 @@ impl App<'_> {
                         self.show_order_overlay,
                     );
                     new_widget.enable_perf(self.timing_enabled);
+                    // Ensure any initial animations or status are set up on the fresh widget
+                    new_widget.check_for_initial_animations();
 
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                    // Reset any transient state from the previous widget/session
+                    self.commit_anim_running.store(false, Ordering::Release);
+                    self.last_esc_time = None;
+                    // Force a clean repaint of the new UI state
+                    self.clear_on_first_frame = true;
 
                     // Replay prefix to the UI
                     let ev = codex_core::protocol::Event {
