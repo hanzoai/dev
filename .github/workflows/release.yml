@@ -618,7 +618,7 @@ jobs:
               out.splice(start + 1, end - (start + 1), msg);
             }
             fs.writeFileSync(p, out.join('\n'));
-            JS
+          JS
           fi
 
           # If the agent forgot to write release notes, synthesize a minimal one from CHANGELOG.
