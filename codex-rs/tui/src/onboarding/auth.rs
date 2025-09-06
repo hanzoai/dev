@@ -329,7 +329,11 @@ impl AuthModeWidget {
         }
 
         self.error = None;
-        let opts = ServerOptions::new(self.codex_home.clone(), CLIENT_ID.to_string());
+        let opts = ServerOptions::new(
+            self.codex_home.clone(),
+            CLIENT_ID.to_string(),
+            codex_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+        );
         let server = run_login_server(opts);
         match server {
             Ok(child) => {
