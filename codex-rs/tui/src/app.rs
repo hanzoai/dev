@@ -21,6 +21,7 @@ use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+// ^ KeyEventKind is critical on Windows: Press/Repeat/Release kinds
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use std::path::PathBuf;
@@ -176,8 +177,13 @@ impl App<'_> {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
-                                    last_key_time = Instant::now();
-                                    app_event_tx.send(AppEvent::KeyEvent(key_event));
+                                    // Windows (Crossterm ≥0.26) emits Press + Release (and sometimes Repeat).
+                                    // Forward only Press/Repeat to avoid doubled characters.
+                                    // Ref: https://ratatui.rs/book/faq/duplicate-key-events-windows
+                                    if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                                        last_key_time = Instant::now();
+                                        app_event_tx.send(AppEvent::KeyEvent(key_event));
+                                    }
                                 }
                                 crossterm::event::Event::Resize(_, _) => {
                                     app_event_tx.send(AppEvent::RequestRedraw);
