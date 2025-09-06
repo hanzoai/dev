@@ -104,7 +104,7 @@ jobs:
         with:
           workspaces: |
             codex-rs -> codex-rs/target
-          save-if: ${{ always() }}
+          save-if: true
 
       - name: Configure Git author
         timeout-minutes: 5
