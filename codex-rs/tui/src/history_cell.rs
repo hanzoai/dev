@@ -3669,10 +3669,11 @@ fn wrap_bullet_line(
 
     // Prefix widths (display columns)
     let bullet_cols = UWStr::width(bullet);
-    // Use a two-space gap after the bullet for better legibility and to keep
-    // continuation lines aligned with the start of the bullet content. This
-    // matches typical Markdown list rendering expectations in terminals.
-    let gap_after_bullet = 2usize;
+    // Use a single space after the bullet so nested lists do not
+    // render with an extra space ("·  item" -> "· item"). Keep the
+    // hanging indent consistent so wrapped lines align under the
+    // start of the bullet content.
+    let gap_after_bullet = 1usize;
     let extra_gap = leading_content_spaces; // absorb any extra content-leading spaces
     let first_prefix = indent_spaces + bullet_cols + gap_after_bullet + extra_gap;
     let cont_prefix = indent_spaces + bullet_cols + gap_after_bullet + extra_gap; // keep continuation aligned
