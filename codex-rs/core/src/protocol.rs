@@ -198,6 +198,11 @@ pub enum SandboxPolicy {
         /// writable roots on UNIX. Defaults to `false`.
         #[serde(default)]
         exclude_slash_tmp: bool,
+
+        /// When true, do not protect the top-level `.git` folder under a
+        /// writable root. Defaults to false for safety.
+        #[serde(default)]
+        allow_git_writes: bool,
     },
 }
 
@@ -248,6 +253,7 @@ impl SandboxPolicy {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
+            allow_git_writes: false,
         }
     }
 
@@ -283,6 +289,7 @@ impl SandboxPolicy {
                 writable_roots,
                 exclude_tmpdir_env_var,
                 exclude_slash_tmp,
+                allow_git_writes,
                 network_access: _,
             } => {
                 // Start from explicitly configured writable roots.
@@ -321,9 +328,11 @@ impl SandboxPolicy {
                     .into_iter()
                     .map(|writable_root| {
                         let mut subpaths = Vec::new();
-                        let top_level_git = writable_root.join(".git");
-                        if top_level_git.is_dir() {
-                            subpaths.push(top_level_git);
+                        if !allow_git_writes {
+                            let top_level_git = writable_root.join(".git");
+                            if top_level_git.is_dir() {
+                                subpaths.push(top_level_git);
+                            }
                         }
                         WritableRoot {
                             root: writable_root,
