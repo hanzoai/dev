@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.70] - 2025-09-06
+
+- TUI: add time-based greeting placeholder across composer, welcome, and history; map 10–13 to "today". (26b6d3c5, a97dc542)
+- TUI/Windows: prevent double character echo by ignoring Release events without enhancement flags. (9e6b1945)
+- Login: fallback to /oauth2/token and send Accept for reliable token exchange. (993c0453)
+- TUI: fully reset UI after jump-back to avoid stalls when sending next message. (9d482af2)
+- TUI/Chrome: allow specifying host for external Chrome connection (dev containers). (2b745f29)
+
 ## [0.2.69] - 2025-09-06
 
 - TUI: add session resume picker (--resume) and quick resume (--continue). (234c0a04)
