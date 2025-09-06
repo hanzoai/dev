@@ -92,6 +92,20 @@ jobs:
           restore-keys: |
             code-bin-cache-${{ runner.os }}-
 
+      - name: Setup Rust toolchain (match repo)
+        timeout-minutes: 5
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+
+      - name: Cache Rust build (cargo + target)
+        timeout-minutes: 5
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            codex-rs -> codex-rs/target
+          save-if: ${{ always() }}
+
       - name: Configure Git author
         timeout-minutes: 5
         run: |
