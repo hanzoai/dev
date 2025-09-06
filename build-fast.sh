@@ -123,6 +123,18 @@ else
   CANONICAL_ENV_APPLIED=0
 fi
 
+# Ensure Cargo writes inside the workspace when running under sandboxes that
+# make $HOME read-only (e.g. CI workspace-write). Allow explicit overrides.
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="${REPO_ROOT}/.cargo-home"
+fi
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  export CARGO_TARGET_DIR="${SCRIPT_DIR}/codex-rs/target"
+fi
+mkdir -p "${CARGO_HOME}" "${CARGO_TARGET_DIR}" 2>/dev/null || true
+# Use sparse registry for faster index updates when available
+export CARGO_REGISTRIES_CRATES_IO_PROTOCOL="sparse"
+
 # Resolve actual cargo/rustc binaries that will be used (via rustup) for fingerprinting
 REAL_CARGO_BIN="$(rustup which cargo 2>/dev/null || command -v cargo || echo cargo)"
 REAL_RUSTC_BIN="$(rustup which rustc 2>/dev/null || command -v rustc || echo rustc)"
