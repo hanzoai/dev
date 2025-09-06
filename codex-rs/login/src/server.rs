@@ -326,26 +326,36 @@ async fn exchange_code_for_tokens(
     }
 
     let client = codex_core::http_client::build_http_client();
-    let resp = client
-        .post(format!("{issuer}/oauth/token"))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!(
-            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
-            urlencoding::encode(code),
-            urlencoding::encode(redirect_uri),
-            urlencoding::encode(client_id),
-            urlencoding::encode(&pkce.code_verifier)
-        ))
-        .send()
-        .await
-        .map_err(io::Error::other)?;
+    let body = format!(
+        "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
+        urlencoding::encode(code),
+        urlencoding::encode(redirect_uri),
+        urlencoding::encode(client_id),
+        urlencoding::encode(&pkce.code_verifier)
+    );
 
-    if !resp.status().is_success() {
-        return Err(io::Error::other(format!(
-            "token endpoint returned status {}",
-            resp.status()
-        )));
+    // Try legacy endpoint first, then fallback to oauth2 path used by some issuers
+    let mut last_status: Option<reqwest::StatusCode> = None;
+    let mut resp_opt = None;
+    for path in ["/oauth/token", "/oauth2/token"] {
+        let url = format!("{issuer}{path}");
+        let res = client
+            .post(&url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Accept", "application/json")
+            .body(body.clone())
+            .send()
+            .await;
+        match res {
+            Ok(resp) if resp.status().is_success() => { resp_opt = Some(resp); break; }
+            Ok(resp) => { last_status = Some(resp.status()); }
+            Err(e) => { return Err(io::Error::other(format!("failed to POST {}: {}", url, e))); }
+        }
     }
+    let resp = resp_opt.ok_or_else(|| io::Error::other(format!(
+        "token endpoint failed (last status {:?})",
+        last_status
+    )))?;
 
     let tokens: TokenResponse = resp.json().await.map_err(io::Error::other)?;
     Ok(ExchangedTokens {
@@ -495,26 +505,35 @@ async fn obtain_api_key(issuer: &str, client_id: &str, id_token: &str) -> io::Re
         access_token: String,
     }
     let client = codex_core::http_client::build_http_client();
-    let resp = client
-        .post(format!("{issuer}/oauth/token"))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!(
-            "grant_type={}&client_id={}&requested_token={}&subject_token={}&subject_token_type={}",
-            urlencoding::encode("urn:ietf:params:oauth:grant-type:token-exchange"),
-            urlencoding::encode(client_id),
-            urlencoding::encode("openai-api-key"),
-            urlencoding::encode(id_token),
-            urlencoding::encode("urn:ietf:params:oauth:token-type:id_token")
-        ))
-        .send()
-        .await
-        .map_err(io::Error::other)?;
-    if !resp.status().is_success() {
-        return Err(io::Error::other(format!(
-            "api key exchange failed with status {}",
-            resp.status()
-        )));
+    let form = format!(
+        "grant_type={}&client_id={}&requested_token={}&subject_token={}&subject_token_type={}",
+        urlencoding::encode("urn:ietf:params:oauth:grant-type:token-exchange"),
+        urlencoding::encode(client_id),
+        urlencoding::encode("openai-api-key"),
+        urlencoding::encode(id_token),
+        urlencoding::encode("urn:ietf:params:oauth:token-type:id_token")
+    );
+    let mut last_status: Option<reqwest::StatusCode> = None;
+    let mut resp_opt = None;
+    for path in ["/oauth/token", "/oauth2/token"] {
+        let url = format!("{issuer}{path}");
+        let res = client
+            .post(&url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Accept", "application/json")
+            .body(form.clone())
+            .send()
+            .await;
+        match res {
+            Ok(resp) if resp.status().is_success() => { resp_opt = Some(resp); break; }
+            Ok(resp) => { last_status = Some(resp.status()); }
+            Err(e) => { return Err(io::Error::other(format!("failed to POST {}: {}", url, e))); }
+        }
     }
+    let resp = resp_opt.ok_or_else(|| io::Error::other(format!(
+        "api key exchange failed (last status {:?})",
+        last_status
+    )))?;
     let body: ExchangeResp = resp.json().await.map_err(io::Error::other)?;
     Ok(body.access_token)
 }
