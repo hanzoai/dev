@@ -1,10 +1,10 @@
 You are Code running headless in CI to prepare a new release.
 
 Inputs
-- Version: v0.2.69
+- Version: v0.2.71
 - Date (UTC): 2025-09-06
-- Previous tag: v0.2.68
-- Commit range: v0.2.68..HEAD
+- Previous tag: v0.2.70
+- Commit range: v0.2.70..HEAD
 - Working directory: repo root (CHANGELOG.md lives at top-level)
 
 Primary Tasks
@@ -14,19 +14,19 @@ Primary Tasks
 CHANGELOG.md House Style (strict)
 - File header stays as-is ("Changelog"). Do not rewrite older sections.
 - Insert the new section at the top (above previous versions), with this header format exactly:
-  ## [0.2.69] - 2025-09-06
+  ## [0.2.71] - 2025-09-06
 - Include 2–5 bullets (no more, no fewer), each a single line, focusing on user-visible features, fixes, UX, performance, or stability.
 - Keep bullets concise and scannable; avoid long prose. Use present tense.
 - When helpful, start bullets with a short scope label like "TUI:", "CLI:", or "Core:".
 - At the end of each bullet, include abbreviated commit SHA(s) in parentheses, using 7–8 hex chars, comma‑separated when multiple, like: (abc1234, def5678).
-- Map changes from the git commit log in v0.2.68..HEAD; ignore pure chores/merges unless user‑visible.
+- Map changes from the git commit log in v0.2.70..HEAD; ignore pure chores/merges unless user‑visible.
 - Do NOT add links, tables, code blocks, or subheadings. Do NOT include PR author attributions in the changelog.
 - Do NOT add any extra headers inside the changelog entry; only bullets under the version header.
-- Idempotent: if a section for 0.2.69 already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
+- Idempotent: if a section for 0.2.71 already exists, replace only that section’s body with the newly generated bullets and keep the header intact.
 
 Release Notes (release-notes/RELEASE_NOTES.md)
 - Write exactly these sections in order; include the optional Thanks section only when applicable:
-  1) Title: ## @just-every/code v0.2.69
+  1) Title: ## @just-every/code v0.2.71
   2) One brief intro sentence (1–2 lines max).
   3) Section header: ### Changes
      - The same 2–5 bullets as in the changelog (you may omit SHAs).
@@ -36,59 +36,27 @@ Release Notes (release-notes/RELEASE_NOTES.md)
      code
   5) Optional section header: ### Thanks
      - Include ONE line like: "Thanks to @alice and @bob for contributions!"
-     - Only include if at least one merged PR in v0.2.68..HEAD is authored by an external contributor.
-     - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk.
+     - Only include if at least one merged PR in v0.2.70..HEAD is authored by an external contributor.
+     - External contributors are any GitHub users other than: @zemaj, @andrej-griniuk, and NOT upstream contributors.
+     - Treat a username as upstream if it matches the regex /-oai$/i, or clearly belongs to the upstream org (e.g., OpenAI maintainers). Exclude such users from Thanks.
      - Derive usernames from merge commits, Co-authored-by trailers, or PR references in commit messages. Deduplicate and prefer "@username" form.
 - Keep notes concise; no walls of text. Do not add any other sections beyond the optional Thanks.
 - Optional final line (only if a previous tag exists):
-  Compare: https://github.com/just-every/code/compare/v0.2.68...v0.2.69
+  Compare: https://github.com/just-every/code/compare/v0.2.70...v0.2.71
 
 Rules
 - Use the provided git log as source of truth; summarize responsibly.
 - Explore codebase directly if commit messages are unclear or need additional context.
 - Keep formatting minimal (headers + list bullets). No emojis ever! Basic markdown only.
-- Never reorder older versions. Only touch the section for v0.2.69.
-- After writing files, stage and commit with message: docs(changelog): update for v0.2.69 [skip ci]
+- Never reorder older versions. Only touch the section for v0.2.71.
+- After writing files, stage and commit with message: docs(changelog): update for v0.2.71 [skip ci]
 
 Context (git log excerpt follows):
-# Commit log (v0.2.68..HEAD)
-* 178fcc05 chore(release): 0.2.69 [skip ci] (GitHub Action)
-* 13a2ce78 fix(tui): skip release key events on windows (James Peter)
-* 671e8023 docs(changelog): update for v0.2.68 [skip ci] (GitHub Action)
-* ba9620ae [codex] respect overrides for model family configuration from toml file (#3176) (Anton Panasenko)
-* 45c3b200 Added CLI version to `/status` output (#3223) (Eric Traut)
-* 6cfc012e feat(tui): show minutes/hours in thinking timer (#3220) (Enrique Moreno Tent)
-* 17a80d43 Added logic to cancel pending oauth login to free up localhost port (#3217) (Eric Traut)
-* c11696f6 hide resume until it's complete (#3218) (Ahmed Ibrahim)
-* 5775174e Never store requests (#3212) (pakrym-oai)
-* ba631e79 ZSH on UNIX system and better detection (#3187) (jif-oai)
-* db383473 [BREAKING] Stop loading project .env files (#3184) (pakrym-oai)
-* d6182bec syntax-highlight bash lines (#3142) (Jeremy Rose)
-* 323a5cb7 refactor: remove AttachImage tui event (#3191) (Jeremy Rose)
-* 3f40fbc0 chore: improve serialization of ServerNotification (#3193) (Michael Bolin)
-* 742feaf4 tui: fix approval dialog for large commands (#3087) (Jeremy Rose)
-* 907d3dd3 MCP: add session resume + history listing;  (#3185) (Ahmed Ibrahim)
-* 7df9e9c6 Correctly calculate remaining context size (#3190) (pakrym-oai)
-* b795fbe2 chore(deps): bump uuid from 1.17.0 to 1.18.0 in /codex-rs (#2493) (dependabot[bot])
-* 82ed7bd2 [mcp-server] Update read config interface (#3093) (Dylan)
-* 1c04e131 AGENTS.md: clarify test approvals for codex-rs (#3132) (Jeremy Rose)
-* bef7ed0c prompt to read AGENTS.md files (#3122) (Jeremy Rose)
-* be23fe13 Pause status timer while modals are open (#3131) (Jeremy Rose)
-* 2073fa71 tui: pager pins scroll to bottom (#3167) (Jeremy Rose)
-* e60a44cb [codex] move configuration for reasoning summary format to model family config type (#3171) (Anton Panasenko)
-* 075e3859 Use ⌥⇧⌃ glyphs for key hints on mac (#3143) (Jeremy Rose)
-* aa083b79 chore: add rust-lang.rust-analyzer and vadimcn.vscode-lldb to the list of recommended extensions (#3172) (Michael Bolin)
-* 91708bb0 fix: fix serde_as annotation and verify with test (#3170) (Michael Bolin)
-* 82dfec5b [codex] improve handling of reasoning summary (#3138) (Anton Panasenko)
-* 1e82bf9d tui: avoid panic when active exec cell area is zero height (#3133) (Jeremy Rose)
-* 0a83db55 fix: use a more efficient wire format for ExecCommandOutputDeltaEvent.chunk (#3163) (Michael Bolin)
-* bd4fa855 fix: add callback to map before sending request to fix race condition (#3146) (Michael Bolin)
-* 234c0a04 TUI: Add session resume picker (--resume) and quick resume (--continue) (#3135) (Ahmed Ibrahim)
-* 0f4ae1b5 chore(deps): bump wiremock from 0.6.4 to 0.6.5 in /codex-rs (#2666) (dependabot[bot])
-* 2b96f9f5 Dividing UserMsgs into categories to send it back to the tui (#3127) (Ahmed Ibrahim)
-* f2036572 Replay EventMsgs from Response Items when resuming a session with history. (#3123) (Ahmed Ibrahim)
-* bea64569 MCP sandbox call (#3128) (jif-oai)
-* e83c5f42 Include originator in authentication URL parameters (#3117) (pakrym-oai)
-* ed0d23d5 [tui] Update /mcp output (#3134) (Dylan)
-* 4ae45a6c remove bold the keyword from prompt (#3121) (Jeremy Rose)
-* 6b83c1c3 Fix failing CI (#3130) (Ahmed Ibrahim)
+# Commit log (v0.2.70..HEAD)
+* 2d20341f chore(release): 0.2.71 [skip ci] (GitHub Action)
+* acaba1d6 ci(issue-triage): prime Rust toolchain and cache codex-rs/target so agent builds via ./build-fast.sh are incremental (James Peter)
+* ac994e87 fix(tui/onboarding): apply themed background to auth picker surface (James Peter)
+* 3e4a648f fix(ci/upstream-merge): avoid PR 422 by validating head branch and using owner:branch; add Rust cache + toolchain for incremental builds like ./build-fast.sh (James Peter)
+* c4e586cf style(login/success): fix background + theme variables (James Peter)
+* d43eb23e fix(login): remove /oauth2/token fallback; adopt upstream-visible request shape (James Peter)
+* 93f6b4ac docs(changelog): update for v0.2.70 [skip ci] (GitHub Action)
