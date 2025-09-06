@@ -5,9 +5,12 @@ use chrono::Timelike;
 /// "What can I code for you this morning?".
 pub(crate) fn greeting_placeholder() -> String {
     let hour = Local::now().hour();
-    let when = if (5..=11).contains(&hour) {
+    // Custom mapping: show "today" for 10:00–13:59 local time.
+    let when = if (10..=13).contains(&hour) {
+        "today"
+    } else if (5..=9).contains(&hour) {
         "this morning"
-    } else if (12..=16).contains(&hour) {
+    } else if (14..=16).contains(&hour) {
         "this afternoon"
     } else if (17..=20).contains(&hour) {
         "this evening"
@@ -17,4 +20,3 @@ pub(crate) fn greeting_placeholder() -> String {
     };
     format!("What can I code for you {when}?")
 }
-
