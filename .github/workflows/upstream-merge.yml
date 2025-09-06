@@ -132,26 +132,30 @@ jobs:
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
-          PROMPT=$(cat << 'EOP'
+          # Build the agent prompt safely without command substitution
+          {
+            printf 'Context\n- UPSTREAM_REPO=%s\n- UPSTREAM_BRANCH=%s\n- MERGE_BRANCH=%s\n- DEFAULT_BRANCH=%s\n\n' \
+              "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$MERGE_BRANCH" "$DEFAULT_BRANCH";
+            cat << 'EOP'
           <task>
           You are the maintainer bot. Perform an upstream merge using the repo policies from MERGE.md and prepare a PR.
           Steps:
           1) Configure git with author "just-every-code <just-every-code@users.noreply.github.com>"
-          2) Ensure remote `upstream` points to ${UPSTREAM_REPO}. Fetch origin and upstream.
-          3) Re-create branch `${MERGE_BRANCH}` from `origin/${DEFAULT_BRANCH}`.
-          4) Merge `upstream/${UPSTREAM_BRANCH}` using `-X ours` strategy by default.
+          2) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
+          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH (see Context).
+          4) Merge upstream/UPSTREAM_BRANCH using "-X ours" strategy by default.
              - For TUI files (e.g., codex-tui/*, chatwidget.rs, history_cell.rs, bottom_pane/*), keep our themes/browser/agents; selectively incorporate upstream improvements if trivial.
              - Keep our AGENTS.md, CHANGELOG.md, README.md.
              - Do not modify .github/workflows except as result of merge (prefer ours on conflicts).
-          5) Run `./build-fast.sh`.
+          5) Run ./build-fast.sh.
              - If errors or warnings occur, make the smallest safe fixes to achieve a clean build (warnings treated as failures).
           6) Write a short report at MERGE_REPORT.md:
              - Incorporated: bullets
              - Dropped: bullets
              - Other changes: bullets
-          7) Create a conventional commit on `${MERGE_BRANCH}` summarizing the merge and including a one-line build status.
+          7) Create a conventional commit on MERGE_BRANCH summarizing the merge and including a one-line build status.
           8) Push branch to origin using GH_TOKEN.
-          9) Prepare `.github/auto/PR_TITLE.txt` and `.github/auto/PR_BODY.md` describing what changed and validation.
+          9) Prepare .github/auto/PR_TITLE.txt and .github/auto/PR_BODY.md describing what changed and validation.
           </task>
 
           <constraints>
@@ -161,8 +165,7 @@ jobs:
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
           EOP
-          )
-          printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+          } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
