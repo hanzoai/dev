@@ -154,6 +154,19 @@ jobs:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          OURS_GLOBS: |
+            codex-rs/tui/**
+            codex-cli/**
+            .github/workflows/**
+            AGENTS.md
+            README.md
+            CHANGELOG.md
+          THEIRS_GLOBS: |
+            codex-rs/core/**
+            codex-rs/common/**
+            codex-rs/protocol/**
+            codex-rs/exec/**
+            codex-rs/file-search/**
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
@@ -163,29 +176,24 @@ jobs:
               "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$MERGE_BRANCH" "$DEFAULT_BRANCH";
             cat << 'EOP'
           <task>
-          You are the maintainer bot. Perform an upstream merge using the repo policies from MERGE.md and prepare a PR.
+          You are the maintainer bot. Perform an upstream merge using our repo policies and a selective reconciliation strategy.
           Steps:
-          1) Configure git with author "just-every-code <just-every-code@users.noreply.github.com>"
+          1) Configure git with author "just-every-code <just-every-code@users.noreply.github.com>".
           2) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
-          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH (see Context).
-          4) Merge upstream/UPSTREAM_BRANCH using "-X ours" strategy by default.
-             - For TUI files (e.g., codex-tui/*, chatwidget.rs, history_cell.rs, bottom_pane/*), keep our themes/browser/agents; selectively incorporate upstream improvements if trivial.
-             - Keep our AGENTS.md, CHANGELOG.md, README.md.
-             - Do not modify .github/workflows except as result of merge (prefer ours on conflicts).
-          5) Run ./build-fast.sh.
-             - If errors or warnings occur, make the smallest safe fixes to achieve a clean build (warnings treated as failures).
-          6) Write a short report at MERGE_REPORT.md:
-             - Incorporated: bullets
-             - Dropped: bullets
-             - Other changes: bullets
-          7) Create a conventional commit on MERGE_BRANCH summarizing the merge and including a one-line build status.
-          8) Push branch to origin using GH_TOKEN.
-          9) Prepare .github/auto/PR_TITLE.txt and .github/auto/PR_BODY.md describing what changed and validation.
+          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
+          4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
+             - For files matching OURS_GLOBS: keep ours; if upstream added new files under these globs, remove them.
+             - For files matching THEIRS_GLOBS: prefer theirs.
+             - For everything else, default to ours unless the change is a clear, trivial improvement (typos/docs) that doesn’t conflict with our direction.
+          5) Stage and commit with a conventional message and short build status.
+          6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
+          7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          8) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
           <constraints>
           - Be minimal and surgical; do not refactor.
-          - Keep diffs focused on merge and required fixes.
+          - Keep diffs focused on merge and required fixes. Do not recreate locally removed theming/UX files.
           - Never rewrite git history outside the merge branch.
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
@@ -201,6 +209,8 @@ jobs:
             -s workspace-write \
             -c sandbox_workspace_write.allow_git_writes=true \
             -c sandbox_workspace_write.network_access=true \
+            -c shell_environment_policy.r#set.CARGO_HOME="${GITHUB_WORKSPACE}/.cargo-home" \
+            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
