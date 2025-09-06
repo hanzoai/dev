@@ -341,6 +341,10 @@ pub struct SandboxWorkspaceWrite {
     pub exclude_tmpdir_env_var: bool,
     #[serde(default)]
     pub exclude_slash_tmp: bool,
+    /// When true, do not protect the top-level `.git` folder under a writable
+    /// root. Defaults to false for safety.
+    #[serde(default)]
+    pub allow_git_writes: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
