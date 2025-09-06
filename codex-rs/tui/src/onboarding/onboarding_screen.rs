@@ -187,6 +187,11 @@ impl KeyboardHandler for OnboardingScreen {
 impl WidgetRef for &OnboardingScreen {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
+        // Fill the onboarding surface with the themed background so the picker
+        // screen matches the active light/dark theme across terminals.
+        let bg = ratatui::widgets::Block::default()
+            .style(ratatui::style::Style::default().bg(crate::colors::background()));
+        bg.render(area, buf);
         // Render steps top-to-bottom, measuring each step's height dynamically.
         let mut y = area.y;
         let bottom = area.y.saturating_add(area.height);
