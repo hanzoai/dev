@@ -30,17 +30,30 @@ env:
   UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
   MERGE_BRANCH: upstream-merge
 
-jobs:
-  merge:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  jobs:
+    merge:
+      runs-on: ubuntu-latest
+      timeout-minutes: 45
 
-    steps:
-      - name: Check out repository (full history)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
+      steps:
+        - name: Check out repository (full history)
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
+            persist-credentials: false
+
+        - name: Setup Rust toolchain (match repo)
+          uses: dtolnay/rust-toolchain@master
+          with:
+            toolchain: 1.89.0
+
+        - name: Cache Rust build (cargo + target)
+          uses: Swatinem/rust-cache@v2
+          with:
+            # Our Rust workspace lives in codex-rs; cache its target dir
+            workspaces: |
+              codex-rs -> codex-rs/target
+            save-if: ${{ always() }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -176,13 +189,21 @@ jobs:
             if (!body) {
               body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
             }
-            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}` });
+            // Ensure the branch exists on origin before creating/updating a PR.
+            const ref = `heads/${head}`;
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+            } catch (e) {
+              core.notice(`Branch '${head}' not found on origin; skipping PR creation.`);
+              return;
+            }
+            const headRef = `${owner}:${head}`;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
             if (prs.data.length) {
               const pr = prs.data[0];
               await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
               core.notice(`Updated PR #${pr.number}`);
             } else {
-              const pr = await github.rest.pulls.create({ owner, repo, title, head, base, body });
+              const pr = await github.rest.pulls.create({ owner, repo, title, head: headRef, base, body });
               core.notice(`Created PR #${pr.data.number}`);
             }
-
