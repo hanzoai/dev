@@ -243,17 +243,20 @@ impl MarkdownRenderer {
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
             let indent = line.len() - trimmed.len();
             let mut content = &trimmed[2..];
+            // Collapse any extra spaces after the list marker so we render
+            // a single space after the bullet ("-  item" -> "- item").
+            content = content.trim_start();
 
             // Task list checkbox support: - [ ] / - [x]
             let mut checkbox_spans: Vec<Span<'static>> = Vec::new();
             if let Some(rest) = content.strip_prefix("[ ] ") {
-                content = rest;
+                content = rest.trim_start();
                 checkbox_spans.push(Span::raw("☐ "));
             } else if let Some(rest) = content
                 .strip_prefix("[x] ")
                 .or_else(|| content.strip_prefix("[X] "))
             {
-                content = rest;
+                content = rest.trim_start();
                 checkbox_spans.push(Span::styled(
                     "✔ ",
                     Style::default().fg(crate::colors::success()),
@@ -323,7 +326,7 @@ impl MarkdownRenderer {
             let number_part = &trimmed[..dot_pos];
             if number_part.chars().all(|c| c.is_ascii_digit()) && !number_part.is_empty() {
                 let indent = line.len() - trimmed.len();
-                let content = &trimmed[dot_pos + 2..];
+                let content = trimmed[dot_pos + 2..].trim_start();
                 let styled_content = self.process_inline_spans(content);
                 let depth = indent / 2 + 1;
                 let content_fg = match depth {
