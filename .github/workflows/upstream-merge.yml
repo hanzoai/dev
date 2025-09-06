@@ -30,30 +30,30 @@ env:
   UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
   MERGE_BRANCH: upstream-merge
 
-  jobs:
-    merge:
-      runs-on: ubuntu-latest
-      timeout-minutes: 45
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
-      steps:
-        - name: Check out repository (full history)
-          uses: actions/checkout@v4
-          with:
-            fetch-depth: 0
-            persist-credentials: false
+    steps:
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-        - name: Setup Rust toolchain (match repo)
-          uses: dtolnay/rust-toolchain@master
-          with:
-            toolchain: 1.89.0
+      - name: Setup Rust toolchain (match repo)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
 
-        - name: Cache Rust build (cargo + target)
-          uses: Swatinem/rust-cache@v2
-          with:
-            # Our Rust workspace lives in codex-rs; cache its target dir
-            workspaces: |
-              codex-rs -> codex-rs/target
-            save-if: ${{ always() }}
+      - name: Cache Rust build (cargo + target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Our Rust workspace lives in codex-rs; cache its target dir
+          workspaces: |
+            codex-rs -> codex-rs/target
+          save-if: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
