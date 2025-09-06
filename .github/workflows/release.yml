@@ -724,7 +724,7 @@ jobs:
               esac
             done < <(git ls-files --unmerged | cut -f2 | sort -u)
             git add -A
-            git commit -m "Merge origin/main: adopt remote workflow changes; keep release changes"
+            git commit -m "Merge origin/main: adopt remote workflow changes; keep release changes [skip ci]"
           fi
           echo "Retrying push after policy merge..."
           git push origin main
