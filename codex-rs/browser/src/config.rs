@@ -60,6 +60,10 @@ pub struct BrowserConfig {
     pub user_agent: Option<String>, // leave None to let Chrome decide
 
     // --- Connection tuning (CDP attach) ---
+    /// Optional host to use when connecting to an external Chrome via
+    /// `connect_port`. Defaults to 127.0.0.1 when not set.
+    #[serde(default)]
+    pub connect_host: Option<String>,
     /// Per-attempt timeout for WS connect to Chrome (milliseconds)
     #[serde(default = "default_connect_attempt_timeout_ms")]
     pub connect_attempt_timeout_ms: u64,
@@ -82,6 +86,7 @@ impl Default for BrowserConfig {
             headless: false, // Prefer headed for fewer false positives
             connect_ws: None,
             connect_port: None,
+            connect_host: None,
             user_data_dir: None,
             persist_profile: default_persist_profile(),
             locale: Some("en-AU".into()),
