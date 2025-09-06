@@ -103,7 +103,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            codex-rs -> codex-rs/target
+            codex-rs -> target
           save-if: true
 
       - name: Configure Git author

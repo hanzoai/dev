@@ -55,13 +55,13 @@ jobs:
         with:
           toolchain: 1.89.0
 
-      - name: Cache Rust build (cargo + target)
-        uses: Swatinem/rust-cache@v2
-        with:
-          # Our Rust workspace lives in codex-rs; cache its target dir
-          workspaces: |
-            codex-rs -> codex-rs/target
-          save-if: true
+        - name: Cache Rust build (cargo + target)
+          uses: Swatinem/rust-cache@v2
+          with:
+            # Our Rust workspace lives in codex-rs; cache its target dir
+            workspaces: |
+              codex-rs -> target
+            save-if: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -132,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
-          PROMPT=$(cat << EOP
+          PROMPT=$(cat << 'EOP'
           <task>
           You are the maintainer bot. Perform an upstream merge using the repo policies from MERGE.md and prepare a PR.
           Steps:
@@ -169,7 +169,7 @@ jobs:
             GH_TOKEN="$GH_TOKEN" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
-            -s danger-full-access -a never \
+            -s workspace-write -a never -c sandbox_workspace_write.allow_git_writes=true \
             exec \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
