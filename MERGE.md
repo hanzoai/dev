@@ -1,5 +1,5 @@
 Goal
-◦ Merge latest upstream/main into our repo via a merge branch.
+◦ Merge latest upstream/main into our repo and land it on our main.
 ◦ Prefer our changes, but adopt upstream TUI improvements where compatible.
 ◦ Verify only with ./build-fast.sh.
 
@@ -21,8 +21,15 @@ Essential Steps
   · Fix all errors
   · Fix all warnings
 ◦ Finalize:
-  · Commit changes
-  · Merge branch into main (do not push)
+  · Commit changes on the merge branch.
+  · Merge the merge branch into main (no-ff merge, keep history).
+  · Push main to origin (merge-only; do NOT rebase). See “Git Push Policy”.
+  · If GitHub still shows “behind upstream/main”, create an empty merge to acknowledge upstream history without changing files:
+    - git fetch upstream
+    - git checkout main
+    - git merge -s ours upstream/main -m "Merge upstream/main (ours strategy to acknowledge history)"
+    - ./build-fast.sh (must be clean)
+    - git push origin main
   · If you stashed files, unstash them
 
 Report:
