@@ -41,7 +41,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-const BASE_PLACEHOLDER_TEXT: &str = "Welcome to Code — What are we coding today? Type / to see commands";
+// Dynamic placeholder rendered when the composer is empty.
 /// If the pasted content exceeds this number of characters, replace it with a
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
@@ -1608,7 +1608,8 @@ impl WidgetRef for ChatComposer {
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
         // Only show placeholder if there's no chat history AND no text typed
         if !self.typed_anything && self.textarea.text().is_empty() {
-            Line::from(BASE_PLACEHOLDER_TEXT)
+            let placeholder = crate::greeting::greeting_placeholder();
+            Line::from(placeholder)
                 .style(Style::default().dim())
                 .render_ref(padded_textarea_rect, buf);
         }
