@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.74] - 2025-09-06
+
+- Maintenance: no user-facing changes; CI and repo hygiene improvements. (9ba6bb9d, 4ed87245)
+- CI: guard self/bot comments; improve upstream-merge reconciliation and pass Cargo env for builds. (9ba6bb9d)
+
 ## [0.2.73] - 2025-09-06
 
 - CI/Build: default CARGO_HOME and CARGO_TARGET_DIR to workspace; use sparse registry; precreate dirs for sandboxed runs. (dd9ff4b8)
