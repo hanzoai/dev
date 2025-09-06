@@ -169,8 +169,8 @@ jobs:
             GH_TOKEN="$GH_TOKEN" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
-            -s workspace-write -a never -c sandbox_workspace_write.allow_git_writes=true \
             exec \
+            -s workspace-write -a never -c sandbox_workspace_write.allow_git_writes=true \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
