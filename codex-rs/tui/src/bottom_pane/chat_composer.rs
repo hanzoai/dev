@@ -104,6 +104,8 @@ pub(crate) struct ChatComposer {
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
     has_chat_history: bool,
+    /// Tracks whether the user has typed or pasted any content since startup.
+    typed_anything: bool,
     is_task_running: bool,
     // Current status message to display when task is running
     status_message: String,
@@ -155,6 +157,7 @@ impl ChatComposer {
             token_usage_info: None,
             has_focus: has_input_focus,
             has_chat_history: false,
+            typed_anything: false,
             // no double‑Esc handling here; App manages Esc policy
             is_task_running: false,
             status_message: String::from("coding"),
@@ -1202,6 +1205,7 @@ impl ChatComposer {
         // If text changed, reset history navigation state
         if text_before != text_after {
             self.history.reset_navigation();
+            if !text_after.is_empty() { self.typed_anything = true; }
         }
 
         // Check if any placeholders were removed and remove their corresponding pending pastes
@@ -1603,7 +1607,7 @@ impl WidgetRef for ChatComposer {
         let mut state = self.textarea_state.borrow_mut();
         StatefulWidgetRef::render_ref(&(&self.textarea), padded_textarea_rect, buf, &mut state);
         // Only show placeholder if there's no chat history AND no text typed
-        if !self.has_chat_history && self.textarea.text().is_empty() {
+        if !self.typed_anything && self.textarea.text().is_empty() {
             Line::from(BASE_PLACEHOLDER_TEXT)
                 .style(Style::default().dim())
                 .render_ref(padded_textarea_rect, buf);
