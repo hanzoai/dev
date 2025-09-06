@@ -28,8 +28,8 @@ struct JsonVersion {
     web_socket_debugger_url: String,
 }
 
-async fn discover_ws_via_port(port: u16) -> Result<String> {
-    let url = format!("http://127.0.0.1:{}/json/version", port);
+async fn discover_ws_via_host_port(host: &str, port: u16) -> Result<String> {
+    let url = format!("http://{}:{}/json/version", host, port);
     debug!("Requesting Chrome version info from: {}", url);
 
     let client_start = tokio::time::Instant::now();
@@ -212,8 +212,8 @@ impl BrowserManager {
 
         let config = self.config.read().await.clone();
         tracing::info!(
-            "[cdp/bm] config: connect_port={:?}, connect_ws={:?}",
-            config.connect_port, config.connect_ws
+            "[cdp/bm] config: connect_host={:?}, connect_port={:?}, connect_ws={:?}",
+            config.connect_host, config.connect_port, config.connect_ws
         );
 
         // If a WebSocket is configured explicitly, try that first
@@ -289,6 +289,7 @@ impl BrowserManager {
 
         // Only try CDP connection via port, no fallback
         if let Some(port) = config.connect_port {
+            let host = config.connect_host.as_deref().unwrap_or("127.0.0.1");
             let actual_port = if port == 0 {
                 info!("Auto-scanning for Chrome debug ports...");
                 let start = tokio::time::Instant::now();
@@ -305,12 +306,12 @@ impl BrowserManager {
             };
 
             if actual_port > 0 {
-                info!("[cdp/bm] Discovering Chrome WebSocket URL via port {}...", actual_port);
+                info!("[cdp/bm] Discovering Chrome WebSocket URL via {}:{}...", host, actual_port);
                 // Retry discovery for up to 15s to allow a freshly launched Chrome to initialize
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
                 let ws = loop {
                     let discover_start = tokio::time::Instant::now();
-                    match discover_ws_via_port(actual_port).await {
+                    match discover_ws_via_host_port(host, actual_port).await {
                         Ok(ws) => {
                             info!("[cdp/bm] WS discovered in {:?}: {}", discover_start.elapsed(), ws);
                             break ws;
@@ -495,6 +496,7 @@ impl BrowserManager {
         }
 
         if let Some(port) = config.connect_port {
+            let host = config.connect_host.as_deref().unwrap_or("127.0.0.1");
             let actual_port = if port == 0 {
                 info!("Auto-scanning for Chrome debug ports...");
                 let start = tokio::time::Instant::now();
@@ -511,13 +513,10 @@ impl BrowserManager {
             };
 
             if actual_port > 0 {
-                info!(
-                    "Step 1: Discovering Chrome WebSocket URL via port {}...",
-                    actual_port
-                );
+                info!("Step 1: Discovering Chrome WebSocket URL via {}:{}...", host, actual_port);
                 let ws = loop {
                     let discover_start = tokio::time::Instant::now();
-                    match discover_ws_via_port(actual_port).await {
+                    match discover_ws_via_host_port(host, actual_port).await {
                         Ok(ws) => {
                             info!(
                                 "Step 2: WebSocket URL discovered in {:?}: {}",

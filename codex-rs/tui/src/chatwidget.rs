@@ -4308,17 +4308,18 @@ impl ChatWidget<'_> {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
             // Now try to connect using the shared CDP connection logic
-            ChatWidget::connect_to_cdp_chrome(Some(port), latest_screenshot, app_event_tx).await;
+            ChatWidget::connect_to_cdp_chrome(None, Some(port), latest_screenshot, app_event_tx).await;
         });
     }
 
     /// Shared CDP connection logic used by both /chrome command and Chrome launch options
     async fn connect_to_cdp_chrome(
+        host: Option<String>,
         port: Option<u16>,
         latest_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
         app_event_tx: AppEventSender,
     ) {
-        tracing::info!("[cdp] connect_to_cdp_chrome() begin, port={:?}", port);
+        tracing::info!("[cdp] connect_to_cdp_chrome() begin, host={:?}, port={:?}", host, port);
         let browser_manager = ChatWidget::get_browser_manager().await;
         browser_manager.set_enabled_sync(true);
 
@@ -4334,6 +4335,7 @@ impl ChatWidget<'_> {
 
             if let Some(p) = port {
                 config.connect_ws = None;
+                config.connect_host = host.clone();
                 config.connect_port = Some(p);
             } else {
                 // Load persisted cache from disk (if any), then fall back to in-memory
@@ -4350,9 +4352,11 @@ impl ChatWidget<'_> {
                 } else if let Some(p) = cached_port_for_fallback {
                     tracing::info!("[cdp] using cached Chrome debug port: {}", p);
                     config.connect_ws = None;
+                    config.connect_host = host.clone();
                     config.connect_port = Some(p);
                 } else {
                     config.connect_ws = None;
+                    config.connect_host = host.clone();
                     config.connect_port = Some(0); // auto-detect
                 }
             }
@@ -5330,25 +5334,27 @@ impl ChatWidget<'_> {
         });
     }
 
-    fn handle_chrome_connection(&mut self, port: Option<u16>) {
-        tracing::info!("[cdp] handle_chrome_connection begin, port={:?}", port);
+    fn handle_chrome_connection(&mut self, host: Option<String>, port: Option<u16>) {
+        tracing::info!("[cdp] handle_chrome_connection begin, host={:?}, port={:?}", host, port);
         self.browser_is_external = true;
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
         let port_display = port.map_or("auto-detect".to_string(), |p| p.to_string());
+        let host_display = host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
 
         // Add status message to chat (use BackgroundEvent with header so it renders reliably)
         let status_msg = format!(
-            "🔗 Connecting to Chrome DevTools Protocol (port: {})...",
+            "🔗 Connecting to Chrome DevTools Protocol ({}:{})...",
+            host_display,
             port_display
         );
         self.history_push(history_cell::new_background_event(status_msg));
 
         // Connect in background with a single, unified flow (no double-connect)
         tokio::spawn(async move {
-            tracing::info!("[cdp] connect task spawned, port={:?}", port);
+            tracing::info!("[cdp] connect task spawned, host={:?}, port={:?}", host, port);
             // Unified connect flow; emits success/failure messages internally
-            ChatWidget::connect_to_cdp_chrome(port, latest_screenshot.clone(), app_event_tx.clone()).await;
+            ChatWidget::connect_to_cdp_chrome(host, port, latest_screenshot.clone(), app_event_tx.clone()).await;
         });
     }
 
@@ -5395,7 +5401,7 @@ impl ChatWidget<'_> {
             let handled_disconnect = rx.recv().unwrap_or(false);
             if !handled_disconnect {
                 // Switch to external Chrome mode with default/auto-detected port
-                self.handle_chrome_connection(None);
+                self.handle_chrome_connection(None, None);
             } else {
                 // We just disconnected; reflect in title immediately
                 self.browser_is_external = false;
@@ -5426,10 +5432,67 @@ impl ChatWidget<'_> {
             return;
         }
 
-        // Extract port if provided (number as first argument)
-        let port = parts[0].parse::<u16>().ok();
-        tracing::info!("[cdp] parsed port: {:?}", port);
-        self.handle_chrome_connection(port);
+        // Accept several forms:
+        //   /chrome 9222
+        //   /chrome host:9222
+        //   /chrome host 9222
+        //   /chrome ws://host:9222/devtools/browser/<id>
+        let mut host: Option<String> = None;
+        let mut port: Option<u16> = None;
+        let first = parts[0];
+
+        if let Some(ws) = first.strip_prefix("ws://").or_else(|| first.strip_prefix("wss://")) {
+            // Full WS URL provided: set directly via config and return
+            let ws_url = if first.starts_with("ws") { first.to_string() } else { format!("wss://{}", ws) };
+            tracing::info!("[cdp] /chrome provided WS endpoint: {}", ws_url);
+            // Configure and connect using WS
+            self.browser_is_external = true;
+            let latest_screenshot = self.latest_browser_screenshot.clone();
+            let app_event_tx = self.app_event_tx.clone();
+            tokio::spawn(async move {
+                let bm = ChatWidget::get_browser_manager().await;
+                {
+                    let mut cfg = bm.config.write().await;
+                    cfg.enabled = true;
+                    cfg.headless = false;
+                    cfg.persist_profile = true;
+                    cfg.connect_ws = Some(ws_url);
+                    cfg.connect_port = None;
+                    cfg.connect_host = None;
+                }
+                let _ = bm.connect_to_chrome_only().await;
+                // Capture a first screenshot if possible
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                match bm.capture_screenshot_with_url().await {
+                    Ok((paths, url)) => {
+                        if let Some(first_path) = paths.first() {
+                            if let Ok(mut latest) = latest_screenshot.lock() {
+                                *latest = Some((
+                                    first_path.clone(),
+                                    url.clone().unwrap_or_else(|| "Browser".to_string()),
+                                ));
+                            }
+                            use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| "Browser".to_string()) }), order: None }));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to capture initial external Chrome screenshot: {}", e);
+                    }
+                }
+            });
+            return;
+        }
+
+        if let Some((h, p)) = first.rsplit_once(':') {
+            if let Ok(pn) = p.parse::<u16>() { host = Some(h.to_string()); port = Some(pn); }
+        }
+        if host.is_none() && port.is_none() {
+            if let Ok(pn) = first.parse::<u16>() { port = Some(pn); }
+            else if parts.len() >= 2 { if let Ok(pn) = parts[1].parse::<u16>() { host = Some(first.to_string()); port = Some(pn); } }
+        }
+        tracing::info!("[cdp] parsed host={:?}, port={:?}", host, port);
+        self.handle_chrome_connection(host, port);
     }
 
     /// Programmatically submit a user text message as if typed in the
