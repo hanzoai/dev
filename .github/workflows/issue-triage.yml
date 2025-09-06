@@ -464,6 +464,8 @@ jobs:
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
+            CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
+            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
             exec \
