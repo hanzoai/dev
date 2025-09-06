@@ -130,6 +130,27 @@ jobs:
               core.setOutput('id', '0');
             }
 
+      - name: Guard self-trigger (skip if actor is bot)
+        if: always()
+        id: guard_self
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actor = context.actor;
+            const pat = process.env.BOT_LOGIN || '';
+            const bots = new Set([pat, 'github-actions', 'github-actions[bot]', 'just-every-code']);
+            const ok = !bots.has(actor);
+            core.notice(`actor=${actor} bot=${pat} -> proceed=${ok}`);
+            core.setOutput('ok', ok ? 'true' : 'false');
+        env:
+          BOT_LOGIN: ${{ steps.bot.outputs.login }}
+
+      - name: Early exit (self-comment)
+        if: steps.guard_self.outputs.ok != 'true'
+        run: |
+          echo "Skipping: self/bot comment"
+          exit 0
+
       - name: Prepare working files for the agent
         timeout-minutes: 5
         env:
@@ -159,6 +180,34 @@ jobs:
             - If you responded without code changes and the response fully resolves the issue, set close_issue=true and include a concise close_message; the workflow will post it and close the issue immediately.
             - Set assignee to "just-every-code" if you’ve resolved/own it; otherwise set "zemaj".
           EOF
+
+      - name: Collect issue history and past PRs (context for agent)
+        timeout-minutes: 5
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = parseInt(process.env.ISSUE_NUMBER, 10);
+            const issue = (await github.rest.issues.get({ owner, repo, issue_number })).data;
+            const comments = (await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 })).data;
+            const events = (await github.rest.issues.listEvents({ owner, repo, issue_number, per_page: 100 })).data;
+            const q = `repo:${owner}/${repo} is:pr ${issue_number}`; // catch references like #123
+            const prs = (await github.rest.search.issuesAndPullRequests({ q, per_page: 50 })).data.items;
+            let out = [];
+            out.push(`# Issue #${issue.number}: ${issue.title}`);
+            out.push(`State: ${issue.state}  |  Created: ${issue.created_at}`);
+            out.push('\n## History (newest first)');
+            for (const c of comments.slice().reverse()) {
+              out.push(`- [${c.user.login}] ${c.created_at}: ${c.body?.slice(0,500) || ''}`);
+            }
+            out.push('\n## Events');
+            for (const e of events.slice(-50)) { out.push(`- ${e.event} by ${e.actor?.login || 'n/a'} at ${e.created_at}`); }
+            out.push('\n## Related PRs referencing this issue');
+            for (const p of prs) { out.push(`- #${p.number} ${p.title} [${p.state}] by ${p.user.login}`); }
+            fs.writeFileSync('.github/auto/CONTEXT.md', out.join('\n'));
 
       - name: Rate limit check (actor + overall)
         timeout-minutes: 5
