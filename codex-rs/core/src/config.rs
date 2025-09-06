@@ -595,11 +595,13 @@ impl ConfigToml {
                     network_access,
                     exclude_tmpdir_env_var,
                     exclude_slash_tmp,
+                    allow_git_writes,
                 }) => SandboxPolicy::WorkspaceWrite {
                     writable_roots: writable_roots.clone(),
                     network_access: *network_access,
                     exclude_tmpdir_env_var: *exclude_tmpdir_env_var,
                     exclude_slash_tmp: *exclude_slash_tmp,
+                    allow_git_writes: *allow_git_writes,
                 },
                 None => SandboxPolicy::new_workspace_write_policy(),
             },
