@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.72] - 2025-09-06
+
+- Core/Sandbox: add workspace-write opt-in (default off); allow .git writes via CI override. (3df630f9)
+- CI: improve upstream-merge push/auth and skip recursive workflows to stabilize releases. (274dcaef, 8fadbd03, dc1dcac0)
+
 ## [0.2.71] - 2025-09-06
 
 - TUI/Onboarding: apply themed background to auth picker surface. (ac994e87)
