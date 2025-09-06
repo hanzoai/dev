@@ -3,6 +3,19 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.69] - 2025-09-06
+
+- TUI: add session resume picker (--resume) and quick resume (--continue). (234c0a04)
+- TUI: show minutes/hours in thinking timer. (6cfc012e)
+- Fix: skip release key events on Windows. (13a2ce78)
+- Core: respect model family overrides from config. (ba9620ae)
+- Breaking: stop loading project .env files. (db383473)
+
+## [0.2.68] - 2025-09-06
+
+- Core: normalize working directory to Git repo root for consistent path resolution. (520b1c3e)
+- Approvals: warn when approval policy is missing to avoid silent failures. (520b1c3e)
+
 ## [0.2.67] - 2025-09-05
 
 - TUI: prevent doubled characters on Windows by ignoring Repeat/Release for printable keys. (73a22bd6)
