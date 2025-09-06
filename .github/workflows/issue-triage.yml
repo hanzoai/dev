@@ -466,8 +466,8 @@ jobs:
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
-            -s "$CODE_SANDBOX" -a never \
             exec \
+            -s "$CODE_SANDBOX" \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
