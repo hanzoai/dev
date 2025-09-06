@@ -416,9 +416,14 @@ impl App<'_> {
                     if self.timing_enabled { self.timing.on_key(); }
                     // On terminals that do not support keyboard enhancement flags
                     // (notably some Windows Git Bash/mintty setups), crossterm may
-                    // report only Release events. Normalize such events to Press so
-                    // keys register consistently.
+                    // report only Release events for some keys. Previously we coerced
+                    // all events to `Press`, which turned a `Press`+`Release` pair into
+                    // two `Press` events and doubled character insertion on Windows.
+                    //
+                    // Fix: when enhancement flags are not supported, drop `Release`
+                    // events entirely and keep `Press`/`Repeat` semantics.
                     if !self.enhanced_keys_supported {
+                        if key_event.kind == KeyEventKind::Release { continue; }
                         key_event = KeyEvent::new(key_event.code, key_event.modifiers);
                     }
                     // Reset double‑Esc timer on any non‑Esc key
