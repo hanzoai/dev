@@ -1,12 +1,11 @@
-## @just-every/code v0.2.71
+## @just-every/code v0.2.72
 
-Small UX fixes around login and onboarding; no breaking changes.
+Small release focused on sandbox controls and CI stability.
 
 ### Changes
 
-- TUI/Onboarding: apply themed background to auth picker surface.
-- Login: remove /oauth2/token fallback; adopt upstream-visible request shape.
-- Login/Success: fix background and theme variables.
+- Core/Sandbox: add workspace-write opt-in (default off); allow .git writes via CI override.
+- CI: improve upstream-merge push/auth and skip recursive workflows to stabilize releases.
 
 ### Install
 
@@ -15,5 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.70...v0.2.71
-
+Compare: https://github.com/just-every/code/compare/v0.2.71...v0.2.72
