@@ -42,6 +42,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Configure authenticated origin for pushes
+        env:
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
       - name: Setup Rust toolchain (match repo)
         uses: dtolnay/rust-toolchain@master
         with:
