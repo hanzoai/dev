@@ -1,0 +1,145 @@
+name: Upstream Merge
+
+on:
+  # Poll upstream regularly; also allow manual and external triggers
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: 'Upstream repo (owner/name)'
+        required: false
+        default: 'openai/codex'
+      upstream_branch:
+        description: 'Upstream branch'
+        required: false
+        default: 'main'
+  repository_dispatch:
+    types: [upstream-push]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_REPO: ${{ inputs.upstream_repo || 'openai/codex' }}
+  UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
+  MERGE_BRANCH: upstream-merge
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git author
+        run: |
+          git config user.name "just-every-code"
+          git config user.email "just-every-code@users.noreply.github.com"
+
+      - name: Add and fetch upstream
+        env:
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+        run: |
+          set -euo pipefail
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "https://github.com/${UPSTREAM_REPO}.git"
+          else
+            git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          fi
+          git fetch origin --prune
+          git fetch upstream --prune
+          echo "Upstream: ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}"
+
+      - name: Create/update merge branch from latest main
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+        run: |
+          set -euo pipefail
+          # Start from our latest main
+          git checkout -B "$MERGE_BRANCH" "origin/${DEFAULT_BRANCH}"
+          # Merge upstream, preferring ours on conflicts (per MERGE.md policy)
+          set +e
+          git merge -X ours --no-edit "upstream/${UPSTREAM_BRANCH}"
+          status=$?
+          set -e
+          if [ $status -ne 0 ]; then
+            echo "Merge encountered conflicts; completed with -X ours policy." >&2
+          fi
+          # Determine if branch differs from origin/${DEFAULT_BRANCH}
+          ahead=$(git rev-list --left-right --count "origin/${DEFAULT_BRANCH}...HEAD" | awk '{print $2}')
+          echo "AHEAD_COMMITS=${ahead}" >> "$GITHUB_ENV"
+
+      - name: Build quick validation (./build-fast.sh)
+        id: build
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          if [ -x ./build-fast.sh ]; then
+            ./build-fast.sh
+          else
+            echo "No build-fast.sh found; skipping."
+          fi
+
+      - name: Push branch if changed
+        if: env.AHEAD_COMMITS != '0'
+        env:
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force-with-lease --set-upstream origin "$MERGE_BRANCH"
+
+      - name: Open or update PR
+        if: env.AHEAD_COMMITS != '0'
+        uses: actions/github-script@v7
+        env:
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          BUILD_OK: ${{ steps.build.outcome == 'success' && 'true' || 'false' }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.MERGE_BRANCH;
+            const base = process.env.DEFAULT_BRANCH;
+            const title = `Upstream merge: ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}`;
+            const note = process.env.BUILD_OK === 'true'
+              ? 'Validation: ./build-fast.sh succeeded.'
+              : 'Validation: ./build-fast.sh failed — review and fix in this branch.';
+            const body = [
+              `This PR automatically merges upstream changes from \
+${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} using \`-X ours\`.`,
+              '',
+              note,
+              '',
+              'Policy:',
+              '- Start from latest main',
+              '- Merge upstream preferring ours on conflicts',
+              '- Keep branch updated on schedule',
+            ].join('\n');
+
+            // Find existing open PR from MERGE_BRANCH to base
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}` });
+            if (prs.data.length) {
+              const pr = prs.data[0];
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
+              core.notice(`Updated PR #${pr.number}`);
+            } else {
+              const pr = await github.rest.pulls.create({ owner, repo, title, head, base, body });
+              core.notice(`Created PR #${pr.data.number}`);
+            }
+
