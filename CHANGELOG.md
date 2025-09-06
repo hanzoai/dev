@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.73] - 2025-09-06
+
+- CI/Build: default CARGO_HOME and CARGO_TARGET_DIR to workspace; use sparse registry; precreate dirs for sandboxed runs. (dd9ff4b8)
+- CI/Exec: enable network for workspace-write exec runs; keep git writes opt-in. (510c323b)
+- CLI/Fix: remove invalid '-a never' in 'code exec'; verified locally. (87ae88cf)
+- CI: pass flags after subcommand so Exec receives them; fix heredoc quoting and cache mapping; minor formatting cleanups. (854525c9, 06190bba, c4ce2088, 086be4a5)
+
 ## [0.2.72] - 2025-09-06
 
 - Core/Sandbox: add workspace-write opt-in (default off); allow .git writes via CI override. (3df630f9)
