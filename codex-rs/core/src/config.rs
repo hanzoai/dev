@@ -2,6 +2,7 @@ use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
 use crate::config_types::BrowserConfig;
 use crate::config_types::History;
+use crate::config_types::GithubConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::McpServerConfig;
 use crate::config_types::SandboxWorkspaceWrite;
@@ -189,6 +190,9 @@ pub struct Config {
     
     /// Whether we're using ChatGPT authentication (affects feature availability)
     pub using_chatgpt_auth: bool,
+
+    /// GitHub integration configuration.
+    pub github: GithubConfig,
 }
 
 impl Config {
@@ -394,6 +398,33 @@ pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result
     Ok(())
 }
 
+/// Persist the GitHub workflow check preference under `[github].check_workflows_on_push`.
+pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+
+    // Parse existing config if present; otherwise start a new document.
+    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Write `[github].check_workflows_on_push = <enabled>`
+    doc["github"]["check_workflows_on_push"] = toml_edit::value(enabled);
+
+    // ensure codex_home exists
+    std::fs::create_dir_all(codex_home)?;
+
+    // create a tmp_file
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+
+    // atomically move the tmp file into config.toml
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
 /// Apply a single dotted-path override onto a TOML value.
 fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
     use toml::value::Table;
@@ -555,6 +586,9 @@ pub struct ConfigToml {
     /// All characters are inserted as they are received, and no buffering
     /// or placeholder replacement will occur for fast keypress bursts.
     pub disable_paste_burst: Option<bool>,
+
+    /// GitHub integration configuration.
+    pub github: Option<GithubConfig>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -903,6 +937,7 @@ impl Config {
             debug: debug.unwrap_or(false),
             // Already computed before moving codex_home
             using_chatgpt_auth,
+            github: cfg.github.unwrap_or_default(),
         };
         Ok(config)
     }

@@ -28,6 +28,7 @@ mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
 pub mod resume_selection_view;
+mod github_settings_view;
 // no direct use of list_selection_view or its items here
 mod textarea;
 mod theme_selection_view;
@@ -455,6 +456,15 @@ impl BottomPane<'_> {
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw()
+    }
+
+    /// Show GitHub settings (token status + watcher toggle)
+    pub fn show_github_settings(&mut self, watcher_enabled: bool, token_status: String, ready: bool) {
+        use github_settings_view::GithubSettingsView;
+        let view = GithubSettingsView::new(watcher_enabled, token_status, ready, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
     }
 
     /// Height (terminal rows) required by the current bottom pane.
