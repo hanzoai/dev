@@ -265,8 +265,9 @@ jobs:
             files=$(git ls-files -- "$p" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
-          # Belt-and-suspenders: drop any accidentally committed cargo cache dirs (.cargo-home/ or .cargo2/)
-          for d in .cargo-home .cargo2; do
+          # Belt-and-suspenders: drop any accidentally committed cargo cache dirs
+          # Cover both repo-root and nested workspace (e.g., codex-rs/.cargo-home)
+          for d in .cargo-home .cargo2 codex-rs/.cargo-home codex-rs/.cargo2; do
             files=$(git ls-files -- "$d/**" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
