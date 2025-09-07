@@ -118,6 +118,15 @@ jobs:
             codex-rs -> target
           save-if: true
 
+      # Belt-and-suspenders: explicit cache of the target directory keyed by toolchain + lockfile
+      - name: Cache cargo target (direct)
+        uses: actions/cache@v4
+        with:
+          path: codex-rs/target
+          key: target-${{ runner.os }}-toolchain-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}-devfast
+          restore-keys: |
+            target-${{ runner.os }}-toolchain-1.89.0-
+
       - name: Cache Cargo registry (CARGO_HOME in runner temp)
         uses: actions/cache@v4
         with:
