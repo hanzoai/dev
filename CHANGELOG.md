@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.81] - 2025-09-07
+
+- CI: run TUI invariants guard only on TUI changes and downgrade to warnings to reduce false failures. (d41da1d1, 53558af0)
+- CI: upstream-merge workflow hardens context prep; handle no merge-base and forbid unrelated histories. (e410f2ab, 8ee54b85)
+- CI: faster, safer fetch and tools — commit-graph/blobless fetch, cached ripgrep/jq, skip tag fetch to avoid clobbers. (8ee54b85, 23f1084e, dd0dc88f)
+- CI: improve reliability — cache Cargo registry, guard apt installs, upload .github/auto artifacts and ignore in git; fix DEFAULT_BRANCH. (e991e468, ee32f3b8, b6f6d812)
+
 ## [0.2.80] - 2025-09-07
 
 - CI: set git identity, renumber steps, use repo-local CARGO_HOME in upstream-merge workflow. (6a5796a5)
