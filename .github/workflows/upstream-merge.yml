@@ -237,6 +237,35 @@ jobs:
             if (!body) {
               body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
             }
+
+      - name: Enforce policy removals on merge branch (images)
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          OWNER=${REPO%%/*}
+          REPO_N=${REPO##*/}
+          # Only proceed if branch exists
+          if ! git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
+            echo "upstream-merge branch not found; skipping policy cleanup"; exit 0
+          fi
+          wt=.wt-upstream-merge-clean
+          rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge
+          pushd "$wt" >/dev/null
+          removed=false
+          for p in .github/codex-cli-*.png .github/codex-cli-*.jpg .github/codex-cli-*.jpeg .github/codex-cli-*.webp; do
+            files=$(git ls-files -- "$p" || true)
+            if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+          done
+          if [ "$removed" = true ]; then
+            git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
+              commit -m "chore(merge): remove upstream .github codex-cli images per local policy"
+            git push origin HEAD:upstream-merge
+          fi
+          popd >/dev/null
+          git worktree remove -f "$wt"
             // Ensure the branch exists on origin before creating/updating a PR.
             const ref = `heads/${head}`;
             try {
