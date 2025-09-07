@@ -345,6 +345,26 @@ jobs:
           git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
           git push --force-with-lease origin HEAD:upstream-merge
 
+      - name: Close accidental PRs targeting upstream-merge (we mirror default)
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const base = process.env.MERGE_BRANCH; // upstream-merge
+            // Close any open PR that targets upstream-merge; we mirror default directly.
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', base });
+            for (const pr of prs.data) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: this repo auto-mirrors the default branch into upstream-merge. Please target `main` instead.' });
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+              core.notice(`Closed PR #${pr.number} targeting ${base}.`);
+            }
+
       - name: Run Code agent to perform upstream merge
         id: agent
         if: steps.check_upstream.outputs.skip != 'true'
