@@ -1,17 +1,20 @@
-## @just-every/code v0.2.83
+## @just-every/code v0.2.84
 
-This release improves theme-aware JSON output in the TUI and fixes a stability issue in the embedded apply_patch scanner.
+This release improves session accounting and streamlines our release tooling.
 
 ### Changes
-- TUI: theme-aware JSON preview in Exec output; use UI-matched highlighting and avoid white backgrounds.
-- TUI: apply UI-themed JSON highlighting for stdout; clear ANSI backgrounds so output inherits theme.
-- Core: replace fragile tree-sitter query with a heredoc scanner in embedded apply_patch to prevent panics.
+
+- Core: move token usage/context accounting to session level for accurate per-session totals.
+- Release: create_github_release accepts either --publish-alpha or --publish-release to avoid conflicting flags.
+- Release: switch tooling to use gh, fresh temp clone, and Python rewrite for reliability.
+- Repo: remove upstream-only workflows and TUI files to align with fork policy.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.82...v0.2.83
+Compare: https://github.com/just-every/code/compare/v0.2.83...v0.2.84
 
