@@ -61,10 +61,21 @@ jobs:
         with:
           toolchain: 1.89.0
 
-      - name: Install tools (ripgrep + jq)
+      - name: Ensure tools present (ripgrep + jq)
         run: |
+          set -euo pipefail
+          need_rg=0; need_jq=0
+          command -v rg >/dev/null 2>&1 || need_rg=1
+          command -v jq >/dev/null 2>&1 || need_jq=1
+          if [ $need_rg -eq 0 ] && [ $need_jq -eq 0 ]; then
+            echo "ripgrep and jq already available; skipping apt."
+            exit 0
+          fi
           sudo apt-get update
-          sudo apt-get install -y ripgrep jq
+          pkgs=()
+          [ $need_rg -eq 1 ] && pkgs+=(ripgrep)
+          [ $need_jq -eq 1 ] && pkgs+=(jq)
+          sudo apt-get install -y "${pkgs[@]}"
 
       - name: Cache Rust build (cargo + target)
         uses: Swatinem/rust-cache@v2
@@ -73,6 +84,17 @@ jobs:
           workspaces: |
             codex-rs -> target
           save-if: true
+
+      - name: Cache Cargo registry (CARGO_HOME in runner temp)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry
+            ${{ runner.temp }}/cargo-home/git
+          key: cargo-home-${{ runner.os }}-toolchain-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-home-${{ runner.os }}-toolchain-1.89.0-
+            cargo-home-${{ runner.os }}-
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
