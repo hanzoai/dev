@@ -312,6 +312,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
           REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
           OWNER=${REPO%%/*}
@@ -443,6 +444,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: upstream-merge-artifacts
+          if-no-files-found: warn
           path: |
             .github/auto/COMMITS.json
             .github/auto/DELETED_ON_DEFAULT.txt
@@ -472,24 +474,6 @@ jobs:
             let body = readOrDefault('.github/auto/PR_BODY.md', '');
             if (!body) {
               body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
-            }
-            // Ensure the branch exists on origin before creating/updating a PR.
-            const ref = `heads/${head}`;
-            try {
-              await github.rest.git.getRef({ owner, repo, ref });
-            } catch (e) {
-              core.notice(`Branch '${head}' not found on origin; skipping PR creation.`);
-              return;
-            }
-            const headRef = `${owner}:${head}`;
-            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
-            if (prs.data.length) {
-              const pr = prs.data[0];
-              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
-              core.notice(`Updated PR #${pr.number}`);
-            } else {
-              const pr = await github.rest.pulls.create({ owner, repo, title, head: headRef, base, body });
-              core.notice(`Created PR #${pr.data.number}`);
             }
             // Ensure the branch exists on origin before creating/updating a PR.
             const ref = `heads/${head}`;
