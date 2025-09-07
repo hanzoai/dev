@@ -335,6 +335,16 @@ jobs:
           # Force-with-lease so the PR stays open but branch tip is clean
           git push --force-with-lease origin HEAD:upstream-merge
 
+      - name: Ensure upstream-merge mirrors default when skipping (prevent stale PRs)
+        if: steps.check_upstream.outputs.skip == 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin --depth=1
+          git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
+          git push --force-with-lease origin HEAD:upstream-merge
+
       - name: Run Code agent to perform upstream merge
         id: agent
         if: steps.check_upstream.outputs.skip != 'true'
@@ -642,6 +652,7 @@ jobs:
           if-no-files-found: warn
           path: .github/auto/MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
@@ -683,17 +694,7 @@ jobs:
             }
             const headRef = `${owner}:${head}`;
             const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
-            if (zeroDiff) {
-              if (prs.data.length) {
-                const pr = prs.data[0];
-                await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: upstream merge has no net file changes vs base.' });
-                await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
-                core.notice(`Closed PR #${pr.number} due to zero diff.`);
-              } else {
-                core.notice('Zero diff vs base; skipping PR creation.');
-              }
-              return;
-            }
+            if (zeroDiff) { core.notice('Zero diff vs base; skipping PR creation.'); return; }
             if (prs.data.length) {
               const pr = prs.data[0];
               await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
@@ -701,4 +702,36 @@ jobs:
             } else {
               const pr = await github.rest.pulls.create({ owner, repo, title, head: headRef, base, body });
               core.notice(`Created PR #${pr.data.number}`);
+            }
+
+      - name: Close stale upstream-merge PR on skip when zero diff
+        if: steps.check_upstream.outputs.skip == 'true'
+        uses: actions/github-script@v7
+        env:
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.MERGE_BRANCH;
+            const base = process.env.DEFAULT_BRANCH;
+            const headRef = `${owner}:${head}`;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
+            if (!prs.data.length) { return; }
+            // Only close if zero diff after we reset upstream-merge
+            let zeroDiff = false;
+            try {
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}` });
+              zeroDiff = (cmp.data.files || []).length === 0;
+            } catch (e) {
+              core.warning(`Compare failed (${base}...${head}): ${e.message}. Skipping.`);
+              return;
+            }
+            if (zeroDiff) {
+              const pr = prs.data[0];
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: upstream merge has no net file changes vs base.' });
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+              core.notice(`Closed PR #${pr.number} due to zero diff (skip path).`);
             }
