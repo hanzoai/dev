@@ -298,6 +298,13 @@ impl UserApprovalWidget<'_> {
         lines.push(Line::from(""));
         self.app_event_tx.send(AppEvent::InsertHistory(lines));
 
+        // If the user aborted an exec approval, immediately cancel any running task
+        // so the UI reflects their intent (clear spinner/status) without waiting
+        // for backend cleanup. Core still receives the Abort below.
+        if matches!((&self.approval_request, decision), (ApprovalRequest::Exec { .. }, ReviewDecision::Abort)) {
+            self.app_event_tx.send(AppEvent::CancelRunningTask);
+        }
+
         let op = match &self.approval_request {
             ApprovalRequest::Exec { id, .. } => Op::ExecApproval {
                 id: id.clone(),

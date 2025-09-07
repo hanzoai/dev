@@ -10,11 +10,12 @@ use crate::user_approval_widget::UserApprovalWidget;
 use super::BottomPane;
 use super::BottomPaneView;
 use super::CancellationEvent;
+use std::collections::VecDeque;
 
 /// Modal overlay asking the user to approve/deny a sequence of requests.
 pub(crate) struct ApprovalModalView<'a> {
     current: UserApprovalWidget<'a>,
-    queue: Vec<ApprovalRequest>,
+    queue: VecDeque<ApprovalRequest>,
     app_event_tx: AppEventSender,
 }
 
@@ -22,19 +23,19 @@ impl ApprovalModalView<'_> {
     pub fn new(request: ApprovalRequest, app_event_tx: AppEventSender) -> Self {
         Self {
             current: UserApprovalWidget::new(request, app_event_tx.clone()),
-            queue: Vec::new(),
+            queue: VecDeque::new(),
             app_event_tx,
         }
     }
 
     pub fn enqueue_request(&mut self, req: ApprovalRequest) {
-        self.queue.push(req);
+        self.queue.push_back(req);
     }
 
     /// Advance to next request if the current one is finished.
     fn maybe_advance(&mut self) {
         if self.current.is_complete() {
-            if let Some(req) = self.queue.pop() {
+            if let Some(req) = self.queue.pop_front() {
             self.current = UserApprovalWidget::new(req, self.app_event_tx.clone());
         }
         }

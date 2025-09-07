@@ -3660,6 +3660,13 @@ impl ChatWidget<'_> {
         }
     }
 
+    /// Cancel the current running task from a non-keyboard context (e.g. approval modal).
+    /// This bypasses modal key handling and invokes the same immediate UI cleanup path
+    /// as pressing Ctrl-C/Esc while a task is running.
+    pub(crate) fn cancel_running_task_from_approval(&mut self) {
+        self.interrupt_running_task();
+    }
+
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
         let kind = self.stream_state.current_kind.unwrap_or(StreamKind::Answer);
         self.insert_history_lines_with_kind(kind, None, lines);
