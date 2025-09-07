@@ -43,10 +43,16 @@ codex-cli/bin/*-windows-*
 /codex-rs/target/
 **/*.rs.bk
 
-# Local Cargo cache (kept in-repo for sandboxed CI; never commit)
+# Local Cargo caches (never commit)
+# Keep anchored rules for root, and add unanchored patterns so nested workspaces
+# like codex-rs/.cargo-home are also ignored.
 /.cargo-home/
 /.cargo-cache/
 /.cargo2/
+.cargo-home/
+.cargo2/
+/codex-rs/.cargo-home/
+/codex-rs/.cargo2/
 
 # Release and CI scratch
 /.code-bin/
