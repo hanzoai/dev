@@ -33,8 +33,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 # Change to the Rust project root directory (codex-rs) regardless of caller CWD
 cd "${SCRIPT_DIR}/codex-rs"
 
-# Compute repository root (one level up from codex-rs)
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Compute repository root (the directory containing this script)
+# Note: We intentionally set REPO_ROOT to SCRIPT_DIR so any defaults (like CARGO_HOME)
+# resolve inside the repository, not its parent. This prevents permission issues on CI
+# where the parent folder may be owned by a different user.
+REPO_ROOT="${SCRIPT_DIR}"
 
 # Use dev-fast profile by default for quick iteration
 # Can override with: PROFILE=release ./build-fast.sh
