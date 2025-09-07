@@ -16,6 +16,7 @@ use codex_core::config_types::TextVerbosity;
 mod interrupts;
 mod streaming;
 mod exec_tools;
+mod gh_actions;
 mod tools;
 mod layout_scroll;
 mod diff_handlers;
@@ -93,6 +94,7 @@ use ratatui::widgets::ScrollbarOrientation;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use serde::{Deserialize, Serialize};
 use codex_core::config::find_codex_home;
+use codex_core::config::set_github_check_on_push;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedConnection {
@@ -5256,7 +5258,61 @@ impl ChatWidget<'_> {
             "Browser commands:\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser".to_string()
         };
 
-        // Add the response to the UI as a background event
+        // Add the response to the UI as a background event using the helper
+        // so the first content line is not hidden by the renderer.
+        self.history_push(history_cell::new_background_event(response));
+    }
+
+    pub(crate) fn handle_github_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+        let enabled = self.config.github.check_workflows_on_push;
+
+        // If no args or 'status', show interactive settings in the footer
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("status") {
+            let token_info = gh_actions::get_github_token().map(|(_, src)| src);
+            let (ready, token_status) = match token_info {
+                Some(gh_actions::TokenSource::Env) => (true, "Token: detected (env: GITHUB_TOKEN/GH_TOKEN)".to_string()),
+                Some(gh_actions::TokenSource::GhCli) => (true, "Token: detected via gh auth".to_string()),
+                None => (false, "Token: not set (set GH_TOKEN/GITHUB_TOKEN or run 'gh auth login')".to_string()),
+            };
+            self.bottom_pane.show_github_settings(enabled, token_status, ready);
+            return;
+        }
+
+        let response = if trimmed.eq_ignore_ascii_case("on") {
+            self.config.github.check_workflows_on_push = true;
+            match find_codex_home() {
+                Ok(home) => {
+                    if let Err(e) = set_github_check_on_push(&home, true) {
+                        tracing::warn!("Failed to persist /github on: {}", e);
+                        "✅ Enabled GitHub watcher (persist failed; see logs)".to_string()
+                    } else {
+                        "✅ Enabled GitHub watcher (persisted)".to_string()
+                    }
+                }
+                Err(_) => {
+                    "✅ Enabled GitHub watcher (not persisted: CODE_HOME/CODEX_HOME not found)".to_string()
+                }
+            }
+        } else if trimmed.eq_ignore_ascii_case("off") {
+            self.config.github.check_workflows_on_push = false;
+            match find_codex_home() {
+                Ok(home) => {
+                    if let Err(e) = set_github_check_on_push(&home, false) {
+                        tracing::warn!("Failed to persist /github off: {}", e);
+                        "✅ Disabled GitHub watcher (persist failed; see logs)".to_string()
+                    } else {
+                        "✅ Disabled GitHub watcher (persisted)".to_string()
+                    }
+                }
+                Err(_) => {
+                    "✅ Disabled GitHub watcher (not persisted: CODE_HOME/CODEX_HOME not found)".to_string()
+                }
+            }
+        } else {
+            "Usage: /github [status|on|off]".to_string()
+        };
+
         let lines = response
             .lines()
             .map(|line| Line::from(line.to_string()))
@@ -7767,4 +7823,35 @@ struct DiffsState {
 struct PerfState {
     enabled: bool,
     stats: std::cell::RefCell<PerfStats>,
+}
+
+impl ChatWidget<'_> {
+    pub(crate) fn set_github_watcher(&mut self, enabled: bool) {
+        self.config.github.check_workflows_on_push = enabled;
+        match find_codex_home() {
+            Ok(home) => {
+                if let Err(e) = set_github_check_on_push(&home, enabled) {
+                    tracing::warn!("Failed to persist GitHub watcher setting: {}", e);
+                    let msg = format!(
+                        "✅ {} GitHub watcher (persist failed; see logs)",
+                        if enabled { "Enabled" } else { "Disabled" }
+                    );
+                    self.history_push(history_cell::new_background_event(msg));
+                } else {
+                    let msg = format!(
+                        "✅ {} GitHub watcher (persisted)",
+                        if enabled { "Enabled" } else { "Disabled" }
+                    );
+                    self.history_push(history_cell::new_background_event(msg));
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} GitHub watcher (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.history_push(history_cell::new_background_event(msg));
+            }
+        }
+    }
 }

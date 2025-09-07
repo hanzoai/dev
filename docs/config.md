@@ -287,7 +287,7 @@ disk, but attempts to write a file or access the network will be blocked.
 
 A more relaxed policy is `workspace-write`. When specified, the current working directory for the Codex task will be writable (as well as `$TMPDIR` on macOS). Note that the CLI defaults to using the directory where it was spawned as `cwd`, though this can be overridden using `--cwd/-C`.
 
-On macOS (and soon Linux), all writable roots (including `cwd`) that contain a `.git/` folder _as an immediate child_ will configure the `.git/` folder to be read-only while the rest of the Git repository will be writable. This means that commands like `git commit` will fail, by default (as it entails writing to `.git/`), and will require Codex to ask for permission.
+Historically, Codex allowed writes inside the top‑level `.git/` folder when using `workspace-write`. That permissive behavior is the default again. If you want to protect `.git` under `workspace-write`, you can opt out via `[sandbox_workspace_write].allow_git_writes = false`.
 
 ```toml
 # same as `--sandbox workspace-write`
@@ -302,6 +302,9 @@ exclude_tmpdir_env_var = false
 exclude_slash_tmp = false
 
 # Optional list of _additional_ writable roots beyond $TMPDIR and /tmp.
+
+# Protect top-level .git under writable roots (default is true = allow writes)
+allow_git_writes = true
 writable_roots = ["/Users/YOU/.pyenv/shims"]
 
 # Allow the command being run inside the sandbox to make outbound network

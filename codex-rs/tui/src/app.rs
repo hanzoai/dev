@@ -731,6 +731,11 @@ impl App<'_> {
                                 widget.add_agents_output();
                             }
                         }
+                        SlashCommand::Github => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_github_command(command_args);
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);
@@ -856,6 +861,11 @@ impl App<'_> {
                 AppEvent::UpdateTextVerbosity(new_verbosity) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_text_verbosity(new_verbosity);
+                    }
+                }
+                AppEvent::UpdateGithubWatcher(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_github_watcher(enabled);
                     }
                 }
                 AppEvent::DiffResult(text) => {

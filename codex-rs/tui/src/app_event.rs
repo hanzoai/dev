@@ -72,6 +72,9 @@ pub(crate) enum AppEvent {
     /// Update the text verbosity level
     UpdateTextVerbosity(TextVerbosity),
 
+    /// Update GitHub workflow monitoring toggle
+    UpdateGithubWatcher(bool),
+
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
 

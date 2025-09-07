@@ -92,13 +92,13 @@ codex --sandbox danger-full-access
 
 The same setting can be persisted in `~/.codex/config.toml` via the top-level `sandbox_mode = "MODE"` key, e.g. `sandbox_mode = "workspace-write"`.
 
-If you need to allow the agent to update Git metadata (e.g., in CI when it must commit/push), you can opt‑in by setting a workspace‑write tweak:
+If you want to prevent the agent from updating Git metadata (e.g., local safety), you can opt‑out with a workspace‑write tweak:
 
 ```toml
 sandbox_mode = "workspace-write"
 
 [sandbox_workspace_write]
-allow_git_writes = true    # default is false; enables writes under .git
+allow_git_writes = false   # default is true; set false to protect .git
 ```
 
 ### Debugging Virtual Cursor
