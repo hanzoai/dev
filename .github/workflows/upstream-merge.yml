@@ -58,7 +58,7 @@ jobs:
           git config user.email "code@justevery.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Quick no-op: ancestor checks for default and upstream-merge
+      - name: "Quick no-op: ancestor checks for default and upstream-merge"
         id: check_upstream
         shell: bash
         env:
