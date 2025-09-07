@@ -55,10 +55,10 @@ jobs:
         with:
           toolchain: 1.89.0
 
-      - name: Install tools (ripgrep)
+      - name: Install tools (ripgrep + jq)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y ripgrep jq
 
       - name: Cache Rust build (cargo + target)
         uses: Swatinem/rust-cache@v2
@@ -230,30 +230,7 @@ jobs:
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
 
-      - name: Open or update PR (use agent-supplied title/body if present)
-        uses: actions/github-script@v7
-        env:
-          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
-          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
-          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-        with:
-          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
-          script: |
-            const fs = require('fs');
-            function readOrDefault(p, dflt) { try { const t = fs.readFileSync(p,'utf8').trim(); return t || dflt; } catch { return dflt; } }
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const head = process.env.MERGE_BRANCH;
-            const base = process.env.DEFAULT_BRANCH;
-            const dfltTitle = `Upstream merge: ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}`;
-            const title = readOrDefault('.github/auto/PR_TITLE.txt', dfltTitle);
-            let body = readOrDefault('.github/auto/PR_BODY.md', '');
-            if (!body) {
-              body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
-            }
-
-      - name: Enforce policy removals on merge branch (images + caches)
+      - name: Enforce policy removals on merge branch (images + caches + purge_globs)
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
@@ -281,6 +258,16 @@ jobs:
             files=$(git ls-files -- "$d/**" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
+          # Apply purge_globs and perma_removed_paths from merge-policy.json when present
+          if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then
+            mapfile -t purges < <(jq -r '.purge_globs[]? // empty' .github/merge-policy.json 2>/dev/null || true)
+            mapfile -t perma  < <(jq -r '.perma_removed_paths[]? // empty' .github/merge-policy.json 2>/dev/null || true)
+            for pat in "${purges[@]}" "${perma[@]}"; do
+              [ -n "${pat:-}" ] || continue
+              files=$(git ls-files -- "$pat" || true)
+              if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+            done
+          fi
           if [ "$removed" = true ]; then
             git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
               commit -m "chore(merge): enforce policy removals (images + cargo caches)"
@@ -288,6 +275,90 @@ jobs:
           fi
           popd >/dev/null
           git worktree remove -f "$wt"
+      
+      - name: Policy guard checks (docs, branding, perma-deleted)
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          # Fail if docs/** changed between default and upstream-merge (we prefer ours)
+          changed=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | wc -l | tr -d ' ')
+          if [ "$changed" != "0" ]; then
+            echo "docs/** changed on upstream-merge; policy prefers ours. Failing." >&2
+            git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' >&2 || true
+            exit 1
+          fi
+          # Branding guard: block additions of user-visible 'Codex' in TUI/CLI/docs (allow crate/package contexts)
+          if git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- codex-rs/tui/** codex-cli/** docs/** \
+            | grep -E '^\+' \
+            | grep -Ei '\bCodex\b' \
+            | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
+            echo "Branding guard tripped: new user-visible 'Codex' strings detected in TUI/CLI/docs." >&2
+            git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- codex-rs/tui/** codex-cli/** docs/** \
+              | grep -E '^\+' | grep -Ei '\bCodex\b' | sed 's/^/> /' >&2 || true
+            exit 1
+          fi
+          # Perma-deleted guard: ensure none of perma_removed_paths exist on branch
+          if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then
+            mapfile -t perma  < <(jq -r '.perma_removed_paths[]? // empty' .github/merge-policy.json 2>/dev/null || true)
+            if [ ${#perma[@]} -gt 0 ]; then
+              wt=.wt-guard
+              rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge >/dev/null
+              pushd "$wt" >/dev/null
+              for pat in "${perma[@]}"; do
+                [ -n "${pat:-}" ] || continue
+                if git ls-files -- "$pat" | grep -q .; then
+                  echo "Perma-deleted guard: files present matching '$pat'" >&2
+                  git ls-files -- "$pat" >&2 || true
+                  exit 1
+                fi
+              done
+              popd >/dev/null
+              git worktree remove -f "$wt" >/dev/null
+            fi
+          fi
+
+      - name: Open or update PR (use agent-supplied title/body if present)
+        uses: actions/github-script@v7
+        env:
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const fs = require('fs');
+            function readOrDefault(p, dflt) { try { const t = fs.readFileSync(p,'utf8').trim(); return t || dflt; } catch { return dflt; } }
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.MERGE_BRANCH;
+            const base = process.env.DEFAULT_BRANCH;
+            const dfltTitle = `Upstream merge: ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}`;
+            const title = readOrDefault('.github/auto/PR_TITLE.txt', dfltTitle);
+            let body = readOrDefault('.github/auto/PR_BODY.md', '');
+            if (!body) {
+              body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
+            }
+            // Ensure the branch exists on origin before creating/updating a PR.
+            const ref = `heads/${head}`;
+            try {
+              await github.rest.git.getRef({ owner, repo, ref });
+            } catch (e) {
+              core.notice(`Branch '${head}' not found on origin; skipping PR creation.`);
+              return;
+            }
+            const headRef = `${owner}:${head}`;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
+            if (prs.data.length) {
+              const pr = prs.data[0];
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
+              core.notice(`Updated PR #${pr.number}`);
+            } else {
+              const pr = await github.rest.pulls.create({ owner, repo, title, head: headRef, base, body });
+              core.notice(`Created PR #${pr.data.number}`);
+            }
             // Ensure the branch exists on origin before creating/updating a PR.
             const ref = `heads/${head}`;
             try {
