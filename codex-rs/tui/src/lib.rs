@@ -436,10 +436,11 @@ fn determine_repo_trust_state(
         // skip the trust flow
         Ok(false)
     } else if config_toml.is_cwd_trusted(&config.cwd) {
-        // if the current cwd project is trusted and no config has been set
-        // skip the trust flow and set the approval policy and sandbox mode
-        config.approval_policy = AskForApproval::OnRequest;
-        config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
+        // If the current cwd project is trusted and no explicit config has been set,
+        // default to fully trusted, non‑interactive execution to match expected behavior.
+        // This restores the previous semantics before the recent trust‑flow refactor.
+        config.approval_policy = AskForApproval::Never;
+        config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         Ok(false)
     } else {
         // if none of the above conditions are met, show the trust screen
