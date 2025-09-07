@@ -345,7 +345,7 @@ jobs:
           You are the maintainer bot. Perform an upstream merge using our repo policies and a selective reconciliation strategy.
           Steps:
           1) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
-          2) Write MERGE_PLAN.md summarizing strategy (one-shot, by-bucket, or per-commit) based on MERGE_MODE and artifacts.
+          2) Write .github/auto/MERGE_PLAN.md summarizing strategy (one-shot, by-bucket, or per-commit) based on MERGE_MODE and artifacts.
           3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
           4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
              - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
@@ -355,7 +355,7 @@ jobs:
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). For each upstream commit, use repo context and history to judge whether to incorporate or to keep ours. Prefer preserving our local intent and removals; incorporate upstream when it improves correctness, security, or compatibility without violating protected areas (themes/UX/docs/workflows). Record notable decisions in MERGE_REPORT.md.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
-          7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          7) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
           8) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
@@ -402,6 +402,10 @@ jobs:
           rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge
           pushd "$wt" >/dev/null
           removed=false
+          # Remove any accidentally committed merge artifacts from repo root
+          for f in MERGE_PLAN.md MERGE_REPORT.md; do
+            if git ls-files -- "$f" | grep -q .; then git rm -f -- "$f"; removed=true; fi
+          done
           # Remove any tracked upstream images disallowed by local policy
           for p in .github/codex-cli-*.png .github/codex-cli-*.jpg .github/codex-cli-*.jpeg .github/codex-cli-*.webp; do
             files=$(git ls-files -- "$p" || true)
@@ -532,13 +536,7 @@ jobs:
           name: upstream-merge-artifacts
           if-no-files-found: warn
           path: |
-            .github/auto/COMMITS.json
-            .github/auto/DELETED_ON_DEFAULT.txt
-            .github/auto/CHANGE_HISTOGRAM.txt
-            .github/auto/DELTA_FILES.txt
-            .github/auto/DIFFSTAT.txt
-            MERGE_PLAN.md
-            MERGE_REPORT.md
+            .github/auto/**
       - name: Open or update PR (use agent-supplied title/body if present)
         uses: actions/github-script@v7
         env:

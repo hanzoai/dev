@@ -59,6 +59,7 @@ codex-cli/bin/*-windows-*
 /artifacts/
 /release-assets/
 /npm-binaries/
+/.github/auto/
 
 # Local GitHub Actions runners and caches
 .act/
