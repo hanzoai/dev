@@ -4135,6 +4135,19 @@ fn normalize_overwrite_sequences(input: &str) -> String {
 }
 
 fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static>> {
+    // Prefer UI‑themed JSON highlighting when the (ANSI‑stripped) text parses as JSON.
+    let stripped_plain = sanitize_for_tui(
+        text,
+        SanitizeMode::Plain,
+        SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false },
+    );
+    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&stripped_plain) {
+        let pretty = serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| json_val.to_string());
+        let highlighted = crate::syntax_highlight::highlight_code_block(&pretty, Some("json"));
+        return select_preview_from_lines(&highlighted, PREVIEW_HEAD_LINES, PREVIEW_TAIL_LINES);
+    }
+
+    // Otherwise, compact valid JSON (without ANSI) to improve wrap, or pass original through.
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
     let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
@@ -4149,30 +4162,25 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     } else {
         let mut v: Vec<Seg> = Vec::with_capacity(PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES + 1);
         // Head
-        for i in 0..PREVIEW_HEAD_LINES {
-            v.push(Seg::Line(non_empty[i]));
-        }
+        for i in 0..PREVIEW_HEAD_LINES { v.push(Seg::Line(non_empty[i])); }
         v.push(Seg::Ellipsis);
         // Tail
         let start = non_empty.len().saturating_sub(PREVIEW_TAIL_LINES);
-        for s in &non_empty[start..] {
-            v.push(Seg::Line(s));
-        }
+        for s in &non_empty[start..] { v.push(Seg::Line(s)); }
         v
     };
+
+    fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
+        let mut ln = ansi_escape_line(s);
+        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        ln
+    }
 
     let mut out: Vec<Line<'static>> = Vec::new();
     for seg in segments {
         match seg {
-            Seg::Line(line) => {
-                // Do not draw manual borders; the caller wraps output in a Block
-                // with a left border and padding. Just emit the content line.
-                out.push(ansi_escape_line(line));
-            }
-            Seg::Ellipsis => {
-                // Use dots for truncation marker; border comes from Block
-                out.push(Line::from("⋮".dim()));
-            }
+            Seg::Line(line) => out.push(ansi_line_with_theme_bg(line)),
+            Seg::Ellipsis => out.push(Line::from("⋮".dim())),
         }
     }
     out
@@ -5351,17 +5359,20 @@ fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<L
     let processed = normalize_overwrite_sequences(&processed);
     let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
+    fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
+        let mut ln = ansi_escape_line(s);
+        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        ln
+    }
     let mut out: Vec<Line<'static>> = Vec::new();
     if non_empty.len() <= head + tail {
-        for s in non_empty {
-            out.push(ansi_escape_line(s));
-        }
+        for s in non_empty { out.push(ansi_line_with_theme_bg(s)); }
         return out;
     }
-    for s in non_empty.iter().take(head) { out.push(ansi_escape_line(s)); }
+    for s in non_empty.iter().take(head) { out.push(ansi_line_with_theme_bg(s)); }
     out.push(Line::from("⋮".dim()));
     let start = non_empty.len().saturating_sub(tail);
-    for s in &non_empty[start..] { out.push(ansi_escape_line(s)); }
+    for s in &non_empty[start..] { out.push(ansi_line_with_theme_bg(s)); }
     out
 }
 
