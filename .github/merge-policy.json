@@ -3,6 +3,7 @@
     "codex-rs/tui/**",
     "codex-cli/**",
     ".github/workflows/**",
+    "docs/**",
     "AGENTS.md",
     "README.md",
     "CHANGELOG.md"
@@ -19,5 +20,7 @@
     ".github/codex-cli-*.jpg",
     ".github/codex-cli-*.jpeg",
     ".github/codex-cli-*.webp"
+  ],
+  "perma_removed_paths": [
   ]
 }
