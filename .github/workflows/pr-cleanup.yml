@@ -63,11 +63,16 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           PATTERNS: ${{ inputs.patterns }}
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          PR_LIST: ${{ steps.list.outputs.result }}
         run: |
-          set -euo pipefail
-          echo '${{ steps.list.outputs.result }}' > .github/auto/prs.json
+          set -xeuo pipefail
+          mkdir -p .github/auto
+          DRY_RUN=${DRY_RUN:-false}
+          PATTERNS=${PATTERNS:-'.cargo-home/**,.cargo-cache/**,**/.gitignore'}
+          printf '%s' "$PR_LIST" > .github/auto/prs.json
           OWNER=${GITHUB_REPOSITORY%%/*}
           REPO=${GITHUB_REPOSITORY##*/}
+          export GITHUB_TOKEN="$GH_TOKEN"
           remove_patterns() {
             IFS=',' read -r -a pats <<<"$PATTERNS"
             for p in "${pats[@]}"; do
@@ -96,11 +101,8 @@ jobs:
             if [ "$same_repo" != "true" ]; then
               echo "  skip: fork PR (cannot push)"; continue
             fi
-            files=$(curl -sSL -H "authorization: Bearer $GH_TOKEN" -H 'accept: application/vnd.github+json' \
-              "https://api.github.com/repos/$OWNER/$REPO/pulls/$num/files?per_page=100")
-            needs_cleanup=$(jq -r --arg pats "$PATTERNS" '
-              ($pats | split(",")) as $globs | any(.[]; .filename as $f | any($globs[]; $f | test((. | gsub("\\*\\*"; ".*" ) | gsub("\\*"; "[^"]*" )); "")))
-            ' <<<"$files")
+            files=$(gh api repos/$OWNER/$REPO/pulls/$num/files?per_page=100)
+            needs_cleanup=$(jq -r 'any(.[]; (.filename|startswith(".cargo-home/") or startswith(".cargo-cache/") or endswith(".gitignore")))' <<<"$files")
             if [ "$needs_cleanup" != "true" ]; then echo "  no cleanup needed"; continue; fi
             git fetch origin "$head" && git checkout -B "$head" "origin/$head"
             remove_patterns
