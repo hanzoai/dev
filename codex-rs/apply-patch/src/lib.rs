@@ -1,6 +1,7 @@
 mod parser;
 mod seek_sequence;
 mod standalone_executable;
+mod tree_sitter_utils;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -30,6 +31,24 @@ pub use standalone_executable::main;
 pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_tool_instructions.md");
 
 const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
+
+/// Details about an embedded `apply_patch` heredoc found inside a larger shell script.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmbeddedApplyPatch {
+    /// The extracted heredoc body (the actual patch text between Begin/End Patch).
+    pub patch_body: String,
+    /// Optional working directory if the script used `cd <path> && apply_patch <<EOF`.
+    pub cd_path: Option<String>,
+    /// Byte range in the original script covering the full redirected statement to remove.
+    pub stmt_byte_range: (usize, usize),
+}
+
+/// Find the first `apply_patch <<'EOF' ... EOF` redirected statement anywhere in a bash/sh/zsh script.
+/// Also supports the form `cd <path> && apply_patch <<'EOF' ...`.
+/// Returns `None` when not present.
+pub fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ExtractHeredocError> {
+    tree_sitter_utils::find_embedded_apply_patch(script)
+}
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
