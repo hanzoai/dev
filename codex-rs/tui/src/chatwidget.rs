@@ -370,6 +370,78 @@ impl ChatWidget<'_> {
         format!("O:req={} out={} seq={}", ok.req, ok.out, ok.seq)
     }
 
+    // Allocate a key that places an internal (non‑model) event at the point it
+    // occurs during the current request, instead of sinking it to the end.
+    //
+    // Strategy:
+    // - If an OrderMeta is provided, honor it (strict model ordering).
+    // - Otherwise, if a new turn is queued (a user prompt was just inserted),
+    //   anchor immediately after that prompt within the upcoming request so
+    //   the notice appears in the right window.
+    // - Otherwise, derive a key within the current request:
+    //   * If there is any existing cell in this request, append after the
+    //     latest key in this request (req = last_seen, out/seq bumped).
+    //   * If no cells exist for this request yet, place near the top of this
+    //     request (after headers/prompts) so provider output can follow.
+    fn near_time_key(
+        &mut self,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) -> OrderKey {
+        if let Some(om) = order {
+            return Self::order_key_from_order_meta(om);
+        }
+
+        // If we just staged a user prompt for the next request, keep using the
+        // next‑turn anchor so the background item lands with that turn.
+        if self.pending_user_prompts_for_next_turn > 0 {
+            return self.next_req_key_after_prompt();
+        }
+
+        let req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            // No provider traffic yet: allocate a synthetic request bucket.
+            // Use the same path as next_internal_key() to keep monotonicity.
+            if self.current_request_index < self.last_seen_request_index {
+                self.current_request_index = self.last_seen_request_index;
+            }
+            self.current_request_index = self.current_request_index.saturating_add(1);
+            self.current_request_index
+        };
+
+        // Scan for the latest key within this request to append after.
+        let mut last_in_req: Option<OrderKey> = None;
+        for k in &self.cell_order_seq {
+            if k.req == req {
+                last_in_req = Some(match last_in_req { Some(prev) => if *k > prev { *k } else { prev }, None => *k });
+            }
+        }
+
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        match last_in_req {
+            Some(last) => OrderKey { req, out: last.out, seq: last.seq.saturating_add(1) },
+            None => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
+        }
+    }
+
+    // After inserting a non‑reasoning cell during streaming, restore the
+    // in‑progress indicator on the latest reasoning cell so the ellipsis
+    // remains visible while the model continues.
+    fn restore_reasoning_in_progress_if_streaming(&mut self) {
+        if !self.stream.is_write_cycle_active() { return; }
+        if let Some(idx) = self
+            .history_cells
+            .iter()
+            .rposition(|c| c.as_any().downcast_ref::<crate::history_cell::CollapsibleReasoningCell>().is_some())
+        {
+            if let Some(rc) = self.history_cells[idx]
+                .as_any()
+                .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+            {
+                rc.set_in_progress(true);
+            }
+        }
+    }
     // Allocate a new synthetic key for internal (non-LLM) messages at the bottom of the
     // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
     fn next_internal_key(&mut self) -> OrderKey {
@@ -674,11 +746,7 @@ impl ChatWidget<'_> {
         if self.is_write_cycle_active() { defer_fn(&mut self.interrupts); } else { handle_fn(self); }
     }
 
-    fn next_sequence(&mut self) -> u64 {
-        let s = self.stream_state.next_seq;
-        self.stream_state.next_seq = self.stream_state.next_seq.saturating_add(1);
-        s
-    }
+    // removed: next_sequence; plan updates are inserted immediately
 
     // Removed order-adjustment helpers; ordering now uses stable order keys on insert.
 
@@ -1139,7 +1207,7 @@ impl ChatWidget<'_> {
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
-            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), next_seq: 1, seq_answer_final: None, drop_streaming: false },
+            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), seq_answer_final: None, drop_streaming: false },
             interrupts: interrupts::InterruptManager::new(),
             ended_call_ids: HashSet::new(),
             diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
@@ -1262,7 +1330,7 @@ impl ChatWidget<'_> {
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
-            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), next_seq: 1, seq_answer_final: None, drop_streaming: false },
+            stream_state: StreamState { current_kind: None, closed_answer_ids: HashSet::new(), closed_reasoning_ids: HashSet::new(), seq_answer_final: None, drop_streaming: false },
             interrupts: interrupts::InterruptManager::new(),
             ended_call_ids: HashSet::new(),
             diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
@@ -2468,16 +2536,12 @@ impl ChatWidget<'_> {
                 self.on_error(message);
             }
             EventMsg::PlanUpdate(update) => {
-                // Avoid interleaving plan updates inside streaming sections.
-                // If a stream is active, defer until the stream finalizes so
-                // the plan block doesn't split a heading and its content.
-                if self.is_write_cycle_active() {
-                    let seq = self.next_sequence();
-                    self.interrupts.push_plan_update(seq, update, event.order.clone());
-                } else {
-                    let key = self.next_internal_key();
-                    let _ = self.history_insert_with_key_global(Box::new(history_cell::new_plan_update(update)), key);
-                }
+                // Insert plan updates at the time they occur. If the provider
+                // supplied OrderMeta, honor it. Otherwise, derive a near‑time key.
+                let key = self.near_time_key(event.order.as_ref());
+                let _ = self.history_insert_with_key_global(Box::new(history_cell::new_plan_update(update)), key);
+                // If we inserted during streaming, keep the reasoning ellipsis visible.
+                self.restore_reasoning_in_progress_if_streaming();
             }
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
@@ -2758,21 +2822,16 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
-                // Surface lightweight background events in the history feed
-                // so users see confirmations (e.g., CDP connect success).
-                // If a user prompt was just inserted for the upcoming turn,
-                // anchor these background events to that next turn so they
-                // render below the prompt and above model output.
-                if self.pending_user_prompts_for_next_turn > 0 {
-                    let key = self.next_req_key_after_prompt();
-                    let _ = self.history_insert_with_key_global_tagged(
-                        Box::new(history_cell::new_background_event(message.clone())),
-                        key,
-                        "bg-next-turn",
-                    );
-                } else {
-                    self.history_push(history_cell::new_background_event(message.clone()));
-                }
+                // Insert background events at near‑time so they appear where the
+                // user saw them, instead of sinking to the end of the turn.
+                let key = self.near_time_key(event.order.as_ref());
+                let _ = self.history_insert_with_key_global_tagged(
+                    Box::new(history_cell::new_background_event(message.clone())),
+                    key,
+                    "bg-now",
+                );
+                // If we inserted during streaming, keep the reasoning ellipsis visible.
+                self.restore_reasoning_in_progress_if_streaming();
 
                 // Also reflect CDP connect success in the status line.
                 if message.starts_with("✅ Connected to Chrome via CDP") {
@@ -7794,7 +7853,6 @@ struct StreamState {
     current_kind: Option<StreamKind>,
     closed_answer_ids: HashSet<StreamId>,
     closed_reasoning_ids: HashSet<StreamId>,
-    next_seq: u64,
     seq_answer_final: Option<u64>,
     drop_streaming: bool,
 }
