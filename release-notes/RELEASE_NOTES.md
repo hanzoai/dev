@@ -1,18 +1,15 @@
-## @just-every/code v0.2.74
+## @just-every/code v0.2.75
 
-Maintenance-only release focused on CI stability and repo hygiene.
+Maintenance release with no user-facing changes. Focus is on CI cleanup and preparing the tag.
 
 ### Changes
-
-- Maintenance: no user-facing changes; CI and repo hygiene improvements.
-- CI: guard self/bot comments; improve upstream-merge reconciliation and pass Cargo env for builds.
+- No user-facing changes; maintenance-only release with CI cleanup.
+- Release: prepare 0.2.75 tag and metadata.
 
 ### Install
-
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.73...v0.2.74
-
+Compare: https://github.com/just-every/code/compare/v0.2.74...v0.2.75
