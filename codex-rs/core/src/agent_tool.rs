@@ -5,7 +5,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -368,26 +367,7 @@ async fn get_git_root() -> Result<PathBuf, String> {
     }
 }
 
-fn sanitize_ref_component(s: &str) -> String {
-    // Git refname safe component: [a-z0-9-]+, collapse invalid runs to '-'
-    let mut out = String::with_capacity(s.len());
-    let mut last_dash = false;
-    for ch in s.chars() {
-        let c = ch.to_ascii_lowercase();
-        let valid = c.is_ascii_alphanumeric() || c == '-';
-        if valid {
-            out.push(c);
-            last_dash = c == '-';
-        } else if !last_dash {
-            out.push('-');
-            last_dash = true;
-        }
-    }
-    // Trim leading/trailing '-'
-    let out = out.trim_matches('-').to_string();
-    // Avoid empty component
-    if out.is_empty() { "agent".to_string() } else { out }
-}
+use crate::git_worktree::sanitize_ref_component;
 
 fn generate_branch_id(model: &str, agent: &str) -> String {
     // Extract first few meaningful words from agent for the branch name
@@ -425,51 +405,7 @@ fn generate_branch_id(model: &str, agent: &str) -> String {
     format!("code-{}-{}", model_s, suffix_s)
 }
 
-async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, String> {
-    // Create .code/branches directory if it doesn't exist
-    let code_dir = git_root.join(".code").join("branches");
-    tokio::fs::create_dir_all(&code_dir)
-        .await
-        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
-
-    // Path for this model's worktree
-    let worktree_path = code_dir.join(branch_id);
-
-    // Remove existing worktree if it exists (cleanup from previous runs)
-    if worktree_path.exists() {
-        Command::new("git")
-            .args(&[
-                "worktree",
-                "remove",
-                worktree_path.to_str().unwrap(),
-                "--force",
-            ])
-            .output()
-            .await
-            .ok(); // Ignore errors, it might not be a worktree
-    }
-
-    // Create new worktree
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(&[
-            "worktree",
-            "add",
-            "-b",
-            branch_id,
-            worktree_path.to_str().unwrap(),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to create git worktree: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to create worktree: {}", stderr));
-    }
-
-    Ok(worktree_path)
-}
+use crate::git_worktree::setup_worktree;
 
 async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     let mut manager = AGENT_MANAGER.write().await;
