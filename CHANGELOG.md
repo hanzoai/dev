@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.77] - 2025-09-07
+
+- TUI/GitHub: add settings view for GitHub integration. (4f59548c)
+- TUI/GitHub: add Actions tools to browse runs and jobs. (4f59548c)
+- TUI: wire GitHub settings and Actions into bottom pane and chatwidget for quick access. (4f59548c)
+
 ## [0.2.76] - 2025-09-07
 
 - CI: pass merge-policy.json to upstream-merge agent and use policy globs for safer merges. (ef4e5559)
