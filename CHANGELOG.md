@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.84] - 2025-09-07
+
+- Core: move token usage/context accounting to session level for accurate per‑session totals. (02690962)
+- Release: create_github_release accepts either --publish-alpha or --publish-release to avoid conflicting flags. (70a6d4b1)
+- Release: switch tooling to use gh, fresh temp clone, and Python rewrite for reliability. (b1d5f7c0, 066c6cce, bd65f81e)
+- Repo: remove upstream‑only workflows and TUI files to align with fork policy. (e6c7b188)
+
 ## [0.2.83] - 2025-09-07
 
 - TUI: theme-aware JSON preview in Exec output; use UI-matched highlighting and avoid white backgrounds. (ac328824)
