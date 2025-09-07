@@ -180,14 +180,11 @@ fn is_likely_sandbox_denied(sandbox_type: SandboxType, exit_code: i32) -> bool {
         return false;
     }
 
-    // Quick rejects: well-known non-sandbox shell exit codes
-    // 127: command not found, 2: misuse of shell builtins
-    if exit_code == 127 {
-        return false;
+    match exit_code {
+        126 => true,          // found but not executable (likely permission denial)
+        1 | 2 | 127 => false, // common non-sandbox failures
+        _ => false,
     }
-
-    // For all other cases, we assume the sandbox is the cause
-    true
 }
 
 #[derive(Debug)]
