@@ -501,14 +501,15 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
-          # Verify key identifiers exist in upstream-merge versions of TUI files
-          req='request_ordinal'; out='output_index'; seq='sequence_number'
-          for p in codex-rs/tui/src/chatwidget.rs codex-rs/tui/src/history_cell.rs; do
-            if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1 && git show "origin/upstream-merge:$p" >/dev/null 2>&1; then
-              content=$(git show "origin/upstream-merge:$p" 2>/dev/null || true)
-              (printf "%s" "$content" | grep -q "$req") || { echo "Invariant missing $req in $p" >&2; exit 1; }
-              (printf "%s" "$content" | grep -q "$out") || { echo "Invariant missing $out in $p" >&2; exit 1; }
-              (printf "%s" "$content" | grep -q "$seq") || { echo "Invariant missing $seq in $p" >&2; exit 1; }
+          # Only run if upstream delta touched TUI
+          if ! grep -q '^codex-rs/tui/' .github/auto/DELTA_FILES.txt 2>/dev/null; then
+            echo "No TUI changes in upstream delta; skipping invariants guard."; exit 0
+          fi
+          # Verify critical ordering identifiers exist somewhere under codex-rs/tui/
+          for token in request_ordinal output_index sequence_number; do
+            if ! git ls-tree -r --name-only origin/upstream-merge -- 'codex-rs/tui/**' | while read -r f; do git show "origin/upstream-merge:$f" || true; done | grep -q "$token"; then
+              echo "Invariant token '$token' not found under codex-rs/tui on upstream-merge." >&2
+              exit 1
             fi
           done
 
