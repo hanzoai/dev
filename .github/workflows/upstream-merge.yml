@@ -195,11 +195,11 @@ jobs:
           2) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
           3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
           4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
-             - Use the <policy> JSON for prefer_ours_globs / prefer_theirs_globs / purge_globs.
+             - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
+             - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
              - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
-             - For files matching prefer_theirs_globs: prefer theirs.
              - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
-             - For everything else, default to ours unless the change is a clear, trivial improvement (typos/docs) that doesn’t conflict with our direction.
+             - Only adopt upstream when the change is trivial and clearly safe (typos, comments) and outside protected areas; otherwise keep ours.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
           7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
@@ -257,6 +257,19 @@ jobs:
           for d in .cargo-home .cargo2 codex-rs/.cargo-home codex-rs/.cargo2; do
             files=$(git ls-files -- "$d/**" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+          done
+          # Drop any codex-rs/<crate> directories that do not exist on the default branch (we removed/renamed them locally)
+          DEF_REF="origin/${DEFAULT_BRANCH}"
+          # Collect crate dirs on default and on current worktree
+          mapfile -t default_crates < <(git ls-tree -r --name-only "$DEF_REF" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u)
+          mapfile -t branch_crates  < <(git ls-files | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u)
+          for c in "${branch_crates[@]}"; do
+            keep=0
+            for d in "${default_crates[@]}"; do [ "$c" = "$d" ] && keep=1 && break; done
+            if [ $keep -eq 0 ]; then
+              files=$(git ls-files -- "$c/**" || true)
+              if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+            fi
           done
           # Apply purge_globs and perma_removed_paths from merge-policy.json when present
           if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then
