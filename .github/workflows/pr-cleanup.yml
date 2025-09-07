@@ -44,8 +44,18 @@ jobs:
         with:
           result-encoding: string
           script: |
-            const prs = await github.paginate(github.rest.pulls.list, { owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100 });
-            const data = prs.map(p => ({ number: p.number, title: p.title, head: p.head.ref, author: p.user?.login || '', created_at: p.created_at, body: p.body || '' }));
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+            const data = prs.map(p => ({
+              number: p.number,
+              title: p.title,
+              head: p.head.ref,
+              head_repo: p.head.repo?.full_name || '',
+              same_repo: (p.head.repo?.full_name || '') === `${owner}/${repo}`,
+              author: p.user?.login || '',
+              created_at: p.created_at,
+              body: p.body || ''
+            }));
             return JSON.stringify(data);
 
       - name: Clean PR branches
@@ -80,8 +90,12 @@ jobs:
           jq -c '.[]' .github/auto/prs.json | while read -r pr; do
             num=$(jq -r '.number' <<<"$pr")
             head=$(jq -r '.head' <<<"$pr")
+            same_repo=$(jq -r '.same_repo' <<<"$pr")
             author=$(jq -r '.author' <<<"$pr")
             echo "-- PR #$num head=$head author=$author"
+            if [ "$same_repo" != "true" ]; then
+              echo "  skip: fork PR (cannot push)"; continue
+            fi
             files=$(curl -sSL -H "authorization: Bearer $GH_TOKEN" -H 'accept: application/vnd.github+json' \
               "https://api.github.com/repos/$OWNER/$REPO/pulls/$num/files?per_page=100")
             needs_cleanup=$(jq -r --arg pats "$PATTERNS" '
