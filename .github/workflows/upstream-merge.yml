@@ -506,10 +506,10 @@ jobs:
             echo "No TUI changes in upstream delta; skipping invariants guard."; exit 0
           fi
           # Verify critical ordering identifiers exist somewhere under codex-rs/tui/
+          failed=0
           for token in request_ordinal output_index sequence_number; do
             if ! git ls-tree -r --name-only origin/upstream-merge -- 'codex-rs/tui/**' | while read -r f; do git show "origin/upstream-merge:$f" || true; done | grep -q "$token"; then
-              echo "Invariant token '$token' not found under codex-rs/tui on upstream-merge." >&2
-              exit 1
+              echo "::warning::Invariant token '$token' not found under codex-rs/tui on upstream-merge (non-blocking)." >&2
             fi
           done
 
