@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.78] - 2025-09-07
+
+- CI: harden upstream-merge flow, fix PR step order, install jq; expand cleanup to purge nested Cargo caches for more reliable releases. (07a30f06, aae9f7ce, a8c7535c)
+- Repo: broaden .gitignore to exclude Cargo caches and local worktrees, preventing accidental files in commits. (59ecbbe9, c403db7e)
+
 ## [0.2.77] - 2025-09-07
 
 - TUI/GitHub: add settings view for GitHub integration. (4f59548c)
