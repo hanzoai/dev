@@ -306,6 +306,18 @@ jobs:
           fi
           if [ -z "${MB:-}" ]; then echo "no_merge_base=true" >> "$GITHUB_OUTPUT"; else echo "no_merge_base=false" >> "$GITHUB_OUTPUT"; fi
 
+      - name: Reset remote merge branch to default tip (preserve PR)
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          # Ensure remote branch does not carry unrelated history from prior runs
+          git fetch --no-tags origin --depth=1
+          git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
+          # Force-with-lease so the PR stays open but branch tip is clean
+          git push --force-with-lease origin HEAD:upstream-merge
+
       - name: Run Code agent to perform upstream merge
         id: agent
         if: steps.check_upstream.outputs.skip != 'true'
@@ -374,6 +386,7 @@ jobs:
           - Keep diffs focused on merge and required fixes. Do not recreate locally removed theming/UX files.
           - Never rewrite git history outside the merge branch.
           - If Git reports no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` to graft histories and proceed with all policies/guards.
+          - If the initial `git merge --no-ff --no-commit upstream/UPSTREAM_BRANCH` fails with unrelated histories, re-run the merge in a separate command with `--allow-unrelated-histories` (do not chain with `||`).
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
           EOP
@@ -416,6 +429,9 @@ jobs:
           for f in MERGE_PLAN.md MERGE_REPORT.md; do
             if git ls-files -- "$f" | grep -q .; then git rm -f -- "$f"; removed=true; fi
           done
+          # Remove any accidentally committed artifacts under .github/auto/** (these should be uploaded, not tracked)
+          auto_tracked=$(git ls-files -- '.github/auto/**' || true)
+          if [ -n "$auto_tracked" ]; then echo "$auto_tracked" | xargs -r git rm -f --; removed=true; fi
           # Remove any tracked upstream images disallowed by local policy
           for p in .github/codex-cli-*.png .github/codex-cli-*.jpg .github/codex-cli-*.jpeg .github/codex-cli-*.webp; do
             files=$(git ls-files -- "$p" || true)
