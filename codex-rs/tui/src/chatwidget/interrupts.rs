@@ -7,7 +7,6 @@ use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::McpToolCallBeginEvent;
 use codex_core::protocol::McpToolCallEndEvent;
 use codex_core::protocol::PatchApplyEndEvent;
-use codex_protocol::plan_tool::UpdatePlanArgs;
 
 use super::ChatWidget;
 use super::tools;
@@ -21,7 +20,6 @@ pub(crate) enum QueuedInterrupt {
     McpBegin { seq: u64, ev: McpToolCallBeginEvent, order: Option<codex_core::protocol::OrderMeta> },
     McpEnd { seq: u64, ev: McpToolCallEndEvent, order: Option<codex_core::protocol::OrderMeta> },
     PatchEnd { seq: u64, ev: PatchApplyEndEvent },
-    PlanUpdate { seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta> },
 }
 
 #[derive(Default)]
@@ -70,9 +68,7 @@ impl InterruptManager {
         self.queue.push(QueuedInterrupt::PatchEnd { seq, ev });
     }
 
-    pub(crate) fn push_plan_update(&mut self, seq: u64, ev: UpdatePlanArgs, order: Option<codex_core::protocol::OrderMeta>) {
-        self.queue.push(QueuedInterrupt::PlanUpdate { seq, ev, order });
-    }
+    // Plan updates are inserted near-time immediately; no interrupt queue entry needed.
 
     pub(crate) fn flush_all(&mut self, chat: &mut ChatWidget<'_>) {
         // Ensure stable order
@@ -114,10 +110,7 @@ impl InterruptManager {
                 QueuedInterrupt::PatchEnd { seq: _, ev } => {
                     chat.handle_patch_apply_end_now(ev);
                 }
-                QueuedInterrupt::PlanUpdate { ev, order, .. } => {
-                    let ok = match order.as_ref() { Some(om) => super::ChatWidget::order_key_from_order_meta(om), None => { tracing::warn!("missing OrderMeta in queued PlanUpdate; using synthetic key"); chat.next_internal_key() } };
-                    let _ = chat.history_insert_with_key_global(Box::new(crate::history_cell::new_plan_update(ev)), ok);
-                }
+                
             }
         }
     }
@@ -131,7 +124,6 @@ fn seq_of(q: &QueuedInterrupt) -> u64 {
         | QueuedInterrupt::ExecEnd { seq, .. }
         | QueuedInterrupt::McpBegin { seq, .. }
         | QueuedInterrupt::McpEnd { seq, .. }
-        | QueuedInterrupt::PatchEnd { seq, .. }
-        | QueuedInterrupt::PlanUpdate { seq, .. } => *seq,
+        | QueuedInterrupt::PatchEnd { seq, .. } => *seq,
     }
 }
