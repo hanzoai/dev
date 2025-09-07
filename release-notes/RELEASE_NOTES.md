@@ -1,11 +1,11 @@
-## @just-every/code v0.2.78
+## @just-every/code v0.2.79
 
-Small maintenance release focused on CI reliability and repository hygiene.
+Small maintenance release improving upstream sync stability.
 
 ### Changes
 
-- CI: harden upstream-merge flow, fix PR step order, install jq; expand cleanup to purge nested Cargo caches for more reliable releases.
-- Repo: broaden .gitignore to exclude Cargo caches and local worktrees, preventing accidental files in commits.
+- CI: harden upstream merge strategy to prefer local changes and reduce conflicts during sync for more stable releases.
+- Build: smarter cleanup of reintroduced crates to avoid transient workspace breaks during upstream sync.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.77...v0.2.78
+Compare: https://github.com/just-every/code/compare/v0.2.78...v0.2.79
