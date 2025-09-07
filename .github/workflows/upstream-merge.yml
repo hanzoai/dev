@@ -138,6 +138,16 @@ jobs:
           git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
           git fetch origin --depth=1
           git fetch upstream --depth=1 "${UPSTREAM_BRANCH}"
+          # Extra short-circuit: if origin/upstream-merge already contains both
+          # current tips (upstream and default), there is nothing new to do.
+          if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/upstream-merge" \
+               && git merge-base --is-ancestor "origin/${DEFAULT_BRANCH}" "origin/upstream-merge"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Upstream and default are already included in origin/upstream-merge; skipping agent run."
+              exit 0
+            fi
+          fi
           if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "No new upstream commits; skipping agent run."
