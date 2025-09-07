@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.75] - 2025-09-07
+
+- No user-facing changes; maintenance-only release with CI cleanup. (c5cd3b9e, 2e43b32c)
+- Release: prepare 0.2.75 tag and metadata. (1b6da85a)
+
 ## [0.2.74] - 2025-09-06
 
 - Maintenance: no user-facing changes; CI and repo hygiene improvements. (9ba6bb9d, 4ed87245)
