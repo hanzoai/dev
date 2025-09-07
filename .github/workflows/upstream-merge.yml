@@ -14,6 +14,10 @@ on:
         description: 'Upstream branch'
         required: false
         default: 'main'
+      allow_unrelated_histories:
+        description: 'Allow unrelated histories (one-time graft when no merge-base)'
+        required: false
+        default: 'false'
   repository_dispatch:
     types: [upstream-push]
 
@@ -31,6 +35,7 @@ env:
   MERGE_BRANCH: upstream-merge
   RG_VERSION: '14.1.0'
   JQ_VERSION: '1.7.1'
+  ALLOW_UNRELATED_HISTORIES: ${{ inputs.allow_unrelated_histories || 'false' }}
 
 jobs:
   merge:
@@ -295,6 +300,7 @@ jobs:
           else
             echo "No merge-base between origin/${DEFAULT_BRANCH} and upstream/${UPSTREAM_BRANCH}; skipping reintroduced path detection." >> .github/auto/CHANGE_HISTOGRAM.txt
           fi
+          if [ -z "${MB:-}" ]; then echo "no_merge_base=true" >> "$GITHUB_OUTPUT"; else echo "no_merge_base=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Run Code agent to perform upstream merge
         id: agent
@@ -363,7 +369,8 @@ jobs:
           - Be minimal and surgical; do not refactor.
           - Keep diffs focused on merge and required fixes. Do not recreate locally removed theming/UX files.
           - Never rewrite git history outside the merge branch.
-          - Do not use `--allow-unrelated-histories`; if the merge is unrelated, stop and report instead of forcing a history link.
+          - Default: Do not use `--allow-unrelated-histories`.
+          - Exception: If ALLOW_UNRELATED_HISTORIES=true and there is no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` a single time to graft histories, then proceed with all policies/guards.
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
           EOP
@@ -521,6 +528,7 @@ jobs:
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           MERGE_MODE: ${{ steps.prep.outputs.merge_mode || 'one-shot' }}
+          NO_MERGE_BASE: ${{ steps.prep.outputs.no_merge_base || 'false' }}
         run: |
           set -euo pipefail
           echo "### Upstream Merge Summary" >> "$GITHUB_STEP_SUMMARY"
@@ -528,15 +536,75 @@ jobs:
           echo "- Files changed upstream: ${{ steps.prep.outputs.files_count }} (est. LOC: ${{ steps.prep.outputs.loc_est }})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Branch: upstream-merge" >> "$GITHUB_STEP_SUMMARY"
           echo "- Artifacts: COMMITS.json, MERGE_PLAN.md, MERGE_REPORT.md, DIFFSTAT.txt" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${NO_MERGE_BASE}" = "true" ]; then echo "- Note: upstream/default have no merge-base (unrelated histories)." >> "$GITHUB_STEP_SUMMARY"; fi
+          # Preview small artifacts inline for quick debugging
+          for f in COMMITS.json CHANGE_HISTOGRAM.txt DIFFSTAT.txt REINTRODUCED_PATHS.txt; do
+            p=".github/auto/$f"; [ -s "$p" ] || continue; echo "\n#### $f" >> "$GITHUB_STEP_SUMMARY"; echo '\n```' >> "$GITHUB_STEP_SUMMARY"; sed -n '1,120p' "$p" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"; done
 
-      - name: Upload merge artifacts
+      # Upload each artifact separately so they appear as individual items in the UI
+      - name: Upload artifact - COMMITS.json
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: upstream-merge-artifacts
+          name: COMMITS.json
           if-no-files-found: warn
-          path: |
-            .github/auto/**
+          path: .github/auto/COMMITS.json
+
+      - name: Upload artifact - DELTA_FILES.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DELTA_FILES.txt
+          if-no-files-found: warn
+          path: .github/auto/DELTA_FILES.txt
+
+      - name: Upload artifact - DIFFSTAT.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIFFSTAT.txt
+          if-no-files-found: warn
+          path: .github/auto/DIFFSTAT.txt
+
+      - name: Upload artifact - CHANGE_HISTOGRAM.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CHANGE_HISTOGRAM.txt
+          if-no-files-found: warn
+          path: .github/auto/CHANGE_HISTOGRAM.txt
+
+      - name: Upload artifact - DELETED_ON_DEFAULT.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DELETED_ON_DEFAULT.txt
+          if-no-files-found: warn
+          path: .github/auto/DELETED_ON_DEFAULT.txt
+
+      - name: Upload artifact - REINTRODUCED_PATHS.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: REINTRODUCED_PATHS.txt
+          if-no-files-found: warn
+          path: .github/auto/REINTRODUCED_PATHS.txt
+
+      - name: Upload artifact - MERGE_PLAN.md
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MERGE_PLAN.md
+          if-no-files-found: warn
+          path: .github/auto/MERGE_PLAN.md
+
+      - name: Upload artifact - MERGE_REPORT.md
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MERGE_REPORT.md
+          if-no-files-found: warn
+          path: .github/auto/MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
         uses: actions/github-script@v7
         env:
