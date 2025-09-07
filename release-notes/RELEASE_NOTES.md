@@ -1,11 +1,11 @@
-## @just-every/code v0.2.79
+## @just-every/code v0.2.80
 
-Small maintenance release improving upstream sync stability.
+Maintenance release polishing CI workflow; no functional changes.
 
 ### Changes
 
-- CI: harden upstream merge strategy to prefer local changes and reduce conflicts during sync for more stable releases.
-- Build: smarter cleanup of reintroduced crates to avoid transient workspace breaks during upstream sync.
+- CI: set git identity, renumber steps, use repo-local CARGO_HOME in upstream-merge workflow.
+- Meta: no functional changes; release metadata only.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.78...v0.2.79
+Compare: https://github.com/just-every/code/compare/v0.2.79...v0.2.80
