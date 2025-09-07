@@ -214,7 +214,7 @@ jobs:
             -s workspace-write \
             -c sandbox_workspace_write.allow_git_writes=true \
             -c sandbox_workspace_write.network_access=true \
-            -c shell_environment_policy.r#set.CARGO_HOME="${GITHUB_WORKSPACE}/.cargo-home" \
+            -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
             -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
@@ -243,7 +243,7 @@ jobs:
               body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`;
             }
 
-      - name: Enforce policy removals on merge branch (images)
+      - name: Enforce policy removals on merge branch (images + caches)
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
@@ -260,13 +260,19 @@ jobs:
           rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge
           pushd "$wt" >/dev/null
           removed=false
+          # Remove any tracked upstream images disallowed by local policy
           for p in .github/codex-cli-*.png .github/codex-cli-*.jpg .github/codex-cli-*.jpeg .github/codex-cli-*.webp; do
             files=$(git ls-files -- "$p" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
+          # Belt-and-suspenders: drop any accidentally committed cargo cache dirs (.cargo-home/ or .cargo2/)
+          for d in .cargo-home .cargo2; do
+            files=$(git ls-files -- "$d/**" || true)
+            if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+          done
           if [ "$removed" = true ]; then
             git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
-              commit -m "chore(merge): remove upstream .github codex-cli images per local policy"
+              commit -m "chore(merge): enforce policy removals (images + cargo caches)"
             git push origin HEAD:upstream-merge
           fi
           popd >/dev/null

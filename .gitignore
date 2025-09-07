@@ -46,6 +46,7 @@ codex-cli/bin/*-windows-*
 # Local Cargo cache (kept in-repo for sandboxed CI; never commit)
 /.cargo-home/
 /.cargo-cache/
+/.cargo2/
 
 # Release and CI scratch
 /.code-bin/

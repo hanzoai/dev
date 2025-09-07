@@ -459,6 +459,7 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
         return;
     }
 
+    let command_for_watch = command.clone();
     let mut completed_opt = Some(history_cell::new_completed_exec_command(
         command,
         parsed,
@@ -508,6 +509,12 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
 
     if exit_code == 0 {
         chat.bottom_pane.update_status_text("command completed".to_string());
+        // If this was a successful `git push`, start background GH Actions watch if enabled.
+        crate::chatwidget::gh_actions::maybe_watch_after_push(
+            chat.app_event_tx.clone(),
+            chat.config.clone(),
+            &command_for_watch,
+        );
     } else {
         chat.bottom_pane.update_status_text(format!("command failed (exit {})", exit_code));
     }

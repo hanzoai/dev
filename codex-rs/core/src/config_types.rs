@@ -46,6 +46,17 @@ fn default_true() -> bool {
     true
 }
 
+/// GitHub integration settings.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct GithubConfig {
+    /// When true, Codex watches for GitHub Actions workflow runs after a
+    /// successful `git push` and reports failures as background messages.
+    /// Enabled by default; can be disabled via `~/.code/config.toml` under
+    /// `[github]` with `check_workflows_on_push = false`.
+    #[serde(default = "default_true")]
+    pub check_workflows_on_push: bool,
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct McpServerConfig {
     pub command: String,
@@ -342,10 +353,13 @@ pub struct SandboxWorkspaceWrite {
     #[serde(default)]
     pub exclude_slash_tmp: bool,
     /// When true, do not protect the top-level `.git` folder under a writable
-    /// root. Defaults to false for safety.
-    #[serde(default)]
+    /// root. Defaults to true (historical behavior allows Git writes).
+    #[serde(default = "crate::config_types::default_true_bool")]
     pub allow_git_writes: bool,
 }
+
+// Serde helper: default to true for `allow_git_writes` when omitted.
+pub(crate) const fn default_true_bool() -> bool { true }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
