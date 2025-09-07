@@ -50,6 +50,11 @@ jobs:
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
 
+      - name: Set git identity for commits
+        run: |
+          git config user.name "just-every-code"
+          git config user.email "code@justevery.com"
+
       - name: Setup Rust toolchain (match repo)
         uses: dtolnay/rust-toolchain@master
         with:
@@ -191,19 +196,18 @@ jobs:
           <task>
           You are the maintainer bot. Perform an upstream merge using our repo policies and a selective reconciliation strategy.
           Steps:
-          1) Configure git with author "just-every-code <just-every-code@users.noreply.github.com>".
-          2) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
-          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
-          4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
+          1) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
+          2) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
+          3) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
              - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
              - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
              - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
              - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). For each upstream commit, use repo context and history to judge whether to incorporate or to keep ours. Prefer preserving our local intent and removals; incorporate upstream when it improves correctness, security, or compatibility without violating protected areas (themes/UX/docs/workflows). Record notable decisions in MERGE_REPORT.md.
-          5) Stage and commit with a conventional message and short build status.
-          6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
-          7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
-          8) Push MERGE_BRANCH and prepare PR title/body.
+          4) Stage and commit with a conventional message and short build status.
+          5) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
+          6) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          7) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
           <constraints>
