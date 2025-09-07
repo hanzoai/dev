@@ -1,5 +1,0 @@
-# Commit log (v0.2.82..HEAD)
-* 3ba329bf chore(release): 0.2.83 [skip ci] (GitHub Action)
-* 00ffb316 fix(apply_patch/embedded): replace fragile tree-sitter query with robust heredoc scanner; prevent panic and gracefully degrade (James Peter)
-* 722fb439 feat(tui/exec): use UI-themed syntect for JSON stdout; clear ANSI BG so output inherits theme background (James Peter)
-* ac328824 feat(tui/exec): theme-aware JSON preview in Run output; strip ANSI backgrounds and use UI-matched JSON highlighting; avoid white bg from jq -C (James Peter)
