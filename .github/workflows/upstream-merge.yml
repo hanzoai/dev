@@ -14,10 +14,6 @@ on:
         description: 'Upstream branch'
         required: false
         default: 'main'
-      allow_unrelated_histories:
-        description: 'Allow unrelated histories (one-time graft when no merge-base)'
-        required: false
-        default: 'false'
   repository_dispatch:
     types: [upstream-push]
 
@@ -35,7 +31,6 @@ env:
   MERGE_BRANCH: upstream-merge
   RG_VERSION: '14.1.0'
   JQ_VERSION: '1.7.1'
-  ALLOW_UNRELATED_HISTORIES: ${{ inputs.allow_unrelated_histories || 'false' }}
 
 jobs:
   merge:
@@ -369,8 +364,7 @@ jobs:
           - Be minimal and surgical; do not refactor.
           - Keep diffs focused on merge and required fixes. Do not recreate locally removed theming/UX files.
           - Never rewrite git history outside the merge branch.
-          - Default: Do not use `--allow-unrelated-histories`.
-          - Exception: If ALLOW_UNRELATED_HISTORIES=true and there is no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` a single time to graft histories, then proceed with all policies/guards.
+          - If Git reports no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` to graft histories and proceed with all policies/guards.
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
           EOP
