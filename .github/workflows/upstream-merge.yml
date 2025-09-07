@@ -625,6 +625,7 @@ jobs:
           if-no-files-found: warn
           path: .github/auto/MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
@@ -654,8 +655,29 @@ jobs:
               core.notice(`Branch '${head}' not found on origin; skipping PR creation.`);
               return;
             }
+            // Skip PR if there are no net file changes vs base. Close existing PR if present.
+            let zeroDiff = false;
+            try {
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}` });
+              const files = cmp.data.files || [];
+              // Consider zero-diff if no files changed. This handles merges that add commits but no file deltas.
+              zeroDiff = files.length === 0;
+            } catch (e) {
+              core.warning(`Compare failed (${base}...${head}): ${e.message}. Proceeding to PR creation.`);
+            }
             const headRef = `${owner}:${head}`;
             const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
+            if (zeroDiff) {
+              if (prs.data.length) {
+                const pr = prs.data[0];
+                await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: upstream merge has no net file changes vs base.' });
+                await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+                core.notice(`Closed PR #${pr.number} due to zero diff.`);
+              } else {
+                core.notice('Zero diff vs base; skipping PR creation.');
+              }
+              return;
+            }
             if (prs.data.length) {
               const pr = prs.data[0];
               await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
