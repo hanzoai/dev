@@ -657,6 +657,11 @@ impl App<'_> {
                     };
 
                     match command {
+                        SlashCommand::Branch => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_branch_command(command_args);
+                            }
+                        }
                         SlashCommand::Resume => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.show_resume_picker();
@@ -833,6 +838,32 @@ impl App<'_> {
                             }));
                         }
                     }
+                }
+                AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
+                    // Rebuild the chat widget bound to a new cwd, preserving
+                    // current configuration and terminal properties.
+                    let mut cfg = self.config.clone();
+                    cfg.cwd = new_cwd;
+                    let mut new_widget = ChatWidget::new(
+                        cfg,
+                        self.app_event_tx.clone(),
+                        None,
+                        Vec::new(),
+                        self.enhanced_keys_supported,
+                        self.terminal_info.clone(),
+                        self.show_order_overlay,
+                    );
+                    new_widget.enable_perf(self.timing_enabled);
+                    self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                    // Optionally submit a prompt immediately in the new session
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(prompt) = initial_prompt {
+                            if !prompt.is_empty() {
+                                widget.submit_text_message(prompt);
+                            }
+                        }
+                    }
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::ResumeFrom(path) => {
                     // Replace the current chat widget with a new one configured to resume

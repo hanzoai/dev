@@ -26,6 +26,7 @@ pub enum SlashCommand {
     Prompts,
     Perf,
     Agents,
+    Branch,
     Github,
     Resume,
     // Prompt-expanding commands
@@ -60,6 +61,7 @@ impl SlashCommand {
             SlashCommand::Theme => "switch between color themes",
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Agents => "list agents (running and availability)",
+            SlashCommand::Branch => "create a worktree branch and switch (/branch [task])",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Logout => "log out of Codex",

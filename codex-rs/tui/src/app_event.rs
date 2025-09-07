@@ -63,6 +63,11 @@ pub(crate) enum AppEvent {
     /// layer so it can be handled centrally. Includes the full command text.
     DispatchCommand(SlashCommand, String),
 
+    /// Switch to a new working directory by rebuilding the chat widget with
+    /// the same configuration but a different `cwd`. Optionally submits an
+    /// initial prompt once the new session is ready.
+    SwitchCwd(std::path::PathBuf, Option<String>),
+
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
     PrepareAgents,
 
