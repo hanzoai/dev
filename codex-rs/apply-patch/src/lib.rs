@@ -47,7 +47,11 @@ pub struct EmbeddedApplyPatch {
 /// Also supports the form `cd <path> && apply_patch <<'EOF' ...`.
 /// Returns `None` when not present.
 pub fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ExtractHeredocError> {
-    tree_sitter_utils::find_embedded_apply_patch(script)
+    // Defer to the fast textual scanner; map unit error to a benign None.
+    match tree_sitter_utils::find_embedded_apply_patch(script) {
+        Ok(v) => Ok(v),
+        Err(_) => Ok(None),
+    }
 }
 
 #[derive(Debug, Error, PartialEq)]
