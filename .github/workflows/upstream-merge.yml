@@ -242,6 +242,18 @@ jobs:
 
           git diff --stat "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}" > .github/auto/DIFFSTAT.txt || true
 
+          # Detect reintroduced paths: present in merge-base, absent on default, present on upstream
+          MB=$(git merge-base "origin/${DEFAULT_BRANCH}" "upstream/${UPSTREAM_BRANCH}")
+          : > .github/auto/REINTRODUCED_PATHS.txt
+          while read -r status path; do
+            [ "${status}" = "A" ] || continue
+            if git ls-tree -r --name-only "$MB" -- "$path" >/dev/null 2>&1 && \
+               git ls-tree -r --name-only "$MB" -- "$path" | grep -q . && \
+               ! git ls-tree -r --name-only "origin/${DEFAULT_BRANCH}" -- "$path" | grep -q .; then
+              echo "$path" >> .github/auto/REINTRODUCED_PATHS.txt
+            fi
+          done < <(git diff --name-status "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}" || true)
+
       - name: Run Code agent to perform upstream merge
         id: agent
         if: steps.check_upstream.outputs.skip != 'true'
@@ -259,12 +271,6 @@ jobs:
             AGENTS.md
             README.md
             CHANGELOG.md
-          THEIRS_GLOBS: |
-            codex-rs/core/**
-            codex-rs/common/**
-            codex-rs/protocol/**
-            codex-rs/exec/**
-            codex-rs/file-search/**
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
@@ -283,8 +289,14 @@ jobs:
             echo '- .github/auto/DELETED_ON_DEFAULT.txt: crates/paths removed on our default; avoid re-introducing.';
             echo '- .github/auto/CHANGE_HISTOGRAM.txt: rough areas touched.';
             echo '- .github/auto/DELTA_FILES.txt and DIFFSTAT.txt: filenames and summary.';
+            echo '- .github/auto/REINTRODUCED_PATHS.txt: candidate paths removed previously that upstream reintroduced.';
             echo '<policy>';
-            cat .github/merge-policy.json 2>/dev/null || echo '{ }';
+            # Emit a minimized JSON policy for clarity (drop empty sections)
+            if command -v jq >/dev/null 2>&1; then
+              jq 'del(.prefer_theirs_globs) | with_entries(select(.value|type != "array" or (.value|length>0)))' .github/merge-policy.json 2>/dev/null || cat .github/merge-policy.json || echo '{ }'
+            else
+              cat .github/merge-policy.json 2>/dev/null || echo '{ }'
+            fi
             echo '</policy>';
             cat << 'EOP'
           <task>
@@ -380,6 +392,14 @@ jobs:
               files=$(git ls-files -- "$pat" || true)
               if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
             done
+          fi
+          # Remove any reintroduced paths detected during precompute
+          if [ -f "$GITHUB_WORKSPACE/.github/auto/REINTRODUCED_PATHS.txt" ]; then
+            mapfile -t reintro < "$GITHUB_WORKSPACE/.github/auto/REINTRODUCED_PATHS.txt" || true
+            if [ ${#reintro[@]} -gt 0 ]; then
+              files=$(git ls-files -- "${reintro[@]}" || true)
+              if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
+            fi
           fi
           if [ "$removed" = true ]; then
             git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
