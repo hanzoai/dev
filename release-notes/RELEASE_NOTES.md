@@ -1,15 +1,19 @@
-## @just-every/code v0.2.76
+## @just-every/code v0.2.77
 
-Maintenance polish focused on upstream-merge policy and repo hygiene.
+This release adds GitHub integration features in the TUI, including a settings view and Actions tools.
 
 ### Changes
-- CI: pass merge-policy.json to upstream-merge agent and use policy globs for safer merges.
-- CI: remove upstream .github codex-cli images after agent merge to keep the repo clean.
+
+- TUI/GitHub: add settings view for GitHub integration.
+- TUI/GitHub: add Actions tools to browse runs and jobs.
+- TUI: wire GitHub settings and Actions into bottom pane and chatwidget for quick access.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.75...v0.2.76
+Compare: https://github.com/just-every/code/compare/v0.2.76...v0.2.77
+
