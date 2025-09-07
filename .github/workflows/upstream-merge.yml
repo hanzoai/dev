@@ -54,6 +54,7 @@ jobs:
         run: |
           git config user.name "just-every-code"
           git config user.email "code@justevery.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Setup Rust toolchain (match repo)
         uses: dtolnay/rust-toolchain@master
@@ -160,6 +161,65 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Prepare agent context (commit range, deleted paths, histogram)
+        id: prep
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github/auto
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
+          git fetch origin --depth=1
+          git fetch upstream --depth=100 "${UPSTREAM_BRANCH}"
+          RANGE="upstream/${UPSTREAM_BRANCH} ^origin/${DEFAULT_BRANCH}"
+          : > .github/auto/COMMITS.json
+          echo '[' >> .github/auto/COMMITS.json
+          first=1
+          while read -r sha; do
+            title=$(git log -1 --pretty=%s "$sha" | sed 's/"/\\"/g')
+            date=$(git log -1 --pretty=%cI "$sha")
+            files=$(git show --pretty=format: --name-only "$sha" | sed '/^$/d')
+            files_json=$(printf '%s\n' "$files" | jq -Rcs 'split("\n") | map(select(length>0))')
+            stats=$(git show --shortstat --oneline "$sha" | tail -n1)
+            ins=$(printf '%s' "$stats" | sed -n 's/.* \([0-9]\+\) insertions\?.*/\1/p')
+            del=$(printf '%s' "$stats" | sed -n 's/.* \([0-9]\+\) deletions\?.*/\1/p')
+            ins=${ins:-0}; del=${del:-0}
+            [ $first -eq 1 ] || echo ',' >> .github/auto/COMMITS.json
+            first=0
+            jq -n --arg sha "$sha" --arg title "$title" --arg date "$date" \
+                 --argjson files "$files_json" --argjson insertions "$ins" --argjson deletions "$del" \
+                 '{sha:$sha,title:$title,date:$date,files:$files,insertions:($insertions|tonumber),deletions:($deletions|tonumber)}' >> .github/auto/COMMITS.json
+          done < <(git rev-list --reverse $RANGE)
+          echo ']' >> .github/auto/COMMITS.json
+
+          git ls-tree -r --name-only "origin/${DEFAULT_BRANCH}" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u > .github/auto/DEFAULT_CRATES.txt
+          git ls-tree -r --name-only "upstream/${UPSTREAM_BRANCH}" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u > .github/auto/UPSTREAM_CRATES.txt
+          comm -13 .github/auto/DEFAULT_CRATES.txt .github/auto/UPSTREAM_CRATES.txt > .github/auto/DELETED_ON_DEFAULT.txt || true
+
+          git diff --name-only "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}" > .github/auto/DELTA_FILES.txt || true
+          awk 'BEGIN{tui=cli=core=docs=tests=other=0}
+               /^codex-rs\/tui\//{tui++; next}
+               /^codex-cli\//{cli++; next}
+               /^codex-rs\/(core|common|protocol|exec|file-search)\//{core++; next}
+               /^docs\//{docs++; next}
+               /(^|\/)tests?\//{tests++; next}
+               {other++}
+               END{printf("tui=%d cli=%d core=%d docs=%d tests=%d other=%d\n",tui,cli,core,docs,tests,other)}' \
+            .github/auto/DELTA_FILES.txt > .github/auto/CHANGE_HISTOGRAM.txt
+
+          FILES_COUNT=$(wc -l < .github/auto/DELTA_FILES.txt | tr -d ' ')
+          LOC_EST=$(git diff --shortstat "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}" | awk '{for(i=1;i<=NF;i++){if($i=="insertions(+)")ins=$(i-1); if($i=="deletions(-)")del=$(i-1)} } END{print (ins?ins:0)+(del?del:0)}')
+          MERGE_MODE=one-shot
+          if [ "${FILES_COUNT:-0}" -gt 800 ] || [ "${LOC_EST:-0}" -gt 15000 ]; then MERGE_MODE=by-bucket; fi
+          echo "merge_mode=${MERGE_MODE}" >> "$GITHUB_OUTPUT"
+          echo "files_count=${FILES_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "loc_est=${LOC_EST}" >> "$GITHUB_OUTPUT"
+
+          git diff --stat "origin/${DEFAULT_BRANCH}..upstream/${UPSTREAM_BRANCH}" > .github/auto/DIFFSTAT.txt || true
+
       - name: Run Code agent to perform upstream merge
         id: agent
         if: steps.check_upstream.outputs.skip != 'true'
@@ -169,6 +229,7 @@ jobs:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          MERGE_MODE: ${{ steps.prep.outputs.merge_mode || 'one-shot' }}
           OURS_GLOBS: |
             codex-rs/tui/**
             codex-cli/**
@@ -189,6 +250,17 @@ jobs:
           {
             printf 'Context\n- UPSTREAM_REPO=%s\n- UPSTREAM_BRANCH=%s\n- MERGE_BRANCH=%s\n- DEFAULT_BRANCH=%s\n\n' \
               "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$MERGE_BRANCH" "$DEFAULT_BRANCH";
+            echo 'Runtime'; echo '- ENV: github-actions'; echo "- MERGE_MODE=${MERGE_MODE}"; echo '';
+            echo 'Goals';
+            echo '- Keep our fork in sync with upstream by incorporating genuine improvements.';
+            echo '- Do not overwrite our unique TUI and tooling approach unless clearly beneficial and compatible.';
+            echo '- Make granular decisions commit-by-commit or by bucket; do not blanket-drop upstream changes without review.';
+            echo '';
+            echo 'Artifacts';
+            echo '- .github/auto/COMMITS.json: upstream commits not in default (sha, title, files, stats).';
+            echo '- .github/auto/DELETED_ON_DEFAULT.txt: crates/paths removed on our default; avoid re-introducing.';
+            echo '- .github/auto/CHANGE_HISTOGRAM.txt: rough areas touched.';
+            echo '- .github/auto/DELTA_FILES.txt and DIFFSTAT.txt: filenames and summary.';
             echo '<policy>';
             cat .github/merge-policy.json 2>/dev/null || echo '{ }';
             echo '</policy>';
@@ -197,17 +269,18 @@ jobs:
           You are the maintainer bot. Perform an upstream merge using our repo policies and a selective reconciliation strategy.
           Steps:
           1) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
-          2) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
-          3) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
+          2) Write MERGE_PLAN.md summarizing strategy (one-shot, by-bucket, or per-commit) based on MERGE_MODE and artifacts.
+          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
+          4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
              - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
              - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
              - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
              - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). For each upstream commit, use repo context and history to judge whether to incorporate or to keep ours. Prefer preserving our local intent and removals; incorporate upstream when it improves correctness, security, or compatibility without violating protected areas (themes/UX/docs/workflows). Record notable decisions in MERGE_REPORT.md.
-          4) Stage and commit with a conventional message and short build status.
-          5) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
-          6) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
-          7) Push MERGE_BRANCH and prepare PR title/body.
+          5) Stage and commit with a conventional message and short build status.
+          6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
+          7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          8) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
           <constraints>
@@ -336,6 +409,48 @@ jobs:
             fi
           fi
 
+      - name: TUI invariants guard (strict stream ordering keys)
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          # Verify key identifiers exist in upstream-merge versions of TUI files
+          req='request_ordinal'; out='output_index'; seq='sequence_number'
+          for p in codex-rs/tui/src/chatwidget.rs codex-rs/tui/src/history_cell.rs; do
+            if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1 && git show "origin/upstream-merge:$p" >/dev/null 2>&1; then
+              content=$(git show "origin/upstream-merge:$p" 2>/dev/null || true)
+              (printf "%s" "$content" | grep -q "$req") || { echo "Invariant missing $req in $p" >&2; exit 1; }
+              (printf "%s" "$content" | grep -q "$out") || { echo "Invariant missing $out in $p" >&2; exit 1; }
+              (printf "%s" "$content" | grep -q "$seq") || { echo "Invariant missing $seq in $p" >&2; exit 1; }
+            fi
+          done
+
+      - name: Summarize run
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          MERGE_MODE: ${{ steps.prep.outputs.merge_mode || 'one-shot' }}
+        run: |
+          set -euo pipefail
+          echo "### Upstream Merge Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Mode: ${MERGE_MODE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Files changed upstream: ${{ steps.prep.outputs.files_count }} (est. LOC: ${{ steps.prep.outputs.loc_est }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: upstream-merge" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Artifacts: COMMITS.json, MERGE_PLAN.md, MERGE_REPORT.md, DIFFSTAT.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload merge artifacts
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-merge-artifacts
+          path: |
+            .github/auto/COMMITS.json
+            .github/auto/DELETED_ON_DEFAULT.txt
+            .github/auto/CHANGE_HISTOGRAM.txt
+            .github/auto/DELTA_FILES.txt
+            .github/auto/DIFFSTAT.txt
+            MERGE_PLAN.md
+            MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
         uses: actions/github-script@v7
         env:
