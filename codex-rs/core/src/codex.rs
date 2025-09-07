@@ -2504,16 +2504,28 @@ async fn try_run_turn(
                 output.push(ProcessedResponseItem { item, response });
             }
             ResponseEvent::WebSearchCallBegin { call_id } => {
-                let _ = sess
-                    .tx_event
-                    .send(sess.make_event(&sub_id, EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: None })))
-                    .await;
+                // Stamp OrderMeta so the TUI can place the search block within
+                // the correct request window instead of using an internal epilogue.
+                let ctx = ToolCallCtx::new(sub_id.to_string(), call_id.clone(), None, None);
+                let order = ctx.order_meta(attempt_req);
+                let ev = sess.make_event_with_order(
+                    &sub_id,
+                    EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id, query: None }),
+                    order,
+                    None,
+                );
+                sess.send_event(ev).await;
             }
             ResponseEvent::WebSearchCallCompleted { call_id, query } => {
-                let _ = sess
-                    .tx_event
-                    .send(sess.make_event(&sub_id, EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query })))
-                    .await;
+                let ctx = ToolCallCtx::new(sub_id.to_string(), call_id.clone(), None, None);
+                let order = ctx.order_meta(attempt_req);
+                let ev = sess.make_event_with_order(
+                    &sub_id,
+                    EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id, query }),
+                    order,
+                    None,
+                );
+                sess.send_event(ev).await;
             }
             ResponseEvent::Completed {
                 response_id: _,
