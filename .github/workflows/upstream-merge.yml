@@ -194,8 +194,9 @@ jobs:
           set -euo pipefail
           mkdir -p .github/auto
           git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
-          git fetch origin --depth=1
-          git fetch upstream --depth=100 "${UPSTREAM_BRANCH}"
+          # Fetch with commit graph but no blobs for speed; ensure sufficient history for merge-base
+          git fetch origin --prune --filter=blob:none --tags
+          git fetch upstream --prune --filter=blob:none --tags "${UPSTREAM_BRANCH}"
           RANGE="upstream/${UPSTREAM_BRANCH} ^origin/${DEFAULT_BRANCH}"
           : > .github/auto/COMMITS.json
           echo '[' >> .github/auto/COMMITS.json
@@ -216,6 +217,9 @@ jobs:
                  '{sha:$sha,title:$title,date:$date,files:$files,insertions:($insertions|tonumber),deletions:($deletions|tonumber)}' >> .github/auto/COMMITS.json
           done < <(git rev-list --reverse $RANGE)
           echo ']' >> .github/auto/COMMITS.json
+          if jq -e 'length==0' .github/auto/COMMITS.json >/dev/null 2>&1; then
+            echo "No upstream commits beyond default; context prepared (empty).";
+          fi
 
           git ls-tree -r --name-only "origin/${DEFAULT_BRANCH}" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u > .github/auto/DEFAULT_CRATES.txt
           git ls-tree -r --name-only "upstream/${UPSTREAM_BRANCH}" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u > .github/auto/UPSTREAM_CRATES.txt
@@ -321,6 +325,7 @@ jobs:
           - Be minimal and surgical; do not refactor.
           - Keep diffs focused on merge and required fixes. Do not recreate locally removed theming/UX files.
           - Never rewrite git history outside the merge branch.
+          - Do not use `--allow-unrelated-histories`; if the merge is unrelated, stop and report instead of forcing a history link.
           - Use only the provided GH_TOKEN for push; do not echo it.
           </constraints>
           EOP
