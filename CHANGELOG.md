@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.76] - 2025-09-07
+
+- CI: pass merge-policy.json to upstream-merge agent and use policy globs for safer merges. (ef4e5559)
+- CI: remove upstream .github codex-cli images after agent merge to keep the repo clean. (7f96c499)
+
 ## [0.2.75] - 2025-09-07
 
 - No user-facing changes; maintenance-only release with CI cleanup. (c5cd3b9e, 2e43b32c)
