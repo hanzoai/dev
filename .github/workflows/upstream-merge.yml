@@ -174,6 +174,9 @@ jobs:
           {
             printf 'Context\n- UPSTREAM_REPO=%s\n- UPSTREAM_BRANCH=%s\n- MERGE_BRANCH=%s\n- DEFAULT_BRANCH=%s\n\n' \
               "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$MERGE_BRANCH" "$DEFAULT_BRANCH";
+            echo '<policy>';
+            cat .github/merge-policy.json 2>/dev/null || echo '{ }';
+            echo '</policy>';
             cat << 'EOP'
           <task>
           You are the maintainer bot. Perform an upstream merge using our repo policies and a selective reconciliation strategy.
@@ -182,8 +185,10 @@ jobs:
           2) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
           3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
           4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
-             - For files matching OURS_GLOBS: keep ours; if upstream added new files under these globs, remove them.
-             - For files matching THEIRS_GLOBS: prefer theirs.
+             - Use the <policy> JSON for prefer_ours_globs / prefer_theirs_globs / purge_globs.
+             - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
+             - For files matching prefer_theirs_globs: prefer theirs.
+             - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
              - For everything else, default to ours unless the change is a clear, trivial improvement (typos/docs) that doesn’t conflict with our direction.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
