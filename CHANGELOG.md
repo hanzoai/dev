@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.83] - 2025-09-07
+
+- TUI: theme-aware JSON preview in Exec output; use UI-matched highlighting and avoid white backgrounds. (ac328824)
+- TUI: apply UI-themed JSON highlighting for stdout; clear ANSI backgrounds so output inherits theme. (722fb439)
+- Core: replace fragile tree-sitter query with a heredoc scanner in embedded apply_patch to prevent panics. (00ffb316)
+
 ## [0.2.81] - 2025-09-07
 
 - CI: run TUI invariants guard only on TUI changes and downgrade to warnings to reduce false failures. (d41da1d1, 53558af0)

@@ -1,19 +1,17 @@
-## @just-every/code v0.2.81
+## @just-every/code v0.2.83
 
-Maintenance release with upstream‑merge and CI stability improvements.
+This release improves theme-aware JSON output in the TUI and fixes a stability issue in the embedded apply_patch scanner.
 
 ### Changes
-
-- CI: run TUI invariants guard only on TUI changes and downgrade to warnings to reduce false failures.
-- CI: upstream-merge workflow hardens context prep; handle no merge-base and forbid unrelated histories.
-- CI: faster, safer fetch and tools — commit-graph/blobless fetch, cached ripgrep/jq, skip tag fetch to avoid clobbers.
-- CI: improve reliability — cache Cargo registry, guard apt installs, upload .github/auto artifacts and ignore in git; fix DEFAULT_BRANCH.
+- TUI: theme-aware JSON preview in Exec output; use UI-matched highlighting and avoid white backgrounds.
+- TUI: apply UI-themed JSON highlighting for stdout; clear ANSI backgrounds so output inherits theme.
+- Core: replace fragile tree-sitter query with a heredoc scanner in embedded apply_patch to prevent panics.
 
 ### Install
-
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.80...v0.2.81
+Compare: https://github.com/just-every/code/compare/v0.2.82...v0.2.83
+
