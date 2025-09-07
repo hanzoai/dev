@@ -633,6 +633,11 @@ impl App<'_> {
                     self.input_running.store(false, Ordering::Release);
                     break 'main;
                 }
+                AppEvent::CancelRunningTask => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.cancel_running_task_from_approval();
+                    }
+                }
                 // fallthrough handled by break
                 AppEvent::CodexOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
