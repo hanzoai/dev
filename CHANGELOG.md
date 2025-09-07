@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.80] - 2025-09-07
+
+- CI: set git identity, renumber steps, use repo-local CARGO_HOME in upstream-merge workflow. (6a5796a5)
+- Meta: no functional changes; release metadata only. (56c7d028)
+
 ## [0.2.79] - 2025-09-07
 
 - CI: harden upstream merge strategy to prefer local changes and reduce conflicts during sync for more stable releases. (b5266c7c)
