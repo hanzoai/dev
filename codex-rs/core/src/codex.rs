@@ -4822,6 +4822,7 @@ async fn handle_container_exec_with_params(
 
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
+    let mut seq_hint_for_exec = seq_hint;
     if let Some((script_index, script)) = extract_shell_script_from_wrapper(&params.command) {
         let trimmed = script.trim_start();
         let confirm_prefixes = ["confirm:", "CONFIRM:"];
@@ -4857,6 +4858,147 @@ async fn handle_container_exec_with_params(
                 })
                 .unwrap_or_else(|| trimmed.to_string());
             params.command[script_index] = without_prefix;
+        }
+
+        // Detect an embedded `apply_patch <<EOF ... EOF` in a larger script and split it out
+        // so the UI can render a distinct "Updated" block before the "Run" block.
+        //
+        // If present, we will:
+        //  1) Execute the patch as a standalone apply_patch exec (with proper events)
+        //  2) Remove the statement from the script and continue with the remainder
+        //     (only if the patch succeeded)
+        if let Ok(Some(found)) = codex_apply_patch::find_embedded_apply_patch(&params.command[script_index]) {
+            // Build a synthetic minimal script for verified parsing of the patch action,
+            // preserving an optional cd path for correct path resolution.
+            let synthetic_script = if let Some(cd) = &found.cd_path {
+                format!("cd {} && apply_patch <<'EOF'\n{}\nEOF\n", cd, found.patch_body)
+            } else {
+                format!("apply_patch <<'EOF'\n{}\nEOF\n", found.patch_body)
+            };
+
+            // Resolve into an ApplyPatchAction using the verified path
+            let cwd_path = std::path::Path::new(&params.cwd);
+            let verified = codex_apply_patch::maybe_parse_apply_patch_verified(
+                &vec!["bash".to_string(), "-lc".to_string(), synthetic_script.clone()],
+                cwd_path,
+            );
+            if let codex_apply_patch::MaybeApplyPatchVerified::Body(action) = verified {
+                // First, run the patch apply as its own Exec with proper events
+                let path_to_codex = std::env::current_exe()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string());
+                if let Some(path_to_codex) = path_to_codex {
+                    let patch_params = ExecParams {
+                        command: vec![
+                            path_to_codex,
+                            CODEX_APPLY_PATCH_ARG1.to_string(),
+                            action.patch.clone(),
+                        ],
+                        cwd: action.cwd.clone(),
+                        timeout_ms: params.timeout_ms,
+                        env: HashMap::new(),
+                        with_escalated_permissions: params.with_escalated_permissions,
+                        justification: params.justification.clone(),
+                    };
+
+                    // Safety for patch step mirrors normal patch handling
+                    let safety = assess_safety_for_untrusted_command(
+                        sess.approval_policy,
+                        &sess.sandbox_policy,
+                        patch_params.with_escalated_permissions.unwrap_or(false),
+                    );
+
+                    let exec_command_context = ExecCommandContext {
+                        sub_id: sub_id.clone(),
+                        call_id: format!("{call_id}.apply_patch"),
+                        command_for_display: vec!["apply_patch".to_string(), action.patch.clone()],
+                        cwd: patch_params.cwd.clone(),
+                        apply_patch: Some(ApplyPatchCommandContext {
+                            user_explicitly_approved_this_action: matches!(safety, SafetyCheck::AutoApprove { .. }),
+                            changes: convert_apply_patch_to_protocol(&action),
+                        }),
+                    };
+
+                    let patch_result = sess
+                        .run_exec_with_events(
+                            turn_diff_tracker,
+                            exec_command_context,
+                            ExecInvokeArgs {
+                                params: patch_params.clone(),
+                                sandbox_type: match safety { SafetyCheck::AutoApprove { sandbox_type } => sandbox_type, SafetyCheck::AskUser => SandboxType::None, SafetyCheck::Reject { .. } => SandboxType::None },
+                                sandbox_policy: &sess.sandbox_policy,
+                                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
+                                stdout_stream: None,
+                            },
+                            seq_hint, // occupy the provided sequence range first
+                            output_index,
+                            attempt_req,
+                        )
+                        .await;
+
+                    let mut should_continue = false;
+                    if let Ok(ref out) = patch_result { should_continue = out.exit_code == 0; }
+
+                    // If patch step succeeded, strip it from the original script and proceed.
+                    if should_continue {
+                        let (start, end) = found.stmt_byte_range;
+                        let mut residual = String::new();
+                        residual.push_str(&params.command[script_index][..start]);
+                        residual.push_str(&params.command[script_index][end..]);
+                        // Clean leading/trailing separators to avoid syntax errors
+                        let mut residual = residual.trim().to_string();
+                        // Remove leading connectors like &&, ||, ; and trailing ones
+                        let trim_connectors = |s: &str| -> String {
+                            let mut s = s.trim().to_string();
+                            // Leading
+                            for _ in 0..2 {
+                                let st = s.trim_start();
+                                let new = if st.starts_with("&&") { &st[2..] } else if st.starts_with("||") { &st[2..] } else if st.starts_with(';') { &st[1..] } else { st };
+                                s = new.trim_start().to_string();
+                            }
+                            // Trailing
+                            for _ in 0..2 {
+                                let st = s.trim_end();
+                                let new = if st.ends_with("&&") { &st[..st.len()-2] } else if st.ends_with("||") { &st[..st.len()-2] } else if st.ends_with(';') { &st[..st.len()-1] } else { st };
+                                s = new.trim_end().to_string();
+                            }
+                            s
+                        };
+                        residual = trim_connectors(&residual);
+
+                        if !residual.is_empty() {
+                            params.command[script_index] = residual;
+                            // Bump the seq hint for the following run cell
+                            seq_hint_for_exec = seq_hint.map(|h| h.saturating_add(2));
+
+                            // Continue with normal flow using updated params (fallthrough below)
+                            // We overwrite `script` in local scope to avoid borrow issues
+                        } else {
+                            // No more commands to run; return the patch result as the tool output
+                            let ok = patch_result
+                                .as_ref()
+                                .map(|o| o.exit_code == 0)
+                                .unwrap_or(false);
+                            let content = match patch_result {
+                                Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
+                                Err(e) => get_error_message_ui(&e),
+                            };
+                            return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
+                        }
+                    } else {
+                        // Patch failed; return immediately with patch output (do not run remainder)
+                        let ok = patch_result
+                            .as_ref()
+                            .map(|o| o.exit_code == 0)
+                            .unwrap_or(false);
+                        let content = match patch_result {
+                            Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
+                            Err(e) => get_error_message_ui(&e),
+                        };
+                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
+                    }
+                }
+            }
         }
     }
     // check if this was a patch, and apply it if so
@@ -5031,7 +5173,7 @@ async fn handle_container_exec_with_params(
                     })
                 },
             },
-            seq_hint,
+            seq_hint_for_exec,
             output_index,
             attempt_req,
         )
