@@ -625,7 +625,6 @@ jobs:
           if-no-files-found: warn
           path: .github/auto/MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
-        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
