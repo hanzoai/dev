@@ -125,6 +125,7 @@ CHANGELOG.ignore.md
 
 # git worktrees
 branches/
+/.wt-*/
 
 # coder directories
 .coder/
