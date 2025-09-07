@@ -414,6 +414,71 @@ impl Page {
     }
   } catch (e) { /* swallow */ }
 
+  // 5) Stealth: reduce headless/automation signals for basic anti-bot checks
+  try {
+    // webdriver: undefined
+    try { Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => undefined }); } catch(_) {}
+
+    // languages
+    try {
+      const langs = ['en-US','en'];
+      Object.defineProperty(Navigator.prototype, 'languages', { get: () => langs.slice() });
+      Object.defineProperty(Navigator.prototype, 'language', { get: () => 'en-US' });
+    } catch(_) {}
+
+    // plugins & mimeTypes
+    try {
+      const fakePlugin = { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' };
+      const arrLike = (len) => ({ length: len, item(i){ return this[i]; } });
+      const plugins = arrLike(1); plugins[0] = fakePlugin;
+      const mimes = arrLike(2); mimes[0] = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }; mimes[1] = { type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format' };
+      Object.defineProperty(Navigator.prototype, 'plugins', { get: () => plugins });
+      Object.defineProperty(Navigator.prototype, 'mimeTypes', { get: () => mimes });
+    } catch(_) {}
+
+    // hardwareConcurrency & deviceMemory
+    try { Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: () => 8 }); } catch(_) {}
+    try { Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: () => 8 }); } catch(_) {}
+
+    // permissions.query
+    try {
+      const orig = navigator.permissions && navigator.permissions.query ? navigator.permissions.query.bind(navigator.permissions) : null;
+      if (orig) {
+        navigator.permissions.query = function(p){
+          if (p && p.name === 'notifications') { return Promise.resolve({ state: 'granted' }); }
+          return orig(p);
+        }
+      }
+    } catch(_) {}
+
+    // WebGL vendor/renderer
+    try {
+      const spoof = (proto) => {
+        const orig = proto.getParameter;
+        Object.defineProperty(proto, 'getParameter', { value: function(p){
+          const UNMASKED_VENDOR_WEBGL = 0x9245; // WEBGL_debug_renderer_info
+          const UNMASKED_RENDERER_WEBGL = 0x9246;
+          if (p === UNMASKED_VENDOR_WEBGL) return 'Apple Inc.';
+          if (p === UNMASKED_RENDERER_WEBGL) return 'Apple M2';
+          return orig.apply(this, arguments);
+        }});
+      };
+      if (window.WebGLRenderingContext) spoof(WebGLRenderingContext.prototype);
+      if (window.WebGL2RenderingContext) spoof(WebGL2RenderingContext.prototype);
+    } catch(_) {}
+
+    // userAgentData (hints)
+    try {
+      if (!('userAgentData' in navigator)) {
+        Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => ({
+          brands: [ { brand: 'Chromium', version: '128' }, { brand: 'Google Chrome', version: '128' } ],
+          mobile: false,
+          platform: navigator.platform || 'macOS'
+        })});
+      }
+    } catch(_) {}
+  } catch(_) { /* ignore */ }
+
   // 4) No cursor bootstrap here; full cursor is injected by runtime ensure_virtual_cursor
 })();
 "#;
