@@ -1,121 +1,115 @@
-use once_cell::sync::Lazy;
-use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
-use tree_sitter_bash::LANGUAGE as BASH;
+use crate::{EmbeddedApplyPatch};
 
-use crate::ExtractHeredocError;
-use crate::EmbeddedApplyPatch;
+/// Locate an embedded `apply_patch <<EOF ... EOF` heredoc in a shell script and
+/// return its patch body, optional `cd` path (when present as `cd <path> &&` on
+/// the same line), and the byte range to remove from the script.
+///
+/// This uses a lightweight textual scan that works reliably for the common
+/// forms we emit in tool calls. It intentionally avoids failing on unexpected
+/// syntax; if anything is off, we simply return Ok(None).
+pub(crate) fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ()> {
+    let _bytes = script.as_bytes();
+    let mut i = 0usize;
+    while let Some(pos) = script[i..].find("apply_patch") {
+        let start = i + pos;
+        // Ensure token boundary (start or whitespace/punct before, and space or '<' after)
+        let ok_before = start == 0 || script[..start].chars().rev().next().map(|c| c.is_whitespace() || ";|&".contains(c)).unwrap_or(true);
+        let after = script[start..].chars().skip("apply_patch".len()).next();
+        let ok_after = after.map(|c| c.is_whitespace() || c == '<').unwrap_or(false);
+        if !ok_before || !ok_after { i = start + "apply_patch".len(); continue; }
 
-/// Locate an apply_patch heredoc anywhere in the script (not anchored to be the only statement).
-pub(crate) fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ExtractHeredocError> {
-    static QUERY: Lazy<Query> = Lazy::new(|| {
-        let language = BASH.into();
-        #[expect(clippy::expect_used)]
-        Query::new(
-            &language,
-            r#"
-            (
-              redirected_statement @stmt
-                body: (
-                  command
-                    name: (command_name (word) @apply_name)
-                )
-                (#any-of? @apply_name "apply_patch" "applypatch")
-                redirect: (heredoc_redirect
-                              . (heredoc_start)
-                              . (heredoc_body) @heredoc
-                              . (heredoc_end)
-                              .)
-            )
+        // Find heredoc op: << (allow spaces between)
+        let rest = &script[start + "apply_patch".len()..];
+        let mut j = 0usize;
+        // Skip spaces
+        while j < rest.len() && rest.as_bytes()[j].is_ascii_whitespace() { j += 1; }
+        if j + 1 >= rest.len() || rest[j..].get(..2).unwrap_or("") != "<<" {
+            i = start + "apply_patch".len();
+            continue;
+        }
+        j += 2; // past <<
+        // Skip spaces
+        while j < rest.len() && rest.as_bytes()[j].is_ascii_whitespace() { j += 1; }
+        if j >= rest.len() { break; }
+        // Parse delimiter token: EOF, 'EOF', or "EOF"
+        let (delim, after_delim_idx) = match rest.as_bytes()[j] {
+            b'\'' => {
+                // 'EOF'
+                let k = rest[j+1..].find('\'').map(|p| j + 1 + p);
+                if let Some(endq) = k { (&rest[j+1..endq], endq + 1) } else { i = start + 2; continue; }
+            }
+            b'"' => {
+                let k = rest[j+1..].find('"').map(|p| j + 1 + p);
+                if let Some(endq) = k { (&rest[j+1..endq], endq + 1) } else { i = start + 2; continue; }
+            }
+            _ => {
+                // Bare word up to whitespace
+                let mut k = j;
+                while k < rest.len() && !rest.as_bytes()[k].is_ascii_whitespace() { k += 1; }
+                (&rest[j..k], k)
+            }
+        };
+        let delim = delim.trim();
+        if delim.is_empty() { i = start + 2; continue; }
 
-            (
-              redirected_statement @stmt
-                body: (
-                  list
-                    . (command
-                        name: (command_name (word) @cd_name) .
-                        argument: [
-                          (word) @cd_path
-                          (string (string_content) @cd_path)
-                          (raw_string) @cd_raw_string
-                        ] .)
-                    "&&"
-                    . (command name: (command_name (word) @apply_name))
-                    .
-                )
-                (#eq? @cd_name "cd")
-                (#any-of? @apply_name "apply_patch" "applypatch")
-                redirect: (heredoc_redirect
-                              . (heredoc_start)
-                              . (heredoc_body) @heredoc
-                              . (heredoc_end)
-                              .)
-            )
-            "#,
-        )
-        .expect("valid bash query (embedded apply_patch)")
-    });
+        // Find end of header line (newline)
+        let header_slice = &rest[after_delim_idx..];
+        let Some(nl_rel) = header_slice.find('\n') else { break };
+        let header_end = start + "apply_patch".len() + after_delim_idx + nl_rel + 1; // pos after newline
 
-    let lang = BASH.into();
-    let mut parser = Parser::new();
-    parser
-        .set_language(&lang)
-        .map_err(ExtractHeredocError::FailedToLoadBashGrammar)?;
-    let tree = parser
-        .parse(script, None)
-        .ok_or(ExtractHeredocError::FailedToParsePatchIntoAst)?;
+        // Search for terminator line equal to delim
+        let mut scan = header_end;
+        let mut found_end: Option<usize> = None;
+        while scan < script.len() {
+            let _line_start = scan;
+            if let Some(nl) = script[scan..].find('\n') {
+                let line = &script[scan..scan+nl];
+                if line == delim { found_end = Some(scan + nl + 1); break; }
+                scan += nl + 1;
+            } else {
+                // Last line without newline
+                let line = &script[scan..];
+                if line == delim { found_end = Some(script.len()); }
+                break;
+            }
+        }
+        let Some(body_end) = found_end else { i = start + 2; continue; };
 
-    let bytes = script.as_bytes();
-    let root = tree.root_node();
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&QUERY, root, bytes);
-
-    while let Some(m) = matches.next() {
-        let mut heredoc_text: Option<String> = None;
+        // Determine line start for this statement and optional preceding `cd <path> &&`
+        let line_start = script[..start].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let before_apply = &script[line_start..start];
         let mut cd_path: Option<String> = None;
-        let mut stmt_range: Option<(usize, usize)> = None;
-
-        for capture in m.captures.iter() {
-            let name = QUERY.capture_names()[capture.index as usize];
-            match name {
-                "heredoc" => {
-                    let text = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?
-                        .trim_end_matches('\n')
-                        .to_string();
-                    heredoc_text = Some(text);
+        let mut stmt_begin = start;
+        {
+            let prefix = before_apply.trim_end();
+            // Try to match "cd <path> &&" directly before apply_patch (allow whitespace)
+            if let Some(and_and_pos) = prefix.rfind("&&") {
+                let left = prefix[..and_and_pos].trim_end();
+                // Ensure no other tokens after && besides whitespace
+                if prefix[and_and_pos+2..].trim().is_empty() {
+                    if let Some(rest) = left.strip_suffix(|c: char| c.is_whitespace()) {
+                        let left_trim = rest.trim_end();
+                        if let Some(arg) = left_trim.strip_prefix("cd ") {
+                            let path = arg.trim();
+                            // Take first token or a single-quoted/quoted string
+                            let path_str = if (path.starts_with('\'') && path.ends_with('\'')) || (path.starts_with('"') && path.ends_with('"')) {
+                                path[1..path.len().saturating_sub(1)].to_string()
+                            } else {
+                                // up to next whitespace
+                                let tok_end = path.find(char::is_whitespace).unwrap_or(path.len());
+                                path[..tok_end].to_string()
+                            };
+                            cd_path = Some(path_str);
+                            // Include the cd... && in the removal range
+                            stmt_begin = line_start + left.find("cd ").map(|p| p).unwrap_or(0);
+                        }
+                    }
                 }
-                "cd_path" => {
-                    let text = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?
-                        .to_string();
-                    cd_path = Some(text);
-                }
-                "cd_raw_string" => {
-                    let raw = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?;
-                    let trimmed = raw
-                        .strip_prefix('\'')
-                        .and_then(|s| s.strip_suffix('\''))
-                        .unwrap_or(raw);
-                    cd_path = Some(trimmed.to_string());
-                }
-                "stmt" => {
-                    stmt_range = Some((capture.node.start_byte(), capture.node.end_byte()));
-                }
-                _ => {}
             }
         }
 
-        if let (Some(heredoc), Some(range)) = (heredoc_text, stmt_range) {
-            return Ok(Some(EmbeddedApplyPatch { patch_body: heredoc, cd_path, stmt_byte_range: range }));
-        }
+        let patch_body = script[header_end..body_end].trim_end_matches('\n').to_string();
+        return Ok(Some(EmbeddedApplyPatch { patch_body, cd_path, stmt_byte_range: (stmt_begin, body_end) }));
     }
-
     Ok(None)
 }
