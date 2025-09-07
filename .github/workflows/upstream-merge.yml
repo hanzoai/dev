@@ -199,7 +199,7 @@ jobs:
              - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
              - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
              - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
-             - Only adopt upstream when the change is trivial and clearly safe (typos, comments) and outside protected areas; otherwise keep ours.
+             - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). For each upstream commit, use repo context and history to judge whether to incorporate or to keep ours. Prefer preserving our local intent and removals; incorporate upstream when it improves correctness, security, or compatibility without violating protected areas (themes/UX/docs/workflows). Record notable decisions in MERGE_REPORT.md.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
           7) Write MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
