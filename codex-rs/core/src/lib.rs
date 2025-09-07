@@ -33,6 +33,7 @@ mod exec_command;
 pub mod exec_env;
 mod flags;
 pub mod git_info;
+pub mod git_worktree;
 mod image_comparison;
 mod is_safe_command;
 pub mod landlock;
