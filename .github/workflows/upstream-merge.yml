@@ -58,23 +58,61 @@ jobs:
           git config user.email "code@justevery.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Quick no-op: ancestor checks for default and upstream-merge
+        id: check_upstream
+        shell: bash
+        env:
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
+          # Fetch exact refs with commit graph, no blobs, to make ancestor checks reliable and fast.
+          git fetch --no-tags --prune --filter=blob:none origin \
+            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" \
+            "+refs/heads/upstream-merge:refs/remotes/origin/upstream-merge" || true
+          git fetch --no-tags --prune --filter=blob:none upstream \
+            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          # Extra short-circuit: if origin/upstream-merge already contains both current tips.
+          if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
+            if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/upstream-merge" \
+               && git merge-base --is-ancestor "origin/${DEFAULT_BRANCH}" "origin/upstream-merge"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Upstream and default are already included in origin/upstream-merge; skipping agent run."
+              exit 0
+            fi
+          fi
+          # If upstream tip is already an ancestor of default, nothing to merge.
+          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits; skipping agent run."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Expensive setup only runs if we are not skipping.
       - name: Setup Rust toolchain (match repo)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.89.0
 
       - name: Add local bin to PATH
+        if: steps.check_upstream.outputs.skip != 'true'
         run: |
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Cache ripgrep binary
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.local/tools/rg-${{ env.RG_VERSION }}
           key: rg-${{ runner.os }}-${{ env.RG_VERSION }}
 
       - name: Setup ripgrep (cached)
+        if: steps.check_upstream.outputs.skip != 'true'
         run: |
           set -euo pipefail
           if command -v rg >/dev/null 2>&1; then rg --version; exit 0; fi
@@ -92,12 +130,14 @@ jobs:
           rg --version
 
       - name: Cache jq binary
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.local/tools/jq-${{ env.JQ_VERSION }}
           key: jq-${{ runner.os }}-${{ env.JQ_VERSION }}
 
       - name: Setup jq (cached)
+        if: steps.check_upstream.outputs.skip != 'true'
         run: |
           set -euo pipefail
           if command -v jq >/dev/null 2>&1; then jq --version; exit 0; fi
@@ -111,6 +151,7 @@ jobs:
       # Remove slow apt install; we now use cached static binaries for rg/jq
 
       - name: Cache Rust build (cargo + target)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           # Our Rust workspace lives in codex-rs; cache its target dir
@@ -120,6 +161,7 @@ jobs:
 
       # Belt-and-suspenders: explicit cache of the target directory keyed by toolchain + lockfile
       - name: Cache cargo target (direct)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: codex-rs/target
@@ -128,6 +170,7 @@ jobs:
             target-${{ runner.os }}-toolchain-1.89.0-
 
       - name: Cache Cargo registry (CARGO_HOME in runner temp)
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -139,11 +182,13 @@ jobs:
             cargo-home-${{ runner.os }}-
 
       - name: Setup Node.js
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Cache npm (npx) downloads
+        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -153,6 +198,7 @@ jobs:
             npm-cache-${{ runner.os }}-node20-
 
       - name: Start local OpenAI proxy (no key to agent)
+        if: steps.check_upstream.outputs.skip != 'true'
         id: openai_proxy
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -195,35 +241,6 @@ jobs:
           JS
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
-
-      - name: Quick no-op check (skip if upstream/main already in origin)
-        id: check_upstream
-        shell: bash
-        env:
-          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
-          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-        run: |
-          set -euo pipefail
-          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
-          git fetch --no-tags origin --depth=1
-          git fetch --no-tags upstream --depth=1 "${UPSTREAM_BRANCH}"
-          # Extra short-circuit: if origin/upstream-merge already contains both
-          # current tips (upstream and default), there is nothing new to do.
-          if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
-            if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/upstream-merge" \
-               && git merge-base --is-ancestor "origin/${DEFAULT_BRANCH}" "origin/upstream-merge"; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "Upstream and default are already included in origin/upstream-merge; skipping agent run."
-              exit 0
-            fi
-          fi
-          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No new upstream commits; skipping agent run."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Prepare agent context (commit range, deleted paths, histogram)
         id: prep
