@@ -5,6 +5,10 @@ use strum_macros::EnumString;
 use strum_macros::IntoStaticStr;
 
 /// Commands that can be invoked by starting a message with a leading slash.
+///
+/// IMPORTANT: When adding or changing slash commands, also update
+/// `docs/slash-commands.md` at the repo root so users can discover them easily.
+/// This enum is the source of truth for the list and ordering shown in the UI.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]
