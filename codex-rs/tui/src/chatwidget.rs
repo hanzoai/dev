@@ -6056,6 +6056,155 @@ impl ChatWidget<'_> {
     }
 }
 
+impl ChatWidget<'_> {
+    /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
+    /// optionally copies current uncommitted changes, then switches the session cwd
+    /// into the worktree. If `task` is non-empty, submits it immediately.
+    pub(crate) fn handle_branch_command(&mut self, args: String) {
+        let args_trim = args.trim().to_string();
+        if matches!(args_trim.as_str(), "finalize" | "merge") {
+            self.handle_branch_finalize();
+            return;
+        }
+        let cwd = self.config.cwd.clone();
+        let tx = self.app_event_tx.clone();
+        // Add a quick notice into history
+        self.history_push(crate::history_cell::new_background_event("Creating branch worktree...".to_string()));
+        self.request_redraw();
+
+        tokio::spawn(async move {
+            // Resolve git root
+            let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — not a git repo: {}", e))]));
+                    return;
+                }
+            };
+            // Determine branch name
+            let task_opt = if args.trim().is_empty() { None } else { Some(args.trim()) };
+            let branch_name = codex_core::git_worktree::generate_branch_name_from_task(task_opt);
+            // Create worktree
+            let worktree = match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — failed to create worktree: {}", e))]));
+                    return;
+                }
+            };
+            // Copy uncommitted changes from the source root into the new worktree
+            let copied = match codex_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — failed to copy changes: {}", e))]));
+                    // Still switch to the branch even if copy fails
+                    0
+                }
+            };
+
+            let msg = if task_opt.is_some() {
+                format!(
+                    "Created worktree '{}'\nPath: {}\nCopied {} changed files\nSwitching and starting task...",
+                    branch_name,
+                    worktree.display(),
+                    copied
+                )
+            } else {
+                format!(
+                    "Created worktree '{}'\nPath: {}\nCopied {} changed files\nSwitched to branch. Type your task when ready.",
+                    branch_name,
+                    worktree.display(),
+                    copied
+                )
+            };
+            tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(msg)]));
+
+            // Switch cwd and optionally submit the task
+            let initial_prompt = task_opt.map(|s| s.to_string());
+            tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
+        });
+    }
+
+    /// Handle `/branch finalize` to merge the branch back into the default branch
+    /// and remove the worktree. Must be invoked from inside the worktree.
+    pub(crate) fn handle_branch_finalize(&mut self) {
+        let tx = self.app_event_tx.clone();
+        let work_cwd = self.config.cwd.clone();
+        // Inform in history
+        self.history_push(crate::history_cell::new_background_event("Finalizing branch: committing, merging to default, and cleaning up...".to_string()));
+        self.request_redraw();
+
+        tokio::spawn(async move {
+            use tokio::process::Command;
+            // Resolve repo root and current branch name
+            let git_root = match codex_core::git_worktree::get_git_root_from(&work_cwd).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — not a git repo: {}", e))]));
+                    return;
+                }
+            };
+            // Determine branch name from HEAD
+            let head = Command::new("git").current_dir(&work_cwd).args(["rev-parse", "--abbrev-ref", "HEAD"]).output().await;
+            let branch_name = match head {
+                Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                _ => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to detect branch name") ]));
+                    return;
+                }
+            };
+
+            // Commit any pending changes in the worktree
+            let _ = Command::new("git").current_dir(&work_cwd).args(["add", "-A"]).output().await;
+            let commit_out = Command::new("git")
+                .current_dir(&work_cwd)
+                .args(["commit", "-m", &format!("merge {branch_name} via /branch")])
+                .output()
+                .await;
+            if let Ok(o) = &commit_out {
+                if !o.status.success() {
+                    // Ignore "nothing to commit" (exit 1); surface others
+                    let msg = String::from_utf8_lossy(&o.stderr);
+                    if !msg.contains("nothing to commit") {
+                        tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — commit failed: {}", msg.trim()))]));
+                    }
+                }
+            }
+
+            // Determine default branch in main repo
+            let default_branch = match codex_core::git_worktree::detect_default_branch(&git_root).await {
+                Some(b) => b,
+                None => {
+                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)")]));
+                    return;
+                }
+            };
+
+            // Merge branch into default from the main repo root
+            let co = Command::new("git").current_dir(&git_root).args(["checkout", &default_branch]).output().await;
+            if !matches!(co, Ok(ref o) if o.status.success()) {
+                tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to checkout default branch") ]));
+                return;
+            }
+            let merge = Command::new("git").current_dir(&git_root).args(["merge", "--no-ff", &branch_name]).output().await;
+            if !matches!(merge, Ok(ref o) if o.status.success()) {
+                let err = merge.ok().and_then(|o| String::from_utf8(o.stderr).ok()).unwrap_or_else(|| "unknown error".to_string());
+                tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — merge failed: {}", err.trim()))]));
+                return;
+            }
+
+            // After a successful merge, remove the worktree and delete the branch
+            let _ = Command::new("git").current_dir(&git_root).args(["worktree", "remove", work_cwd.to_str().unwrap(), "--force"]).output().await;
+            let _ = Command::new("git").current_dir(&git_root).args(["branch", "-D", &branch_name]).output().await;
+
+            // Inform user and switch back to git root
+            let msg = format!("Merged '{}' into '{}' and cleaned up worktree. Switching back to {}", branch_name, default_branch, git_root.display());
+            tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(msg.clone())]));
+            tx.send(AppEvent::SwitchCwd(git_root, None));
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
