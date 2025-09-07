@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.85] - 2025-09-07
+
+- TUI: insert plan/background events near-time and keep reasoning ellipsis during streaming. (81a31dd5)
+- TUI: approvals cancel immediately on deny and use a FIFO queue. (0930b6b0)
+- Core: fix web search event ordering by stamping OrderMeta for in-turn placement. (81a31dd5)
+
 ## [0.2.84] - 2025-09-07
 
 - Core: move token usage/context accounting to session level for accurate per‑session totals. (02690962)
