@@ -1,5 +1,10 @@
 use crate::config_types::AgentConfig;
 
+// NOTE: These are the prompt formatters for the prompt‑expanding slash commands
+// (/plan, /solve, /code). If you add or change a slash command, please update
+// the user documentation in `docs/slash-commands.md` so the list stays in sync
+// with the UI and behavior.
+
 /// Get the list of enabled agent names from the configuration
 pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
     agents
