@@ -850,6 +850,18 @@ pub struct AgentInfo {
     pub status: String,
     /// Optional model being used
     pub model: Option<String>,
+    /// Latest progress line (if any) for UI previews
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub last_progress: Option<String>,
+    /// Final success message, when `status == "completed"`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub result: Option<String>,
+    /// Final error message, when `status == "failed"`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
