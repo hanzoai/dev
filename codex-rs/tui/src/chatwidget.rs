@@ -6242,15 +6242,21 @@ impl ChatWidget<'_> {
                 .output()
                 .await;
             if let Ok(o) = &commit_out {
-                    if !o.status.success() {
-                        // Ignore "nothing to commit" (exit 1); surface others
-                        let msg = String::from_utf8_lossy(&o.stderr);
-                        if !msg.contains("nothing to commit") {
-                            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                            let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — commit failed: {}", msg.trim()) }), order: None }));
-                        }
+                if !o.status.success() {
+                    // Git prints "nothing to commit, working tree clean" on stdout and exits 1.
+                    let stderr_s = String::from_utf8_lossy(&o.stderr);
+                    let stdout_s = String::from_utf8_lossy(&o.stdout);
+                    let benign = stdout_s.contains("nothing to commit")
+                        || stdout_s.contains("working tree clean")
+                        || stderr_s.contains("nothing to commit")
+                        || stderr_s.contains("working tree clean");
+                    if !benign {
+                        use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                        let detail = if !stderr_s.trim().is_empty() { stderr_s.trim().to_string() } else { stdout_s.trim().to_string() };
+                        let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — commit failed: {}", detail) }), order: None }));
                     }
                 }
+            }
 
             // Determine default branch in main repo
             let default_branch = match codex_core::git_worktree::detect_default_branch(&git_root).await {
