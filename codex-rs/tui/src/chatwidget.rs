@@ -3342,7 +3342,10 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+Backspace", "Delete current line"));
         lines.push(kv("Ctrl+U", "Delete to line start"));
         lines.push(kv("Ctrl+K", "Delete to line end"));
-        lines.push(kv("Home/End", "Jump to line start/end"));
+        lines.push(kv(
+            "Home/End",
+            "Jump to line start/end (jump to history start/end when input is empty)",
+        ));
         lines.push(RtLine::from(""));
 
         // Panels
