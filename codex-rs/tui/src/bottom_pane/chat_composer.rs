@@ -1501,6 +1501,15 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
+                // Show current auth mode. Make API key usage obvious.
+                if !self.using_chatgpt_auth {
+                    if !left_spans.is_empty() { left_spans.push(Span::from("   ")); }
+                    left_spans.push(
+                        Span::from("Auth: API key")
+                            .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
+                    );
+                }
+
                 // Right side: command key hints (Ctrl+R/D/H) followed by token usage if available
                 // We will elide hints when space is tight in this order: hide reasoning, diff viewer.
                 let mut right_spans: Vec<Span> = Vec::new();
