@@ -56,9 +56,9 @@ impl SlashCommand {
             SlashCommand::Reasoning => "change reasoning effort (minimal/low/medium/high)",
             SlashCommand::Verbosity => "change text verbosity (high/medium/low)",
             SlashCommand::New => "start a new chat during a conversation",
-            SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
+            SlashCommand::Init => "create an AGENTS.md file with instructions for Code",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
-            SlashCommand::Quit => "exit Codex",
+            SlashCommand::Quit => "exit Code",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Status => "show current session configuration and token usage",
@@ -68,7 +68,7 @@ impl SlashCommand {
             SlashCommand::Branch => "create a worktree branch and switch (/branch [task])",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
-            SlashCommand::Logout => "log out of Codex",
+            SlashCommand::Logout => "log out of Code",
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => "test approval request",
         }
