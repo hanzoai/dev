@@ -79,9 +79,10 @@ jobs:
       - name: Build native
         if: ${{ !matrix.cross }}
         run: |
-          rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain stable
+          rustup show
           cd src/rs
-          cargo build --release --target ${{ matrix.target }} --bin dev --bin dev-tui --bin dev-exec
+          cargo +stable build --release --target ${{ matrix.target }} --bin dev --bin dev-tui --bin dev-exec
 
       - name: Create archive (Unix)
         if: matrix.os != 'windows-latest'
