@@ -117,6 +117,7 @@ pub(crate) struct ChatComposer {
     // Persistent/ephemeral access-mode indicator shown on the left
     access_mode_label: Option<String>,
     access_mode_label_expiry: Option<std::time::Instant>,
+    access_mode_hint_expiry: Option<std::time::Instant>,
     // Footer hint visibility flags
     show_reasoning_hint: bool,
     show_diffs_hint: bool,
@@ -169,6 +170,7 @@ impl ChatComposer {
             footer_notice: None,
             access_mode_label: None,
             access_mode_label_expiry: None,
+            access_mode_hint_expiry: None,
             show_reasoning_hint: false,
             show_diffs_hint: false,
             reasoning_shown: false,
@@ -239,8 +241,17 @@ impl ChatComposer {
     pub fn set_access_mode_label(&mut self, label: Option<String>) {
         self.access_mode_label = label;
         self.access_mode_label_expiry = None;
+        self.access_mode_hint_expiry = None;
     }
-    // Removed unused ephemeral setter to avoid dead_code warnings and keep API minimal.
+    pub fn set_access_mode_label_ephemeral(&mut self, label: String, dur: std::time::Duration) {
+        self.access_mode_label = Some(label);
+        let expiry = std::time::Instant::now() + dur;
+        self.access_mode_label_expiry = Some(expiry);
+        self.access_mode_hint_expiry = Some(expiry);
+    }
+    pub fn set_access_mode_hint_for(&mut self, dur: std::time::Duration) {
+        self.access_mode_hint_expiry = Some(std::time::Instant::now() + dur);
+    }
 
     pub fn set_reasoning_state(&mut self, shown: bool) {
         self.reasoning_shown = shown;
@@ -1453,33 +1464,30 @@ impl WidgetRef for ChatComposer {
                 let mut left_spans: Vec<Span> = Vec::new();
                 left_spans.push(Span::from(" "));
 
-                // Expire ephemeral access-mode label if needed
-                if let Some(until) = self.access_mode_label_expiry {
-                    if std::time::Instant::now() > until {
-                        // Clear the label; draw nothing this frame.
-                        // (BottomPane schedules an extra frame slightly after expiry.)
-                        // This branch only runs when label existed.
-                        // Safe to reset here without needing external events.
-                        // Note: no direct redraw scheduling in render path.
-                        // It will be refreshed by the scheduled frame.
-                        // Clear once.
-                        // This is fine as render_ref is called frequently.
-                        // Use a local mutable ref to self, permitted here.
-                    }
-                }
-                if let Some(until) = self.access_mode_label_expiry {
-                    if std::time::Instant::now() > until {
-                        // Clear both indicator and expiry
-                        // (Render continues without the label)
-                        // Using interior mutation of &self is not allowed; move this to a mutable context above.
-                    }
-                }
                 // Access mode indicator (Read Only / Write with Approval / Full Access)
-                if let Some(label) = &self.access_mode_label {
-                    left_spans.push(Span::from(label.clone()).style(label_style));
-                    left_spans.push(Span::from("  (").style(label_style));
-                    left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
-                    left_spans.push(Span::from(" change)").style(label_style));
+                // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
+                // suffix is shown for a short time even for persistent labels.
+                let show_access_label = if let Some(until) = self.access_mode_label_expiry {
+                    std::time::Instant::now() <= until
+                } else { true };
+                if show_access_label {
+                    if let Some(label) = &self.access_mode_label {
+                        // Emphasize the access label so it stands out in the footer
+                        left_spans.push(Span::from(label.clone()).style(label_style.add_modifier(Modifier::BOLD)));
+                        // Show the hint suffix while the hint timer is active; if the whole label
+                        // is ephemeral, keep the suffix visible for the same duration.
+                        let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
+                            std::time::Instant::now() <= until
+                        } else {
+                            // If label itself is ephemeral, mirror its lifetime for the suffix
+                            self.access_mode_label_expiry.is_some()
+                        };
+                        if show_suffix {
+                            left_spans.push(Span::from("  (").style(label_style));
+                            left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
+                            left_spans.push(Span::from(" change)").style(label_style));
+                        }
+                    }
                 }
 
                 if self.ctrl_c_quit_hint {

@@ -595,6 +595,27 @@ impl BottomPane<'_> {
 
     pub(crate) fn set_access_mode_label(&mut self, label: Option<String>) {
         self.composer.set_access_mode_label(label);
+        // Hide the "(Shift+Tab change)" suffix after a short time for persistent modes.
+        // Avoid using a global frame scheduler which can be coalesced; instead spawn
+        // a tiny timer to request a redraw slightly after expiry.
+        let dur = Duration::from_secs(4);
+        self.composer.set_access_mode_hint_for(dur);
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(dur + Duration::from_millis(120));
+            tx.send(AppEvent::RequestRedraw);
+        });
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_access_mode_label_ephemeral(&mut self, label: String, dur: Duration) {
+        self.composer.set_access_mode_label_ephemeral(label, dur);
+        // Schedule a redraw after expiry without blocking other scheduled frames.
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(dur + Duration::from_millis(120));
+            tx.send(AppEvent::RequestRedraw);
+        });
         self.request_redraw();
     }
 

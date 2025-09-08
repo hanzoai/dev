@@ -4131,6 +4131,12 @@ impl ChatWidget<'_> {
                 RtSpan::styled(v.to_string(), t_dim),
             ])
         };
+        lines.push(RtLine::from(""));
+        // Top quick action
+        lines.push(kv(
+            "Shift+Tab",
+            "Rotate agent between Read Only / Write with Approval / Full Access",
+        ));
 
         // Global
         lines.push(kv("Ctrl+H", "Help overlay"));
@@ -4525,6 +4531,7 @@ impl ChatWidget<'_> {
     /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
     pub(crate) fn cycle_access_mode(&mut self) {
         use codex_core::protocol::{AskForApproval, SandboxPolicy};
+        use codex_core::config::set_project_access_mode;
 
         // Determine current index
         let idx = match (&self.config.sandbox_policy, self.config.approval_policy) {
@@ -4578,8 +4585,24 @@ impl ChatWidget<'_> {
         };
         self.submit_op(op);
 
-        // Update persistent footer indicator (not shown for Full Access)
+        // Persist selection into CODEX_HOME/config.toml for this project directory so it sticks.
+        let _ = set_project_access_mode(
+            &self.config.codex_home,
+            &self.config.cwd,
+            self.config.approval_policy,
+            match &self.config.sandbox_policy {
+                SandboxPolicy::ReadOnly => codex_protocol::config_types::SandboxMode::ReadOnly,
+                SandboxPolicy::WorkspaceWrite { .. } => codex_protocol::config_types::SandboxMode::WorkspaceWrite,
+                SandboxPolicy::DangerFullAccess => codex_protocol::config_types::SandboxMode::DangerFullAccess,
+            },
+        );
+
+        // Footer indicator: persistent for RO/Approval; ephemeral for Full Access
         if next == 2 {
+            self.bottom_pane.set_access_mode_label_ephemeral(
+                "Full Access".to_string(),
+                std::time::Duration::from_secs(4),
+            );
             self.bottom_pane.set_access_mode_label(None);
         } else {
             let persistent = if next == 0 { "Read Only" } else { "Write with Approval" };
@@ -4590,8 +4613,7 @@ impl ChatWidget<'_> {
         // in the current request so it appears above upcoming commands.
         let msg = format!("✓ Access mode: {}", label);
         self.set_access_status_message(msg);
-        self.bottom_pane
-            .flash_footer_notice_for(format!("Access: {}  (Shift+Tab to change)", label), std::time::Duration::from_secs(4));
+        // No footer notice: the indicator covers this; avoid duplicate texts.
 
         // Prepare a single consolidated note for the agent to see before the
         // next turn begins. Subsequent cycles will overwrite this note.
