@@ -5592,15 +5592,9 @@ async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String)
 async fn send_agent_status_update(sess: &Session) {
     let manager = AGENT_MANAGER.read().await;
 
-    // Collect all active agents (not completed/failed/cancelled)
+    // Collect all agents; include completed/failed so HUD can show final messages
     let agents: Vec<crate::protocol::AgentInfo> = manager
         .get_all_agents()
-        .filter(|agent| {
-            !matches!(
-                agent.status,
-                AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
-            )
-        })
         .map(|agent| crate::protocol::AgentInfo {
             id: agent.id.clone(),
             name: agent.model.clone(), // Use model name as the display name
@@ -5612,6 +5606,9 @@ async fn send_agent_status_update(sess: &Session) {
                 AgentStatus::Cancelled => "cancelled".to_string(),
             },
             model: Some(agent.model.clone()),
+            last_progress: agent.progress.last().cloned(),
+            result: agent.result.clone(),
+            error: agent.error.clone(),
         })
         .collect();
 
