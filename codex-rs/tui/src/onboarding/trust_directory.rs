@@ -59,7 +59,7 @@ impl WidgetRef for &TrustDirectoryWidget {
 
         if self.is_git_repo {
             lines.push(Line::from(
-                "  Since this folder is version controlled, you may wish to allow CoCodedex",
+                "  Since this folder is version controlled, you may wish to allow Code",
             ));
             lines.push(Line::from(
                 "  to work in this folder without asking for approval.",
@@ -94,7 +94,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Yes, allow Codex to work in this folder without asking for approval",
+                "Yes, allow Code to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -105,7 +105,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Allow Codex to work in this folder without asking for approval",
+                "Allow Code to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
