@@ -77,7 +77,7 @@ jobs:
           cross build --release --target ${{ matrix.target }} --bin dev --bin dev-tui --bin dev-exec
 
       - name: Build native
-        if: !matrix.cross
+        if: ${{ !matrix.cross }}
         run: |
           cd src/rs
           cargo build --release --target ${{ matrix.target }} --bin dev --bin dev-tui --bin dev-exec
