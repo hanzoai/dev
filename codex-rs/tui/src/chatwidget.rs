@@ -3325,6 +3325,19 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+B", "Toggle Browser panel"));
         lines.push(kv("Ctrl+A", "Toggle Agents panel"));
 
+        // Slash command reference
+        lines.push(RtLine::from(""));
+        lines.push(RtLine::from(vec![RtSpan::styled("Slash commands", t_fg.add_modifier(Modifier::BOLD))]));
+        for (cmd_str, cmd) in crate::slash_command::built_in_slash_commands() {
+            let desc = cmd.description();
+            // Render as "/command  —  description"
+            lines.push(RtLine::from(vec![
+                RtSpan::styled(format!("/{cmd_str:>12}"), t_fg),
+                RtSpan::raw("  —  "),
+                RtSpan::styled(desc.to_string(), t_dim),
+            ]));
+        }
+
         self.help.overlay = Some(HelpOverlay::new(lines));
         self.request_redraw();
     }
