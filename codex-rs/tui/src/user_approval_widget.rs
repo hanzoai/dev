@@ -120,9 +120,10 @@ impl UserApprovalWidget<'_> {
                 let mut cmd_span: Span = cmd.clone().into();
                 cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
                 let mut contents: Vec<Line> = vec![
+                    Line::from(""), // extra spacing above the prompt
                     Line::from(vec![
                         "? ".fg(crate::colors::info()),
-                        "Codex wants to run ".bold(),
+                        "Code wants to run ".bold(),
                         cmd_span,
                     ]),
                     Line::from(""),
@@ -255,7 +256,9 @@ impl UserApprovalWidget<'_> {
             // Append feedback, preserving line breaks
             format!("{}\nfeedback:\n{}", message, feedback)
         };
-        self.app_event_tx.send(AppEvent::InsertBackgroundEvent(message));
+        // Insert above the upcoming command begin so the decision reads first.
+        self.app_event_tx
+            .send(AppEvent::InsertBackgroundEventEarly(message));
 
         // If the user aborted an exec approval, immediately cancel any running task
         // so the UI reflects their intent (clear spinner/status) without waiting

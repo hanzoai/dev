@@ -367,10 +367,12 @@ impl App<'_> {
                     },
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertBackgroundEvent(message) => match &mut self.app_state {
+                // InsertBackgroundEvent removed; use InsertBackgroundEventEarly for
+                // approval decisions to appear above command begin.
+                AppEvent::InsertBackgroundEventEarly(message) => match &mut self.app_state {
                     AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertBackgroundEvent len={}", message.len());
-                        widget.push_background_event(message);
+                        tracing::debug!("app: InsertBackgroundEventEarly len={}", message.len());
+                        widget.insert_background_event_early(message);
                     }
                     AppState::Onboarding { .. } => {}
                 },
@@ -1025,6 +1027,12 @@ impl App<'_> {
                 AppEvent::ComposerExpanded => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.on_composer_expanded();
+                    }
+                    self.schedule_redraw();
+                }
+                AppEvent::CycleAccessMode => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.cycle_access_mode();
                     }
                     self.schedule_redraw();
                 }
