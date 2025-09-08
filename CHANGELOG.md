@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.90] - 2025-09-08
+
+- TUI/History: Home/End jump to start/end when input is empty. (7287fa71, 60f9db8c)
+- TUI/Overlays: Esc closes Help/Diff; hide input cursor while active. (d7353069)
+- TUI/Help: include Slash Commands; left-align keys; simplify delete shortcuts. (e00a4ecd, 11a7022d, 25aa36a3)
+- TUI: rebrand help and slash descriptions to "Code"; hide internal /test-approval. (5a93aee6, bde3e624)
+
 ## [0.2.89] - 2025-09-08
 
 - TUI/Help: add Ctrl+H help overlay with key summary; update footer hint. (c1b265f8)
