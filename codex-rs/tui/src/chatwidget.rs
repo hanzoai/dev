@@ -6132,7 +6132,8 @@ impl ChatWidget<'_> {
             }
 
             // Switch cwd and optionally submit the task
-            let initial_prompt = task_opt.map(|s| s.to_string());
+            // Prefix the auto-submitted task so it's obvious it started in the new branch
+            let initial_prompt = task_opt.map(|s| format!("[branch created] {}", s));
             let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
         });
     }
