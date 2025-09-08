@@ -83,6 +83,33 @@ pub(super) fn flash_scrollbar(chat: &ChatWidget<'_>) {
     });
 }
 
+/// Jump to the very top of the history (oldest content).
+pub(super) fn to_top(chat: &mut ChatWidget<'_>) {
+    chat.layout.scroll_offset = chat.layout.last_max_scroll.get();
+    chat.bottom_pane.set_compact_compose(true);
+    flash_scrollbar(chat);
+    chat.app_event_tx
+        .send(crate::app_event::AppEvent::RequestRedraw);
+    chat.height_manager
+        .borrow_mut()
+        .record_event(HeightEvent::UserScroll);
+    chat.maybe_show_history_nav_hint_on_first_scroll();
+}
+
+/// Jump to the very bottom of the history (latest content).
+pub(super) fn to_bottom(chat: &mut ChatWidget<'_>) {
+    chat.layout.scroll_offset = 0;
+    chat.bottom_pane.set_compact_compose(false);
+    flash_scrollbar(chat);
+    chat.app_event_tx
+        .send(crate::app_event::AppEvent::RequestRedraw);
+    chat.height_manager
+        .borrow_mut()
+        .record_event(HeightEvent::UserScroll);
+    // No hint necessary when landing at bottom, but keep behavior consistent
+    chat.maybe_show_history_nav_hint_on_first_scroll();
+}
+
 pub(super) fn toggle_browser_hud(chat: &mut ChatWidget<'_>) {
     let new_state = !chat.layout.browser_hud_expanded;
     chat.layout.browser_hud_expanded = new_state;
