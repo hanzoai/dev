@@ -4367,17 +4367,29 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
 /// Create a notice cell that shows the "Popular commands" immediately.
 /// If `connecting_mcp` is true, include a dim status line to inform users
 /// that external MCP servers are being connected in the background.
-pub(crate) fn new_popular_commands_notice(connecting_mcp: bool) -> PlainHistoryCell {
+pub(crate) fn new_popular_commands_notice(_connecting_mcp: bool) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("notice".dim()));
     lines.extend(popular_commands_lines());
-    if connecting_mcp {
-        lines.push(Line::from(Span::styled(
-            "Connecting MCP servers…",
-            Style::default().fg(crate::colors::text_dim()),
-        )));
-    }
+    // Connecting status is now rendered as a separate BackgroundEvent cell
+    // with its own gutter icon and spacing. Keep this notice focused.
     PlainHistoryCell { lines, kind: HistoryCellType::Notice }
+}
+
+/// Background status cell shown during startup while external MCP servers
+/// are being connected. Uses the standard background-event gutter (»)
+/// and inserts a blank line above the message for visual separation from
+/// the Popular commands block.
+pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from("event".dim()));
+    // Explicit blank line above the status message
+    lines.push(Line::from(String::new()));
+    lines.push(Line::from(Span::styled(
+        "Connecting MCP servers…",
+        Style::default().fg(crate::colors::text_dim()),
+    )));
+    PlainHistoryCell { lines, kind: HistoryCellType::BackgroundEvent }
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {

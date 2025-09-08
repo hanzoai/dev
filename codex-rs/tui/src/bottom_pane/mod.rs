@@ -265,7 +265,12 @@ impl BottomPane<'_> {
 
     /// True if a modal/overlay view is currently displayed (not the composer popup).
     pub(crate) fn has_active_modal_view(&self) -> bool {
-        self.active_view.is_some()
+        // Consider a modal inactive once it has completed to avoid blocking
+        // Esc routing and other overlay checks after a decision is made.
+        match self.active_view.as_ref() {
+            Some(view) => !view.is_complete(),
+            None => false,
+        }
     }
 
     /// Enable or disable compact compose mode. When enabled, the spacer line
@@ -625,28 +630,35 @@ impl WidgetRef for &BottomPane<'_> {
             y_offset = y_offset.saturating_add(1);
         }
 
-        // When a modal view is active, it owns the whole content area.
+        // When a modal view is active and not yet complete, it owns the whole content area.
         if let Some(view) = &self.active_view {
-            if y_offset < area.height {
-                // Reserve bottom padding lines; keep at least 1 line for the view.
-                let avail = area.height - y_offset;
-                let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
-                // Add horizontal padding (2 chars on each side) for views
-                let horizontal_padding = 1u16;
-                let view_rect = Rect {
-                    x: area.x + horizontal_padding,
-                    y: area.y + y_offset,
-                    width: area.width.saturating_sub(horizontal_padding * 2),
-                    height: avail - pad,
-                };
-                // Ensure view background is painted under its content
-                let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
-                for y in view_rect.y..view_rect.y.saturating_add(view_rect.height) {
-                    for x in view_rect.x..view_rect.x.saturating_add(view_rect.width) {
-                        buf[(x, y)].set_style(view_bg);
+            if view.is_complete() {
+                // Modal finished—render composer instead on this frame.
+                // We intentionally avoid mutating state here; key handling will
+                // clear the view on the next interaction. This keeps render pure.
+            } else if y_offset < area.height {
+                if y_offset < area.height {
+                    // Reserve bottom padding lines; keep at least 1 line for the view.
+                    let avail = area.height - y_offset;
+                    let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
+                    // Add horizontal padding (2 chars on each side) for views
+                    let horizontal_padding = 1u16;
+                    let view_rect = Rect {
+                        x: area.x + horizontal_padding,
+                        y: area.y + y_offset,
+                        width: area.width.saturating_sub(horizontal_padding * 2),
+                        height: avail - pad,
+                    };
+                    // Ensure view background is painted under its content
+                    let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                    for y in view_rect.y..view_rect.y.saturating_add(view_rect.height) {
+                        for x in view_rect.x..view_rect.x.saturating_add(view_rect.width) {
+                            buf[(x, y)].set_style(view_bg);
+                        }
                     }
+                    view.render(view_rect, buf);
                 }
-                view.render(view_rect, buf);
+                return;
             }
         } else if y_offset < area.height {
             // Optionally add an empty line above the input box

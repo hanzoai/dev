@@ -1546,7 +1546,11 @@ impl ChatWidget<'_> {
         let mut w = new_widget;
         w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
         let connecting_mcp = !w.config.mcp_servers.is_empty();
-        w.history_push_top_next_req(history_cell::new_popular_commands_notice(connecting_mcp)); // tag: prelude
+        w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
+        if connecting_mcp {
+            // Render connecting status as a separate cell with standard gutter and spacing
+            w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+        }
         // Mark welcome as shown to avoid duplicating the Popular commands section
         // when SessionConfigured arrives shortly after.
         w.welcome_shown = true;
@@ -2254,9 +2258,13 @@ impl ChatWidget<'_> {
     }
 
     /// Push a cell using a synthetic global order key at the bottom of the current request.
-    fn history_push(&mut self, cell: impl HistoryCell + 'static) {
+    pub(crate) fn history_push(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
+    }
+    /// Public helper to push a background event with the standard gutter and styling.
+    pub(crate) fn push_background_event(&mut self, message: String) {
+        self.history_push(history_cell::new_background_event(message));
     }
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
@@ -2367,6 +2375,39 @@ impl ChatWidget<'_> {
     fn process_animation_cleanup(&mut self) {
         // With trait-based cells, we can't easily detect and clean up specific cell types
         // Animation cleanup is now handled differently
+    }
+
+    /// Replace the initial Popular Commands notice that includes
+    /// the transient "Connecting MCP servers…" line with a version
+    /// that omits it.
+    fn remove_connecting_mcp_notice(&mut self) {
+        let needle = "Connecting MCP servers…";
+        if let Some((idx, cell)) = self
+            .history_cells
+            .iter()
+            .enumerate()
+            .find(|(_, cell)| {
+                cell.display_lines().iter().any(|line| {
+                    line.spans
+                        .iter()
+                        .any(|span| span.content.as_ref() == needle)
+                })
+            })
+        {
+            match cell.kind() {
+                crate::history_cell::HistoryCellType::Notice => {
+                    // Older layout: status was inside the notice cell — replace it
+                    self.history_replace_at(
+                        idx,
+                        Box::new(history_cell::new_popular_commands_notice(false)),
+                    );
+                }
+                _ => {
+                    // New layout: status is a separate BackgroundEvent cell — remove it
+                    self.history_remove_at(idx);
+                }
+            }
+        }
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
@@ -2702,6 +2743,9 @@ impl ChatWidget<'_> {
         let Event { id, msg, .. } = event.clone();
         match msg {
             EventMsg::SessionConfigured(event) => {
+                // Remove stale "Connecting MCP servers…" status from the startup notice
+                // now that MCP initialization has completed in core.
+                self.remove_connecting_mcp_notice();
                 // Record session id for potential future fork/backtrack features
                 self.session_id = Some(event.session_id);
                 self.bottom_pane

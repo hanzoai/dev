@@ -115,6 +115,10 @@ pub(crate) enum AppEvent {
     InsertHistoryWithKind { id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>> },
     /// Finalized assistant answer with raw markdown for re-rendering under theme changes.
     InsertFinalAnswer { id: Option<String>, lines: Vec<Line<'static>>, source: String },
+    /// Insert a background event (status/log-style) message into history.
+    /// These are non-streaming, non-assistant lines rendered with the
+    /// BackgroundEvent style ("event" header, dim text).
+    InsertBackgroundEvent(String),
 
     #[allow(dead_code)]
     StartCommitAnimation,
