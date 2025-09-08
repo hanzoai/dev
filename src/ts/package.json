@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev",
-  "version": "3.0.0",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - Hanzo AI developer tools",
   "bin": {
