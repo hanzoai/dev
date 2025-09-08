@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
 use toml_edit::DocumentMut;
+use toml_edit::Item as TomlItem;
 
 const OPENAI_DEFAULT_MODEL: &str = "gpt-5";
 
@@ -423,6 +424,180 @@ pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Res
     tmp_file.persist(config_path)?;
 
     Ok(())
+}
+
+/// List MCP servers from `CODEX_HOME/config.toml`.
+/// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
+pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
+    Vec<(String, McpServerConfig)>,
+    Vec<(String, McpServerConfig)>,
+)> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let doc_str = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let doc = doc_str.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
+
+    fn table_to_list(tbl: &toml_edit::Table) -> Vec<(String, McpServerConfig)> {
+        let mut out = Vec::new();
+        for (name, item) in tbl.iter() {
+            if let Some(t) = item.as_table() {
+                let command = t
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let args: Vec<String> = t
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|i| i.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                let env: Option<std::collections::HashMap<String, String>> = t
+                    .get("env")
+                    .and_then(|v| v.as_inline_table())
+                    .map(|tbl| {
+                        tbl.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
+                            .collect()
+                    });
+                out.push((name.to_string(), McpServerConfig { command, args, env }));
+            }
+        }
+        out
+    }
+
+    let enabled = doc
+        .as_table()
+        .get("mcp_servers")
+        .and_then(|i| i.as_table())
+        .map(table_to_list)
+        .unwrap_or_default();
+
+    let disabled = doc
+        .as_table()
+        .get("mcp_servers_disabled")
+        .and_then(|i| i.as_table())
+        .map(table_to_list)
+        .unwrap_or_default();
+
+    Ok((enabled, disabled))
+}
+
+/// Add or update an MCP server under `[mcp_servers.<name>]`. If the same
+/// server exists under `mcp_servers_disabled`, it will be removed from there.
+pub fn add_mcp_server(
+    codex_home: &Path,
+    name: &str,
+    cfg: McpServerConfig,
+) -> anyhow::Result<()> {
+    // Validate server name for safety and compatibility with MCP tool naming.
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err(anyhow::anyhow!(
+            "invalid server name '{}': must match ^[a-zA-Z0-9_-]+$",
+            name
+        ));
+    }
+
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Ensure target tables exist
+    if !doc.as_table().contains_key("mcp_servers") {
+        doc["mcp_servers"] = TomlItem::Table(toml_edit::Table::new());
+    }
+    let tbl = doc["mcp_servers"].as_table_mut().unwrap();
+
+    // Build table for this server
+    let mut server_tbl = toml_edit::Table::new();
+    server_tbl.insert("command", toml_edit::value(cfg.command));
+    if !cfg.args.is_empty() {
+        let mut arr = toml_edit::Array::new();
+        for a in cfg.args.into_iter() {
+            arr.push(toml_edit::Value::from(a));
+        }
+        server_tbl.insert("args", TomlItem::Value(toml_edit::Value::Array(arr)));
+    }
+    if let Some(env) = cfg.env {
+        let mut it = toml_edit::InlineTable::new();
+        for (k, v) in env {
+            it.insert(&k, toml_edit::Value::from(v));
+        }
+        server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
+    }
+
+    // Write into enabled table
+    tbl.insert(name, TomlItem::Table(server_tbl));
+
+    // Remove from disabled if present
+    if let Some(disabled_tbl) = doc["mcp_servers_disabled"].as_table_mut() {
+        disabled_tbl.remove(name);
+    }
+
+    // ensure codex_home exists
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Enable/disable an MCP server by moving it between `[mcp_servers]` and
+/// `[mcp_servers_disabled]`. Returns `true` if a change was made.
+pub fn set_mcp_server_enabled(
+    codex_home: &Path,
+    name: &str,
+    enabled: bool,
+) -> anyhow::Result<bool> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Helper to ensure table exists
+    fn ensure_table<'a>(doc: &'a mut DocumentMut, key: &'a str) -> &'a mut toml_edit::Table {
+        if !doc.as_table().contains_key(key) {
+            doc[key] = TomlItem::Table(toml_edit::Table::new());
+        }
+        doc[key].as_table_mut().unwrap()
+    }
+
+    let mut changed = false;
+    if enabled {
+        // Move from disabled -> enabled
+        let moved = {
+            let disabled_tbl = ensure_table(&mut doc, "mcp_servers_disabled");
+            disabled_tbl.remove(name)
+        };
+        if let Some(item) = moved {
+            let enabled_tbl = ensure_table(&mut doc, "mcp_servers");
+            enabled_tbl.insert(name, item);
+            changed = true;
+        }
+    } else {
+        // Move from enabled -> disabled
+        let moved = {
+            let enabled_tbl = ensure_table(&mut doc, "mcp_servers");
+            enabled_tbl.remove(name)
+        };
+        if let Some(item) = moved {
+            let disabled_tbl = ensure_table(&mut doc, "mcp_servers_disabled");
+            disabled_tbl.insert(name, item);
+            changed = true;
+        }
+    }
+
+    if changed {
+        std::fs::create_dir_all(codex_home)?;
+        let tmp = NamedTempFile::new_in(codex_home)?;
+        std::fs::write(tmp.path(), doc.to_string())?;
+        tmp.persist(config_path)?;
+    }
+
+    Ok(changed)
 }
 
 /// Apply a single dotted-path override onto a TOML value.

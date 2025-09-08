@@ -34,6 +34,7 @@ Notes
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
+- `/mcp`: manage MCP servers (status/on/off/add).
 
 ## Search & Mentions
 
@@ -64,4 +65,3 @@ Implementation Notes
   new command, please update this document to keep the UI and docs in sync.
 - Prompt formatting for `/plan`, `/solve`, and `/code` lives in
   `codex-rs/core/src/slash_commands.rs`.
-
