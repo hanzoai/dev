@@ -1285,6 +1285,7 @@ impl App<'_> {
             AppState::Onboarding { .. } => {}
         }
     }
+
 }
 
 fn should_show_onboarding(
