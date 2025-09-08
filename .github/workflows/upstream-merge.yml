@@ -58,7 +58,7 @@ jobs:
           git config user.email "code@justevery.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: "Quick no-op: ancestor checks for default and upstream-merge"
+      - name: "Quick no-op: ancestor check (default vs upstream only)"
         id: check_upstream
         shell: bash
         env:
@@ -69,20 +69,12 @@ jobs:
           set -euo pipefail
           git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
           # Fetch exact refs with commit graph, no blobs, to make ancestor checks reliable and fast.
+          # NOTE: Do not consult origin/upstream-merge here — it may contain a prior partial merge and
+          # cause false positives. We only compare upstream vs the default branch.
           git fetch --no-tags --prune --filter=blob:none origin \
-            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" \
-            "+refs/heads/upstream-merge:refs/remotes/origin/upstream-merge" || true
+            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
           git fetch --no-tags --prune --filter=blob:none upstream \
             "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
-          # Extra short-circuit: if origin/upstream-merge already contains both current tips.
-          if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
-            if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/upstream-merge" \
-               && git merge-base --is-ancestor "origin/${DEFAULT_BRANCH}" "origin/upstream-merge"; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "Upstream and default are already included in origin/upstream-merge; skipping agent run."
-              exit 0
-            fi
-          fi
           # If upstream tip is already an ancestor of default, nothing to merge.
           if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
