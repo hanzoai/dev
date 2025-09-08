@@ -20,12 +20,21 @@ pub(crate) struct TextArea {
     cursor_pos: usize,
     wrap_cache: RefCell<Option<WrapCache>>,
     preferred_col: Option<usize>,
+    // Simple undo stack capturing full snapshots of text and cursor before edits.
+    // This is intentionally simple to reliably undo paste and bulk edits across terminals.
+    undo_stack: Vec<UndoSnapshot>,
 }
 
 #[derive(Debug, Clone)]
 struct WrapCache {
     width: u16,
     lines: Vec<Range<usize>>,
+}
+
+#[derive(Debug, Clone)]
+struct UndoSnapshot {
+    text: String,
+    cursor_pos: usize,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -41,6 +50,7 @@ impl TextArea {
             cursor_pos: 0,
             wrap_cache: RefCell::new(None),
             preferred_col: None,
+            undo_stack: Vec::new(),
         }
     }
 
@@ -60,6 +70,7 @@ impl TextArea {
     }
 
     pub fn insert_str_at(&mut self, pos: usize, text: &str) {
+        self.push_undo_snapshot();
         let pos = self.clamp_pos_for_insertion(pos);
         self.text.insert_str(pos, text);
         self.wrap_cache.replace(None);
@@ -77,6 +88,7 @@ impl TextArea {
 
     fn replace_range_raw(&mut self, range: std::ops::Range<usize>, text: &str) {
         assert!(range.start <= range.end);
+        self.push_undo_snapshot();
         let start = range.start.clamp(0, self.text.len());
         let end = range.end.clamp(0, self.text.len());
         let removed_len = end - start;
@@ -294,6 +306,14 @@ impl TextArea {
                 ..
             } => {
                 self.delete_backward_word();
+            }
+            // Undo: Ctrl+Z reverts the last edit snapshot (paste, insert, delete, etc.).
+            KeyEvent {
+                code: KeyCode::Char('z'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                self.undo();
             }
             // macOS-like shortcuts (when terminals report the Command key as SUPER):
             // Cmd+Left  -> move to beginning of line
@@ -517,6 +537,16 @@ impl TextArea {
         self.set_cursor(bol);
     }
 
+    /// Revert the most recent edit (if any).
+    pub fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.text = prev.text;
+            self.cursor_pos = prev.cursor_pos.min(self.text.len());
+            self.wrap_cache.replace(None);
+            self.preferred_col = None;
+        }
+    }
+
     /// Move the cursor left by a single grapheme cluster.
     pub fn move_cursor_left(&mut self) {
         self.cursor_pos = self.prev_atomic_boundary(self.cursor_pos);
@@ -726,6 +756,20 @@ impl TextArea {
             Ok(Some(b)) => b,
             Ok(None) => self.text.len(),
             Err(_) => pos.saturating_add(1),
+        }
+    }
+
+    fn push_undo_snapshot(&mut self) {
+        // Capture current state before mutation.
+        self.undo_stack.push(UndoSnapshot {
+            text: self.text.clone(),
+            cursor_pos: self.cursor_pos,
+        });
+        // Keep a bounded history to avoid unbounded memory growth.
+        const MAX_UNDO_SNAPSHOTS: usize = 128;
+        if self.undo_stack.len() > MAX_UNDO_SNAPSHOTS {
+            let excess = self.undo_stack.len() - MAX_UNDO_SNAPSHOTS;
+            self.undo_stack.drain(0..excess);
         }
     }
 
