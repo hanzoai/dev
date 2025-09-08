@@ -1472,8 +1472,8 @@ impl WidgetRef for ChatComposer {
                 } else { true };
                 if show_access_label {
                     if let Some(label) = &self.access_mode_label {
-                        // Emphasize the access label so it stands out in the footer
-                        left_spans.push(Span::from(label.clone()).style(label_style.add_modifier(Modifier::BOLD)));
+                        // Access label without bold per design
+                        left_spans.push(Span::from(label.clone()).style(label_style));
                         // Show the hint suffix while the hint timer is active; if the whole label
                         // is ephemeral, keep the suffix visible for the same duration.
                         let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
