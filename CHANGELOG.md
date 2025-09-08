@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.95] - 2025-09-08
+
+- TUI: guard xterm focus tracking on Windows/MSYS and fragile terminals. (9e535afb)
+- TUI: add env toggles to control terminal focus tracking behavior. (9e535afb)
+
 ## [0.2.94] - 2025-09-08
 
 - TUI: add footer access‑mode indicator; Shift+Tab cycles Read Only / Approval / Full Access. (0a34e912)
