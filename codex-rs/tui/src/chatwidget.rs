@@ -3819,7 +3819,13 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn has_active_modal_view(&self) -> bool {
+        // Treat bottom‑pane views (approval, selection popups) and top‑level overlays
+        // (diff viewer, help overlay) as "modals" for Esc routing. This ensures that
+        // a single Esc keypress closes the visible overlay instead of engaging the
+        // global Esc policy (clear input / backtrack).
         self.bottom_pane.has_active_modal_view()
+            || self.diffs.overlay.is_some()
+            || self.help.overlay.is_some()
     }
 
     /// Forward an `Op` directly to codex.
@@ -5796,6 +5802,11 @@ impl ChatWidget<'_> {
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        // Hide the terminal cursor whenever a top‑level overlay is active so the
+        // caret does not show inside the input while a modal (help/diff) is open.
+        if self.diffs.overlay.is_some() || self.help.overlay.is_some() {
+            return None;
+        }
         let layout_areas = self.layout_areas(area);
         let bottom_pane_area = if layout_areas.len() == 4 {
             layout_areas[3]
