@@ -1,6 +1,7 @@
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
+use tokio::fs::OpenOptions;
 
 /// Sanitize a string to be used as a single git refname component.
 ///
@@ -90,6 +91,7 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
         // If the worktree directory already exists, re-use it to avoid the cost
         // of removing and re-adding a worktree. This makes repeated agent runs
         // start much faster.
+        record_worktree_in_session(git_root, &worktree_path).await;
         return Ok((worktree_path, effective_branch));
     }
 
@@ -127,6 +129,7 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
                 let retry_err = String::from_utf8_lossy(&retry.stderr);
                 return Err(format!("Failed to create worktree: {}", retry_err));
             }
+            record_worktree_in_session(git_root, &worktree_path).await;
         } else {
             return Err(format!("Failed to create worktree: {}", stderr));
         }
@@ -134,7 +137,26 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
 
     // Skip remote alias setup for speed; we don't need it during agent runs.
 
+    // Record created worktree for this process; best-effort.
+    record_worktree_in_session(git_root, &worktree_path).await;
+
     Ok((worktree_path, effective_branch))
+}
+
+/// Append the created worktree to a per-process session file so the TUI can
+/// clean it up on exit without touching worktrees from other processes.
+async fn record_worktree_in_session(git_root: &Path, worktree_path: &Path) {
+    let pid = std::process::id();
+    let mut base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    // Global session registry: ~/.code/working/_session
+    base = base.join(".code").join("working").join("_session");
+    if let Err(_e) = tokio::fs::create_dir_all(&base).await { return; }
+    let file = base.join(format!("pid-{}.txt", pid));
+    // Store git_root and worktree_path separated by a tab; one entry per line.
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&file).await {
+        let line = format!("{}\t{}\n", git_root.display(), worktree_path.display());
+        let _ = tokio::io::AsyncWriteExt::write_all(&mut f, line.as_bytes()).await;
+    }
 }
 
 /// Ensure a remote named `origin` exists. If it's missing, choose a likely

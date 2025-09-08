@@ -4283,62 +4283,10 @@ pub(crate) fn new_session_info(
     } = event;
 
     if is_first_event {
-        let lines: Vec<Line<'static>> = vec![
-            Line::from("notice".dim()),
-            Line::styled(
-                "Popular commands:",
-                Style::default().fg(crate::colors::text_bright()),
-            ),
-            Line::from(vec![
-                Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Chrome.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "/browser <url>",
-                    Style::default().fg(crate::colors::primary()),
-                ),
-                Span::from(" - "),
-                Span::from(SlashCommand::Browser.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled("/plan", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Plan.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled("/solve", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Solve.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled("/code", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Code.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled("/reasoning", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Reasoning.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-            Line::from(vec![
-                Span::styled("/resume", Style::default().fg(crate::colors::primary())),
-                Span::from(" - "),
-                Span::from(SlashCommand::Resume.description())
-                    .style(Style::default().add_modifier(Modifier::DIM)),
-            ]),
-        ];
-        PlainHistoryCell {
-            lines,
-            kind: HistoryCellType::Notice,
-        }
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from("notice".dim()));
+        lines.extend(popular_commands_lines());
+        PlainHistoryCell { lines, kind: HistoryCellType::Notice }
     } else if config.model == model {
         PlainHistoryCell {
             lines: Vec::new(),
@@ -4358,6 +4306,78 @@ pub(crate) fn new_session_info(
             kind: HistoryCellType::Notice,
         }
     }
+}
+
+/// Build the common lines for the "Popular commands" section (without the leading
+/// "notice" marker). Shared between the initial session info and the startup prelude.
+fn popular_commands_lines() -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::styled(
+        "Popular commands:",
+        Style::default().fg(crate::colors::text_bright()),
+    ));
+    lines.push(Line::from(vec![
+        Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Chrome.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "/browser <url>",
+            Style::default().fg(crate::colors::primary()),
+        ),
+        Span::from(" - "),
+        Span::from(SlashCommand::Browser.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/plan", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Plan.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/solve", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Solve.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/code", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Code.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/reasoning", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Reasoning.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/resume", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Resume.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines
+}
+
+/// Create a notice cell that shows the "Popular commands" immediately.
+/// If `connecting_mcp` is true, include a dim status line to inform users
+/// that external MCP servers are being connected in the background.
+pub(crate) fn new_popular_commands_notice(connecting_mcp: bool) -> PlainHistoryCell {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from("notice".dim()));
+    lines.extend(popular_commands_lines());
+    if connecting_mcp {
+        lines.push(Line::from(Span::styled(
+            "Connecting MCP servers…",
+            Style::default().fg(crate::colors::text_dim()),
+        )));
+    }
+    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {

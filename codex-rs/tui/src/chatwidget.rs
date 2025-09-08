@@ -1541,9 +1541,15 @@ impl ChatWidget<'_> {
             scroll_history_hint_shown: false,
         };
         // Insert the welcome cell as top-of-first-request so future model output
-        // appears below it.
+        // appears below it. Also insert the Popular commands immediately so users
+        // don't wait for MCP initialization to finish.
         let mut w = new_widget;
         w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
+        let connecting_mcp = !w.config.mcp_servers.is_empty();
+        w.history_push_top_next_req(history_cell::new_popular_commands_notice(connecting_mcp)); // tag: prelude
+        // Mark welcome as shown to avoid duplicating the Popular commands section
+        // when SessionConfigured arrives shortly after.
+        w.welcome_shown = true;
         w
     }
 
@@ -2701,16 +2707,20 @@ impl ChatWidget<'_> {
                 self.bottom_pane
                     .set_history_metadata(event.history_log_id, event.history_entry_count);
                 // Record session information at the top of the conversation.
-                // Only show welcome message on first SessionConfigured event
+                // If we already showed the startup prelude (Popular commands),
+                // avoid inserting a duplicate. Still surface a notice if the
+                // model actually changed from the requested one.
                 let is_first = !self.welcome_shown;
-                if is_first {
-                    self.welcome_shown = true;
+                if is_first || self.config.model != event.model {
+                    if is_first {
+                        self.welcome_shown = true;
+                    }
+                    self.history_push_top_next_req(history_cell::new_session_info(
+                        &self.config,
+                        event,
+                        is_first,
+                    )); // tag: prelude
                 }
-                self.history_push_top_next_req(history_cell::new_session_info(
-                    &self.config,
-                    event,
-                    is_first,
-                )); // tag: prelude
 
                 if let Some(user_message) = self.initial_user_message.take() {
                     // If the user provided an initial message, add it to the
@@ -7771,6 +7781,7 @@ impl ChatWidget<'_> {
         self.request_redraw();
 
         tokio::spawn(async move {
+            use tokio::process::Command;
             // Resolve git root
             let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
@@ -7838,21 +7849,67 @@ impl ChatWidget<'_> {
                     }
                 };
 
+            // Attempt to set upstream for the new branch to match the source branch's upstream,
+            // falling back to origin/<default> when available. Also ensure origin/HEAD is set.
+            let mut upstream_msg: Option<String> = None;
+            // Discover source branch upstream like 'origin/main'
+            let src_upstream = Command::new("git")
+                .current_dir(&git_root)
+                .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.is_empty() { None } else { Some(s) }
+                });
+            // Ensure origin/HEAD points at the remote default, if origin exists.
+            let _ = Command::new("git")
+                .current_dir(&git_root)
+                .args(["remote", "set-head", "origin", "-a"])
+                .output()
+                .await;
+            // Compute fallback remote default
+            let fallback_remote = codex_core::git_worktree::detect_default_branch(&git_root)
+                .await
+                .map(|d| format!("origin/{}", d));
+            let target_upstream = src_upstream.clone().or(fallback_remote);
+            if let Some(up) = target_upstream {
+                let set = Command::new("git")
+                    .current_dir(&worktree)
+                    .args(["branch", "--set-upstream-to", up.as_str(), used_branch.as_str()])
+                    .output()
+                    .await;
+                if let Ok(o) = set {
+                    if o.status.success() {
+                        upstream_msg = Some(format!("Set upstream for '{}' to {}", used_branch, up));
+                    } else {
+                        let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                        if !e.is_empty() {
+                            upstream_msg = Some(format!("Upstream not set ({}).", e));
+                        }
+                    }
+                }
+            }
+
             // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
             let msg = if let Some(task_text) = task_opt {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Task: {task}\n  Switching and starting task...",
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Task: {task}\n  Switching and starting task...",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,
+                    up = upstream_msg.clone().unwrap_or_else(|| "".to_string()),
                     task = task_text
                 )
             } else {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Switched to branch. Type your task when ready.",
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Switched to branch. Type your task when ready.",
                     used = used_branch,
                     path = worktree.display(),
-                    copied = copied
+                    copied = copied,
+                    up = upstream_msg.unwrap_or_else(|| "".to_string())
                 )
             };
             {
@@ -7887,7 +7944,6 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             use tokio::process::Command;
-            use std::path::PathBuf;
             // Resolve repo root and current branch name
             let git_root = match codex_core::git_worktree::get_git_root_from(&work_cwd).await {
                 Ok(p) => p,
@@ -7989,97 +8045,98 @@ impl ChatWidget<'_> {
             };
 
             // Merge branch into default from the main repo root
-            // 1) If already on default branch in the main repo, skip checkout
-            let on_default_branch = {
-                let cur = Command::new("git")
-                    .current_dir(&git_root)
-                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                    .output()
-                    .await;
-                matches!(cur, Ok(ref o) if o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == default_branch)
+            // Skip checkout if already on the default branch
+            let on_default = match Command::new("git")
+                .current_dir(&git_root)
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .output()
+                .await
+            {
+                Ok(o) if o.status.success() => {
+                    String::from_utf8_lossy(&o.stdout).trim() == default_branch
+                }
+                _ => false,
             };
 
-            if !on_default_branch {
-                // 2) Ensure local default branch exists; if missing, fetch and create a tracking branch
-                let has_local_default = {
-                    let out = Command::new("git")
-                        .current_dir(&git_root)
-                        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", default_branch)])
-                        .output()
-                        .await;
-                    matches!(out, Ok(ref o) if o.status.success())
+            if !on_default {
+                // Ensure local default branch exists; if missing, try to fetch and create a tracking branch
+                let has_local = match Command::new("git")
+                    .current_dir(&git_root)
+                    .args([
+                        "rev-parse",
+                        "--verify",
+                        "--quiet",
+                        &format!("refs/heads/{}", default_branch),
+                    ])
+                    .output()
+                    .await
+                {
+                    Ok(o) => o.status.success(),
+                    _ => false,
                 };
-                if !has_local_default {
+                if !has_local {
                     let _ = Command::new("git")
                         .current_dir(&git_root)
                         .args(["fetch", "origin", &default_branch])
                         .output()
                         .await;
-                    let track = Command::new("git")
+                    let _ = Command::new("git")
                         .current_dir(&git_root)
-                        .args(["branch", "--track", &default_branch, &format!("origin/{}", default_branch)])
+                        .args([
+                            "branch",
+                            "--track",
+                            &default_branch,
+                            &format!("origin/{}", default_branch),
+                        ])
                         .output()
                         .await;
-                    if !matches!(track, Ok(ref o) if o.status.success()) {
-                        // Fallback: create from remote without --track (or if remote is missing)
-                        let switch = Command::new("git")
-                            .current_dir(&git_root)
-                            .args(["switch", "-c", &default_branch, &format!("origin/{}", default_branch)])
-                            .output()
-                            .await;
-                        if !matches!(switch, Ok(ref o) if o.status.success()) {
-                            use codex_core::protocol::BackgroundEventEvent;
-                            use codex_core::protocol::Event;
-                            use codex_core::protocol::EventMsg;
-                            let detail = track
-                                .ok()
-                                .and_then(|o| String::from_utf8(o.stderr).ok())
-                                .filter(|s| !s.trim().is_empty())
-                                .or_else(|| switch.ok().and_then(|o| String::from_utf8(o.stderr).ok()))
-                                .unwrap_or_else(|| "unknown error".to_string());
-                            let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — default branch '{}' missing locally and could not be created from remote: {}", default_branch, detail.trim()) }), order: None }));
-                            return;
-                        }
-                    }
                 }
 
-                // 3) Try to checkout default branch
+                // Try to checkout the default branch and surface errors
                 let co = Command::new("git")
                     .current_dir(&git_root)
                     .args(["checkout", &default_branch])
                     .output()
                     .await;
                 if !matches!(co, Ok(ref o) if o.status.success()) {
-                    // Enhance message with stderr/stdout and a worktree hint if the branch
-                    // is already checked out elsewhere.
                     let (stderr_s, stdout_s) = co
                         .ok()
-                        .map(|o| (String::from_utf8_lossy(&o.stderr).to_string(), String::from_utf8_lossy(&o.stdout).to_string()))
+                        .map(|o| {
+                            (
+                                String::from_utf8_lossy(&o.stderr).trim().to_string(),
+                                String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                            )
+                        })
                         .unwrap_or_else(|| (String::new(), String::new()));
 
-                    // Attempt to detect where the default branch is checked out
-                    let mut worktree_hint: Option<String> = None;
-                    let wt = Command::new("git")
+                    // If the branch is checked out in another worktree, hint its path
+                    let mut hint: Option<String> = None;
+                    if let Ok(wt) = Command::new("git")
                         .current_dir(&git_root)
                         .args(["worktree", "list", "--porcelain"])
                         .output()
-                        .await;
-                    if let Ok(o) = wt {
-                        if o.status.success() {
-                            let s = String::from_utf8_lossy(&o.stdout);
+                        .await
+                    {
+                        if wt.status.success() {
+                            let s = String::from_utf8_lossy(&wt.stdout);
                             let mut cur_path: Option<String> = None;
                             let mut cur_branch: Option<String> = None;
                             for line in s.lines() {
                                 if let Some(rest) = line.strip_prefix("worktree ") {
                                     cur_path = Some(rest.trim().to_string());
                                     cur_branch = None;
-                                } else if let Some(rest) = line.strip_prefix("branch ") {
+                                    continue;
+                                }
+                                if let Some(rest) = line.strip_prefix("branch ") {
                                     cur_branch = Some(rest.trim().to_string());
                                 }
                                 if let (Some(p), Some(b)) = (&cur_path, &cur_branch) {
-                                    if b.trim() == format!("refs/heads/{}", default_branch) && PathBuf::from(p) != git_root {
-                                        worktree_hint = Some(p.clone());
-                                        break;
+                                    if b == &format!("refs/heads/{}", default_branch) {
+                                        // Avoid hinting the main repo root
+                                        if std::path::Path::new(p) != git_root.as_path() {
+                                            hint = Some(p.clone());
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -8089,10 +8146,21 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let mut msg = format!("`/branch finalize` — failed to checkout default branch '{}'", default_branch);
-                    let detail = if !stderr_s.trim().is_empty() { stderr_s.trim().to_string() } else { stdout_s.trim().to_string() };
-                    if !detail.is_empty() { msg = format!("{}: {}", msg, detail); }
-                    if let Some(path) = worktree_hint { msg = format!("{} (checked out in worktree: {})", msg, path); }
+                    let mut msg = format!(
+                        "`/branch finalize` — failed to checkout default branch '{}'",
+                        default_branch
+                    );
+                    let detail = if !stderr_s.is_empty() {
+                        stderr_s
+                    } else {
+                        stdout_s
+                    };
+                    if !detail.is_empty() {
+                        msg = format!("{}: {}", msg, detail);
+                    }
+                    if let Some(p) = hint {
+                        msg = format!("{} (checked out in worktree: {})", msg, p);
+                    }
                     let _ = tx.send(AppEvent::CodexEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
