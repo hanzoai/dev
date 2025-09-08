@@ -285,6 +285,33 @@ impl TextArea {
             } => {
                 self.delete_backward_word();
             }
+            // macOS-like shortcuts (when terminals report the Command key as SUPER):
+            // Cmd+Left  -> move to beginning of line
+            // Cmd+Right -> move to end of line
+            // Cmd+Backspace -> delete entire current line contents
+            #[allow(unreachable_patterns)]
+            KeyEvent { code: KeyCode::Left, modifiers, .. }
+                if modifiers.bits() & (KeyModifiers::ALT | KeyModifiers::CONTROL).bits() == 0
+                    && { #[allow(deprecated)] { modifiers.bits() & (crossterm::event::KeyModifiers::from_bits_truncate(0b0000_1000).bits()) } } != 0 =>
+            {
+                // Treat unknown extra modifier bit (commonly SUPER/Cmd) as line home.
+                self.move_cursor_to_beginning_of_line(false);
+            }
+            #[allow(unreachable_patterns)]
+            KeyEvent { code: KeyCode::Right, modifiers, .. }
+                if modifiers.bits() & (KeyModifiers::ALT | KeyModifiers::CONTROL).bits() == 0
+                    && { #[allow(deprecated)] { modifiers.bits() & (crossterm::event::KeyModifiers::from_bits_truncate(0b0000_1000).bits()) } } != 0 =>
+            {
+                // Treat unknown extra modifier bit (commonly SUPER/Cmd) as line end.
+                self.move_cursor_to_end_of_line(false);
+            }
+            #[allow(unreachable_patterns)]
+            KeyEvent { code: KeyCode::Backspace, modifiers, .. }
+                if { #[allow(deprecated)] { modifiers.bits() & (crossterm::event::KeyModifiers::from_bits_truncate(0b0000_1000).bits()) } } != 0 =>
+            {
+                // Treat Cmd+Backspace as delete entire line contents.
+                self.delete_entire_line();
+            }
             // Meta-b -> move to beginning of previous word
             // Meta-f -> move to end of next word
             // Many terminals map Option (macOS) to Alt. Some send Alt|Shift, so match contains(ALT).
@@ -318,18 +345,14 @@ impl TextArea {
             }
 
             // Cursor movement
-            KeyEvent {
-                code: KeyCode::Left,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Left, modifiers, .. }
+                if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT =>
+            {
                 self.move_cursor_left();
             }
-            KeyEvent {
-                code: KeyCode::Right,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Right, modifiers, .. }
+                if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT =>
+            {
                 self.move_cursor_right();
             }
             KeyEvent {
@@ -471,6 +494,17 @@ impl TextArea {
         } else {
             self.replace_range(bol..self.cursor_pos, "");
         }
+    }
+
+    /// Delete the entire contents of the current logical line, preserving the newline.
+    /// Leaves the cursor at the beginning of the line.
+    pub fn delete_entire_line(&mut self) {
+        let bol = self.beginning_of_current_line();
+        let eol = self.end_of_current_line();
+        if bol < eol {
+            self.replace_range(bol..eol, "");
+        }
+        self.set_cursor(bol);
     }
 
     /// Move the cursor left by a single grapheme cluster.
