@@ -1462,7 +1462,7 @@ impl WidgetRef for ChatComposer {
                 let label_style = Style::default().fg(crate::colors::text_dim());
                 // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
                 let mut left_spans: Vec<Span> = Vec::new();
-                left_spans.push(Span::from(" "));
+                left_spans.push(Span::from("  "));
 
                 // Access mode indicator (Read Only / Write with Approval / Full Access)
                 // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
