@@ -3304,6 +3304,10 @@ impl ChatWidget<'_> {
         // Removed Ctrl+T per request
         lines.push(kv("Ctrl+D", "Diff viewer"));
         lines.push(kv("Esc", "Edit previous message / close popups"));
+        // Task control shortcuts
+        lines.push(kv("Esc", "End current task"));
+        lines.push(kv("Ctrl+C", "End current task"));
+        lines.push(kv("Ctrl+C twice", "Quit"));
         lines.push(RtLine::from(""));
 
         // Composer
@@ -3322,6 +3326,7 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+W", "Delete previous word"));
         lines.push(kv("Ctrl+H", "Delete previous char"));
         lines.push(kv("Ctrl+D", "Delete next char"));
+        lines.push(kv("Ctrl+Backspace", "Delete current line"));
         lines.push(kv("Ctrl+U", "Delete to line start"));
         lines.push(kv("Ctrl+K", "Delete to line end"));
         lines.push(kv("Home/End", "Jump to line start/end"));
