@@ -3291,7 +3291,8 @@ impl ChatWidget<'_> {
 
         let kv = |k: &str, v: &str| -> RtLine<'static> {
             RtLine::from(vec![
-                RtSpan::styled(format!("{k:>12}"), t_fg),
+                // Left-align the key column for improved readability
+                RtSpan::styled(format!("{k:<12}"), t_fg),
                 RtSpan::raw("  —  "),
                 RtSpan::styled(v.to_string(), t_dim),
             ])
@@ -3312,9 +3313,10 @@ impl ChatWidget<'_> {
         lines.push(kv("Shift+Up/Down", "Browse input history"));
         lines.push(kv("Ctrl+B/Ctrl+F", "Move left/right"));
         lines.push(kv("Alt+Left/Right", "Move by word"));
-        lines.push(kv("Ctrl+W / Alt+Backspace", "Delete previous word"));
-        lines.push(kv("Ctrl+H / Backspace", "Delete previous char"));
-        lines.push(kv("Ctrl+D / Delete", "Delete next char"));
+        // Simplify delete shortcuts; remove Alt+Backspace/Backspace/Delete variants
+        lines.push(kv("Ctrl+W", "Delete previous word"));
+        lines.push(kv("Ctrl+H", "Delete previous char"));
+        lines.push(kv("Ctrl+D", "Delete next char"));
         lines.push(kv("Ctrl+U", "Delete to line start"));
         lines.push(kv("Ctrl+K", "Delete to line end"));
         lines.push(kv("Home/End", "Jump to line start/end"));
@@ -3332,7 +3334,7 @@ impl ChatWidget<'_> {
             let desc = cmd.description();
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
-                RtSpan::styled(format!("/{cmd_str:>12}"), t_fg),
+                RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
                 RtSpan::raw("  —  "),
                 RtSpan::styled(desc.to_string(), t_dim),
             ]));
