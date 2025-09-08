@@ -3,6 +3,19 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.87] - 2025-09-08
+
+- TUI/History: make Shift+Up/Down navigate history in all popups; persist UI-only slash commands to history. (16c38b6b)
+- TUI/Branch: preserve visibility by emitting 'Switched to worktree: <path>' after session swap; avoid losing the confirmation message on reset. (5970a977)
+- TUI/Branch: use BackgroundEvent for all /branch status and errors; retry with a unique name if the branch exists; propagate effective branch to callers. (40783f51)
+- TUI/Branch: split multi-line worktree message into proper lines for clarity. (959a86e8)
+
+## [0.2.86] - 2025-09-08
+
+- TUI: add `/branch` to create worktrees, switch sessions, and finalize merges. (8f888de1)
+- Core: treat only exit 126 as sandbox denial to avoid false escalations. (e4e5fb01)
+- Docs: add comprehensive slash command reference and link from README. (a3b5c18a)
+
 ## [0.2.85] - 2025-09-07
 
 - TUI: insert plan/background events near-time and keep reasoning ellipsis during streaming. (81a31dd5)
