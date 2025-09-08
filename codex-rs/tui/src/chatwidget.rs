@@ -6068,8 +6068,12 @@ impl ChatWidget<'_> {
         }
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
-        // Add a quick notice into history
-        self.history_push(crate::history_cell::new_background_event("Creating branch worktree...".to_string()));
+        // Add a quick notice into history, include task preview if provided
+        if args_trim.is_empty() {
+            self.history_push(crate::history_cell::new_background_event("Creating branch worktree...".to_string()));
+        } else {
+            self.history_push(crate::history_cell::new_background_event(format!("Creating branch worktree... Task: {}", args_trim)));
+        }
         self.request_redraw();
 
         tokio::spawn(async move {
