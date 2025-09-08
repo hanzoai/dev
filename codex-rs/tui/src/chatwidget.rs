@@ -3301,7 +3301,7 @@ impl ChatWidget<'_> {
         // Global
         lines.push(kv("Ctrl+H", "Help overlay"));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
-        lines.push(kv("Ctrl+T", "Transcript / toggle reasoning"));
+        // Removed Ctrl+T per request
         lines.push(kv("Ctrl+D", "Diff viewer"));
         lines.push(kv("Esc", "Edit previous message / close popups"));
         lines.push(RtLine::from(""));
@@ -3310,9 +3310,14 @@ impl ChatWidget<'_> {
         lines.push(RtLine::from(vec![RtSpan::styled("Compose field", t_fg.add_modifier(Modifier::BOLD))]));
         lines.push(kv("Enter", "Send message"));
         lines.push(kv("Ctrl+J", "Insert newline"));
-        lines.push(kv("Shift+Up/Down", "Browse input history"));
-        lines.push(kv("Ctrl+B/Ctrl+F", "Move left/right"));
-        lines.push(kv("Alt+Left/Right", "Move by word"));
+        lines.push(kv("Shift+Enter", "Insert newline"));
+        // Split combined shortcuts into separate rows for readability
+        lines.push(kv("Shift+Up", "Browse input history"));
+        lines.push(kv("Shift+Down", "Browse input history"));
+        lines.push(kv("Ctrl+B", "Move left"));
+        lines.push(kv("Ctrl+F", "Move right"));
+        lines.push(kv("Alt+Left", "Move by word"));
+        lines.push(kv("Alt+Right", "Move by word"));
         // Simplify delete shortcuts; remove Alt+Backspace/Backspace/Delete variants
         lines.push(kv("Ctrl+W", "Delete previous word"));
         lines.push(kv("Ctrl+H", "Delete previous char"));
