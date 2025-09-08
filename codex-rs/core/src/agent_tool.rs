@@ -567,7 +567,7 @@ async fn execute_model_with_permissions(
     };
 
     // Set working directory if provided
-    if let Some(dir) = working_dir {
+    if let Some(dir) = working_dir.clone() {
         cmd.current_dir(dir);
     }
 
@@ -628,34 +628,179 @@ async fn execute_model_with_permissions(
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
-    // Attempt to spawn the external command; if it fails due to NotFound or a
-    // similar OS error, fall back to invoking the current executable (built‑in)
-    // for better portability, especially on Windows with PATH shims.
-    let output = match cmd.output().await {
-        Ok(o) => o,
-        Err(e) => {
-            // Only fall back for external CLIs (not the built-in code/codex path)
-            if model_name == "codex" || model_name == "code" {
-                return Err(format!("Failed to execute {}: {}", model, e));
+    // Attempt to spawn the external command; if non-read-only, run under a
+    // filesystem sandbox restricted to the worktree so agents cannot write
+    // outside it (fixes GH-71). For read-only, preserve prior behavior.
+    use crate::protocol::SandboxPolicy;
+    use crate::spawn::StdioPolicy;
+    let output = if !read_only {
+        // Build env from current process then overlay any config-provided vars.
+        let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+        if let Some(ref cfg) = config {
+            if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
+        }
+
+        // Allow network for external agents and confine writes to the worktree.
+        let sandbox_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: working_dir.clone().into_iter().collect(),
+            network_access: true,
+            exclude_tmpdir_env_var: false,
+            exclude_slash_tmp: false,
+            allow_git_writes: true,
+        };
+
+        // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
+        // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
+        // Rebuild the invocation as `command` + args set above.
+        // We reconstruct to run under our sandbox helpers.
+        let program = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+            // Use current exe path
+            std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
+        } else {
+            // Use program name; PATH resolution will be handled by spawn helper with provided env.
+            std::path::PathBuf::from(&command)
+        };
+
+        // Rebuild args exactly as above
+        let mut args: Vec<String> = Vec::new();
+        match model_name {
+            "claude" => {
+                args.extend(
+                    [
+                        if read_only { "--allowedTools" } else { "--dangerously-skip-permissions" },
+                    ]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                );
+                if read_only {
+                    args.push("Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch".to_string());
+                }
+                args.push("-p".to_string());
+                args.push(prompt.to_string());
             }
-            let mut fb = match std::env::current_exe() {
-                Ok(p) => Command::new(p),
-                Err(e2) => return Err(format!(
-                    "Failed to execute {} and could not resolve built-in fallback: {} / {}",
-                    model, e, e2
-                )),
-            };
-            if read_only {
-                fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-            } else {
-                fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+            "gemini" => {
+                args.extend(["-m".to_string(), "gemini-2.5-pro".to_string()]);
+                if !read_only { args.push("-y".to_string()); }
+                args.extend(["-p".to_string(), prompt.to_string()]);
             }
-            fb.output().await.map_err(|e2| {
-                format!(
-                    "Failed to execute {} ({}). Built-in fallback also failed: {}",
-                    model, e, e2
+            "codex" | "code" => {
+                args.extend(["-s".to_string(), if read_only { "read-only" } else { "workspace-write" }.to_string()]);
+                args.extend(["-a".to_string(), "never".to_string(), "exec".to_string(), "--skip-git-repo-check".to_string(), prompt.to_string()]);
+            }
+            _ => {}
+        }
+
+        // Choose platform sandbox
+        // Note: import via fully qualified path to avoid module confusion
+        let sandbox_type = crate::safety::get_platform_sandbox().unwrap_or(crate::exec::SandboxType::None);
+
+        // Spawn via helpers and capture output
+        let child_result: std::io::Result<tokio::process::Child> = match sandbox_type {
+            crate::exec::SandboxType::MacosSeatbelt => {
+                crate::seatbelt::spawn_command_under_seatbelt(
+                    {
+                        let mut v = Vec::with_capacity(1 + args.len());
+                        v.push(program.to_string_lossy().to_string());
+                        v.extend(args.clone());
+                        v
+                    },
+                    &sandbox_policy,
+                    working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                    StdioPolicy::RedirectForShellTool,
+                    env.clone(),
                 )
-            })?
+                .await
+            }
+            crate::exec::SandboxType::LinuxSeccomp => {
+                // Locate codex-linux-sandbox helper
+                let helper = std::env::var("CODEX_LINUX_SANDBOX_EXE")
+                    .map(std::path::PathBuf::from)
+                    .ok()
+                    .filter(|p| p.is_file())
+                    .or_else(|| {
+                        std::env::current_exe()
+                            .ok()
+                            .and_then(|p| p.parent().map(|d| d.join("codex-linux-sandbox")))
+                            .filter(|p| p.is_file())
+                    })
+                    ;
+
+                if let Some(helper_path) = helper {
+                    crate::landlock::spawn_command_under_linux_sandbox(
+                        helper_path,
+                        {
+                            let mut v = Vec::with_capacity(1 + args.len());
+                            v.push(program.to_string_lossy().to_string());
+                            v.extend(args.clone());
+                            v
+                        },
+                        &sandbox_policy,
+                        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                        StdioPolicy::RedirectForShellTool,
+                        env.clone(),
+                    )
+                    .await
+                } else {
+                    // Fallback: spawn without sandbox if helper is missing
+                    crate::spawn::spawn_child_async(
+                        program.clone(),
+                        args.clone(),
+                        Some(&program.to_string_lossy()),
+                        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                        &SandboxPolicy::DangerFullAccess,
+                        StdioPolicy::RedirectForShellTool,
+                        env.clone(),
+                    )
+                    .await
+                }
+            }
+            crate::exec::SandboxType::None => {
+                crate::spawn::spawn_child_async(
+                    program.clone(),
+                    args.clone(),
+                    Some(&program.to_string_lossy()),
+                    working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                    &SandboxPolicy::DangerFullAccess,
+                    StdioPolicy::RedirectForShellTool,
+                    env.clone(),
+                )
+                .await
+            }
+        };
+
+        match child_result {
+            Ok(child) => child.wait_with_output().await.map_err(|e| format!("Failed to read output: {}", e))?,
+            Err(e) => return Err(format!("Failed to spawn sandboxed agent: {}", e)),
+        }
+    } else {
+        // Read-only path: use prior behavior
+        match cmd.output().await {
+            Ok(o) => o,
+            Err(e) => {
+                // Only fall back for external CLIs (not the built-in code/codex path)
+                if model_name == "codex" || model_name == "code" {
+                    return Err(format!("Failed to execute {}: {}", model, e));
+                }
+                let mut fb = match std::env::current_exe() {
+                    Ok(p) => Command::new(p),
+                    Err(e2) => return Err(format!(
+                        "Failed to execute {} and could not resolve built-in fallback: {} / {}",
+                        model, e, e2
+                    )),
+                };
+                if read_only {
+                    fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+                } else {
+                    fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+                }
+                fb.output().await.map_err(|e2| {
+                    format!(
+                        "Failed to execute {} ({}). Built-in fallback also failed: {}",
+                        model, e, e2
+                    )
+                })?
+            }
         }
     };
 
