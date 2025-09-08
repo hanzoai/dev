@@ -872,7 +872,8 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(prompt) = initial_prompt {
                             if !prompt.is_empty() {
-                                widget.submit_text_message(prompt);
+                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Wait for explicit confirmation before merging.".to_string();
+                                widget.submit_text_message_with_preface(prompt, preface);
                             }
                         }
                     }
