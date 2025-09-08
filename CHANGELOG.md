@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.94] - 2025-09-08
+
+- TUI: add footer access‑mode indicator; Shift+Tab cycles Read Only / Approval / Full Access. (0a34e912)
+- TUI: show access‑mode status as a background event early; update Help with shortcut. (0a34e912)
+- Core: persist per‑project access mode in config.toml and apply on startup. (0a34e912)
+- Core: clarify read‑only write denials and block writes immediately in RO mode. (0a34e912)
+
 ## [0.2.93] - 2025-09-08
 
 - TUI/Core: show Popular commands on start; track and clean worktrees. (2908be45)
