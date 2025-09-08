@@ -255,6 +255,16 @@ impl TextArea {
             },
             KeyEvent {
                 code: KeyCode::Backspace,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                // Map Ctrl+Backspace to delete the entire current line contents.
+                // This provides a portable shortcut similar to macOS Cmd+Backspace
+                // for terminals that do not forward the Command (SUPER) modifier.
+                self.delete_entire_line();
+            }
+            KeyEvent {
+                code: KeyCode::Backspace,
                 modifiers: KeyModifiers::ALT,
                 ..
             } => self.delete_backward_word(),
