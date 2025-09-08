@@ -69,7 +69,17 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
 /// Create a new worktree for `branch_id` under `<git_root>/.code/branches/<branch_id>`.
 /// If a previous worktree directory exists, remove it first.
 pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf, String), String> {
-    let code_dir = git_root.join(".code").join("branches");
+    // Global location: ~/.code/working/<repo_name>/branches
+    let repo_name = git_root
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo");
+    let mut code_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    code_dir = code_dir
+        .join(".code")
+        .join("working")
+        .join(repo_name)
+        .join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
         .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
