@@ -763,6 +763,11 @@ impl App<'_> {
                                 widget.handle_github_command(command_args);
                             }
                         }
+                        SlashCommand::Mcp => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_mcp_command(command_args);
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);
@@ -933,6 +938,16 @@ impl App<'_> {
                 AppEvent::UpdateGithubWatcher(enabled) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_github_watcher(enabled);
+                    }
+                }
+                AppEvent::UpdateMcpServer { name, enable } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_mcp_server(&name, enable);
+                    }
+                }
+                AppEvent::PrefillComposer(text) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.insert_str(&text);
                     }
                 }
                 AppEvent::DiffResult(text) => {

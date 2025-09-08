@@ -5546,6 +5546,164 @@ impl ChatWidget<'_> {
         self.history_push(history_cell::PlainHistoryCell { lines, kind: history_cell::HistoryCellType::BackgroundEvent });
     }
 
+    /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
+    pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+        if trimmed.is_empty() {
+            // Interactive popup like /reasoning
+            match codex_core::config::find_codex_home() {
+                Ok(home) => match codex_core::config::list_mcp_servers(&home) {
+                    Ok((enabled, disabled)) => {
+                        // Map into simple rows for the popup
+                        let mut rows: Vec<crate::bottom_pane::mcp_settings_view::McpServerRow> = Vec::new();
+                        for (name, cfg) in enabled.into_iter() {
+                            let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow { name, enabled: true, summary: format!("{}{}", cfg.command, args) });
+                        }
+                        for (name, cfg) in disabled.into_iter() {
+                            let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow { name, enabled: false, summary: format!("{}{}", cfg.command, args) });
+                        }
+                        // Sort by name for stability
+                        rows.sort_by(|a, b| a.name.cmp(&b.name));
+                        self.bottom_pane.show_mcp_settings(rows);
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to read MCP config: {}", e);
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                },
+                Err(e) => {
+                    let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                    self.history_push(history_cell::new_error_event(msg));
+                }
+            }
+            return;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let sub = parts.next().unwrap_or("");
+
+        match sub {
+            "status" => {
+                match find_codex_home() {
+                    Ok(home) => match codex_core::config::list_mcp_servers(&home) {
+                        Ok((enabled, disabled)) => {
+                            let mut lines = String::new();
+                            if enabled.is_empty() && disabled.is_empty() {
+                                lines.push_str("No MCP servers configured. Use /mcp add … to add one.");
+                            } else {
+                                lines.push_str(&format!("Enabled ({}):\n", enabled.len()));
+                                for (name, cfg) in enabled {
+                                    let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                                    lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                }
+                                lines.push_str(&format!("\nDisabled ({}):\n", disabled.len()));
+                                for (name, cfg) in disabled {
+                                    let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                                    lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                }
+                            }
+                            self.history_push(history_cell::new_background_event(lines));
+                        }
+                        Err(e) => {
+                            let msg = format!("Failed to read MCP config: {}", e);
+                            self.history_push(history_cell::new_error_event(msg));
+                        }
+                    },
+                    Err(e) => {
+                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let name = parts.next().unwrap_or("");
+                if name.is_empty() {
+                    let msg = format!("Usage: /mcp {} <name>", sub);
+                    self.history_push(history_cell::new_error_event(msg));
+                    return;
+                }
+                match find_codex_home() {
+                    Ok(home) => match codex_core::config::set_mcp_server_enabled(&home, name, sub == "on") {
+                        Ok(changed) => {
+                            if changed {
+                                // Keep ChatWidget's in-memory config roughly in sync for new sessions.
+                                if sub == "off" { self.config.mcp_servers.remove(name); }
+                                if sub == "on" {
+                                    // If enabling, try to load its config from disk and add to in-memory map.
+                                    if let Ok((enabled, _)) = codex_core::config::list_mcp_servers(&home) {
+                                        if let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name) {
+                                            self.config.mcp_servers.insert(name.to_string(), cfg);
+                                        }
+                                    }
+                                }
+                                let msg = format!("{} MCP server '{}'", if sub == "on" { "Enabled" } else { "Disabled" }, name);
+                                self.history_push(history_cell::new_background_event(msg));
+                            } else {
+                                let msg = format!("No change: server '{}' was already {}", name, if sub == "on" { "enabled" } else { "disabled" });
+                                self.history_push(history_cell::new_background_event(msg));
+                            }
+                        }
+                        Err(e) => {
+                            let msg = format!("Failed to update MCP server '{}': {}", name, e);
+                            self.history_push(history_cell::new_error_event(msg));
+                        }
+                    },
+                    Err(e) => {
+                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            "add" => {
+                let name = parts.next().unwrap_or("");
+                let command = parts.next().unwrap_or("");
+                if name.is_empty() || command.is_empty() {
+                    let msg = "Usage: /mcp add <name> <command> [args…] [ENV=VAL…]".to_string();
+                    self.history_push(history_cell::new_error_event(msg));
+                    return;
+                }
+                let mut args: Vec<String> = Vec::new();
+                let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                for tok in parts {
+                    if let Some((k, v)) = tok.split_once('=') {
+                        // Treat token with '=' as ENV var
+                        if !k.is_empty() { env.insert(k.to_string(), v.to_string()); }
+                    } else {
+                        args.push(tok.to_string());
+                    }
+                }
+                match find_codex_home() {
+                    Ok(home) => {
+                        let cfg = codex_core::config_types::McpServerConfig { command: command.to_string(), args: args.clone(), env: if env.is_empty() { None } else { Some(env.clone()) } };
+                        match codex_core::config::add_mcp_server(&home, name, cfg.clone()) {
+                            Ok(()) => {
+                                // Update in-memory config for future sessions
+                                self.config.mcp_servers.insert(name.to_string(), cfg);
+                                let args_disp = if args.is_empty() { String::new() } else { format!(" {}", args.join(" ")) };
+                                let msg = format!("Added MCP server '{}': {}{}", name, command, args_disp);
+                                self.history_push(history_cell::new_background_event(msg));
+                            }
+                            Err(e) => {
+                                let msg = format!("Failed to add MCP server '{}': {}", name, e);
+                                self.history_push(history_cell::new_error_event(msg));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            _ => {
+                let msg = format!("Unknown MCP command: '{}'\nUsage:\n  /mcp status\n  /mcp on <name>\n  /mcp off <name>\n  /mcp add <name> <command> [args…] [ENV=VAL…]", sub);
+                self.history_push(history_cell::new_error_event(msg));
+            }
+        }
+    }
+
     #[allow(dead_code)]
     fn switch_to_internal_browser(&mut self) {
         // Switch to internal browser mode
@@ -8344,6 +8502,36 @@ impl ChatWidget<'_> {
                     if enabled { "Enabled" } else { "Disabled" }
                 );
                 self.history_push(history_cell::new_background_event(msg));
+            }
+        }
+    }
+
+    pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
+        match codex_core::config::find_codex_home() {
+            Ok(home) => match codex_core::config::set_mcp_server_enabled(&home, name, enable) {
+                Ok(changed) => {
+                    if changed {
+                        if enable {
+                            if let Ok((enabled, _)) = codex_core::config::list_mcp_servers(&home) {
+                                if let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name) {
+                                    self.config.mcp_servers.insert(name.to_string(), cfg);
+                                }
+                            }
+                        } else {
+                            self.config.mcp_servers.remove(name);
+                        }
+                        let msg = format!("{} MCP server '{}'", if enable { "Enabled" } else { "Disabled" }, name);
+                        self.history_push(history_cell::new_background_event(msg));
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("Failed to update MCP server '{}': {}", name, e);
+                    self.history_push(history_cell::new_error_event(msg));
+                }
+            },
+            Err(e) => {
+                let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                self.history_push(history_cell::new_error_event(msg));
             }
         }
     }
