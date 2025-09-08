@@ -266,6 +266,9 @@ pub(crate) struct ChatWidget<'a> {
     internal_seq: u64,
     // Show order overlay when true (from --order)
     show_order_overlay: bool,
+
+    // One-time hint to teach input history navigation
+    scroll_history_hint_shown: bool,
 }
 
 struct PendingJumpBack {
@@ -460,6 +463,16 @@ impl ChatWidget<'_> {
         // Place internal notices at the end of the current request window by using
         // a maximal out so they sort after any model-provided output_index.
         OrderKey { req, out: i32::MAX, seq: self.internal_seq }
+    }
+
+    /// Show the "Shift+Up/Down" input history hint the first time the user scrolls.
+    pub(super) fn maybe_show_history_nav_hint_on_first_scroll(&mut self) {
+        if self.scroll_history_hint_shown { return; }
+        self.scroll_history_hint_shown = true;
+        self.bottom_pane.flash_footer_notice_for(
+            "Use Shift+Up/Down to use previous input".to_string(),
+            std::time::Duration::from_secs(6),
+        );
     }
 
     // Synthetic key for internal content that should appear at the TOP of the NEXT request
@@ -1248,6 +1261,7 @@ impl ChatWidget<'_> {
             current_request_index: 0,
             internal_seq: 0,
             show_order_overlay,
+            scroll_history_hint_shown: false,
         };
         // Insert the welcome cell as top-of-first-request so future model output
         // appears below it.
@@ -1371,6 +1385,7 @@ impl ChatWidget<'_> {
             current_request_index: 0,
             internal_seq: 0,
             show_order_overlay,
+            scroll_history_hint_shown: false,
             
         };
         // Welcome at top of first request for forked session too
@@ -1520,6 +1535,7 @@ impl ChatWidget<'_> {
                 self.height_manager
                     .borrow_mut()
                     .record_event(HeightEvent::UserScroll);
+                self.maybe_show_history_nav_hint_on_first_scroll();
             }
             InputResult::ScrollDown => {
                 // Only allow Down to navigate command history when the top view
@@ -1535,6 +1551,7 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
+                    self.maybe_show_history_nav_hint_on_first_scroll();
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::ComposerModeChange);
@@ -1546,6 +1563,7 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
+                    self.maybe_show_history_nav_hint_on_first_scroll();
                 } else if self.layout.scroll_offset > 0 {
                     // Land exactly at bottom without toggling spacer yet; require
                     // a subsequent Down to re-enable the spacer so the input
@@ -1555,6 +1573,7 @@ impl ChatWidget<'_> {
                     self.height_manager
                         .borrow_mut()
                         .record_event(HeightEvent::UserScroll);
+                    self.maybe_show_history_nav_hint_on_first_scroll();
                 }
                 self.flash_scrollbar();
             }
