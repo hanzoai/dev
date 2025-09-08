@@ -428,6 +428,7 @@ impl ChatComposer {
             // Insert placeholder and notify chat widget about the mapping.
             self.textarea.insert_str(&placeholder);
             self.textarea.insert_str(" ");
+            self.typed_anything = true; // Mark that user has interacted via paste
             self.app_event_tx
                 .send(crate::app_event::AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
             self.flash_footer_notice(format!("Added image {}x{} (PNG)", info.width, info.height));
@@ -435,8 +436,10 @@ impl ChatComposer {
             let placeholder = format!("[Pasted Content {char_count} chars]");
             self.textarea.insert_str(&placeholder);
             self.pending_pastes.push((placeholder, pasted));
+            self.typed_anything = true; // Mark that user has interacted via paste
         } else if self.handle_paste_image_path(pasted.clone()) {
             self.textarea.insert_str(" ");
+            self.typed_anything = true; // Mark that user has interacted via paste
         } else if pasted.trim().is_empty() {
             // No textual content pasted — try reading an image directly from the OS clipboard.
             match paste_image_to_temp_png() {
@@ -448,6 +451,7 @@ impl ChatComposer {
                     let placeholder = format!("[image: {}]", filename);
                     self.textarea.insert_str(&placeholder);
                     self.textarea.insert_str(" ");
+                    self.typed_anything = true; // Mark that user has interacted via paste
                     self.app_event_tx
                         .send(crate::app_event::AppEvent::RegisterPastedImage { placeholder: placeholder.clone(), path });
                     // Give a small visual confirmation in the footer.
@@ -462,6 +466,7 @@ impl ChatComposer {
             }
         } else {
             self.textarea.insert_str(&pasted);
+            self.typed_anything = true; // Mark that user has interacted via paste
         }
         self.sync_command_popup();
         if matches!(self.active_popup, ActivePopup::Command(_)) {
@@ -556,6 +561,7 @@ impl ChatComposer {
 
     pub(crate) fn insert_str(&mut self, text: &str) {
         self.textarea.insert_str(text);
+        self.typed_anything = true; // Mark that user has interacted via programmatic insertion
         self.sync_command_popup();
         self.sync_file_search_popup();
     }
@@ -2246,5 +2252,125 @@ mod tests {
                 (false, 0), // After deleting from end
             ]
         );
+    }
+
+    #[test]
+    fn test_typed_anything_on_paste() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false);
+
+        // Initially typed_anything should be false
+        assert!(!composer.typed_anything);
+
+        // After pasting text, typed_anything should be true
+        composer.handle_paste("test content".to_string());
+        assert!(composer.typed_anything);
+        assert_eq!(composer.textarea.text(), "test content");
+
+        // Clear text (simulating submit) - typed_anything should remain true
+        composer.clear_text();
+        assert!(composer.typed_anything);
+        assert_eq!(composer.textarea.text(), "");
+    }
+
+    #[test]
+    fn test_typed_anything_on_large_paste() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false);
+
+        // Initially typed_anything should be false
+        assert!(!composer.typed_anything);
+
+        // After pasting large content with placeholder, typed_anything should be true
+        let large = "x".repeat(LARGE_PASTE_CHAR_THRESHOLD + 100);
+        composer.handle_paste(large.clone());
+        assert!(composer.typed_anything);
+
+        // Clear text - typed_anything should remain true
+        composer.clear_text();
+        assert!(composer.typed_anything);
+    }
+
+    #[test]
+    fn test_typed_anything_on_insert_str() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false);
+
+        // Initially typed_anything should be false
+        assert!(!composer.typed_anything);
+
+        // After insert_str (e.g., from slash command), typed_anything should be true
+        composer.insert_str("@file.txt");
+        assert!(composer.typed_anything);
+        assert_eq!(composer.textarea.text(), "@file.txt");
+
+        // Clear text - typed_anything should remain true
+        composer.clear_text();
+        assert!(composer.typed_anything);
+        assert_eq!(composer.textarea.text(), "");
+    }
+
+    #[test]
+    fn test_placeholder_behavior_after_user_interaction() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::buffer::Buffer;
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender, false);
+
+        // Create a test terminal
+        let backend = TestBackend::new(100, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // Initially, placeholder should be shown (typed_anything is false, text is empty)
+        terminal.draw(|f| {
+            let area = f.area();
+            let mut buf = Buffer::empty(area);
+            composer.render_ref(area, &mut buf);
+            // Check that placeholder is rendered (it would contain greeting text)
+            let content = buf.content();
+            let has_placeholder = content.iter().any(|cell| {
+                let s = cell.symbol();
+                s.contains("today") || s.contains("tonight") || s.contains("evening")
+            });
+            assert!(has_placeholder, "Placeholder should be visible initially");
+        }).unwrap();
+
+        // After pasting, placeholder should not be shown even if text is cleared
+        composer.handle_paste("test".to_string());
+        composer.clear_text();
+
+        terminal.draw(|f| {
+            let area = f.area();
+            let mut buf = Buffer::empty(area);
+            composer.render_ref(area, &mut buf);
+            // Check that placeholder is NOT rendered
+            let content = buf.content();
+            let has_placeholder = content.iter().any(|cell| {
+                let s = cell.symbol();
+                s.contains("today") || s.contains("tonight") || s.contains("evening")
+            });
+            assert!(!has_placeholder, "Placeholder should not be visible after user interaction");
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_new_session_resets_typed_anything() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(true, sender.clone(), false);
+
+        // Type something
+        composer.insert_str("test");
+        assert!(composer.typed_anything);
+
+        // Simulate new session by creating a new composer (this is what happens on /new)
+        let composer2 = ChatComposer::new(true, sender, false);
+        assert!(!composer2.typed_anything, "New session should reset typed_anything");
     }
 }
