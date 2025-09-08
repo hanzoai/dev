@@ -58,29 +58,54 @@ jobs:
           git config user.email "code@justevery.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: "Quick no-op: ancestor check (default vs upstream only)"
+      - name: "Quick no-op: ancestor check (default and merge branch)"
         id: check_upstream
         shell: bash
         env:
           UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
           UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
         run: |
           set -euo pipefail
           git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
           # Fetch exact refs with commit graph, no blobs, to make ancestor checks reliable and fast.
           # NOTE: Do not consult origin/upstream-merge here — it may contain a prior partial merge and
-          # cause false positives. We only compare upstream vs the default branch.
-          git fetch --no-tags --prune --filter=blob:none origin \
-            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          # cause false positives. We primarily compare upstream vs the default branch, but if a dedicated
+          # merge branch exists we also consider it for no-op (so we don't re-trigger while a PR is open).
+          git fetch --no-tags --prune --filter=blob:none origin "${DEFAULT_BRANCH}"
+          HAS_MERGE_BRANCH=false
+          if git ls-remote --exit-code --heads origin "${MERGE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --prune --filter=blob:none origin "${MERGE_BRANCH}"
+            HAS_MERGE_BRANCH=true
+          fi
+
+      - name: Summarize quick check
+        if: always()
+        run: |
+          {
+            echo "### Upstream Merge: Quick Check";
+            echo "- skip: ${{ steps.check_upstream.outputs.skip || '' }}";
+            echo "- reason: ${{ steps.check_upstream.outputs.skip_reason || 'n/a' }}";
+            echo "- mirror_on_skip: ${{ steps.check_upstream.outputs.mirror_on_skip || 'false' }}";
+          } >> "$GITHUB_STEP_SUMMARY"
           git fetch --no-tags --prune --filter=blob:none upstream \
             "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
-          # If upstream tip is already an ancestor of default, nothing to merge.
+          # Evaluate ancestor relationships
           if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No new upstream commits; skipping agent run."
+            echo "skip_reason=upstream_ancestor_of_default" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=true" >> "$GITHUB_OUTPUT"
+            echo "No new upstream commits beyond default; skipping.";
+          elif [ "$HAS_MERGE_BRANCH" = true ] && git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${MERGE_BRANCH}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=upstream_ancestor_of_merge_branch" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream already contained in merge branch '${MERGE_BRANCH}'; skipping to avoid duplicate runs.";
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=upstream_has_new_commits" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Expensive setup only runs if we are not skipping.
@@ -328,7 +353,7 @@ jobs:
           git push --force-with-lease origin HEAD:upstream-merge
 
       - name: Ensure upstream-merge mirrors default when skipping (prevent stale PRs)
-        if: steps.check_upstream.outputs.skip == 'true'
+        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true'
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
@@ -717,7 +742,7 @@ jobs:
             }
 
       - name: Close stale upstream-merge PR on skip when zero diff
-        if: steps.check_upstream.outputs.skip == 'true'
+        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
