@@ -96,9 +96,6 @@ impl AgentManager {
                         name,
                         status: format!("{:?}", agent.status).to_lowercase(),
                         model: Some(agent.model.clone()),
-                        last_progress: agent.progress.last().cloned(),
-                        result: agent.result.clone(),
-                        error: agent.error.clone(),
                     }
                 })
                 .collect();
@@ -631,55 +628,26 @@ async fn execute_model_with_permissions(
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
-    // Agents: run without OS sandboxing; rely on per-branch worktrees for isolation.
+    // Attempt to spawn the external command; if non-read-only, run under a
+    // filesystem sandbox restricted to the worktree so agents cannot write
+    // outside it (fixes GH-71). For read-only, preserve prior behavior.
     use crate::protocol::SandboxPolicy;
     use crate::spawn::StdioPolicy;
     let output = if !read_only {
         // Build env from current process then overlay any config-provided vars.
         let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
-        let orig_home: Option<String> = env.get("HOME").cloned();
         if let Some(ref cfg) = config {
             if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
         }
 
-        // Convenience: map common key names so external CLIs "just work".
-        if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
-            env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
-        }
-        if let Some(claude_key) = env.get("CLAUDE_API_KEY").cloned() {
-            env.entry("ANTHROPIC_API_KEY".to_string()).or_insert(claude_key);
-        }
-        if let Some(anthropic_key) = env.get("ANTHROPIC_API_KEY").cloned() {
-            env.entry("CLAUDE_API_KEY".to_string()).or_insert(anthropic_key);
-        }
-        if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
-            env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
-        }
-        // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
-        env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
-        env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string()).or_insert("1".to_string());
-        env.entry("DISABLE_ERROR_REPORTING".to_string()).or_insert("1".to_string());
-        // Prefer explicit Claude config dir to avoid touching $HOME/.claude.json.
-        // Do not force CLAUDE_CONFIG_DIR here; leave CLI free to use its default
-        // (including Keychain) unless we explicitly redirect HOME below.
-
-        // If GEMINI_API_KEY not provided, try pointing to host config for read‑only
-        // discovery (Gemini CLI supports GEMINI_CONFIG_DIR). We keep HOME as-is so
-        // CLIs that require ~/.gemini and ~/.claude continue to work with your
-        // existing config.
-        if env.get("GEMINI_API_KEY").is_none() {
-            if let Some(h) = orig_home.clone() {
-                let host_gem_cfg = std::path::PathBuf::from(&h).join(".gemini");
-                if host_gem_cfg.is_dir() {
-                    env.insert(
-                        "GEMINI_CONFIG_DIR".to_string(),
-                        host_gem_cfg.to_string_lossy().to_string(),
-                    );
-                }
-            }
-        }
-
-        // No OS sandbox.
+        // Allow network for external agents and confine writes to the worktree.
+        let sandbox_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: working_dir.clone().into_iter().collect(),
+            network_access: true,
+            exclude_tmpdir_env_var: false,
+            exclude_slash_tmp: false,
+            allow_git_writes: true,
+        };
 
         // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
         // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
@@ -723,12 +691,71 @@ async fn execute_model_with_permissions(
             _ => {}
         }
 
-        // Always run agents without OS sandboxing.
-        let sandbox_type = crate::exec::SandboxType::None;
+        // Choose platform sandbox
+        // Note: import via fully qualified path to avoid module confusion
+        let sandbox_type = crate::safety::get_platform_sandbox().unwrap_or(crate::exec::SandboxType::None);
 
         // Spawn via helpers and capture output
         let child_result: std::io::Result<tokio::process::Child> = match sandbox_type {
-            crate::exec::SandboxType::None | crate::exec::SandboxType::MacosSeatbelt | crate::exec::SandboxType::LinuxSeccomp => {
+            crate::exec::SandboxType::MacosSeatbelt => {
+                crate::seatbelt::spawn_command_under_seatbelt(
+                    {
+                        let mut v = Vec::with_capacity(1 + args.len());
+                        v.push(program.to_string_lossy().to_string());
+                        v.extend(args.clone());
+                        v
+                    },
+                    &sandbox_policy,
+                    working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                    StdioPolicy::RedirectForShellTool,
+                    env.clone(),
+                )
+                .await
+            }
+            crate::exec::SandboxType::LinuxSeccomp => {
+                // Locate codex-linux-sandbox helper
+                let helper = std::env::var("CODEX_LINUX_SANDBOX_EXE")
+                    .map(std::path::PathBuf::from)
+                    .ok()
+                    .filter(|p| p.is_file())
+                    .or_else(|| {
+                        std::env::current_exe()
+                            .ok()
+                            .and_then(|p| p.parent().map(|d| d.join("codex-linux-sandbox")))
+                            .filter(|p| p.is_file())
+                    })
+                    ;
+
+                if let Some(helper_path) = helper {
+                    crate::landlock::spawn_command_under_linux_sandbox(
+                        helper_path,
+                        {
+                            let mut v = Vec::with_capacity(1 + args.len());
+                            v.push(program.to_string_lossy().to_string());
+                            v.extend(args.clone());
+                            v
+                        },
+                        &sandbox_policy,
+                        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                        StdioPolicy::RedirectForShellTool,
+                        env.clone(),
+                    )
+                    .await
+                } else {
+                    // Fallback: spawn without sandbox if helper is missing
+                    crate::spawn::spawn_child_async(
+                        program.clone(),
+                        args.clone(),
+                        Some(&program.to_string_lossy()),
+                        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                        &SandboxPolicy::DangerFullAccess,
+                        StdioPolicy::RedirectForShellTool,
+                        env.clone(),
+                    )
+                    .await
+                }
+            }
+            crate::exec::SandboxType::None => {
                 crate::spawn::spawn_child_async(
                     program.clone(),
                     args.clone(),
@@ -743,10 +770,7 @@ async fn execute_model_with_permissions(
         };
 
         match child_result {
-            Ok(child) => child
-                .wait_with_output()
-                .await
-                .map_err(|e| format!("Failed to read output: {}", e))?,
+            Ok(child) => child.wait_with_output().await.map_err(|e| format!("Failed to read output: {}", e))?,
             Err(e) => return Err(format!("Failed to spawn sandboxed agent: {}", e)),
         }
     } else {
@@ -784,15 +808,7 @@ async fn execute_model_with_permissions(
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let combined = if stderr.trim().is_empty() {
-            stdout.trim().to_string()
-        } else if stdout.trim().is_empty() {
-            stderr.trim().to_string()
-        } else {
-            format!("{}\n{}", stderr.trim(), stdout.trim())
-        };
-        Err(format!("Command failed: {}", combined))
+        Err(format!("Command failed: {}", stderr))
     }
 }
 

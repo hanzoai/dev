@@ -69,17 +69,3 @@
 ; Added on top of Chrome profile
 ; Needed for python multiprocessing on MacOS for the SemLock
 (allow ipc-posix-sem)
-
-; Allow reading user preferences (common for many CLIs) and basic
-; OpenDirectory/DirecoryService lookups used by APIs like `os.userInfo()`.
-; This keeps the policy minimal while avoiding surprising failures from
-; system libraries that query user information.
-(allow user-preference-read)
-(allow mach-lookup
-  (global-name "com.apple.system.opendirectoryd.libinfo")
-  (global-name "com.apple.system.opendirectoryd.membership")
-  (global-name "com.apple.system.DirectoryService.libinfo_v1")
-  (global-name "com.apple.cfprefsd.agent")
-  (global-name "com.apple.cfprefsd.daemon")
-  (global-name "com.apple.securityd")
-)
