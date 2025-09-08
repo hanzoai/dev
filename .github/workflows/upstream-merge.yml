@@ -340,27 +340,27 @@ jobs:
           fi
           if [ -z "${MB:-}" ]; then echo "no_merge_base=true" >> "$GITHUB_OUTPUT"; else echo "no_merge_base=false" >> "$GITHUB_OUTPUT"; fi
 
-      - name: Reset remote merge branch to default tip (preserve PR)
+      - name: Carry forward merge branch (merge default into it)
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
-          # Ensure remote branch does not carry unrelated history from prior runs
-          git fetch --no-tags origin --depth=1
-          git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
-          # Force-with-lease so the PR stays open but branch tip is clean
-          git push --force-with-lease origin HEAD:upstream-merge
-
-      - name: Ensure upstream-merge mirrors default when skipping (prevent stale PRs)
-        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true'
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin --depth=1
-          git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
-          git push --force-with-lease origin HEAD:upstream-merge
+          # Bring local refs up to date
+          git fetch --no-tags --prune --filter=blob:none origin
+          # If upstream-merge exists, base work on it and merge the latest default into it,
+          # preferring existing upstream-merge resolutions on conflict (-X ours).
+          if git ls-remote --exit-code --heads origin upstream-merge >/dev/null 2>&1; then
+            git checkout -B upstream-merge origin/upstream-merge
+            # Merge the latest default into upstream-merge to rebase the carry-forward state
+            git merge --no-ff --no-edit -X ours "origin/${DEFAULT_BRANCH}" || true
+            # Ensure the branch exists remotely (fast-forward or merge commit)
+            git push origin HEAD:upstream-merge
+          else
+            # First run: create the branch from the current default
+            git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
+            git push --set-upstream origin HEAD:upstream-merge || git push origin HEAD:upstream-merge
+          fi
 
       - name: Close accidental PRs targeting upstream-merge (we mirror default)
         if: always()
@@ -432,8 +432,8 @@ jobs:
           Steps:
           1) Ensure remote `upstream` points to the UPSTREAM_REPO in Context. Fetch origin and upstream.
           2) Write .github/auto/MERGE_PLAN.md summarizing strategy (one-shot, by-bucket, or per-commit) based on MERGE_MODE and artifacts.
-          3) Re-create branch MERGE_BRANCH from origin/DEFAULT_BRANCH.
-          4) Merge upstream/UPSTREAM_BRANCH using `--no-commit`.
+          3) Use existing MERGE_BRANCH (prepared earlier). Do not reset or recreate it.
+          4) Merge upstream/UPSTREAM_BRANCH into MERGE_BRANCH using `--no-commit`.
              - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
              - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
              - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
