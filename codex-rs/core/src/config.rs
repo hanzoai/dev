@@ -426,6 +426,73 @@ pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Res
     Ok(())
 }
 
+/// Persist per-project access mode under `[projects."<path>"]` with
+/// `approval_policy` and `sandbox_mode`.
+pub fn set_project_access_mode(
+    codex_home: &Path,
+    project_path: &Path,
+    approval: AskForApproval,
+    sandbox_mode: SandboxMode,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+
+    // Parse existing config if present; otherwise start a new document.
+    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Ensure projects table and the per-project table exist
+    let project_key = project_path.to_string_lossy().to_string();
+    if !doc.as_table().contains_key("projects") {
+        doc["projects"] = TomlItem::Table(toml_edit::Table::new());
+    }
+    let projects_tbl = doc["projects"].as_table_mut().unwrap();
+    if !projects_tbl.contains_key(project_key.as_str()) {
+        projects_tbl.insert(project_key.as_str(), TomlItem::Table(toml_edit::Table::new()));
+    }
+    let proj_tbl = projects_tbl
+        .get_mut(project_key.as_str())
+        .and_then(|i| i.as_table_mut())
+        .ok_or_else(|| anyhow::anyhow!("failed to create projects.{} table", project_key))?;
+
+    // Write fields
+    proj_tbl.insert(
+        "approval_policy",
+        TomlItem::Value(toml_edit::Value::from(format!("{}", approval))),
+    );
+    proj_tbl.insert(
+        "sandbox_mode",
+        TomlItem::Value(toml_edit::Value::from(format!("{}", sandbox_mode))),
+    );
+
+    // Harmonize trust_level with selected access mode:
+    // - Full Access (Never + DangerFullAccess): set trust_level = "trusted" so future runs
+    //   default to non-interactive behavior when no overrides are present.
+    // - Other modes: remove trust_level to avoid conflicting with per-project policy.
+    let full_access = matches!(
+        (approval, sandbox_mode),
+        (AskForApproval::Never, SandboxMode::DangerFullAccess)
+    );
+    if full_access {
+        proj_tbl.insert(
+            "trust_level",
+            TomlItem::Value(toml_edit::Value::from("trusted")),
+        );
+    } else {
+        proj_tbl.remove("trust_level");
+    }
+
+    // Ensure home exists; write atomically
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+
+    Ok(())
+}
+
 /// List MCP servers from `CODEX_HOME/config.toml`.
 /// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
 pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
@@ -766,9 +833,11 @@ pub struct ConfigToml {
     pub github: Option<GithubConfig>,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct ProjectConfig {
     pub trust_level: Option<String>,
+    pub approval_policy: Option<AskForApproval>,
+    pub sandbox_mode: Option<SandboxMode>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -792,6 +861,7 @@ pub struct ToolsToml {
 
 impl ConfigToml {
     /// Derive the effective sandbox policy from the configuration.
+    #[cfg(test)]
     fn derive_sandbox_policy(&self, sandbox_mode_override: Option<SandboxMode>) -> SandboxPolicy {
         let resolved_sandbox_mode = sandbox_mode_override
             .or(self.sandbox_mode)
@@ -925,7 +995,7 @@ impl Config {
             None => ConfigProfile::default(),
         };
 
-        let sandbox_policy = cfg.derive_sandbox_policy(sandbox_mode);
+        // (removed placeholder) sandbox_policy computed below after resolving project overrides.
 
         let mut model_providers = built_in_model_providers();
         // Merge user-defined providers into the built-in list.
@@ -946,6 +1016,9 @@ impl Config {
                 )
             })?
             .clone();
+
+        // Capture workspace-write details early to avoid borrow after partial moves
+        let cfg_workspace = cfg.sandbox_workspace_write.clone();
 
         let shell_environment_policy = cfg.shell_environment_policy.into();
 
@@ -982,6 +1055,46 @@ impl Config {
                 resolved_cwd = repo_root;
             }
         }
+
+        // Project-specific overrides based on final resolved cwd (exact match)
+        let project_key = resolved_cwd.to_string_lossy().to_string();
+        let project_override = cfg
+            .projects
+            .as_ref()
+            .and_then(|m| m.get(&project_key));
+        // Resolve sandbox mode with correct precedence:
+        // CLI override > per-project override > global config.toml > default
+        let effective_sandbox_mode = sandbox_mode
+            .or(project_override.and_then(|p| p.sandbox_mode))
+            .or(cfg.sandbox_mode)
+            .unwrap_or_default();
+        let sandbox_policy = match effective_sandbox_mode {
+            SandboxMode::ReadOnly => SandboxPolicy::new_read_only_policy(),
+            SandboxMode::WorkspaceWrite => match cfg_workspace {
+                Some(SandboxWorkspaceWrite {
+                    writable_roots,
+                    network_access,
+                    exclude_tmpdir_env_var,
+                    exclude_slash_tmp,
+                    allow_git_writes,
+                }) => SandboxPolicy::WorkspaceWrite {
+                    writable_roots,
+                    network_access,
+                    exclude_tmpdir_env_var,
+                    exclude_slash_tmp,
+                    allow_git_writes,
+                },
+                None => SandboxPolicy::new_workspace_write_policy(),
+            },
+            SandboxMode::DangerFullAccess => SandboxPolicy::DangerFullAccess,
+        };
+        // Resolve approval policy with precedence:
+        // CLI override > profile override > per-project override > global config.toml > default
+        let effective_approval = approval_policy
+            .or(config_profile.approval_policy)
+            .or(project_override.and_then(|p| p.approval_policy))
+            .or(cfg.approval_policy)
+            .unwrap_or_else(AskForApproval::default);
 
         let history = cfg.history.unwrap_or_default();
 
@@ -1054,10 +1167,7 @@ impl Config {
             model_provider_id,
             model_provider,
             cwd: resolved_cwd,
-            approval_policy: approval_policy
-                .or(config_profile.approval_policy)
-                .or(cfg.approval_policy)
-                .unwrap_or_else(AskForApproval::default),
+            approval_policy: effective_approval,
             sandbox_policy,
             shell_environment_policy,
             disable_response_storage: config_profile
@@ -1122,7 +1232,8 @@ impl Config {
         use codex_protocol::mcp_protocol::AuthMode;
         use crate::CodexAuth;
         
-        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey, "codex_cli_rs") {
+        // Prefer ChatGPT when both ChatGPT tokens and an API key are present.
+        match CodexAuth::from_codex_home(codex_home, AuthMode::ChatGPT, "codex_cli_rs") {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
             _ => false,
         }
