@@ -8076,7 +8076,7 @@ impl ChatWidget<'_> {
                                 } else if let Some(rest) = line.strip_prefix("branch ") {
                                     cur_branch = Some(rest.trim().to_string());
                                 }
-                                if let (Some(ref p), Some(ref b)) = (&cur_path, &cur_branch) {
+                                if let (Some(p), Some(b)) = (&cur_path, &cur_branch) {
                                     if b.trim() == format!("refs/heads/{}", default_branch) && PathBuf::from(p) != git_root {
                                         worktree_hint = Some(p.clone());
                                         break;
