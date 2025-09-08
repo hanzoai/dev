@@ -1891,6 +1891,36 @@ impl ChatWidget<'_> {
         // Fade the welcome cell only when a user actually posts a message.
         for cell in &self.history_cells { cell.trigger_fade(); }
         let UserMessage { display_text, mut ordered_items } = user_message;
+        // If our configured cwd no longer exists (e.g., a worktree folder was
+        // deleted outside the app), try to automatically recover to the repo
+        // root for worktrees and re-submit the same message there.
+        if !self.config.cwd.exists() {
+            let missing = self.config.cwd.clone();
+            let missing_s = missing.display().to_string();
+            if missing_s.contains("/.code/branches/") {
+                // Recover by walking up to '<repo>/.code/branches/<branch>' -> repo root
+                let mut anc = missing.as_path();
+                // Walk up 3 parents if available
+                for _ in 0..3 { if let Some(p) = anc.parent() { anc = p; } }
+                let fallback_root = anc.to_path_buf();
+                if fallback_root.exists() {
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let msg = format!("⚠️ Worktree directory is missing: {}\nSwitching to repo root: {}",
+                        missing.display(), fallback_root.display());
+                    let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event { id: "cwd-recover".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }), order: None }));
+                    // Re-submit this exact message after switching cwd
+                    self.app_event_tx
+                        .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
+                    return;
+                }
+            }
+            // If we can't recover, surface an error and drop the message to prevent loops
+            self.history_push(history_cell::new_error_event(format!(
+                "Working directory is missing: {}",
+                self.config.cwd.display()
+            )));
+            return;
+        }
         let original_text = display_text.clone();
         // Build a combined string view of the text-only parts to process slash commands
         let mut text_only = String::new();
@@ -5625,6 +5655,22 @@ impl ChatWidget<'_> {
             return;
         }
         self.submit_user_message(text.into());
+    }
+
+    /// Submit a visible text message, but prepend a hidden instruction that is
+    /// sent to the agent in the same turn. The hidden text is not added to the
+    /// chat history; only `visible` appears to the user.
+    pub(crate) fn submit_text_message_with_preface(&mut self, visible: String, preface: String) {
+        if visible.is_empty() { return; }
+        use crate::chatwidget::message::UserMessage;
+        use codex_core::protocol::InputItem;
+        let mut ordered = Vec::new();
+        if !preface.trim().is_empty() {
+            ordered.push(InputItem::Text { text: preface });
+        }
+        ordered.push(InputItem::Text { text: visible.clone() });
+        let msg = UserMessage { display_text: visible, ordered_items: ordered };
+        self.submit_user_message(msg);
     }
 
     pub(crate) fn token_usage(&self) -> &TokenUsage {
