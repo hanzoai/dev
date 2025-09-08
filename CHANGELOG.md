@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.89] - 2025-09-08
+
+- TUI/Help: add Ctrl+H help overlay with key summary; update footer hint. (c1b265f8)
+- TUI/Input: add Ctrl+Z undo in composer and route it to Chat correctly. (a589aeee, 0cbeb651)
+- TUI/Input: map Ctrl+Backspace to delete the current line in composer. (c422d92d)
+- TUI/Branch: treat "nothing to commit" as success on finalize and continue cleanup. (e9d2a246)
+
 ## [0.2.88] - 2025-09-08
 
 - Core/Git: ensure 'origin' exists in new worktrees and set origin/HEAD for default branch to improve git UX. (c59fd7e2)
