@@ -1607,7 +1607,11 @@ impl WidgetRef for ChatComposer {
                 line_spans.push(Span::from(" "));
 
                 Line::from(line_spans)
-                    .style(Style::default().fg(crate::colors::text_dim()))
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::DIM),
+                    )
                     .render_ref(bottom_line_rect, buf);
             }
         }
