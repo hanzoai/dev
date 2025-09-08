@@ -1232,7 +1232,8 @@ impl Config {
         use codex_protocol::mcp_protocol::AuthMode;
         use crate::CodexAuth;
         
-        match CodexAuth::from_codex_home(codex_home, AuthMode::ApiKey, "codex_cli_rs") {
+        // Prefer ChatGPT when both ChatGPT tokens and an API key are present.
+        match CodexAuth::from_codex_home(codex_home, AuthMode::ChatGPT, "codex_cli_rs") {
             Ok(Some(auth)) => auth.mode == AuthMode::ChatGPT,
             _ => false,
         }

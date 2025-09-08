@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
 use codex_core::config::set_project_trusted;
+use codex_core::config::set_project_access_mode;
+use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use crossterm::event::KeyCode;
@@ -166,10 +168,21 @@ impl TrustDirectoryWidget {
         }
 
         // Update the in-memory chat config for this session to a more permissive
-        // policy suitable for a trusted workspace.
+        // policy suitable for a trusted workspace (Full Access).
         if let Ok(mut args) = self.chat_widget_args.lock() {
-            args.config.approval_policy = AskForApproval::OnRequest;
-            args.config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
+            args.config.approval_policy = AskForApproval::Never;
+            args.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+        }
+
+        // Persist the access mode explicitly so subsequent runs don't rely solely on
+        // the trust fallback logic and so the UI reflects the chosen mode immediately.
+        if let Err(e) = set_project_access_mode(
+            &self.codex_home,
+            &self.cwd,
+            AskForApproval::Never,
+            SandboxModeCfg::DangerFullAccess,
+        ) {
+            tracing::warn!("Failed to persist project access mode: {e:?}");
         }
 
         self.selection = Some(TrustDirectorySelection::Trust);
