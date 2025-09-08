@@ -1502,6 +1502,19 @@ impl ChatWidget<'_> {
             layout_scroll::page_down(self);
             return;
         }
+        // Home/End: when the composer is empty, jump the history to start/end
+        if let crossterm::event::KeyEvent { code: crossterm::event::KeyCode::Home, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } = key_event {
+            if self.composer_is_empty() {
+                layout_scroll::to_top(self);
+                return;
+            }
+        }
+        if let crossterm::event::KeyEvent { code: crossterm::event::KeyCode::End, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } = key_event {
+            if self.composer_is_empty() {
+                layout_scroll::to_bottom(self);
+                return;
+            }
+        }
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
