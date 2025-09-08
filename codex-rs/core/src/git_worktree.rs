@@ -87,10 +87,14 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
     let mut effective_branch = branch_id.to_string();
     let mut worktree_path = code_dir.join(&effective_branch);
     if worktree_path.exists() {
-        // If the worktree directory already exists, re-use it to avoid the cost
-        // of removing and re-adding a worktree. This makes repeated agent runs
-        // start much faster.
-        return Ok((worktree_path, effective_branch));
+        let _ = Command::new("git")
+            .arg("worktree")
+            .arg("remove")
+            .arg(worktree_path.to_str().unwrap())
+            .arg("--force")
+            .current_dir(git_root)
+            .output()
+            .await; // ignore errors
     }
 
     let output = Command::new("git")
@@ -132,7 +136,9 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
         }
     }
 
-    // Skip remote alias setup for speed; we don't need it during agent runs.
+    // Ensure an 'origin' remote exists and points to a writable remote so that
+    // generic commands like `git push origin HEAD:main` work out of the box.
+    ensure_origin_remote(git_root).await.ok();
 
     Ok((worktree_path, effective_branch))
 }
@@ -141,7 +147,7 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
 /// writable remote (prefer `fork`, then `upstream-push`, then the first push
 /// URL we find) and alias it as `origin`. Finally, set the remote HEAD so
 /// `origin/HEAD` points at the default branch.
-async fn _ensure_origin_remote(git_root: &Path) -> Result<(), String> {
+async fn ensure_origin_remote(git_root: &Path) -> Result<(), String> {
     // Check existing remotes
     let remotes_out = Command::new("git")
         .current_dir(git_root)
