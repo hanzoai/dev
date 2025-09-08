@@ -5244,12 +5244,21 @@ async fn handle_sandbox_error(
     // we're letting the model manage escalation requests. Otherwise, continue
     match sess.approval_policy {
         AskForApproval::Never | AskForApproval::OnRequest => {
+            // Clarify when Read Only mode is the reason a command cannot proceed.
+            let content = if matches!(sess.sandbox_policy, SandboxPolicy::ReadOnly) {
+                format!(
+                    "command blocked by Read Only mode: {}",
+                    error
+                )
+            } else {
+                format!(
+                    "failed in sandbox {sandbox_type:?} with execution error: {error}"
+                )
+            };
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
-                    content: format!(
-                        "failed in sandbox {sandbox_type:?} with execution error: {error}"
-                    ),
+                    content,
                     success: Some(false),
                 },
             };
