@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.97] - 2025-09-08
+
+- CI/Preview: add PR preview builds for faster review. (cd624877)
+- Workflows/Triage: add triage‑first agent to prioritize issues. (cd624877)
+- TUI: show richer comments in PR previews. (cd624877)
+
 ## [0.2.96] - 2025-09-08
 
 - Core/Auth: prefer ChatGPT over API key when tokens exist. (a8cd8abd)
