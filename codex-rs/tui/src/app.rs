@@ -644,6 +644,14 @@ impl App<'_> {
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::DispatchCommand(command, command_text) => {
+                    // Persist UI-only slash commands to cross-session history.
+                    // For prompt-expanding commands (/plan, /solve, /code) we let the
+                    // expanded prompt be recorded by the normal submission path.
+                    if !command.is_prompt_expanding() {
+                        let _ = self
+                            .app_event_tx
+                            .send(AppEvent::CodexOp(Op::AddToHistory { text: command_text.clone() }));
+                    }
                     // Extract command arguments by removing the slash command from the beginning
                     // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"
                     let command_args = {
