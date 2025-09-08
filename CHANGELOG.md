@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.88] - 2025-09-08
+
+- Core/Git: ensure 'origin' exists in new worktrees and set origin/HEAD for default branch to improve git UX. (c59fd7e2)
+- TUI/Footer: show one-time Shift+Up/Down history hint on first scroll. (9a4bddc7)
+- TUI/Input: support macOS Command-key shortcuts in the composer. (7f021e37)
+- TUI/Branch: add hidden preface for auto-submitted confirm/merge-and-cleanup flow; prefix with '[branch created]' for clarity. (16b78005, a78a2256)
+
 ## [0.2.87] - 2025-09-08
 
 - TUI/History: make Shift+Up/Down navigate history in all popups; persist UI-only slash commands to history. (16c38b6b)
