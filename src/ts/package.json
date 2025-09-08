@@ -1,0 +1,39 @@
+{
+  "name": "@hanzo/dev",
+  "version": "3.0.0",
+  "license": "Apache-2.0",
+  "description": "Lightweight coding agent that runs in your terminal - Hanzo AI developer tools",
+  "bin": {
+    "dev": "bin/dev.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin/dev.js",
+    "postinstall.js",
+    "dist"
+  ],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzoai/dev.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "optionalDependencies": {
+    "@hanzo/dev-darwin-arm64": "3.0.0",
+    "@hanzo/dev-darwin-x64": "3.0.0",
+    "@hanzo/dev-linux-x64-musl": "3.0.0",
+    "@hanzo/dev-linux-arm64-musl": "3.0.0",
+    "@hanzo/dev-win32-x64": "3.0.0"
+  }
+}

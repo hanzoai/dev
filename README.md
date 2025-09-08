@@ -1,26 +1,26 @@
-# JustEvery_ Code
+# Hanzo Dev
 
 &ensp;
 
 <p align="center">
-  <img src="docs/logo.png" alt="Code Logo" width="400">
+  <img src="docs/logo.png" alt="Hanzo Dev Logo" width="400">
 </p>
 
 &ensp;
 
-**Code** is a fast, local coding agent for your terminal. It's a community-driven fork of `openai/codex` focused on real developer ergonomics: Browser integration, multi-agents, theming, and reasoning control — all while staying compatible with upstream.
+**Hanzo Dev** is a fast, local AI-powered development assistant for your terminal. Built by [Hanzo AI](https://hanzo.ai) for developers who demand the best tooling for their AI-accelerated workflows.
 
 &ensp;
-## Why Code
+## Why Hanzo Dev
 
   - 🌐 **Browser Integration** - CDP support, headless browsing, screenshots
   - 📝 **Diff Viewer** - Side-by-side diffs with syntax highlighting
   - 🤖 **Multi-Agent Commands** - /plan, /solve, /code with agent panels
   - 🎨 **Theme System** - /themes with live preview and accessibility
   - 🧠 **Reasoning Control** - /reasoning for dynamic effort adjustment
-  - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
-  - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
-  - 🔁 **Backwards compatible** – Supports `~/.codex/*` or default `~/.coder/*`
+  - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools
+  - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing
+  - 🚀 **Hanzo AI Integration** - Works seamlessly with Hanzo's AI infrastructure
 
 &ensp;
 | <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
@@ -36,31 +36,28 @@
 ### Run
 
 ```bash
-npx -y @just-every/code
+npx -y @hanzo/dev
 ```
 
 ### Install & Run
 
 ```bash
-npm install -g @just-every/code
-code // or `coder` if you're using VS Code
+npm install -g @hanzo/dev
+dev
 ```
-
-Note: If another tool already provides a `code` command (e.g. VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts.
 
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
-  - Run `code` and pick "Sign in with ChatGPT"
+  - Run `dev` and pick "Sign in with ChatGPT"
   - Stores creds locally at `~/.coder/auth.json` (also reads legacy `~/.codex/auth.json`)
 - **API key** (usage-based)
-  - Set `export OPENAI_API_KEY=xyz` and run `code`
+  - Set `export OPENAI_API_KEY=xyz` and run `dev`
 
 ### Install Claude & Gemini (optional)
 
-Code supports orchestrating other AI CLI tools. Install these and config to use alongside Code.
+Hanzo Dev supports orchestrating other AI CLI tools. Install these and config to use alongside Hanzo Dev.
 
 ```bash
-
 npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just checking you're working! Let me know how I can exit." && gemini -i "Just checking you're working! Let me know how I can exit."
 ```
 
@@ -69,7 +66,7 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 
 ### Browser
 ```bash
-# Connect code to external Chrome browser (running CDP)
+# Connect to external Chrome browser (running CDP)
 /chrome        # Connect with auto-detect port
 /chrome 9222   # Connect to specific port
 
@@ -108,7 +105,7 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 ## CLI reference
 
 ```shell
-code [options] [prompt]
+dev [options] [prompt]
 
 Options:
   --model <name>        Override the model (gpt-5, claude-opus, etc.)
@@ -125,7 +122,7 @@ Options:
 &ensp;
 ## Memory & project docs
 
-Code can remember context across sessions:
+Hanzo Dev can remember context across sessions:
 
 1. **Create an `AGENTS.md` or `CLAUDE.md` file** in your project root:
 ```markdown
@@ -141,7 +138,7 @@ This is a React TypeScript application with:
 - `/server/` - Backend services
 ```
 
-2. **Session memory**: Code maintains conversation history
+2. **Session memory**: Hanzo Dev maintains conversation history
 3. **Codebase analysis**: Automatically understands project structure
 
 &ensp;
@@ -151,19 +148,19 @@ For automation and CI/CD:
 
 ```shell
 # Run a specific task
-code --no-approval "run tests and fix any failures"
+dev --no-approval "run tests and fix any failures"
 
 # Generate reports
-code --read-only "analyze code quality and generate report"
+dev --read-only "analyze code quality and generate report"
 
 # Batch processing
-code --config output_format=json "list all TODO comments"
+dev --config output_format=json "list all TODO comments"
 ```
 
 &ensp;
 ## Model Context Protocol (MCP)
 
-Code supports MCP for extended capabilities:
+Hanzo Dev supports MCP for extended capabilities:
 
 - **File operations**: Advanced file system access
 - **Database connections**: Query and modify databases
@@ -216,11 +213,14 @@ model_reasoning_summary = "detailed"
 &ensp;
 ## FAQ
 
-**How is this different from the original?**
-> This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
+**What is Hanzo Dev?**
+> Hanzo Dev is Hanzo AI's official developer assistant, a powerful evolution of the popular Codex CLI with enterprise-grade features and integration with Hanzo's AI infrastructure.
+
+**How does this relate to OpenAI Codex?**
+> This is a fork of the original OpenAI Codex CLI, enhanced with additional features and maintained by Hanzo AI for the developer community.
 
 **Can I use my existing Codex configuration?**
-> Yes! This fork is fully backward compatible with existing `~/.codex/` configurations.
+> Yes! Hanzo Dev is fully backward compatible with existing `~/.codex/` configurations.
 
 **Does this work with ChatGPT Plus?**
 > Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
@@ -237,15 +237,15 @@ We welcome contributions! This fork maintains compatibility with upstream while 
 
 ```bash
 # Clone and setup
-git clone https://github.com/just-every/code.git
-cd code
+git clone https://github.com/hanzoai/dev.git
+cd dev
 npm install
 
 # Build (use fast build for development)
 ./build-fast.sh
 
 # Run locally
-./codex-rs/target/dev-fast/code
+./codex-rs/target/dev-fast/dev
 ```
 
 ### Opening a pull request
@@ -259,14 +259,24 @@ npm install
 
 
 &ensp;
+## About Hanzo AI
+
+[Hanzo AI](https://hanzo.ai) is building the future of AI-powered development tools. Our mission is to accelerate human potential through intelligent automation and augmentation.
+
+- **Website**: [hanzo.ai](https://hanzo.ai)
+- **GitHub**: [github.com/hanzoai](https://github.com/hanzoai)
+- **Platform**: Enterprise AI infrastructure and tools
+- **Focus**: Developer productivity, AI agents, and automation
+
+&ensp;
 ## Legal & Use
 
 ### License & attribution
-- This project is a community fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
-- **Code** is **not** affiliated with, sponsored by, or endorsed by OpenAI.
+- This project is a fork of `openai/codex` under **Apache-2.0**. We preserve upstream LICENSE and NOTICE files.
+- **Hanzo Dev** is maintained by Hanzo AI and is **not** affiliated with, sponsored by, or endorsed by OpenAI.
 
 ### Your responsibilities
-Using OpenAI, Anthropic or Google services through Code means you agree to **their Terms and policies**. In particular:
+Using OpenAI, Anthropic or Google services through Hanzo Dev means you agree to **their Terms and policies**. In particular:
 - **Don't** programmatically scrape/extract content outside intended flows.
 - **Don't** bypass or interfere with rate limits, quotas, or safety mitigations.
 - Use your **own** account; don't share or rotate accounts to evade limits.
@@ -277,15 +287,15 @@ Using OpenAI, Anthropic or Google services through Code means you agree to **the
 - Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
 
 ### Subject to change
-AI providers can change eligibility, limits, models, or authentication flows. Code supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
+AI providers can change eligibility, limits, models, or authentication flows. Hanzo Dev supports **both** ChatGPT sign-in and API-key modes so you can pick what fits (local/hobby vs CI/automation).
 
 &ensp;
 ## License
 
 Apache 2.0 - See [LICENSE](LICENSE) file for details.
 
-This project is a community fork of the original Codex CLI. We maintain compatibility while adding enhanced features requested by the developer community.
+This project is a community fork of the original Codex CLI, enhanced and maintained by Hanzo AI. We maintain compatibility while adding enhanced features requested by the developer community.
 
 &ensp;
 ---
-**Need help?** Open an issue on [GitHub](https://github.com/just-every/code/issues) or check our documentation.
+**Need help?** Open an issue on [GitHub](https://github.com/hanzoai/dev/issues) or check our documentation.

@@ -1,0 +1,43 @@
+[package]
+edition = "2024"
+name = "dev-cli"
+version = { workspace = true }
+
+[[bin]]
+name = "dev"
+path = "src/main.rs"
+
+[lib]
+name = "dev_cli"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+dev-arg0 = { path = "../arg0" }
+dev-chatgpt = { path = "../chatgpt" }
+dev-common = { path = "../common", features = ["cli"] }
+dev-core = { path = "../core" }
+dev-exec = { path = "../exec" }
+dev-login = { path = "../login" }
+dev-mcp-server = { path = "../mcp-server" }
+dev-protocol = { path = "../protocol" }
+dev-tui = { path = "../tui" }
+dev-version = { path = "../version" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+tokio = { version = "1", features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+dev-protocol-ts = { path = "../protocol-ts" }

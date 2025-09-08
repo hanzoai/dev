@@ -1,14 +1,14 @@
 {
-  "name": "code-monorepo",
+  "name": "dev-monorepo",
   "private": true,
   "description": "Tools for repo-wide maintenance.",
   "scripts": {
     "format": "prettier --check *.json *.md .github/workflows/*.yml **/*.js",
     "format:fix": "prettier --write *.json *.md .github/workflows/*.yml **/*.js",
-    "build": "cd codex-rs && cargo build --release --bin code --bin code-tui --bin code-exec",
-    "build:dev": "cd codex-rs && cargo build --bin code --bin code-tui --bin code-exec",
-    "build:quick": "cd codex-rs && cargo build --release --bin code",
-    "test:local": "cd codex-cli && npm link && code --version",
+    "build": "cd src/rs && cargo build --release --bin dev --bin dev-tui --bin dev-exec",
+    "build:dev": "cd src/rs && cargo build --bin dev --bin dev-tui --bin dev-exec",
+    "build:quick": "cd src/rs && cargo build --release --bin dev",
+    "test:local": "cd src/ts && npm link && dev --version",
     "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty"
   },
   "devDependencies": {

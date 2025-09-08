@@ -1,0 +1,22 @@
+[package]
+edition = "2024"
+name = "dev-chatgpt"
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dev-common = { path = "../common", features = ["cli"] }
+dev-core = { path = "../core" }
+dev-protocol = { path = "../protocol" }
+dev-login = { path = "../login" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
