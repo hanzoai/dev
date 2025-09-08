@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.92] - 2025-09-08
+
+- Core/Git Worktree: create agent worktrees under ~/.code/working/<repo>/branches for isolation. (e9ebcf1f)
+- Core/Agent: sandbox non-read-only agent runs to worktree to prevent writes outside branch. (ad2f141e)
+
 ## [0.2.91] - 2025-09-08
 
 - TUI/Panic: restore terminal state and exit cleanly on any thread panic. (34ffe467)
