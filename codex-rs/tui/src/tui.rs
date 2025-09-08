@@ -56,8 +56,20 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     execute!(stdout(), EnableBracketedPaste)?;
     // Enable focus change events so we can detect when the terminal window/tab
     // regains focus and proactively repaint the UI (helps terminals that clear
-    // their alt‑screen buffer while unfocused).
-    let _ = execute!(stdout(), EnableFocusChange);
+    // their alt‑screen buffer while unfocused). However, certain environments
+    // (notably Windows Terminal running Git Bash/MSYS and some legacy Windows
+    // terminals) will echo ESC [ I / ESC [ O literally ("[I", "[O") and may
+    // disrupt input handling. Apply a conservative heuristic and allow users to
+    // override via env vars:
+    //   - CODE_DISABLE_FOCUS=1 forces off
+    //   - CODE_ENABLE_FOCUS=1 forces on
+    if should_enable_focus_change() {
+        let _ = execute!(stdout(), EnableFocusChange);
+    } else {
+        tracing::info!(
+            "Focus tracking disabled (heuristic). Set CODE_ENABLE_FOCUS=1 to force on."
+        );
+    }
 
     // Enter alternate screen mode for full screen TUI
     execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
@@ -211,4 +223,48 @@ pub fn restore() -> Result<()> {
     // Leave alternate screen mode
     execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
+}
+
+/// Determine whether to enable xterm focus change tracking for the current
+/// environment. We default to enabling on modern terminals, but disable for
+/// known-problematic combinations — especially Windows Terminal + Git Bash
+/// (MSYS) — where focus sequences may be echoed as text and interfere with
+/// input. Users can force behavior with env overrides.
+fn should_enable_focus_change() -> bool {
+    use std::env;
+
+    // Hard overrides first
+    if env::var("CODE_DISABLE_FOCUS").map(|v| v == "1").unwrap_or(false) {
+        return false;
+    }
+    if env::var("CODE_ENABLE_FOCUS").map(|v| v == "1").unwrap_or(false) {
+        return true;
+    }
+
+    let term = env::var("TERM").unwrap_or_default().to_lowercase();
+
+    // Disable on terminals that are frequently problematic with DECSET 1004
+    // (focus tracking) on Windows or MSYS stacks.
+    #[cfg(windows)]
+    {
+        let term_program = env::var("TERM_PROGRAM").unwrap_or_default().to_lowercase();
+        let is_windows_terminal = !env::var("WT_SESSION").unwrap_or_default().is_empty()
+            || term_program.contains("windows_terminal");
+        let is_msys = env::var("MSYSTEM").is_ok(); // Git Bash / MSYS2
+        let looks_like_mintty = term_program.contains("mintty")
+            || env::var("TERM_PROGRAM").unwrap_or_default().contains("mintty");
+        let looks_like_conemu = term_program.contains("conemu") || term_program.contains("cmder");
+
+        if is_msys || looks_like_mintty || looks_like_conemu || (is_windows_terminal && is_msys) {
+            return false;
+        }
+    }
+
+    // Very old / limited terminals
+    if term == "dumb" {
+        return false;
+    }
+
+    // Default: enabled for modern terminals (xterm-256color, iTerm2, Alacritty, kitty, tmux, etc.)
+    true
 }
