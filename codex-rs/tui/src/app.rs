@@ -763,6 +763,11 @@ impl App<'_> {
                                 widget.handle_github_command(command_args);
                             }
                         }
+                        SlashCommand::Mcp => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_mcp_command(command_args);
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);
