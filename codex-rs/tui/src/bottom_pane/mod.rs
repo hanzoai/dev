@@ -297,6 +297,15 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    /// Show an ephemeral footer notice for a custom duration.
+    pub(crate) fn flash_footer_notice_for(&mut self, text: String, dur: Duration) {
+        self.composer.flash_footer_notice_for(text, dur);
+        // Ask app to clear it slightly after expiry to avoid flicker on boundary
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(dur + Duration::from_millis(100)));
+        self.request_redraw();
+    }
+
     pub(crate) fn show_ctrl_c_quit_hint(&mut self) {
         self.ctrl_c_quit_hint = true;
         self.composer

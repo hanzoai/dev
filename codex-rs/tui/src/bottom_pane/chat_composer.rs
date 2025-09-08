@@ -212,6 +212,12 @@ impl ChatComposer {
         self.footer_notice = Some((text, expiry));
     }
 
+    /// Show a footer notice for a specific duration.
+    pub fn flash_footer_notice_for(&mut self, text: String, dur: std::time::Duration) {
+        let expiry = std::time::Instant::now() + dur;
+        self.footer_notice = Some((text, expiry));
+    }
+
     // Control footer hint visibility
     pub fn set_show_reasoning_hint(&mut self, show: bool) {
         if self.show_reasoning_hint != show {
