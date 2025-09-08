@@ -593,6 +593,11 @@ impl BottomPane<'_> {
         }
     }
 
+    pub(crate) fn set_access_mode_label(&mut self, label: Option<String>) {
+        self.composer.set_access_mode_label(label);
+        self.request_redraw();
+    }
+
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
