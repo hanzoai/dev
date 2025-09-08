@@ -6106,22 +6106,18 @@ impl ChatWidget<'_> {
                 }
             };
 
-            let msg = if task_opt.is_some() {
-                format!(
-                    "Created worktree '{}'\nPath: {}\nCopied {} changed files\nSwitching and starting task...",
-                    branch_name,
-                    worktree.display(),
-                    copied
-                )
+            // Build clean multi-line output for improved readability
+            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+            lines.push(ratatui::text::Line::from(format!("• Created worktree '{}'", branch_name)));
+            lines.push(ratatui::text::Line::from(format!("  Path: {}", worktree.display())));
+            lines.push(ratatui::text::Line::from(format!("  Copied {} changed files", copied)));
+            if let Some(task_text) = task_opt {
+                lines.push(ratatui::text::Line::from(format!("  Task: {}", task_text)));
+                lines.push(ratatui::text::Line::from("  Switching and starting task..."));
             } else {
-                format!(
-                    "Created worktree '{}'\nPath: {}\nCopied {} changed files\nSwitched to branch. Type your task when ready.",
-                    branch_name,
-                    worktree.display(),
-                    copied
-                )
-            };
-            tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(msg)]));
+                lines.push(ratatui::text::Line::from("  Switched to branch. Type your task when ready."));
+            }
+            tx.send(AppEvent::InsertHistory(lines));
 
             // Switch cwd and optionally submit the task
             let initial_prompt = task_opt.map(|s| s.to_string());
