@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.96] - 2025-09-08
+
+- Core/Auth: prefer ChatGPT over API key when tokens exist. (a8cd8abd)
+- CI/Upstream-merge: strengthen ancestor checks, gate mirroring on reason, show skip_reason. (55909c25)
+
 ## [0.2.95] - 2025-09-08
 
 - TUI: guard xterm focus tracking on Windows/MSYS and fragile terminals. (9e535afb)
