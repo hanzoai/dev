@@ -1,13 +1,11 @@
-## @just-every/code v0.2.94
+## @just-every/code v0.2.95
 
-This release improves access mode UX, adds a clear footer indicator, and persists your choice per project.
+This release improves terminal stability by guarding focus tracking and adds environment toggles for better control.
 
 ### Changes
 
-- TUI: add footer access‑mode indicator; Shift+Tab cycles Read Only / Approval / Full Access.
-- TUI: show access‑mode status as a background event early; update Help with shortcut.
-- Core: persist per‑project access mode in config.toml and apply on startup.
-- Core: clarify read‑only write denials and block writes immediately in RO mode.
+- TUI: guard xterm focus tracking on Windows/MSYS and fragile terminals.
+- TUI: add env toggles to control terminal focus tracking behavior.
 
 ### Install
 
@@ -16,5 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.93...v0.2.94
-
+Compare: https://github.com/just-every/code/compare/v0.2.94...v0.2.95
