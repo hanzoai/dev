@@ -940,6 +940,16 @@ impl App<'_> {
                         widget.set_github_watcher(enabled);
                     }
                 }
+                AppEvent::UpdateMcpServer { name, enable } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_mcp_server(&name, enable);
+                    }
+                }
+                AppEvent::PrefillComposer(text) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.insert_str(&text);
+                    }
+                }
                 AppEvent::DiffResult(text) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.add_diff_output(text);
