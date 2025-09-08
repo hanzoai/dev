@@ -1,13 +1,13 @@
-## @just-every/code v0.2.87
+## @just-every/code v0.2.88
 
-This release improves history navigation and clarifies the /branch workflow with consistent background updates.
+This release refines git behavior in worktrees and adds helpful TUI polish across footer hints, input shortcuts, and branch workflows.
 
 ### Changes
 
-- TUI/History: Make Shift+Up/Down navigate history in all popups; persist UI-only slash commands to history.
-- TUI/Branch: Preserve visibility by emitting 'Switched to worktree: <path>' after session swap; avoid losing the confirmation message on reset.
-- TUI/Branch: Use BackgroundEvent for all /branch status and errors; retry with a unique name if the branch exists; propagate effective branch to callers.
-- TUI/Branch: Split multi-line worktree message into proper lines for clarity.
+- Core/Git: ensure 'origin' exists in new worktrees and set origin/HEAD for default branch to improve git UX.
+- TUI/Footer: show one-time Shift+Up/Down history hint on first scroll.
+- TUI/Input: support macOS Command-key shortcuts in the composer.
+- TUI/Branch: add hidden preface for auto-submitted confirm/merge-and-cleanup flow; prefix with '[branch created]' for clarity.
 
 ### Install
 
@@ -16,4 +16,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.86...v0.2.87
+Compare: https://github.com/just-every/code/compare/v0.2.87...v0.2.88
+
