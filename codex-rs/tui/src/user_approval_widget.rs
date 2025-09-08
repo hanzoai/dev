@@ -234,69 +234,28 @@ impl UserApprovalWidget<'_> {
     }
 
     fn send_decision_with_feedback(&mut self, decision: ReviewDecision, feedback: String) {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        match &self.approval_request {
+        // Emit a background event instead of an assistant message.
+        let message = match &self.approval_request {
             ApprovalRequest::Exec { command, .. } => {
                 let cmd = strip_bash_lc_and_escape(command);
-                let mut cmd_span: Span = cmd.clone().into();
-                cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
-
-                // Result line based on decision.
                 match decision {
-                    ReviewDecision::Approved => {
-                        lines.push(Line::from(vec![
-                            "✔ ".fg(crate::colors::success()),
-                            "You ".into(),
-                            "approved".bold(),
-                            " codex to run ".into(),
-                            cmd_span,
-                            " ".into(),
-                            "this time".bold(),
-                        ]));
-                    }
-                    ReviewDecision::ApprovedForSession => {
-                        lines.push(Line::from(vec![
-                            "✔ ".fg(crate::colors::success()),
-                            "You ".into(),
-                            "approved".bold(),
-                            " codex to run ".into(),
-                            cmd_span,
-                            " ".into(),
-                            "every time this session".bold(),
-                        ]));
-                    }
-                    ReviewDecision::Denied => {
-                        lines.push(Line::from(vec![
-                            "✗ ".fg(crate::colors::error()),
-                            "You ".into(),
-                            "did not approve".bold(),
-                            " codex to run ".into(),
-                            cmd_span,
-                        ]));
-                    }
-                    ReviewDecision::Abort => {
-                        lines.push(Line::from(vec![
-                            "✗ ".fg(crate::colors::error()),
-                            "You ".into(),
-                            "canceled".bold(),
-                            " the request to run ".into(),
-                            cmd_span,
-                        ]));
-                    }
+                    ReviewDecision::Approved => format!("approved: run {} (this time)", cmd),
+                    ReviewDecision::ApprovedForSession => format!("approved: run {} (every time this session)", cmd),
+                    ReviewDecision::Denied => format!("not approved: run {}", cmd),
+                    ReviewDecision::Abort => format!("canceled: run {}", cmd),
                 }
             }
             ApprovalRequest::ApplyPatch { .. } => {
-                lines.push(Line::from(format!("patch approval decision: {decision:?}")));
+                format!("patch approval decision: {:?}", decision)
             }
-        }
-        if !feedback.trim().is_empty() {
-            lines.push(Line::from("feedback:"));
-            for l in feedback.lines() {
-                lines.push(Line::from(l.to_string()));
-            }
-        }
-        lines.push(Line::from(""));
-        self.app_event_tx.send(AppEvent::InsertHistory(lines));
+        };
+        let message = if feedback.trim().is_empty() {
+            message
+        } else {
+            // Append feedback, preserving line breaks
+            format!("{}\nfeedback:\n{}", message, feedback)
+        };
+        self.app_event_tx.send(AppEvent::InsertBackgroundEvent(message));
 
         // If the user aborted an exec approval, immediately cancel any running task
         // so the UI reflects their intent (clear spinner/status) without waiting
