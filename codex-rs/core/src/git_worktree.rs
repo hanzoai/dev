@@ -126,7 +126,83 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
         }
     }
 
+    // Ensure an 'origin' remote exists and points to a writable remote so that
+    // generic commands like `git push origin HEAD:main` work out of the box.
+    ensure_origin_remote(git_root).await.ok();
+
     Ok((worktree_path, effective_branch))
+}
+
+/// Ensure a remote named `origin` exists. If it's missing, choose a likely
+/// writable remote (prefer `fork`, then `upstream-push`, then the first push
+/// URL we find) and alias it as `origin`. Finally, set the remote HEAD so
+/// `origin/HEAD` points at the default branch.
+async fn ensure_origin_remote(git_root: &Path) -> Result<(), String> {
+    // Check existing remotes
+    let remotes_out = Command::new("git")
+        .current_dir(git_root)
+        .args(["remote"])
+        .output()
+        .await
+        .map_err(|e| format!("git remote failed: {}", e))?;
+    if !remotes_out.status.success() {
+        return Err("git remote returned error".to_string());
+    }
+    let remotes: Vec<String> = String::from_utf8_lossy(&remotes_out.stdout)
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if remotes.iter().any(|r| r == "origin") {
+        // Make sure origin/HEAD is set; ignore errors
+        let _ = Command::new("git")
+            .current_dir(git_root)
+            .args(["remote", "set-head", "origin", "-a"])
+            .output()
+            .await;
+        return Ok(());
+    }
+
+    // Prefer candidates in this order
+    let mut candidates = vec!["fork", "upstream-push", "upstream"]; // typical setups
+    // Append any other remotes as fallbacks
+    for r in &remotes {
+        if !candidates.contains(&r.as_str()) { candidates.push(r); }
+    }
+
+    // Find a candidate with a URL
+    for cand in candidates {
+        let url_out = Command::new("git")
+            .current_dir(git_root)
+            .args(["remote", "get-url", cand])
+            .output()
+            .await;
+        if let Ok(out) = url_out {
+            if out.status.success() {
+                let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !url.is_empty() {
+                    // Add origin pointing to this URL
+                    let add = Command::new("git")
+                        .current_dir(git_root)
+                        .args(["remote", "add", "origin", &url])
+                        .output()
+                        .await
+                        .map_err(|e| format!("git remote add origin failed: {}", e))?;
+                    if !add.status.success() {
+                        return Err("failed to add origin".to_string());
+                    }
+                    let _ = Command::new("git")
+                        .current_dir(git_root)
+                        .args(["remote", "set-head", "origin", "-a"])
+                        .output()
+                        .await;
+                    return Ok(());
+                }
+            }
+        }
+    }
+    // No usable remote found; leave as-is
+    Err("no suitable remote to alias as origin".to_string())
 }
 
 /// Copy uncommitted (modified + untracked) files from `src_root` into the `worktree_path`.
