@@ -462,7 +462,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                 drop(manager);
 
                 match setup_worktree(&git_root, &branch_id).await {
-                    Ok(worktree_path) => {
+                    Ok((worktree_path, used_branch)) => {
                         let mut manager = AGENT_MANAGER.write().await;
                         manager
                             .add_progress(
@@ -474,7 +474,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                             .update_worktree_info(
                                 &agent_id,
                                 worktree_path.display().to_string(),
-                                branch_id.clone(),
+                                used_branch.clone(),
                             )
                             .await;
                         drop(manager);

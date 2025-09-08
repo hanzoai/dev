@@ -6081,7 +6081,8 @@ impl ChatWidget<'_> {
             let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — not a git repo: {}", e))]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch` — not a git repo: {}", e) }), order: None }));
                     return;
                 }
             };
@@ -6089,10 +6090,11 @@ impl ChatWidget<'_> {
             let task_opt = if args.trim().is_empty() { None } else { Some(args.trim()) };
             let branch_name = codex_core::git_worktree::generate_branch_name_from_task(task_opt);
             // Create worktree
-            let worktree = match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
-                Ok(p) => p,
+            let (worktree, used_branch) = match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
+                Ok((p, b)) => (p, b),
                 Err(e) => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — failed to create worktree: {}", e))]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch` — failed to create worktree: {}", e) }), order: None }));
                     return;
                 }
             };
@@ -6100,28 +6102,38 @@ impl ChatWidget<'_> {
             let copied = match codex_core::git_worktree::copy_uncommitted_to_worktree(&git_root, &worktree).await {
                 Ok(n) => n,
                 Err(e) => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch` — failed to copy changes: {}", e))]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch` — failed to copy changes: {}", e) }), order: None }));
                     // Still switch to the branch even if copy fails
                     0
                 }
             };
 
-            // Build clean multi-line output for improved readability
-            let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-            lines.push(ratatui::text::Line::from(format!("• Created worktree '{}'", branch_name)));
-            lines.push(ratatui::text::Line::from(format!("  Path: {}", worktree.display())));
-            lines.push(ratatui::text::Line::from(format!("  Copied {} changed files", copied)));
-            if let Some(task_text) = task_opt {
-                lines.push(ratatui::text::Line::from(format!("  Task: {}", task_text)));
-                lines.push(ratatui::text::Line::from("  Switching and starting task..."));
+            // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
+            let msg = if let Some(task_text) = task_opt {
+                format!(
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Task: {task}\n  Switching and starting task...",
+                    used = used_branch,
+                    path = worktree.display(),
+                    copied = copied,
+                    task = task_text
+                )
             } else {
-                lines.push(ratatui::text::Line::from("  Switched to branch. Type your task when ready."));
+                format!(
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Switched to branch. Type your task when ready.",
+                    used = used_branch,
+                    path = worktree.display(),
+                    copied = copied
+                )
+            };
+            {
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }), order: None }));
             }
-            tx.send(AppEvent::InsertHistory(lines));
 
             // Switch cwd and optionally submit the task
             let initial_prompt = task_opt.map(|s| s.to_string());
-            tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
+            let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
         });
     }
 
@@ -6140,7 +6152,8 @@ impl ChatWidget<'_> {
             let git_root = match codex_core::git_worktree::get_git_root_from(&work_cwd).await {
                 Ok(p) => p,
                 Err(e) => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — not a git repo: {}", e))]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — not a git repo: {}", e) }), order: None }));
                     return;
                 }
             };
@@ -6149,7 +6162,8 @@ impl ChatWidget<'_> {
             let branch_name = match head {
                 Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
                 _ => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to detect branch name") ]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to detect branch name".to_string() }), order: None }));
                     return;
                 }
             };
@@ -6162,20 +6176,22 @@ impl ChatWidget<'_> {
                 .output()
                 .await;
             if let Ok(o) = &commit_out {
-                if !o.status.success() {
-                    // Ignore "nothing to commit" (exit 1); surface others
-                    let msg = String::from_utf8_lossy(&o.stderr);
-                    if !msg.contains("nothing to commit") {
-                        tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — commit failed: {}", msg.trim()))]));
+                    if !o.status.success() {
+                        // Ignore "nothing to commit" (exit 1); surface others
+                        let msg = String::from_utf8_lossy(&o.stderr);
+                        if !msg.contains("nothing to commit") {
+                            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                            let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — commit failed: {}", msg.trim()) }), order: None }));
+                        }
                     }
                 }
-            }
 
             // Determine default branch in main repo
             let default_branch = match codex_core::git_worktree::detect_default_branch(&git_root).await {
                 Some(b) => b,
                 None => {
-                    tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)")]));
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)".to_string() }), order: None }));
                     return;
                 }
             };
@@ -6183,13 +6199,15 @@ impl ChatWidget<'_> {
             // Merge branch into default from the main repo root
             let co = Command::new("git").current_dir(&git_root).args(["checkout", &default_branch]).output().await;
             if !matches!(co, Ok(ref o) if o.status.success()) {
-                tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from("`/branch finalize` — failed to checkout default branch") ]));
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to checkout default branch".to_string() }), order: None }));
                 return;
             }
             let merge = Command::new("git").current_dir(&git_root).args(["merge", "--no-ff", &branch_name]).output().await;
             if !matches!(merge, Ok(ref o) if o.status.success()) {
                 let err = merge.ok().and_then(|o| String::from_utf8(o.stderr).ok()).unwrap_or_else(|| "unknown error".to_string());
-                tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(format!("`/branch finalize` — merge failed: {}", err.trim()))]));
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("`/branch finalize` — merge failed: {}", err.trim()) }), order: None }));
                 return;
             }
 
@@ -6199,7 +6217,10 @@ impl ChatWidget<'_> {
 
             // Inform user and switch back to git root
             let msg = format!("Merged '{}' into '{}' and cleaned up worktree. Switching back to {}", branch_name, default_branch, git_root.display());
-            tx.send(AppEvent::InsertHistory(vec![ratatui::text::Line::from(msg.clone())]));
+            {
+                use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg.clone() }), order: None }));
+            }
             tx.send(AppEvent::SwitchCwd(git_root, None));
         });
     }
