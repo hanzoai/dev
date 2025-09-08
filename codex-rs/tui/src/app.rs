@@ -564,11 +564,20 @@ impl App<'_> {
                             kind: KeyEventKind::Press,
                             ..
                         } => {
-                            #[cfg(unix)]
-                            {
-                                self.suspend(terminal)?;
+                            // Prefer in-app undo in Chat (composer) over shell suspend.
+                            match &mut self.app_state {
+                                AppState::Chat { widget } => {
+                                    widget.handle_key_event(key_event);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                                AppState::Onboarding { .. } => {
+                                    #[cfg(unix)]
+                                    {
+                                        self.suspend(terminal)?;
+                                    }
+                                    // No-op on non-Unix platforms.
+                                }
                             }
-                            // No-op on non-Unix platforms.
                         }
                         KeyEvent {
                             code: KeyCode::Char('r') | KeyCode::Char('t'),
