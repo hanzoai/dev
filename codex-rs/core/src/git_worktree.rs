@@ -68,13 +68,14 @@ pub async fn get_git_root_from(cwd: &Path) -> Result<PathBuf, String> {
 
 /// Create a new worktree for `branch_id` under `<git_root>/.code/branches/<branch_id>`.
 /// If a previous worktree directory exists, remove it first.
-pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, String> {
+pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf, String), String> {
     let code_dir = git_root.join(".code").join("branches");
     tokio::fs::create_dir_all(&code_dir)
         .await
         .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
 
-    let worktree_path = code_dir.join(branch_id);
+    let mut effective_branch = branch_id.to_string();
+    let mut worktree_path = code_dir.join(&effective_branch);
     if worktree_path.exists() {
         let _ = Command::new("git")
             .arg("worktree")
@@ -88,17 +89,44 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf,
 
     let output = Command::new("git")
         .current_dir(git_root)
-        .args(["worktree", "add", "-b", branch_id, worktree_path.to_str().unwrap()])
+        .args(["worktree", "add", "-b", &effective_branch, worktree_path.to_str().unwrap()])
         .output()
         .await
         .map_err(|e| format!("Failed to create git worktree: {}", e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to create worktree: {}", stderr));
+        // If the branch already exists, generate a unique name and retry once.
+        if stderr.contains("already exists") {
+            effective_branch = format!("{}-{}", effective_branch, Utc::now().format("%Y%m%d-%H%M%S"));
+            worktree_path = code_dir.join(&effective_branch);
+            // Ensure target path is clean
+            if worktree_path.exists() {
+                let _ = Command::new("git")
+                    .arg("worktree")
+                    .arg("remove")
+                    .arg(worktree_path.to_str().unwrap())
+                    .arg("--force")
+                    .current_dir(git_root)
+                    .output()
+                    .await;
+            }
+            let retry = Command::new("git")
+                .current_dir(git_root)
+                .args(["worktree", "add", "-b", &effective_branch, worktree_path.to_str().unwrap()])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to create git worktree (retry): {}", e))?;
+            if !retry.status.success() {
+                let retry_err = String::from_utf8_lossy(&retry.stderr);
+                return Err(format!("Failed to create worktree: {}", retry_err));
+            }
+        } else {
+            return Err(format!("Failed to create worktree: {}", stderr));
+        }
     }
 
-    Ok(worktree_path)
+    Ok((worktree_path, effective_branch))
 }
 
 /// Copy uncommitted (modified + untracked) files from `src_root` into the `worktree_path`.
@@ -160,4 +188,3 @@ pub async fn detect_default_branch(cwd: &Path) -> Option<String> {
     }
     None
 }
-
