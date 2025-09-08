@@ -644,6 +644,14 @@ impl App<'_> {
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::DispatchCommand(command, command_text) => {
+                    // Persist UI-only slash commands to cross-session history.
+                    // For prompt-expanding commands (/plan, /solve, /code) we let the
+                    // expanded prompt be recorded by the normal submission path.
+                    if !command.is_prompt_expanding() {
+                        let _ = self
+                            .app_event_tx
+                            .send(AppEvent::CodexOp(Op::AddToHistory { text: command_text.clone() }));
+                    }
                     // Extract command arguments by removing the slash command from the beginning
                     // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"
                     let command_args = {
@@ -872,7 +880,8 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(prompt) = initial_prompt {
                             if !prompt.is_empty() {
-                                widget.submit_text_message(prompt);
+                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/branch finalize' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
+                                widget.submit_text_message_with_preface(prompt, preface);
                             }
                         }
                     }
