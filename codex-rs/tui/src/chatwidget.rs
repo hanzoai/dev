@@ -2401,18 +2401,13 @@ impl ChatWidget<'_> {
     /// that omits it.
     fn remove_connecting_mcp_notice(&mut self) {
         let needle = "Connecting MCP servers…";
-        if let Some((idx, cell)) = self
-            .history_cells
-            .iter()
-            .enumerate()
-            .find(|(_, cell)| {
-                cell.display_lines().iter().any(|line| {
-                    line.spans
-                        .iter()
-                        .any(|span| span.content.as_ref() == needle)
-                })
+        if let Some((idx, cell)) = self.history_cells.iter().enumerate().find(|(_, cell)| {
+            cell.display_lines().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.as_ref() == needle)
             })
-        {
+        }) {
             match cell.kind() {
                 crate::history_cell::HistoryCellType::Notice => {
                     // Older layout: status was inside the notice cell — replace it
@@ -4517,12 +4512,31 @@ impl ChatWidget<'_> {
     }
 
     fn apply_access_mode_indicator_from_config(&mut self) {
-        use codex_core::protocol::{AskForApproval, SandboxPolicy};
+        use codex_core::protocol::AskForApproval;
+        use codex_core::protocol::SandboxPolicy;
         let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
             (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
-            (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnRequest)
-            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnFailure)
-            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::UnlessTrusted) => Some("Write with Approval".to_string()),
+            (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::OnRequest,
+            )
+            | (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::OnFailure,
+            )
+            | (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::UnlessTrusted,
+            ) => Some("Write with Approval".to_string()),
             _ => None,
         };
         self.bottom_pane.set_access_mode_label(label);
@@ -4530,15 +4544,34 @@ impl ChatWidget<'_> {
 
     /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
     pub(crate) fn cycle_access_mode(&mut self) {
-        use codex_core::protocol::{AskForApproval, SandboxPolicy};
         use codex_core::config::set_project_access_mode;
+        use codex_core::protocol::AskForApproval;
+        use codex_core::protocol::SandboxPolicy;
 
         // Determine current index
         let idx = match (&self.config.sandbox_policy, self.config.approval_policy) {
             (SandboxPolicy::ReadOnly, _) => 0,
-            (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnRequest)
-            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnFailure)
-            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::UnlessTrusted) => 1,
+            (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::OnRequest,
+            )
+            | (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::OnFailure,
+            )
+            | (
+                SandboxPolicy::WorkspaceWrite {
+                    network_access: false,
+                    ..
+                },
+                AskForApproval::UnlessTrusted,
+            ) => 1,
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => 2,
             _ => 1,
         };
@@ -4592,8 +4625,12 @@ impl ChatWidget<'_> {
             self.config.approval_policy,
             match &self.config.sandbox_policy {
                 SandboxPolicy::ReadOnly => codex_protocol::config_types::SandboxMode::ReadOnly,
-                SandboxPolicy::WorkspaceWrite { .. } => codex_protocol::config_types::SandboxMode::WorkspaceWrite,
-                SandboxPolicy::DangerFullAccess => codex_protocol::config_types::SandboxMode::DangerFullAccess,
+                SandboxPolicy::WorkspaceWrite { .. } => {
+                    codex_protocol::config_types::SandboxMode::WorkspaceWrite
+                }
+                SandboxPolicy::DangerFullAccess => {
+                    codex_protocol::config_types::SandboxMode::DangerFullAccess
+                }
             },
         );
 
@@ -4604,21 +4641,30 @@ impl ChatWidget<'_> {
                 std::time::Duration::from_secs(4),
             );
         } else {
-            let persistent = if next == 0 { "Read Only" } else { "Write with Approval" };
-            self.bottom_pane.set_access_mode_label(Some(persistent.to_string()));
+            let persistent = if next == 0 {
+                "Read Only"
+            } else {
+                "Write with Approval"
+            };
+            self.bottom_pane
+                .set_access_mode_label(Some(persistent.to_string()));
         }
 
         // Announce in history: replace the last access-mode status, inserting early
         // in the current request so it appears above upcoming commands.
-        let msg = format!("✓ Access mode: {}", label);
+        let msg = format!("Mode changed: {}", label);
         self.set_access_status_message(msg);
         // No footer notice: the indicator covers this; avoid duplicate texts.
 
         // Prepare a single consolidated note for the agent to see before the
         // next turn begins. Subsequent cycles will overwrite this note.
         let agent_note = match next {
-            0 => "System: access mode changed to Read Only. Do not attempt write operations or apply_patch.",
-            1 => "System: access mode changed to Write with Approval. Request approval before writes.",
+            0 => {
+                "System: access mode changed to Read Only. Do not attempt write operations or apply_patch."
+            }
+            1 => {
+                "System: access mode changed to Write with Approval. Request approval before writes."
+            }
             _ => "System: access mode changed to Full Access. Writes and network are allowed.",
         };
         self.pending_access_note = Some(agent_note.to_string());
@@ -4630,7 +4676,10 @@ impl ChatWidget<'_> {
         let cell = crate::history_cell::new_background_event(message);
         if let Some(idx) = self.access_status_idx {
             if idx < self.history_cells.len()
-                && matches!(self.history_cells[idx].kind(), crate::history_cell::HistoryCellType::BackgroundEvent)
+                && matches!(
+                    self.history_cells[idx].kind(),
+                    crate::history_cell::HistoryCellType::BackgroundEvent
+                )
             {
                 self.history_replace_at(idx, Box::new(cell));
                 self.request_redraw();
@@ -7030,16 +7079,24 @@ impl ChatWidget<'_> {
                 // Helper: derive a reasonable server name from command/args.
                 fn derive_server_name(command: &str, tokens: &[String]) -> String {
                     // Prefer an npm-style package token if present.
-                    let candidate = tokens.iter().find(|t| {
-                        !t.starts_with('-') && !t.contains('=') && (t.contains('/') || t.starts_with('@'))
-                    }).cloned();
+                    let candidate = tokens
+                        .iter()
+                        .find(|t| {
+                            !t.starts_with('-')
+                                && !t.contains('=')
+                                && (t.contains('/') || t.starts_with('@'))
+                        })
+                        .cloned();
 
                     let mut raw = match candidate {
                         Some(pkg) => {
                             // Strip scope, take the last path segment
                             let after_slash = pkg.rsplit('/').next().unwrap_or(pkg.as_str());
                             // Common convention: server-<name>
-                            after_slash.strip_prefix("server-").unwrap_or(after_slash).to_string()
+                            after_slash
+                                .strip_prefix("server-")
+                                .unwrap_or(after_slash)
+                                .to_string()
                         }
                         None => command.to_string(),
                     };
@@ -7047,18 +7104,30 @@ impl ChatWidget<'_> {
                     // Sanitize: keep [a-zA-Z0-9_-], map others to '-'
                     raw = raw
                         .chars()
-                        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                                c
+                            } else {
+                                '-'
+                            }
+                        })
                         .collect();
                     // Collapse multiple '-'
                     let mut out = String::with_capacity(raw.len());
                     let mut prev_dash = false;
                     for ch in raw.chars() {
-                        if ch == '-' && prev_dash { continue; }
+                        if ch == '-' && prev_dash {
+                            continue;
+                        }
                         prev_dash = ch == '-';
                         out.push(ch);
                     }
                     // Ensure non-empty; fall back to "server"
-                    if out.trim_matches('-').is_empty() { "server".to_string() } else { out.trim_matches('-').to_string() }
+                    if out.trim_matches('-').is_empty() {
+                        "server".to_string()
+                    } else {
+                        out.trim_matches('-').to_string()
+                    }
                 }
 
                 // Parse the two accepted forms
@@ -7088,10 +7157,13 @@ impl ChatWidget<'_> {
 
                 // Separate args from ENV=VAL pairs
                 let mut args: Vec<String> = Vec::new();
-                let mut env: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+                let mut env: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
                 for tok in rest_tokens.into_iter() {
                     if let Some((k, v)) = tok.split_once('=') {
-                        if !k.is_empty() { env.insert(k.to_string(), v.to_string()); }
+                        if !k.is_empty() {
+                            env.insert(k.to_string(), v.to_string());
+                        }
                     } else {
                         args.push(tok);
                     }
@@ -8084,12 +8156,18 @@ impl ChatWidget<'_> {
             if let Some(up) = target_upstream {
                 let set = Command::new("git")
                     .current_dir(&worktree)
-                    .args(["branch", "--set-upstream-to", up.as_str(), used_branch.as_str()])
+                    .args([
+                        "branch",
+                        "--set-upstream-to",
+                        up.as_str(),
+                        used_branch.as_str(),
+                    ])
                     .output()
                     .await;
                 if let Ok(o) = set {
                     if o.status.success() {
-                        upstream_msg = Some(format!("Set upstream for '{}' to {}", used_branch, up));
+                        upstream_msg =
+                            Some(format!("Set upstream for '{}' to {}", used_branch, up));
                     } else {
                         let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
                         if !e.is_empty() {
@@ -8841,7 +8919,10 @@ impl ChatWidget<'_> {
                 if matches!(a.status, AgentStatus::Running) {
                     if let Some(lp) = &a.last_progress {
                         let mut lp_trim = lp.trim().to_string();
-                        if lp_trim.len() > 60 { lp_trim.truncate(60); lp_trim.push('…'); }
+                        if lp_trim.len() > 60 {
+                            lp_trim.truncate(60);
+                            lp_trim.push('…');
+                        }
                         label.push_str(&format!(" — {}", lp_trim));
                     }
                 }
