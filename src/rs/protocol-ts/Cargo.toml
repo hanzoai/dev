@@ -1,0 +1,21 @@
+[package]
+edition = "2024"
+name = "dev-protocol-ts"
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+name = "dev_protocol_ts"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dev-protocol-ts"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+dev-protocol = { path = "../protocol" }
+ts-rs = "11"
+clap = { version = "4", features = ["derive"] }
