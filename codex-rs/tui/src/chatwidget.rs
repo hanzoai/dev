@@ -5627,6 +5627,22 @@ impl ChatWidget<'_> {
         self.submit_user_message(text.into());
     }
 
+    /// Submit a visible text message, but prepend a hidden instruction that is
+    /// sent to the agent in the same turn. The hidden text is not added to the
+    /// chat history; only `visible` appears to the user.
+    pub(crate) fn submit_text_message_with_preface(&mut self, visible: String, preface: String) {
+        if visible.is_empty() { return; }
+        use crate::chatwidget::message::UserMessage;
+        use codex_core::protocol::InputItem;
+        let mut ordered = Vec::new();
+        if !preface.trim().is_empty() {
+            ordered.push(InputItem::Text { text: preface });
+        }
+        ordered.push(InputItem::Text { text: visible.clone() });
+        let msg = UserMessage { display_text: visible, ordered_items: ordered };
+        self.submit_user_message(msg);
+    }
+
     pub(crate) fn token_usage(&self) -> &TokenUsage {
         &self.total_token_usage
     }
