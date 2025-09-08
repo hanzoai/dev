@@ -1910,6 +1910,36 @@ impl ChatWidget<'_> {
         // Fade the welcome cell only when a user actually posts a message.
         for cell in &self.history_cells { cell.trigger_fade(); }
         let UserMessage { display_text, mut ordered_items } = user_message;
+        // If our configured cwd no longer exists (e.g., a worktree folder was
+        // deleted outside the app), try to automatically recover to the repo
+        // root for worktrees and re-submit the same message there.
+        if !self.config.cwd.exists() {
+            let missing = self.config.cwd.clone();
+            let missing_s = missing.display().to_string();
+            if missing_s.contains("/.code/branches/") {
+                // Recover by walking up to '<repo>/.code/branches/<branch>' -> repo root
+                let mut anc = missing.as_path();
+                // Walk up 3 parents if available
+                for _ in 0..3 { if let Some(p) = anc.parent() { anc = p; } }
+                let fallback_root = anc.to_path_buf();
+                if fallback_root.exists() {
+                    use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    let msg = format!("⚠️ Worktree directory is missing: {}\nSwitching to repo root: {}",
+                        missing.display(), fallback_root.display());
+                    let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event { id: "cwd-recover".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }), order: None }));
+                    // Re-submit this exact message after switching cwd
+                    self.app_event_tx
+                        .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
+                    return;
+                }
+            }
+            // If we can't recover, surface an error and drop the message to prevent loops
+            self.history_push(history_cell::new_error_event(format!(
+                "Working directory is missing: {}",
+                self.config.cwd.display()
+            )));
+            return;
+        }
         let original_text = display_text.clone();
         // Build a combined string view of the text-only parts to process slash commands
         let mut text_only = String::new();
