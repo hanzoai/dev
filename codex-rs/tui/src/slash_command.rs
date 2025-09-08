@@ -32,6 +32,7 @@ pub enum SlashCommand {
     Agents,
     Branch,
     Github,
+    Mcp,
     Resume,
     // Prompt-expanding commands
     Plan,
@@ -67,6 +68,7 @@ impl SlashCommand {
             SlashCommand::Agents => "list agents (running and availability)",
             SlashCommand::Branch => "create a worktree branch and switch (/branch [task])",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
+            SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Logout => "log out of Code",
             #[cfg(debug_assertions)]
