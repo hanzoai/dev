@@ -48,6 +48,23 @@ Notes:
 - When `preferred_auth_method = "chatgpt"` (default), Codex prefers ChatGPT auth if present; if only an API key is present, it will use the API key. Certain account types may also require API-key mode.
 - To check which auth method is being used during a session, use the `/status` command in the TUI.
 
+## Project .env safety (OPENAI_API_KEY)
+
+By default, Codex will no longer read `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` from a project’s local `.env` file.
+
+Why: many repos include an API key in `.env` for unrelated tooling, which could cause Codex to silently use the API key instead of your ChatGPT plan in that folder.
+
+What still works:
+
+- `~/.code/.env` (or `~/.codex/.env`) is loaded first and may contain your `OPENAI_API_KEY` for global use.
+- A shell-exported `OPENAI_API_KEY` is honored.
+
+Project `.env` provider keys are always ignored — there is no opt‑in.
+
+UI clarity:
+
+- When Codex is using an API key, the chat footer shows a bold “Auth: API key” badge so it’s obvious which mode you’re in.
+
 ## Connecting on a "Headless" Machine
 
 Today, the login process entails running a server on `localhost:1455`. If you are on a "headless" server, such as a Docker container or are `ssh`'d into a remote machine, loading `localhost:1455` in the browser on your local machine will not automatically connect to the webserver running on the _headless_ machine, so you must use one of the following workarounds:
