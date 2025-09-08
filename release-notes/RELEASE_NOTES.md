@@ -1,13 +1,13 @@
-## @just-every/code v0.2.88
+## @just-every/code v0.2.89
 
-This release refines git behavior in worktrees and adds helpful TUI polish across footer hints, input shortcuts, and branch workflows.
+This release adds an in-app help overlay and improves composer editing with undo and line delete, plus smoother branch finalize handling.
 
 ### Changes
 
-- Core/Git: ensure 'origin' exists in new worktrees and set origin/HEAD for default branch to improve git UX.
-- TUI/Footer: show one-time Shift+Up/Down history hint on first scroll.
-- TUI/Input: support macOS Command-key shortcuts in the composer.
-- TUI/Branch: add hidden preface for auto-submitted confirm/merge-and-cleanup flow; prefix with '[branch created]' for clarity.
+- TUI/Help: add Ctrl+H help overlay with key summary; update footer hint.
+- TUI/Input: add Ctrl+Z undo in composer and route it to Chat correctly.
+- TUI/Input: map Ctrl+Backspace to delete the current line in composer.
+- TUI/Branch: treat "nothing to commit" as success on finalize and continue cleanup.
 
 ### Install
 
@@ -16,5 +16,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.87...v0.2.88
-
+Compare: https://github.com/just-every/code/compare/v0.2.88...v0.2.89
