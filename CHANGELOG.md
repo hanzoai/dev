@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.86] - 2025-09-08
+
+- TUI: add `/branch` to create worktrees, switch sessions, and finalize merges. (8f888de1)
+- Core: treat only exit 126 as sandbox denial to avoid false escalations. (e4e5fb01)
+- Docs: add comprehensive slash command reference and link from README. (a3b5c18a)
+
 ## [0.2.85] - 2025-09-07
 
 - TUI: insert plan/background events near-time and keep reasoning ellipsis during streaming. (81a31dd5)
