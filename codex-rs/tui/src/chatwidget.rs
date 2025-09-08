@@ -288,6 +288,13 @@ pub(crate) struct ChatWidget<'a> {
 
     // One-time hint to teach input history navigation
     scroll_history_hint_shown: bool,
+
+    // Track and manage the access-mode background status cell so mode changes
+    // replace the existing status instead of stacking multiple entries.
+    access_status_idx: Option<usize>,
+    // Pending one-shot note about the latest access-mode change to inject into
+    // the agent's conversation history on the next user message.
+    pending_access_note: Option<String>,
 }
 
 struct PendingJumpBack {
@@ -1425,7 +1432,7 @@ impl ChatWidget<'_> {
 
         // Initialize image protocol for rendering screenshots
 
-        let new_widget = Self {
+        let mut new_widget = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
             bottom_pane: BottomPane::new(BottomPaneParams {
@@ -1539,7 +1546,11 @@ impl ChatWidget<'_> {
             internal_seq: 0,
             show_order_overlay,
             scroll_history_hint_shown: false,
+            access_status_idx: None,
+            pending_access_note: None,
         };
+        // Seed footer access indicator based on current config
+        new_widget.apply_access_mode_indicator_from_config();
         // Insert the welcome cell as top-of-first-request so future model output
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
@@ -1708,6 +1719,8 @@ impl ChatWidget<'_> {
             internal_seq: 0,
             show_order_overlay,
             scroll_history_hint_shown: false,
+            access_status_idx: None,
+            pending_access_note: None,
         };
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
@@ -2262,9 +2275,15 @@ impl ChatWidget<'_> {
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
     }
-    /// Public helper to push a background event with the standard gutter and styling.
-    pub(crate) fn push_background_event(&mut self, message: String) {
-        self.history_push(history_cell::new_background_event(message));
+    /// Insert a background event near the top of the current request so it appears
+    /// before imminent provider output (e.g. Exec begin).
+    pub(crate) fn insert_background_event_early(&mut self, message: String) {
+        let key = self.near_time_key(None);
+        let _ = self.history_insert_with_key_global_tagged(
+            Box::new(history_cell::new_background_event(message)),
+            key,
+            "background-early",
+        );
     }
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
@@ -2691,6 +2710,12 @@ impl ChatWidget<'_> {
             self.history_push_prompt_next_req(history_cell::new_user_prompt(original_text.clone()));
             self.pending_user_prompts_for_next_turn =
                 self.pending_user_prompts_for_next_turn.saturating_add(1);
+        }
+
+        // If an access-mode change was pending, record it in the agent's
+        // conversation history right before the next user turn.
+        if let Some(note) = self.pending_access_note.take() {
+            let _ = self.codex_op_tx.send(Op::AddToHistory { text: note });
         }
 
         // Now send to the agent
@@ -4096,8 +4121,6 @@ impl ChatWidget<'_> {
             "Keyboard shortcuts",
             t_fg.add_modifier(Modifier::BOLD),
         )]));
-        lines.push(RtLine::from(""));
-
         let kv = |k: &str, v: &str| -> RtLine<'static> {
             RtLine::from(vec![
                 // Left-align the key column for improved readability
@@ -4106,6 +4129,12 @@ impl ChatWidget<'_> {
                 RtSpan::styled(v.to_string(), t_dim),
             ])
         };
+        lines.push(RtLine::from(""));
+        // Top quick action
+        lines.push(kv(
+            "Shift+Tab",
+            "Rotate agent between Read Only / Write with Approval / Full Access",
+        ));
 
         // Global
         lines.push(kv("Ctrl+H", "Help overlay"));
@@ -4483,6 +4512,134 @@ impl ChatWidget<'_> {
         };
         let message = format!("✓ Theme changed to {}", theme_name);
         self.history_push(history_cell::new_background_event(message));
+    }
+
+    fn apply_access_mode_indicator_from_config(&mut self) {
+        use codex_core::protocol::{AskForApproval, SandboxPolicy};
+        let label = match (&self.config.sandbox_policy, self.config.approval_policy) {
+            (SandboxPolicy::ReadOnly, _) => Some("Read Only".to_string()),
+            (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnRequest)
+            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnFailure)
+            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::UnlessTrusted) => Some("Write with Approval".to_string()),
+            _ => None,
+        };
+        self.bottom_pane.set_access_mode_label(label);
+    }
+
+    /// Rotate the access preset: Read Only (Plan Mode) → Write with Approval → Full Access
+    pub(crate) fn cycle_access_mode(&mut self) {
+        use codex_core::protocol::{AskForApproval, SandboxPolicy};
+        use codex_core::config::set_project_access_mode;
+
+        // Determine current index
+        let idx = match (&self.config.sandbox_policy, self.config.approval_policy) {
+            (SandboxPolicy::ReadOnly, _) => 0,
+            (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnRequest)
+            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::OnFailure)
+            | (SandboxPolicy::WorkspaceWrite { network_access: false, .. }, AskForApproval::UnlessTrusted) => 1,
+            (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => 2,
+            _ => 1,
+        };
+        let next = (idx + 1) % 3;
+
+        // Apply mapping
+        let (label, approval, sandbox) = match next {
+            0 => (
+                "Read Only (Plan Mode)",
+                AskForApproval::OnRequest,
+                SandboxPolicy::ReadOnly,
+            ),
+            1 => (
+                "Write with Approval",
+                AskForApproval::OnRequest,
+                SandboxPolicy::new_workspace_write_policy(),
+            ),
+            _ => (
+                "Full Access",
+                AskForApproval::Never,
+                SandboxPolicy::DangerFullAccess,
+            ),
+        };
+
+        // Update local config
+        self.config.approval_policy = approval;
+        self.config.sandbox_policy = sandbox;
+
+        // Send ConfigureSession op to backend
+        let op = Op::ConfigureSession {
+            provider: self.config.model_provider.clone(),
+            model: self.config.model.clone(),
+            model_reasoning_effort: self.config.model_reasoning_effort,
+            model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: self.config.model_text_verbosity,
+            user_instructions: self.config.user_instructions.clone(),
+            base_instructions: self.config.base_instructions.clone(),
+            approval_policy: self.config.approval_policy.clone(),
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            disable_response_storage: self.config.disable_response_storage,
+            notify: self.config.notify.clone(),
+            cwd: self.config.cwd.clone(),
+            resume_path: None,
+        };
+        self.submit_op(op);
+
+        // Persist selection into CODEX_HOME/config.toml for this project directory
+        // so it sticks across restarts.
+        let _ = set_project_access_mode(
+            &self.config.codex_home,
+            &self.config.cwd,
+            self.config.approval_policy,
+            match &self.config.sandbox_policy {
+                SandboxPolicy::ReadOnly => codex_protocol::config_types::SandboxMode::ReadOnly,
+                SandboxPolicy::WorkspaceWrite { .. } => codex_protocol::config_types::SandboxMode::WorkspaceWrite,
+                SandboxPolicy::DangerFullAccess => codex_protocol::config_types::SandboxMode::DangerFullAccess,
+            },
+        );
+
+        // Footer indicator: persistent for RO/Approval; ephemeral for Full Access
+        if next == 2 {
+            self.bottom_pane.set_access_mode_label_ephemeral(
+                "Full Access".to_string(),
+                std::time::Duration::from_secs(4),
+            );
+        } else {
+            let persistent = if next == 0 { "Read Only" } else { "Write with Approval" };
+            self.bottom_pane.set_access_mode_label(Some(persistent.to_string()));
+        }
+
+        // Announce in history: replace the last access-mode status, inserting early
+        // in the current request so it appears above upcoming commands.
+        let msg = format!("✓ Access mode: {}", label);
+        self.set_access_status_message(msg);
+        // No footer notice: indicator covers this; avoid duplicate texts.
+
+        // Prepare a single consolidated note for the agent to see before the
+        // next turn begins. Subsequent cycles will overwrite this note.
+        let agent_note = match next {
+            0 => "System: access mode changed to Read Only. Do not attempt write operations or apply_patch.",
+            1 => "System: access mode changed to Write with Approval. Approval will be automatically requested before writes.",
+            _ => "System: access mode changed to Full Access. Writes and network are allowed.",
+        };
+        self.pending_access_note = Some(agent_note.to_string());
+    }
+
+    /// Insert or replace the access-mode status background event. Uses a near-time
+    /// key so it appears above any imminent Exec/Tool cells in this request.
+    fn set_access_status_message(&mut self, message: String) {
+        let cell = crate::history_cell::new_background_event(message);
+        if let Some(idx) = self.access_status_idx {
+            if idx < self.history_cells.len()
+                && matches!(self.history_cells[idx].kind(), crate::history_cell::HistoryCellType::BackgroundEvent)
+            {
+                self.history_replace_at(idx, Box::new(cell));
+                self.request_redraw();
+                return;
+            }
+        }
+        // Insert new status near the top of this request window
+        let key = self.near_time_key(None);
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "access-status");
+        self.access_status_idx = Some(pos);
     }
 
     fn restyle_history_after_theme_change(&mut self) {
@@ -7368,6 +7525,10 @@ impl ChatWidget<'_> {
             enhanced_keys_supported,
             using_chatgpt_auth: self.config.using_chatgpt_auth,
         });
+        self.access_status_idx = None;
+        self.pending_access_note = None;
+        // Re-apply access indicator for new composer
+        self.apply_access_mode_indicator_from_config();
 
         // Request redraw for the new animation
         self.mark_needs_redraw();
