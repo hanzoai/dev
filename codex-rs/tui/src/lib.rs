@@ -368,6 +368,9 @@ fn run_ratatui_app(
     let timing_summary = app.perf_summary();
 
     restore();
+
+    // After restoring the terminal, clean up any worktrees created by this process.
+    cleanup_session_worktrees_and_print();
     // Mark the end of the recorded session.
     session_log::log_session_end();
     if let Some(summary) = timing_summary {
@@ -393,6 +396,39 @@ fn restore() {
 #[allow(clippy::print_stderr)]
 fn print_timing_summary(summary: &str) {
     eprintln!("\n== Timing Summary ==\n{}", summary);
+}
+
+#[allow(clippy::print_stdout, clippy::print_stderr)]
+fn cleanup_session_worktrees_and_print() {
+    use std::process::Command;
+    let pid = std::process::id();
+    let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
+    let session_dir = home.join(".code").join("working").join("_session");
+    let file = session_dir.join(format!("pid-{}.txt", pid));
+    let Ok(data) = std::fs::read_to_string(&file) else { return };
+    let mut entries: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    for line in data.lines() {
+        if line.trim().is_empty() { continue; }
+        if let Some((root_s, path_s)) = line.split_once('\t') {
+            entries.push((std::path::PathBuf::from(root_s), std::path::PathBuf::from(path_s)));
+        }
+    }
+    // Deduplicate paths in case of retries
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    entries.retain(|(_, p)| seen.insert(p.clone()));
+    if entries.is_empty() { let _ = std::fs::remove_file(&file); return; }
+
+    eprintln!("Cleaning remaining worktrees ({}).", entries.len());
+    for (git_root, worktree) in entries {
+        let wt_str = match worktree.to_str() { Some(s) => s, None => continue };
+        let _ = Command::new("git")
+            .current_dir(&git_root)
+            .args(["worktree", "remove", wt_str, "--force"])
+            .output();
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+    let _ = std::fs::remove_file(&file);
 }
 
 /// Minimal login status indicator for onboarding flow.
