@@ -80,6 +80,12 @@ pub(crate) enum AppEvent {
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
 
+    /// Enable/disable a specific MCP server
+    UpdateMcpServer { name: String, enable: bool },
+
+    /// Prefill the composer input with the given text
+    PrefillComposer(String),
+
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
 

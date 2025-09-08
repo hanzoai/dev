@@ -5549,14 +5549,35 @@ impl ChatWidget<'_> {
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("help") {
-            let help = "MCP commands:\n\
-• /mcp status — list enabled/disabled servers\n\
-• /mcp on <name> — enable a server (moves from disabled)\n\
-• /mcp off <name> — disable a server (does not delete)\n\
-• /mcp add <name> <command> [args…] [ENV=VAL…] — add or update a server\n\
-Changes are saved to ~/.codex/config.toml. Start a new chat to apply.";
-            self.history_push(history_cell::new_background_event(help.to_string()));
+        if trimmed.is_empty() {
+            // Interactive popup like /reasoning
+            match codex_core::config::find_codex_home() {
+                Ok(home) => match codex_core::config::list_mcp_servers(&home) {
+                    Ok((enabled, disabled)) => {
+                        // Map into simple rows for the popup
+                        let mut rows: Vec<crate::bottom_pane::mcp_settings_view::McpServerRow> = Vec::new();
+                        for (name, cfg) in enabled.into_iter() {
+                            let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow { name, enabled: true, summary: format!("{}{}", cfg.command, args) });
+                        }
+                        for (name, cfg) in disabled.into_iter() {
+                            let args = if cfg.args.is_empty() { String::new() } else { format!(" {}", cfg.args.join(" ")) };
+                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow { name, enabled: false, summary: format!("{}{}", cfg.command, args) });
+                        }
+                        // Sort by name for stability
+                        rows.sort_by(|a, b| a.name.cmp(&b.name));
+                        self.bottom_pane.show_mcp_settings(rows);
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to read MCP config: {}", e);
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                },
+                Err(e) => {
+                    let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                    self.history_push(history_cell::new_error_event(msg));
+                }
+            }
             return;
         }
 
@@ -8481,6 +8502,36 @@ impl ChatWidget<'_> {
                     if enabled { "Enabled" } else { "Disabled" }
                 );
                 self.history_push(history_cell::new_background_event(msg));
+            }
+        }
+    }
+
+    pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
+        match codex_core::config::find_codex_home() {
+            Ok(home) => match codex_core::config::set_mcp_server_enabled(&home, name, enable) {
+                Ok(changed) => {
+                    if changed {
+                        if enable {
+                            if let Ok((enabled, _)) = codex_core::config::list_mcp_servers(&home) {
+                                if let Some((_, cfg)) = enabled.into_iter().find(|(n, _)| n == name) {
+                                    self.config.mcp_servers.insert(name.to_string(), cfg);
+                                }
+                            }
+                        } else {
+                            self.config.mcp_servers.remove(name);
+                        }
+                        let msg = format!("{} MCP server '{}'", if enable { "Enabled" } else { "Disabled" }, name);
+                        self.history_push(history_cell::new_background_event(msg));
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("Failed to update MCP server '{}': {}", name, e);
+                    self.history_push(history_cell::new_error_event(msg));
+                }
+            },
+            Err(e) => {
+                let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                self.history_push(history_cell::new_error_event(msg));
             }
         }
     }
