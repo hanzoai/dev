@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.91] - 2025-09-08
+
+- TUI/Panic: restore terminal state and exit cleanly on any thread panic. (34ffe467)
+- TUI/Windows: prevent broken raw mode/alt-screen after background panics under heavy load. (34ffe467)
+
 ## [0.2.90] - 2025-09-08
 
 - TUI/History: Home/End jump to start/end when input is empty. (7287fa71, 60f9db8c)
