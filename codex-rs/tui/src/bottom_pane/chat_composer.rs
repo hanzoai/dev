@@ -597,7 +597,11 @@ impl ChatComposer {
         };
 
         match key_event {
-            KeyEvent { code: KeyCode::Up, .. } => {
+            // Allow Shift+Up to navigate history even when slash popup is active.
+            KeyEvent { code: KeyCode::Up, modifiers, .. } => {
+                if modifiers.contains(KeyModifiers::SHIFT) {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 // If there are 0 or 1 items, let Up behave normally (cursor/history/scroll)
                 if popup.match_count() <= 1 {
                     return self.handle_key_event_without_popup(key_event);
@@ -605,7 +609,11 @@ impl ChatComposer {
                 popup.move_up();
                 (InputResult::None, true)
             }
-            KeyEvent { code: KeyCode::Down, .. } => {
+            // Allow Shift+Down to navigate history even when slash popup is active.
+            KeyEvent { code: KeyCode::Down, modifiers, .. } => {
+                if modifiers.contains(KeyModifiers::SHIFT) {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 // If there are 0 or 1 items, let Down behave normally (cursor/history/scroll)
                 if popup.match_count() <= 1 {
                     return self.handle_key_event_without_popup(key_event);
@@ -731,7 +739,10 @@ impl ChatComposer {
         };
 
         match key_event {
-            KeyEvent { code: KeyCode::Up, .. } => {
+            KeyEvent { code: KeyCode::Up, modifiers, .. } => {
+                if modifiers.contains(KeyModifiers::SHIFT) {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 // If there are 0 or 1 items, let Up behave normally (cursor/history/scroll)
                 if popup.match_count() <= 1 {
                     return self.handle_key_event_without_popup(key_event);
@@ -739,7 +750,10 @@ impl ChatComposer {
                 popup.move_up();
                 (InputResult::None, true)
             }
-            KeyEvent { code: KeyCode::Down, .. } => {
+            KeyEvent { code: KeyCode::Down, modifiers, .. } => {
+                if modifiers.contains(KeyModifiers::SHIFT) {
+                    return self.handle_key_event_without_popup(key_event);
+                }
                 // If there are 0 or 1 items, let Down behave normally (cursor/history/scroll)
                 if popup.match_count() <= 1 {
                     return self.handle_key_event_without_popup(key_event);
