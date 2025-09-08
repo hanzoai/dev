@@ -3336,7 +3336,10 @@ impl ChatWidget<'_> {
         lines.push(RtLine::from(""));
         lines.push(RtLine::from(vec![RtSpan::styled("Slash commands", t_fg.add_modifier(Modifier::BOLD))]));
         for (cmd_str, cmd) in crate::slash_command::built_in_slash_commands() {
-            let desc = cmd.description();
+            // Hide internal test command from the Help panel
+            if cmd_str == "test-approval" { continue; }
+            // Prefer "Code" branding in the Help panel
+            let desc = cmd.description().replace("Codex", "Code");
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
                 RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
