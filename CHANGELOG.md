@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.93] - 2025-09-08
+
+- TUI/Core: show Popular commands on start; track and clean worktrees. (2908be45)
+- TUI/MCP: add interactive /mcp settings popup with on/off toggles; composer prefill. (5e9ce801, 7456b3f0)
+- TUI/Onboarding: fix stray import token causing build failure. (707c43c2)
+- TUI/Branch: fix finalize pattern errors under Rust 2024 ergonomics. (54659509)
+
 ## [0.2.92] - 2025-09-08
 
 - Core/Git Worktree: create agent worktrees under ~/.code/working/<repo>/branches for isolation. (e9ebcf1f)
