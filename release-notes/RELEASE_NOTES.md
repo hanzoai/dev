@@ -1,11 +1,11 @@
-## @just-every/code v0.2.91
+## @just-every/code v0.2.92
 
-Stability update focused on terminal recovery during unexpected background panics.
+This release improves agent isolation with dedicated worktrees and strengthens sandboxing to protect your repositories.
 
 ### Changes
 
-- TUI/Panic: restore terminal state and exit cleanly on any thread panic.
-- TUI/Windows: prevent broken raw mode/alt-screen after background panics under heavy load.
+- Core/Git Worktree: create agent worktrees under ~/.code/working/<repo>/branches for isolation.
+- Core/Agent: sandbox non-read-only agent runs to worktree to prevent writes outside branch.
 
 ### Install
 
@@ -14,4 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.90...v0.2.91
+Compare: https://github.com/just-every/code/compare/v0.2.91...v0.2.92
+
