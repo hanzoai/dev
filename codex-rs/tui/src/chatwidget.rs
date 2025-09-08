@@ -20,6 +20,7 @@ mod gh_actions;
 mod tools;
 mod layout_scroll;
 mod diff_handlers;
+mod help_handlers;
 mod perf;
 mod diff_ui;
 mod message;
@@ -197,6 +198,9 @@ pub(crate) struct ChatWidget<'a> {
     // Accumulated diff/session state
     diffs: DiffsState,
 
+    // Help overlay state
+    help: HelpState,
+
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
     // Track last width used to opportunistically clear cache when layout changes
@@ -306,6 +310,7 @@ static BG_SHOT_IN_FLIGHT: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false)
 static BG_SHOT_LAST_START_MS: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 
 use self::diff_ui::{DiffBlock, DiffConfirm, DiffOverlay};
+use ratatui::text::{Line as RtLine, Span as RtSpan};
 
 use self::message::UserMessage;
 
@@ -1211,6 +1216,7 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             ended_call_ids: HashSet::new(),
             diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
+            help: HelpState { overlay: None, body_visible_rows: std::cell::Cell::new(0) },
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -1334,6 +1340,7 @@ impl ChatWidget<'_> {
             interrupts: interrupts::InterruptManager::new(),
             ended_call_ids: HashSet::new(),
             diffs: DiffsState { session_patch_sets: Vec::new(), baseline_file_contents: HashMap::new(), overlay: None, confirm: None, body_visible_rows: std::cell::Cell::new(0) },
+            help: HelpState { overlay: None, body_visible_rows: std::cell::Cell::new(0) },
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -1440,7 +1447,8 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
-        // Intercept keys for diff overlay when active
+        // Intercept keys for overlays when active (help first, then diff)
+        if help_handlers::handle_help_key(self, key_event) { return; }
         if diff_handlers::handle_diff_key(self, key_event) { return; }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
@@ -3252,6 +3260,59 @@ impl ChatWidget<'_> {
         } else {
             self.show_diffs_popup();
         }
+    }
+
+    pub(crate) fn show_help_popup(&mut self) {
+        let t_dim = Style::default().fg(crate::colors::text_dim());
+        let t_fg = Style::default().fg(crate::colors::text());
+
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(RtLine::from(vec![RtSpan::styled("Keyboard shortcuts", t_fg.add_modifier(Modifier::BOLD))]));
+        lines.push(RtLine::from(""));
+
+        let kv = |k: &str, v: &str| -> RtLine<'static> {
+            RtLine::from(vec![
+                RtSpan::styled(format!("{k:>12}"), t_fg),
+                RtSpan::raw("  —  "),
+                RtSpan::styled(v.to_string(), t_dim),
+            ])
+        };
+
+        // Global
+        lines.push(kv("Ctrl+H", "Help overlay"));
+        lines.push(kv("Ctrl+R", "Toggle reasoning"));
+        lines.push(kv("Ctrl+T", "Transcript / toggle reasoning"));
+        lines.push(kv("Ctrl+D", "Diff viewer"));
+        lines.push(kv("Esc", "Edit previous message / close popups"));
+        lines.push(RtLine::from(""));
+
+        // Composer
+        lines.push(RtLine::from(vec![RtSpan::styled("Compose field", t_fg.add_modifier(Modifier::BOLD))]));
+        lines.push(kv("Enter", "Send message"));
+        lines.push(kv("Ctrl+J", "Insert newline"));
+        lines.push(kv("Shift+Up/Down", "Browse input history"));
+        lines.push(kv("Ctrl+B/Ctrl+F", "Move left/right"));
+        lines.push(kv("Alt+Left/Right", "Move by word"));
+        lines.push(kv("Ctrl+W / Alt+Backspace", "Delete previous word"));
+        lines.push(kv("Ctrl+H / Backspace", "Delete previous char"));
+        lines.push(kv("Ctrl+D / Delete", "Delete next char"));
+        lines.push(kv("Ctrl+U", "Delete to line start"));
+        lines.push(kv("Ctrl+K", "Delete to line end"));
+        lines.push(kv("Home/End", "Jump to line start/end"));
+        lines.push(RtLine::from(""));
+
+        // Panels
+        lines.push(RtLine::from(vec![RtSpan::styled("Panels", t_fg.add_modifier(Modifier::BOLD))]));
+        lines.push(kv("Ctrl+B", "Toggle Browser panel"));
+        lines.push(kv("Ctrl+A", "Toggle Agents panel"));
+
+        self.help.overlay = Some(HelpOverlay::new(lines));
+        self.request_redraw();
+    }
+
+    pub(crate) fn toggle_help_popup(&mut self) {
+        if self.help.overlay.is_some() { self.help.overlay = None; } else { self.show_help_popup(); }
+        self.request_redraw();
     }
 
     pub(crate) fn handle_reasoning_command(&mut self, command_args: String) {
@@ -7944,6 +8005,61 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
         }
+
+        // Render help overlay (covering the history area) if active
+        if let Some(overlay) = &self.help.overlay {
+            // Global scrim across widget
+            let scrim_bg = Style::default()
+                .bg(crate::colors::overlay_scrim())
+                .fg(crate::colors::text_dim());
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    buf[(x, y)].set_style(scrim_bg);
+                }
+            }
+            let padding = 1u16;
+            let window_area = Rect {
+                x: history_area.x + padding,
+                y: history_area.y,
+                width: history_area.width.saturating_sub(padding * 2),
+                height: history_area.height,
+            };
+            Clear.render(window_area, buf);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(" ", Style::default().fg(crate::colors::text_dim())),
+                    ratatui::text::Span::styled("Help", Style::default().fg(crate::colors::text())),
+                    ratatui::text::Span::styled(" ——— ", Style::default().fg(crate::colors::text_dim())),
+                    ratatui::text::Span::styled("Esc", Style::default().fg(crate::colors::text())),
+                    ratatui::text::Span::styled(" close ", Style::default().fg(crate::colors::text_dim())),
+                ]))
+                .style(Style::default().bg(crate::colors::background()))
+                .border_style(Style::default().fg(crate::colors::border()).bg(crate::colors::background()));
+            let inner = block.inner(window_area);
+            block.render(window_area, buf);
+
+            // Paint inner bg
+            let inner_bg = Style::default().bg(crate::colors::background());
+            for y in inner.y..inner.y + inner.height {
+                for x in inner.x..inner.x + inner.width {
+                    buf[(x, y)].set_style(inner_bg);
+                }
+            }
+
+            // Body area with one cell padding
+            let body = inner.inner(ratatui::layout::Margin::new(1, 1));
+
+            // Compute visible slice
+            let visible_rows = body.height as usize;
+            self.help.body_visible_rows.set(body.height);
+            let max_off = overlay.lines.len().saturating_sub(visible_rows.max(1));
+            let skip = (overlay.scroll as usize).min(max_off);
+            let end = (skip + visible_rows).min(overlay.lines.len());
+            let visible = if skip < overlay.lines.len() { &overlay.lines[skip..end] } else { &[] };
+            let paragraph = Paragraph::new(RtText::from(visible.to_vec())).wrap(ratatui::widgets::Wrap { trim: false });
+            ratatui::widgets::Widget::render(paragraph, body, buf);
+        }
         // Finalize widget render timing
         if let Some(t0) = _perf_widget_start {
             let dt = t0.elapsed().as_nanos();
@@ -8100,6 +8216,21 @@ struct DiffsState {
     overlay: Option<DiffOverlay>,
     confirm: Option<DiffConfirm>,
     body_visible_rows: std::cell::Cell<u16>,
+}
+
+#[derive(Default)]
+struct HelpState {
+    overlay: Option<HelpOverlay>,
+    body_visible_rows: std::cell::Cell<u16>,
+}
+
+struct HelpOverlay {
+    lines: Vec<RtLine<'static>>,
+    scroll: u16,
+}
+
+impl HelpOverlay {
+    fn new(lines: Vec<RtLine<'static>>) -> Self { Self { lines, scroll: 0 } }
 }
 #[derive(Default)]
 struct PerfState {
