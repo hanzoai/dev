@@ -843,7 +843,7 @@ impl App<'_> {
                     // Rebuild the chat widget bound to a new cwd, preserving
                     // current configuration and terminal properties.
                     let mut cfg = self.config.clone();
-                    cfg.cwd = new_cwd;
+                    cfg.cwd = new_cwd.clone();
                     let mut new_widget = ChatWidget::new(
                         cfg,
                         self.app_event_tx.clone(),
@@ -855,6 +855,19 @@ impl App<'_> {
                     );
                     new_widget.enable_perf(self.timing_enabled);
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+
+                    // Surface a BackgroundEvent so the user can see the effective cwd
+                    // in the new session before any prompt runs.
+                    {
+                        use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                        let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
+                        let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                            id: "switch-cwd".to_string(),
+                            event_seq: 0,
+                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
+                            order: None,
+                        }));
+                    }
                     // Optionally submit a prompt immediately in the new session
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(prompt) = initial_prompt {
