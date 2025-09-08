@@ -1,13 +1,11 @@
-## @just-every/code v0.2.90
+## @just-every/code v0.2.91
 
-This release improves navigation, overlays, and the in-app Help, including rebranded descriptions and clearer shortcuts.
+Stability update focused on terminal recovery during unexpected background panics.
 
 ### Changes
 
-- TUI/History: Home/End jump to start/end when input is empty.
-- TUI/Overlays: Esc closes Help/Diff; hide input cursor while active.
-- TUI/Help: include Slash Commands; left-align keys; simplify delete shortcuts.
-- TUI: rebrand help and slash descriptions to "Code"; hide internal /test-approval.
+- TUI/Panic: restore terminal state and exit cleanly on any thread panic.
+- TUI/Windows: prevent broken raw mode/alt-screen after background panics under heavy load.
 
 ### Install
 
@@ -16,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.89...v0.2.90
+Compare: https://github.com/just-every/code/compare/v0.2.90...v0.2.91
