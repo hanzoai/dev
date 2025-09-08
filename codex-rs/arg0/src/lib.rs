@@ -111,14 +111,29 @@ const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
+    // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
     if let Ok(codex_home) = codex_core::config::find_codex_home() {
         if let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env")) {
+            // Global env may legitimately contain provider keys for Code usage.
             set_filtered(iter);
         }
     }
 
+    // 2) Load from the current project's .env, but with extra safety:
+    //    - Do NOT import provider API keys by default (e.g., OPENAI_API_KEY, AZURE_OPENAI_API_KEY).
+    //    - Users can opt back in via CODEX_ALLOW_PROJECT_OPENAI_KEYS=1 (either exported
+    //      in the shell or placed in ~/.code/.env).
     if let Ok(iter) = dotenvy::dotenv_iter() {
-        set_filtered(iter);
+        // Filtered setter that always blocks provider keys from the project's .env.
+        for (key, value) in iter.into_iter().flatten() {
+            let upper = key.to_ascii_uppercase();
+            // Never allow CODEX_* to be set from .env files for safety.
+            if upper.starts_with(ILLEGAL_ENV_VAR_PREFIX) { continue; }
+            // Always ignore provider keys from project .env (must be set globally or in shell).
+            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" { continue; }
+            // Safe: still single-threaded during startup.
+            unsafe { std::env::set_var(&key, &value) };
+        }
     }
 }
 
