@@ -1,12 +1,12 @@
-## @just-every/code v0.2.85
+## @just-every/code v0.2.86
 
-This release improves TUI stream ordering and approvals UX, and fixes web search event ordering.
+This release adds a new branching workflow in the TUI and improves execution reliability, with updated slash‑command docs.
 
 ### Changes
 
-- TUI: insert plan/background events near-time and keep reasoning ellipsis during streaming.
-- TUI: approvals cancel immediately on deny and use a FIFO queue.
-- Core: fix web search event ordering by stamping OrderMeta for in-turn placement.
+- TUI: add `/branch` to create worktrees, switch sessions, and finalize merges.
+- Core: treat only exit 126 as sandbox denial to avoid false escalations.
+- Docs: add comprehensive slash command reference and link from README.
 
 ### Install
 
@@ -15,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.84...v0.2.85
+Compare: https://github.com/just-every/code/compare/v0.2.85...v0.2.86
