@@ -1,13 +1,13 @@
-## @just-every/code v0.2.89
+## @just-every/code v0.2.90
 
-This release adds an in-app help overlay and improves composer editing with undo and line delete, plus smoother branch finalize handling.
+This release improves navigation, overlays, and the in-app Help, including rebranded descriptions and clearer shortcuts.
 
 ### Changes
 
-- TUI/Help: add Ctrl+H help overlay with key summary; update footer hint.
-- TUI/Input: add Ctrl+Z undo in composer and route it to Chat correctly.
-- TUI/Input: map Ctrl+Backspace to delete the current line in composer.
-- TUI/Branch: treat "nothing to commit" as success on finalize and continue cleanup.
+- TUI/History: Home/End jump to start/end when input is empty.
+- TUI/Overlays: Esc closes Help/Diff; hide input cursor while active.
+- TUI/Help: include Slash Commands; left-align keys; simplify delete shortcuts.
+- TUI: rebrand help and slash descriptions to "Code"; hide internal /test-approval.
 
 ### Install
 
@@ -16,4 +16,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.88...v0.2.89
+Compare: https://github.com/just-every/code/compare/v0.2.89...v0.2.90
