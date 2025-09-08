@@ -4603,7 +4603,6 @@ impl ChatWidget<'_> {
                 "Full Access".to_string(),
                 std::time::Duration::from_secs(4),
             );
-            self.bottom_pane.set_access_mode_label(None);
         } else {
             let persistent = if next == 0 { "Read Only" } else { "Write with Approval" };
             self.bottom_pane.set_access_mode_label(Some(persistent.to_string()));
