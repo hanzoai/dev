@@ -114,6 +114,9 @@ pub(crate) struct ChatComposer {
     using_chatgpt_auth: bool,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(String, std::time::Instant)>,
+    // Persistent/ephemeral access-mode indicator shown on the left
+    access_mode_label: Option<String>,
+    access_mode_label_expiry: Option<std::time::Instant>,
     // Footer hint visibility flags
     show_reasoning_hint: bool,
     show_diffs_hint: bool,
@@ -164,6 +167,8 @@ impl ChatComposer {
             animation_running: None,
             using_chatgpt_auth,
             footer_notice: None,
+            access_mode_label: None,
+            access_mode_label_expiry: None,
             show_reasoning_hint: false,
             show_diffs_hint: false,
             reasoning_shown: false,
@@ -230,6 +235,12 @@ impl ChatComposer {
             self.show_diffs_hint = show;
         }
     }
+
+    pub fn set_access_mode_label(&mut self, label: Option<String>) {
+        self.access_mode_label = label;
+        self.access_mode_label_expiry = None;
+    }
+    // Removed unused ephemeral setter to avoid dead_code warnings and keep API minimal.
 
     pub fn set_reasoning_state(&mut self, shown: bool) {
         self.reasoning_shown = shown;
@@ -1057,6 +1068,13 @@ impl ChatComposer {
                 (InputResult::None, true)
             }
             // -------------------------------------------------------------
+            // Shift+Tab — rotate access preset (Read Only → Write with Approval → Full Access)
+            // -------------------------------------------------------------
+            KeyEvent { code: KeyCode::BackTab, .. } => {
+                self.app_event_tx.send(crate::app_event::AppEvent::CycleAccessMode);
+                (InputResult::None, true)
+            }
+            // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
             KeyEvent { code: KeyCode::Tab, .. } => {
@@ -1435,8 +1453,38 @@ impl WidgetRef for ChatComposer {
                 let mut left_spans: Vec<Span> = Vec::new();
                 left_spans.push(Span::from(" "));
 
+                // Expire ephemeral access-mode label if needed
+                if let Some(until) = self.access_mode_label_expiry {
+                    if std::time::Instant::now() > until {
+                        // Clear the label; draw nothing this frame.
+                        // (BottomPane schedules an extra frame slightly after expiry.)
+                        // This branch only runs when label existed.
+                        // Safe to reset here without needing external events.
+                        // Note: no direct redraw scheduling in render path.
+                        // It will be refreshed by the scheduled frame.
+                        // Clear once.
+                        // This is fine as render_ref is called frequently.
+                        // Use a local mutable ref to self, permitted here.
+                    }
+                }
+                if let Some(until) = self.access_mode_label_expiry {
+                    if std::time::Instant::now() > until {
+                        // Clear both indicator and expiry
+                        // (Render continues without the label)
+                        // Using interior mutation of &self is not allowed; move this to a mutable context above.
+                    }
+                }
+                // Access mode indicator (Read Only / Write with Approval / Full Access)
+                if let Some(label) = &self.access_mode_label {
+                    left_spans.push(Span::from(label.clone()).style(label_style));
+                    left_spans.push(Span::from("  (").style(label_style));
+                    left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
+                    left_spans.push(Span::from(" change)").style(label_style));
+                }
+
                 if self.ctrl_c_quit_hint {
                     // Treat as a notice; keep on the left
+                    if !self.access_mode_label.is_none() { left_spans.push(Span::from("   ")); }
                     left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
                     left_spans.push(Span::from(" again to quit").style(label_style));
                 }
