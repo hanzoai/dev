@@ -872,7 +872,7 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(prompt) = initial_prompt {
                             if !prompt.is_empty() {
-                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Wait for explicit confirmation before merging.".to_string();
+                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/branch finalize' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
                                 widget.submit_text_message_with_preface(prompt, preface);
                             }
                         }
