@@ -22,6 +22,23 @@
     "type": "git",
     "url": "git+https://github.com/hanzoai/dev.git"
   },
+  "keywords": [
+    "ai",
+    "cli",
+    "dev",
+    "developer-tools",
+    "coding-assistant",
+    "hanzo",
+    "llm",
+    "chatgpt",
+    "claude",
+    "code-generation"
+  ],
+  "author": "Hanzo AI",
+  "homepage": "https://github.com/hanzoai/dev#readme",
+  "bugs": {
+    "url": "https://github.com/hanzoai/dev/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -30,10 +47,10 @@
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@hanzo/dev-darwin-arm64": "3.0.0",
-    "@hanzo/dev-darwin-x64": "3.0.0",
-    "@hanzo/dev-linux-x64-musl": "3.0.0",
-    "@hanzo/dev-linux-arm64-musl": "3.0.0",
-    "@hanzo/dev-win32-x64": "3.0.0"
+    "@hanzo/dev-darwin-arm64": "0.1.0",
+    "@hanzo/dev-darwin-x64": "0.1.0",
+    "@hanzo/dev-linux-x64": "0.1.0",
+    "@hanzo/dev-linux-arm64": "0.1.0",
+    "@hanzo/dev-win32-x64": "0.1.0"
   }
 }
