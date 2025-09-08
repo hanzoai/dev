@@ -3210,14 +3210,9 @@ impl ChatWidget<'_> {
                     |this| {
                         this.finalize_active_stream();
                         this.flush_interrupt_queue();
-                        // Internal message (no OrderMeta in core for approvals): allocate synthetic key
-                        let key = this.next_internal_key();
-                        let cell = history_cell::new_patch_event(
-                            history_cell::PatchEventType::ApprovalRequest,
-                            ev2.changes.clone(),
-                        );
-                        let _ = this.history_insert_with_key_global(Box::new(cell), key);
-                        // Push approval UI state to bottom pane
+                        // Push approval UI state to bottom pane and surface the patch summary there.
+                        // (Avoid inserting a duplicate summary here; handle_apply_patch_approval_now
+                        // is responsible for rendering the proposed patch once.)
                         this.handle_apply_patch_approval_now(id2, ev2);
                         this.request_redraw();
                     },
@@ -7892,6 +7887,7 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             use tokio::process::Command;
+            use std::path::PathBuf;
             // Resolve repo root and current branch name
             let git_root = match codex_core::git_worktree::get_git_root_from(&work_cwd).await {
                 Ok(p) => p,
