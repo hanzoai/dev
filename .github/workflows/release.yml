@@ -100,7 +100,7 @@ jobs:
           Get-ChildItem dev-*.zip
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dev-${{ matrix.target }}
           path: |
@@ -132,7 +132,7 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: List artifacts
         run: |
@@ -283,7 +283,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Download artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: dev-${{ matrix.target }}
 
