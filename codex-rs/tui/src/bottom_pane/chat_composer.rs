@@ -1443,7 +1443,7 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
-                // Right side: command key hints (Ctrl+R/D/C) followed by token usage if available
+                // Right side: command key hints (Ctrl+R/D/H) followed by token usage if available
                 // We will elide hints when space is tight in this order: hide reasoning, diff viewer.
                 let mut right_spans: Vec<Span> = Vec::new();
 
@@ -1484,10 +1484,10 @@ impl WidgetRef for ChatComposer {
                             spans.push(Span::from("Ctrl+D").style(key_hint_style));
                             spans.push(Span::from(" diff viewer").style(label_style));
                         }
-                        // Always show quit at the end of the command hints
+                        // Always show help at the end of the command hints
                         if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                        spans.push(Span::from("Ctrl+C").style(key_hint_style));
-                        spans.push(Span::from(" quit").style(label_style));
+                        spans.push(Span::from("Ctrl+H").style(key_hint_style));
+                        spans.push(Span::from(" help").style(label_style));
                     }
                     spans
                 };
