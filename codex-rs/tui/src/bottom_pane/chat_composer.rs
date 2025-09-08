@@ -114,6 +114,10 @@ pub(crate) struct ChatComposer {
     using_chatgpt_auth: bool,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(String, std::time::Instant)>,
+    // Persistent/ephemeral access-mode indicator shown on the left
+    access_mode_label: Option<String>,
+    access_mode_label_expiry: Option<std::time::Instant>,
+    access_mode_hint_expiry: Option<std::time::Instant>,
     // Footer hint visibility flags
     show_reasoning_hint: bool,
     show_diffs_hint: bool,
@@ -164,6 +168,9 @@ impl ChatComposer {
             animation_running: None,
             using_chatgpt_auth,
             footer_notice: None,
+            access_mode_label: None,
+            access_mode_label_expiry: None,
+            access_mode_hint_expiry: None,
             show_reasoning_hint: false,
             show_diffs_hint: false,
             reasoning_shown: false,
@@ -229,6 +236,20 @@ impl ChatComposer {
         if self.show_diffs_hint != show {
             self.show_diffs_hint = show;
         }
+    }
+
+    pub fn set_access_mode_label(&mut self, label: Option<String>) {
+        self.access_mode_label = label;
+        self.access_mode_label_expiry = None;
+        self.access_mode_hint_expiry = None;
+    }
+    pub fn set_access_mode_label_ephemeral(&mut self, label: String, dur: std::time::Duration) {
+        self.access_mode_label = Some(label);
+        self.access_mode_label_expiry = Some(std::time::Instant::now() + dur);
+        self.access_mode_hint_expiry = self.access_mode_label_expiry;
+    }
+    pub fn set_access_mode_hint_for(&mut self, dur: std::time::Duration) {
+        self.access_mode_hint_expiry = Some(std::time::Instant::now() + dur);
     }
 
     pub fn set_reasoning_state(&mut self, shown: bool) {
@@ -1057,6 +1078,13 @@ impl ChatComposer {
                 (InputResult::None, true)
             }
             // -------------------------------------------------------------
+            // Shift+Tab — rotate access preset (Read Only → Write with Approval → Full Access)
+            // -------------------------------------------------------------
+            KeyEvent { code: KeyCode::BackTab, .. } => {
+                self.app_event_tx.send(crate::app_event::AppEvent::CycleAccessMode);
+                (InputResult::None, true)
+            }
+            // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
             KeyEvent { code: KeyCode::Tab, .. } => {
@@ -1435,8 +1463,32 @@ impl WidgetRef for ChatComposer {
                 let mut left_spans: Vec<Span> = Vec::new();
                 left_spans.push(Span::from(" "));
 
+                // Access mode indicator (Read Only / Write with Approval / Full Access)
+                let show_access_label = if let Some(until) = self.access_mode_label_expiry {
+                    std::time::Instant::now() <= until
+                } else {
+                    true
+                };
+                if show_access_label { if let Some(label) = &self.access_mode_label {
+                    // Keep the access mode label bold so it stands out even with a dim footer.
+                    left_spans.push(Span::from(label.clone()).style(label_style.add_modifier(Modifier::BOLD)));
+                    // Hide the hint after the expiry window (or keep while label is ephemeral)
+                    let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
+                        std::time::Instant::now() <= until
+                    } else {
+                        // If whole label is ephemeral, show suffix while visible
+                        self.access_mode_label_expiry.is_some()
+                    };
+                    if show_suffix {
+                        left_spans.push(Span::from("  (").style(label_style));
+                        left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
+                        left_spans.push(Span::from(" change)").style(label_style));
+                    }
+                }}
+
                 if self.ctrl_c_quit_hint {
                     // Treat as a notice; keep on the left
+                    if !self.access_mode_label.is_none() { left_spans.push(Span::from("   ")); }
                     left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
                     left_spans.push(Span::from(" again to quit").style(label_style));
                 }
@@ -1550,8 +1602,13 @@ impl WidgetRef for ChatComposer {
                 line_spans.extend(right_spans);
                 line_spans.push(Span::from(" "));
 
+                // Render footer slightly dimmer than normal content across themes
                 Line::from(line_spans)
-                    .style(Style::default().fg(crate::colors::text_dim()))
+                    .style(
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::DIM),
+                    )
                     .render_ref(bottom_line_rect, buf);
             }
         }

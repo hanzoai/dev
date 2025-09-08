@@ -459,6 +459,19 @@ fn determine_repo_trust_state(
 ) -> std::io::Result<bool> {
     let config_profile = config_toml.get_config_profile(config_profile_override)?;
 
+    // If this project has explicit per-project overrides for approval and/or sandbox,
+    // honor them and skip the trust screen entirely.
+    let proj_key = config.cwd.to_string_lossy().to_string();
+    let has_per_project_overrides = config_toml
+        .projects
+        .as_ref()
+        .and_then(|m| m.get(&proj_key))
+        .map(|p| p.approval_policy.is_some() || p.sandbox_mode.is_some())
+        .unwrap_or(false);
+    if has_per_project_overrides {
+        return Ok(false);
+    }
+
     if approval_policy_overide.is_some() || sandbox_mode_override.is_some() {
         // if the user has overridden either approval policy or sandbox mode,
         // skip the trust flow
@@ -479,7 +492,7 @@ fn determine_repo_trust_state(
         config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         Ok(false)
     } else {
-        // if none of the above conditions are met, show the trust screen
+        // if none of the above conditions are met (and no per‑project overrides), show the trust screen
         Ok(true)
     }
 }
