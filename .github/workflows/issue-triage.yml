@@ -517,6 +517,7 @@ jobs:
       - name: Run Code agent to implement or respond
         timeout-minutes: 20
         if: steps.gate.outputs.allow_agent == 'true'
+        id: run_agent
         shell: bash
         run: |
           set -euo pipefail
@@ -573,6 +574,8 @@ jobs:
           esac
           echo "Agent mode: $AGENT_MODE -> sandbox: $CODE_SANDBOX"
 
+          set +e
+          set +o pipefail
           printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
@@ -581,6 +584,8 @@ jobs:
             CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
             STRICT_CARGO_HOME="1" \
             CARGO_HOME_ENFORCED="$GITHUB_WORKSPACE/.cargo-home" \
+            GIT_TERMINAL_PROMPT="0" \
+            GIT_ASKPASS="/bin/false" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
             exec \
@@ -589,6 +594,10 @@ jobs:
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
+          AGENT_RC=${PIPESTATUS[1]}
+          set -e
+          set -o pipefail
+          echo "agent_rc=$AGENT_RC" >> "$GITHUB_OUTPUT"
 
       - name: Extract agent comment (comment mode)
         if: steps.gate.outputs.agent_mode == 'comment'
