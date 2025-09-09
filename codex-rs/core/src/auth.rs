@@ -262,20 +262,19 @@ fn load_auth(
         last_refresh,
     } = auth_dot_json;
 
-    // If the auth.json has an API key, decide whether to use it.
+    // If the auth.json has an API key AND does not appear to be on a plan that
+    // should prefer AuthMode::ChatGPT, use AuthMode::ApiKey.
     if let Some(api_key) = &auth_json_api_key {
         // Should any of these be AuthMode::ChatGPT with the api_key set?
         // Does AuthMode::ChatGPT indicate that there is an auth.json that is
         // "refreshable" even if we are using the API key for auth?
         match &tokens {
-            Some(_tokens) => {
-                // When tokens are present, honor the caller's preference strictly:
-                // - If the caller prefers API key, use it.
-                // - Otherwise, prefer ChatGPT and ignore the API key.
-                if preferred_auth_method == AuthMode::ApiKey {
+            Some(tokens) => {
+                if tokens.should_use_api_key(preferred_auth_method, tokens.is_openai_email()) {
                     return Ok(Some(CodexAuth::from_api_key_with_client(api_key, client)));
+                } else {
+                    // Ignore the API key and fall through to ChatGPT auth.
                 }
-                // else: fall through to ChatGPT auth
             }
             None => {
                 // We have an API key but no tokens in the auth.json file.
