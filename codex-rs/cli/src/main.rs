@@ -156,8 +156,8 @@ struct OrderReplayArgs {
 
 #[derive(Debug, Parser)]
 struct PreviewArgs {
-    /// PR number whose prerelease assets to download (e.g., 115)
-    pr_number: u64,
+    /// Identifier: slug (preferred), or pr:<number>, or bare <number> (compat)
+    id: String,
     /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
@@ -384,12 +384,72 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
     };
 
-    let client = reqwest::Client::builder()
-        .user_agent("codex-preview/1")
-        .build()?;
-    let pr_number: u64 = args.pr_number;
+    let client = reqwest::Client::builder().user_agent("codex-preview/1").build()?;
 
-    let tag = format!("preview-pr-{}", pr_number);
+    // Resolve slug/tag from id
+    let id = args.id.trim().to_string();
+    async fn fetch_json(client: &reqwest::Client, url: &str) -> anyhow::Result<serde_json::Value> {
+        let r = client.get(url).send().await?;
+        let s = r.status();
+        let t = r.text().await?;
+        if !s.is_success() { anyhow::bail!(format!("GET {} -> {} {}", url, s.as_u16(), t)); }
+        Ok(serde_json::from_str(&t).unwrap_or(serde_json::Value::Null))
+    }
+    async fn resolve_slug_from_pr(client: &reqwest::Client, owner: &str, name: &str, pr: u64) -> anyhow::Result<String> {
+        let url = format!("https://api.github.com/repos/{owner}/{name}/pulls/{pr}");
+        let v = fetch_json(client, &url).await?;
+        let body = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
+        let re = regex::Regex::new(r"<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->").unwrap();
+        if let Some(c) = re.captures(body) { return Ok(c.get(1).unwrap().as_str().to_string()); }
+        if let Some(head) = v.get("head").and_then(|h| h.get("ref")).and_then(|s| s.as_str()) {
+            if let Some(m) = head.strip_prefix("issue-") { if let Ok(iss) = m.parse::<u64>() {
+                let url = format!("https://api.github.com/repos/{owner}/{name}/issues/{iss}/comments");
+                let arr = fetch_json(client, &url).await?;
+                if let Some(a) = arr.as_array() {
+                    for it in a {
+                        let b = it.get("body").and_then(|x| x.as_str()).unwrap_or("");
+                        if let Some(c) = re.captures(b) { return Ok(c.get(1).unwrap().as_str().to_string()); }
+                    }
+                }
+            }}
+        }
+        anyhow::bail!(format!("Could not resolve codex-id for PR {}. Ensure PR body contains <!-- codex-id: ... -->.", pr))
+    }
+    async fn latest_tag_for_slug(client: &reqwest::Client, owner: &str, name: &str, slug: &str) -> anyhow::Result<String> {
+        let base = format!("preview-{}", slug);
+        let url = format!("https://api.github.com/repos/{owner}/{name}/releases?per_page=100");
+        let v = fetch_json(client, &url).await?;
+        let mut latest = base.clone();
+        let mut max_n: u64 = 0;
+        if let Some(arr) = v.as_array() {
+            let re = regex::Regex::new(&format!(r"^{}-(\\d+)$", regex::escape(&base))).unwrap();
+            for it in arr {
+                if let Some(tag) = it.get("tag_name").and_then(|x| x.as_str()) {
+                    if tag == base { if max_n < 1 { max_n = 1; latest = base.clone(); } }
+                    else if let Some(c) = re.captures(tag) {
+                        let n: u64 = c.get(1).unwrap().as_str().parse().unwrap_or(0);
+                        if n > max_n { max_n = n; latest = tag.to_string(); }
+                    }
+                }
+            }
+        }
+        Ok(latest)
+    }
+    let (slug, tag) = if let Some(rest) = id.strip_prefix("pr:") {
+        let pr: u64 = rest.parse().context("parse pr:<number>")?;
+        let s = resolve_slug_from_pr(&client, &owner, &name, pr).await?;
+        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
+        (s, t)
+    } else if id.chars().all(|c| c.is_ascii_digit()) {
+        let pr: u64 = id.parse().context("parse PR number")?;
+        let s = resolve_slug_from_pr(&client, &owner, &name, pr).await?;
+        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
+        (s, t)
+    } else {
+        let s = id.to_lowercase();
+        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
+        (s, t)
+    };
     let base = format!("https://github.com/{owner}/{name}/releases/download/{tag}");
 
     // Try to download the best asset for this platform; prefer .tar.gz on Unix and .zip on Windows; fallback to .zst.
@@ -460,7 +520,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             ar.unpack(&out_dir)?;
             // Find extracted binary
             let bin = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code"));
-            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("code"), pr_number);
+            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("code"), slug);
             let dest = out_dir.join(dest_name);
             // Rename/move to include PR number suffix
             let _ = fs::rename(&bin, &dest).or_else(|_| { fs::copy(&bin, &dest).map(|_| () ) });
@@ -476,13 +536,13 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let mut z = ZipArchive::new(f)?;
             z.extract(&out_dir)?;
             let exe = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code.exe"));
-            // Append PR number before extension if present
+            // Append slug before extension if present
             let dest = match exe.extension().and_then(|e| e.to_str()) {
                 Some(ext) => {
                     let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("code");
-                    out_dir.join(format!("{}-{}.{}", stem, pr_number, ext))
+                    out_dir.join(format!("{}-{}.{}", stem, slug, ext))
                 }
-                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("code"), pr_number)),
+                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("code"), slug)),
             };
             let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
             println!("Downloaded preview to {}", dest.display());
@@ -495,16 +555,12 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     if path.file_name().and_then(|s| s.to_str()).map(|n| n.ends_with(".zst")).unwrap_or(false) {
         // Try to decompress .zst to 'code'
         if which::which("zstd").is_ok() {
-            // Derive base name from archive (e.g., code-aarch64-apple-darwin.zst -> code-aarch64-apple-darwin-<pr>.{exe?})
+            // Derive base name from archive (e.g., code-aarch64-apple-darwin.zst -> code-aarch64-apple-darwin-<slug>.{exe?})
             let stem = path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("code");
-            let dest = if cfg!(windows) {
-                out_dir.join(format!("{}-{}.exe", stem, pr_number))
-            } else {
-                out_dir.join(format!("{}-{}", stem, pr_number))
-            };
+            let dest = if cfg!(windows) { out_dir.join(format!("{}-{}.exe", stem, slug)) } else { out_dir.join(format!("{}-{}", stem, slug)) };
             let status = std::process::Command::new("zstd").arg("-d").arg(&path).arg("-o").arg(&dest).status()?;
             if status.success() {
                 make_exec(&dest);

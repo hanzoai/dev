@@ -110,8 +110,32 @@ jobs:
           script: |
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
-            const pr = process.env.PR_NUMBER;
-            const tag = `preview-pr-${pr}`;
+            const pr = Number(process.env.PR_NUMBER);
+            // resolve slug
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
+            const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            let slug = '';
+            const m = (pull.body || '').match(marker);
+            if (m) slug = m[1].toLowerCase();
+            if (!slug) {
+              const b = pull.head.ref || '';
+              const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
+              if (issue_number) {
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+              }
+            }
+            if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
+            // resolve latest tag for slug
+            const baseTag = `preview-${slug}`;
+            const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
+            let tag = baseTag; let maxN = 0; let hasBase = false;
+            for (const r of rels) {
+              const t = r.tag_name || '';
+              if (t === baseTag) { hasBase = true; maxN = Math.max(maxN, 1); tag = baseTag; }
+              const mm = t.match(new RegExp(`^${baseTag}-(\\d+)$`));
+              if (mm) { const n = parseInt(mm[1], 10); if (n > maxN) { maxN = n; tag = t; } }
+            }
             const releaseBase = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
             const dl = [
               `- Linux x86_64 (.zst): ${releaseBase}/code-x86_64-unknown-linux-musl.zst`,
@@ -139,7 +163,7 @@ jobs:
             }
             lines.push('## Preview command');
             lines.push('```bash');
-            lines.push(`code preview ${pr}`);
+            lines.push(`code preview ${slug}`);
             lines.push('```');
             lines.push('');
             lines.push('## Direct downloads');
@@ -235,14 +259,36 @@ jobs:
             let body = '';
             try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
             if (!body) {
-              const tag = `preview-pr-${pr}`;
+              // derive slug + latest tag
+              const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
+              const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+              let slug = '';
+              const m = (pull.body || '').match(marker);
+              if (m) slug = m[1].toLowerCase();
+              if (!slug) {
+                const b = pull.head.ref || '';
+                const im = b.match(/^issue-(\d+)$/); let issue_number2 = 0; if (im) issue_number2 = Number(im[1]);
+                if (issue_number2) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue_number2, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                }
+              }
+              const baseTag = `preview-${slug}`;
+              const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
+              let tag = baseTag; let maxN = 0; let hasBase = false;
+              for (const r of rels) {
+                const t = r.tag_name || '';
+                if (t === baseTag) { hasBase = true; maxN = Math.max(maxN, 1); tag = baseTag; }
+                const mm = t.match(new RegExp(`^${baseTag}-(\\d+)$`));
+                if (mm) { const n = parseInt(mm[1], 10); if (n > maxN) { maxN = n; tag = t; } }
+              }
               const base = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
               body = [
                 '### Preview Build',
                 '',
                 'You can run this right now! In your terminal just use:',
                 '```bash',
-                `code preview ${pr}`,
+                `code preview ${slug}`,
                 '```',
                 'This will run the version of Code we\'ve created for this issue.',
                 '',
