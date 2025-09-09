@@ -549,12 +549,13 @@ jobs:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
+            const slug = `${{ steps.slug.outputs.slug }}`;
             const body = [
               `Thanks @${context.actor}! I queued an implementation run.`,
               '',
-              'I will open a PR shortly; once the preview build finishes, this issue will receive instructions to try it with:',
+              'I will open a PR shortly; once the preview build finishes, you can try it with:',
               '```bash',
-              'code preview <PR_NUMBER>',
+              `code preview ${slug}`,
               '```'
             ].join('\n');
             await github.rest.issues.createComment({ owner, repo, issue_number, body });

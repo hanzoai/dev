@@ -244,7 +244,7 @@ jobs:
           }
           JS
 
-      - name: Post comment to linked issue (fallback to stock if needed)
+      - name: Post comment to linked issue (upsert by marker; fallback to stock)
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
@@ -256,21 +256,22 @@ jobs:
             const issue_number = Number(process.env.ISSUE_NUMBER || 0);
             const pr = Number(process.env.PR_NUMBER || 0);
             if (!issue_number) { core.notice('No linked issue detected; skipping issue comment.'); return; }
+            const ISSUE_MARK = '<!-- preview-build:issue -->';
             let body = '';
             try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
             if (!body) {
               // derive slug + latest tag
               const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
-              const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+              const slugRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
               let slug = '';
-              const m = (pull.body || '').match(marker);
+              const m = (pull.body || '').match(slugRe);
               if (m) slug = m[1].toLowerCase();
               if (!slug) {
                 const b = pull.head.ref || '';
                 const im = b.match(/^issue-(\d+)$/); let issue_number2 = 0; if (im) issue_number2 = Number(im[1]);
                 if (issue_number2) {
                   const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue_number2, per_page: 100 });
-                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                  for (const c of comments) { const mm = (c.body || '').match(slugRe); if (mm) { slug = mm[1].toLowerCase(); break; } }
                 }
               }
               const baseTag = `preview-${slug}`;
@@ -284,6 +285,7 @@ jobs:
               }
               const base = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
               body = [
+                ISSUE_MARK,
                 '### Preview Build',
                 '',
                 'You can run this right now! In your terminal just use:',
@@ -302,6 +304,14 @@ jobs:
                 `- macOS arm64 (.zst): ${base}/code-aarch64-apple-darwin.zst`,
                 `- macOS arm64 (.tar.gz): ${base}/code-aarch64-apple-darwin.tar.gz`,
                 `- Windows x86_64 (.zip): ${base}/code-x86_64-pc-windows-msvc.exe.zip`,
+                ISSUE_MARK
               ].join('\n');
             }
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            // Upsert by marker on the issue
+            const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = all.find(c => c.user?.type?.toLowerCase().includes('bot') && (c.body || '').includes(ISSUE_MARK));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

@@ -153,6 +153,49 @@ jobs:
         run: |
           git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
+      - name: Start local OpenAI proxy (no key to agent)
+        id: openai_proxy
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY secret is required to start the proxy." >&2
+            exit 1
+          fi
+          mkdir -p .github/auto
+          cat > .github/auto/openai-proxy.js <<'JS'
+          const http = require('http');
+          const https = require('https');
+          const { URL } = require('url');
+          const PORT = process.env.PORT || 5057;
+          const API_KEY = process.env.OPENAI_API_KEY || '';
+          const ALLOWED = ['/v1/chat/completions','/v1/responses'];
+          if (!API_KEY) { console.error('OPENAI_API_KEY missing'); process.exit(1); }
+          const server = http.createServer((req, res) => {
+            if (req.method !== 'POST' || !ALLOWED.some(p => req.url.startsWith(p))) {
+              res.writeHead(403, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ error: 'blocked' }));
+              return;
+            }
+            const chunks = [];
+            req.on('data', c => { chunks.push(c); if (Buffer.concat(chunks).length > 1024*1024) req.destroy(); });
+            req.on('end', () => {
+              const up = new URL('https://api.openai.com' + req.url);
+              const fw = https.request({
+                method: 'POST',
+                hostname: up.hostname,
+                path: up.pathname + up.search,
+                headers: { 'content-type': 'application/json', 'authorization': `Bearer ${API_KEY}` }
+              }, r => { res.writeHead(r.statusCode || 500, r.headers); r.pipe(res); });
+              fw.on('error', e => { res.writeHead(502, {'content-type':'application/json'}); res.end(JSON.stringify({ error:'upstream', message: e.message })); });
+              fw.end(Buffer.concat(chunks));
+            });
+          });
+          server.listen(PORT, '127.0.0.1', () => { console.log('proxy listening on 127.0.0.1:'+PORT); });
+          JS
+          node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+
       - name: Run Code agent (workspace-write)
         id: run_agent
         continue-on-error: true
@@ -184,7 +227,7 @@ jobs:
 
           set +e; set +o pipefail
           { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
-              OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY || '' }}" \
+              OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:5057/v1" \
               CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
               CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
               STRICT_CARGO_HOME="1" \
@@ -270,12 +313,16 @@ jobs:
             const owner = context.repo.owner; const repo = context.repo.repo;
             const head = `issue-${{ steps.meta.outputs.issue_number }}`;
             const base = process.env.DEFAULT_BRANCH || 'main';
-            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${{ steps.meta.outputs.issue_title }}`);
+            const titleRaw = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${{ steps.meta.outputs.issue_title }}`);
             const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
             const slug = `${{ steps.slug.outputs.slug }}`;
             const marker = slug ? `<!-- codex-id: ${slug} -->` : '';
             const footer = ['','---',`Auto-generated for issue #${{ steps.meta.outputs.issue_number }} by a workflow.`,`Author: @${context.actor}`, marker].filter(Boolean).join('\n');
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer);
+            let title = titleRaw;
+            if (slug && !title.toLowerCase().startsWith(`[${slug}]`)) {
+              title = `[${slug}] ${title}`;
+            }
             // Attempt create; if exists, reuse
             const params = { owner, repo, title, head, base, body };
             let r = await github.request('POST /repos/{owner}/{repo}/pulls', params).catch(e => e.response || { status: 0, data: {} });

@@ -331,10 +331,10 @@ jobs:
             ].join('\n');
 
             // Find existing marker comment from this bot
-            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr_number, per_page: 100 });
             const mine = comments.find(c => c.user?.type?.toLowerCase().includes('bot') && c.body?.includes(marker));
             if (mine) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr_number, body });
             }
