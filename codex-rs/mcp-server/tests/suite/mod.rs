@@ -7,4 +7,3 @@ mod create_conversation;
 mod interrupt;
 mod login;
 mod send_message;
-mod user_agent;
