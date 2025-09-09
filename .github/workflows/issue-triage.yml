@@ -197,19 +197,7 @@ jobs:
           echo "Skipping: self/bot comment"
           exit 0
 
-      - name: Handle preview feedback (label flip + ack)
-        if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
-            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number, per_page: 100 });
-            const hasNeeds = labels.some(l => l.name === 'needs-preview-feedback');
-            if (!hasNeeds) return;
-            try { await github.rest.issues.removeLabel({ owner, repo, issue_number, name: 'needs-preview-feedback' }); } catch {}
-            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['preview-feedback-received'] });
-            const body = [`Thanks @${context.actor}! We received your feedback on the preview build.`, 'Triage is reviewing it now and will follow up soon.'].join('\n\n');
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+      # Preview feedback labels are no longer used; Preview builds are handled by the PR workflow.
 
       - name: Prepare working files for the agent
         timeout-minutes: 5
@@ -515,6 +503,16 @@ jobs:
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
+      - name: Cache Cargo registry/git for agent (workspace-local)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.cargo-home/registry
+            ${{ github.workspace }}/.cargo-home/git
+          key: agent-cargo-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}
+          restore-keys: |
+            agent-cargo-${{ runner.os }}-
+
       - name: Run Code agent to implement or respond
         timeout-minutes: 20
         if: steps.gate.outputs.allow_agent == 'true'
@@ -528,8 +526,8 @@ jobs:
           AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
           # Normalize agent mode (trim whitespace/CRs)
           AGENT_MODE=$(printf '%s' "$AGENT_MODE" | tr -d '\r' | xargs)
-          # Ensure local, writable cargo dirs exist for the agent
-          mkdir -p "$RUNNER_TEMP/cargo-home" "$GITHUB_WORKSPACE/codex-rs/target"
+          # Ensure local, writable cargo dirs exist for the agent inside workspace (sandbox allows workdir writes)
+          mkdir -p "$GITHUB_WORKSPACE/.cargo-home" "$GITHUB_WORKSPACE/codex-rs/target"
           PROMPT=$(cat << 'EOP'
           <task>
             - Understand the issue and list exact edits needed (paths, snippets).
@@ -564,6 +562,7 @@ jobs:
             Set close_issue=true when your comment fully resolves the issue (e.g., answered question, duplicate with link, usage fix).
           - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
             If your changes/PR fully resolve the issue, write .github/auto/DECISION.json with close_issue=true and assignee=\"just-every-code\".
+          - Build policy: Do NOT change CARGO_HOME or CARGO_TARGET_DIR; do NOT run \"cargo update\". Use ./build-fast.sh as-is. CI sets caches for determinism and speed.
           "
           # Choose sandbox mode based on agent_mode (robust compare)
           case "$AGENT_MODE" in
@@ -576,8 +575,10 @@ jobs:
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
-            CARGO_HOME="$RUNNER_TEMP/cargo-home" \
+            CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
             CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
+            STRICT_CARGO_HOME="1" \
+            CARGO_HOME_ENFORCED="$GITHUB_WORKSPACE/.cargo-home" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
             exec \
@@ -889,8 +890,9 @@ jobs:
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           if ! git push --set-upstream origin "${BRANCH_NAME}"; then
-            # Handle non-fast-forward by force-with-lease (bot-owned triage branch)
-            git push --force-with-lease origin "${BRANCH_NAME}"
+            # Handle non-fast-forward: update remote refs and force push (bot-owned triage branch)
+            git fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
+            git push -f origin "${BRANCH_NAME}"
           fi
 
       - name: Open or update PR with AI-written title/body (no comment yet)
@@ -955,70 +957,7 @@ jobs:
               core.setOutput('number', String(pr.number || 0));
             }
 
-      - name: Preview build (Linux x86_64 MUSL) and upload artifact
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y musl-tools zstd
-          rustup target add x86_64-unknown-linux-musl
-          cd codex-rs
-          cargo fetch --locked || true
-          cargo build --release --locked --target x86_64-unknown-linux-musl --bin code
-          cd ..
-          mkdir -p preview
-          cp codex-rs/target/x86_64-unknown-linux-musl/release/code preview/code-x86_64-unknown-linux-musl
-          zstd -T0 -19 --force -o preview/code-x86_64-unknown-linux-musl.zst preview/code-x86_64-unknown-linux-musl
-
-      - name: Upload preview artifact
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: preview-x86_64-unknown-linux-musl
-          path: preview/
-          compression-level: 0
-
-      - name: Comment with run instructions (after preview upload)
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        uses: actions/github-script@v7
-        env:
-          PAT: ${{ secrets.CODE_GH_PAT }}
-          FALLBACK: ${{ github.token }}
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issue_number = Number(process.env.ISSUE_NUMBER);
-            const runId = context.runId;
-            const body = [
-              '### Preview Build',
-              '',
-              'You can run this right now! In your terminal just use:',
-              '```bash',
-              `code preview ${runId}`,
-              '```',
-              'This will run the version of Code we\'ve created for this issue.',
-              '',
-              'After you run it, please comment here and let me know if it does what you need.',
-            ].join('\n');
-            async function commentIssue(token, msg){
-              return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`,{
-                method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({ body: msg })
-              });
-            }
-            let rc = await commentIssue(process.env.PAT, body);
-            if (rc.status === 403) rc = await commentIssue(process.env.FALLBACK, body);
-            if (!rc.ok) core.warning(`comment with artifacts failed: ${rc.status} ${rc.statusText}`);
-
-      - name: "Add label: needs-preview-feedback"
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
-            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['needs-preview-feedback'] });
+      # Preview artifacts and feedback labels are no longer handled here. Cross-platform preview builds are handled by the PR Preview Build workflow.
 
       - name: Assign (PR path; PAT→GITHUB_TOKEN fallback)
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'

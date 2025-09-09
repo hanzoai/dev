@@ -38,7 +38,108 @@ env:
   JQ_VERSION: '1.7.1'
 
 jobs:
+  precheck:
+    name: Precheck (no-op gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      action: ${{ steps.check.outputs.action }}
+      upstream_only: ${{ steps.check.outputs.upstream_only }}
+      merge_only: ${{ steps.check.outputs.merge_only }}
+      upstream_in_merge: ${{ steps.check.outputs.upstream_in_merge }}
+    steps:
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: "Quick precheck: compute upstream/merge deltas"
+        id: check
+        shell: bash
+        env:
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || true
+          git fetch --no-tags --prune origin "${DEFAULT_BRANCH}"
+          HAS_MERGE_BRANCH=false
+          if git ls-remote --exit-code --heads origin "${MERGE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --prune origin "${MERGE_BRANCH}"
+            HAS_MERGE_BRANCH=true
+          fi
+          git fetch --no-tags --prune upstream \
+            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          # Count exclusive commits to determine work type
+          upstream_only=$(git rev-list --count "upstream/${UPSTREAM_BRANCH}" --not "origin/${DEFAULT_BRANCH}" || echo 0)
+          merge_only=0
+          if [ "$HAS_MERGE_BRANCH" = true ]; then
+            merge_only=$(git rev-list --count "origin/${MERGE_BRANCH}" --not "origin/${DEFAULT_BRANCH}" || echo 0)
+          fi
+          upstream_in_merge=false
+          if [ "$HAS_MERGE_BRANCH" = true ] && git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${MERGE_BRANCH}"; then
+            upstream_in_merge=true
+          fi
+
+          action=no_work
+          if [ "$upstream_only" -gt 0 ] && [ "$upstream_in_merge" != true ]; then
+            action=merge
+          elif [ "$merge_only" -gt 0 ] || [ "$upstream_in_merge" = true ]; then
+            action=pr_only
+          fi
+
+          {
+            echo "action=$action";
+            echo "upstream_only=$upstream_only";
+            echo "merge_only=$merge_only";
+            echo "upstream_in_merge=$upstream_in_merge";
+          } | tee -a "$GITHUB_OUTPUT"
+
+          {
+            echo "### Upstream Merge: Precheck";
+            echo "- action: ${action}";
+            echo "- upstream_only: ${upstream_only}";
+            echo "- merge_only: ${merge_only}";
+            echo "- upstream_in_merge: ${upstream_in_merge}";
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close stale upstream-merge PR on skip when zero diff (opt-in)
+        if: steps.check.outputs.skip == 'true' && steps.check.outputs.mirror_on_skip == 'true' && env.CLOSE_ZERO_DIFF_ON_SKIP == 'true'
+        uses: actions/github-script@v7
+        env:
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.MERGE_BRANCH;
+            const base = process.env.DEFAULT_BRANCH;
+            const headRef = `${owner}:${head}`;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
+            if (!prs.data.length) { return; }
+            let zeroDiff = false;
+            try {
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}` });
+              zeroDiff = (cmp.data.files || []).length === 0;
+            } catch (e) {
+              core.warning(`Compare failed (${base}...${head}): ${e.message}. Skipping.`);
+              return;
+            }
+            if (zeroDiff) {
+              const pr = prs.data[0];
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: upstream merge has no net file changes vs base.' });
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
+              core.notice(`Closed PR #${pr.number} due to zero diff (skip path).`);
+            }
+
   merge:
+    needs: [precheck]
+    if: needs.precheck.outputs.action == 'merge'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -84,6 +185,22 @@ jobs:
             git fetch --no-tags --prune --filter=blob:none origin "${MERGE_BRANCH}"
             HAS_MERGE_BRANCH=true
           fi
+          git fetch --no-tags --prune --filter=blob:none upstream \
+            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          # Evaluate ancestor relationships and expose results as step outputs
+          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=upstream_ancestor_of_default" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_MERGE_BRANCH" = true ] && git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${MERGE_BRANCH}"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=upstream_ancestor_of_merge_branch" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=upstream_has_new_commits" >> "$GITHUB_OUTPUT"
+            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Summarize quick check
         if: always()
@@ -94,24 +211,6 @@ jobs:
             echo "- reason: ${{ steps.check_upstream.outputs.skip_reason || 'n/a' }}";
             echo "- mirror_on_skip: ${{ steps.check_upstream.outputs.mirror_on_skip || 'false' }}";
           } >> "$GITHUB_STEP_SUMMARY"
-          git fetch --no-tags --prune --filter=blob:none upstream \
-            "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
-          # Evaluate ancestor relationships
-          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${DEFAULT_BRANCH}"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=upstream_ancestor_of_default" >> "$GITHUB_OUTPUT"
-            echo "mirror_on_skip=true" >> "$GITHUB_OUTPUT"
-            echo "No new upstream commits beyond default; skipping.";
-          elif [ "$HAS_MERGE_BRANCH" = true ] && git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" "origin/${MERGE_BRANCH}"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=upstream_ancestor_of_merge_branch" >> "$GITHUB_OUTPUT"
-            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
-            echo "Upstream already contained in merge branch '${MERGE_BRANCH}'; skipping to avoid duplicate runs.";
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=upstream_has_new_commits" >> "$GITHUB_OUTPUT"
-            echo "mirror_on_skip=false" >> "$GITHUB_OUTPUT"
-          fi
 
       # Expensive setup only runs if we are not skipping.
       - name: Setup Rust toolchain (match repo)
@@ -798,7 +897,6 @@ jobs:
           if-no-files-found: warn
           path: .github/auto/MERGE_REPORT.md
       - name: Open or update PR (use agent-supplied title/body if present)
-        if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
@@ -850,34 +948,57 @@ jobs:
               core.notice(`Created PR #${pr.data.number}`);
             }
 
-      - name: Close stale upstream-merge PR on skip when zero diff (opt-in)
-        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true' && env.CLOSE_ZERO_DIFF_ON_SKIP == 'true'
+  pr:
+    name: Open/Update PR (no merge work)
+    needs: [precheck]
+    if: needs.precheck.outputs.action == 'pr_only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open or update PR (use agent-supplied title/body if present)
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+          UPSTREAM_BRANCH: ${{ env.UPSTREAM_BRANCH }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         with:
           github-token: ${{ secrets.CODE_GH_PAT || github.token }}
           script: |
+            const fs = require('fs');
+            function readOrDefault(p, dflt) { try { const t = fs.readFileSync(p,'utf8').trim(); return t || dflt; } catch { return dflt; } }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const head = process.env.MERGE_BRANCH;
             const base = process.env.DEFAULT_BRANCH;
-            const headRef = `${owner}:${head}`;
-            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
-            if (!prs.data.length) { return; }
-            // Only close if zero diff (opt-in path; branch is carried forward)
+            const dfltTitle = `Upstream merge: ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}`;
+            const title = readOrDefault('.github/auto/PR_TITLE.txt', dfltTitle);
+            let body = readOrDefault('.github/auto/PR_BODY.md', '');
+            if (!body) { body = `This PR merges ${process.env.UPSTREAM_REPO}@${process.env.UPSTREAM_BRANCH} into ${base}.`; }
+            const ref = `heads/${head}`;
+            try { await github.rest.git.getRef({ owner, repo, ref }); } catch (e) {
+              core.notice(`Branch '${head}' not found on origin; skipping PR creation.`); return;
+            }
             let zeroDiff = false;
             try {
               const cmp = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}` });
               zeroDiff = (cmp.data.files || []).length === 0;
             } catch (e) {
-              core.warning(`Compare failed (${base}...${head}): ${e.message}. Skipping.`);
-              return;
+              core.warning(`Compare failed (${base}...${head}): ${e.message}. Proceeding to PR creation.`);
             }
-            if (zeroDiff) {
+            if (zeroDiff) { core.notice('Zero diff vs base; skipping PR creation.'); return; }
+            const headRef = `${owner}:${head}`;
+            const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
+            if (prs.data.length) {
               const pr = prs.data[0];
-              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: 'Closing: upstream merge has no net file changes vs base.' });
-              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
-              core.notice(`Closed PR #${pr.number} due to zero diff (skip path).`);
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, title, body });
+              core.notice(`Updated PR #${pr.number}`);
+            } else {
+              const pr = await github.rest.pulls.create({ owner, repo, title, head: headRef, base, body });
+              core.notice(`Created PR #${pr.data.number}`);
             }
