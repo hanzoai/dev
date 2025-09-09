@@ -1636,7 +1636,7 @@ impl WidgetRef for ChatComposer {
             // Create centered title with spinner and spaces
             let title_line = Line::from(vec![
                 Span::raw(" "), // Space before spinner
-                Span::styled(spinner_str.to_string(), Style::default().fg(crate::colors::info())),
+                Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
                 Span::styled(
                     format!(" {}... ", self.status_message),
                     Style::default().fg(crate::colors::info()),
