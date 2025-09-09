@@ -1571,6 +1571,7 @@ async fn submission_loop(
                 }
                 // Optionally resume an existing rollout.
                 let mut restored_items: Option<Vec<ResponseItem>> = None;
+                let mut rollout_path_for_session: Option<std::path::PathBuf> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
                         match RolloutRecorder::resume(&config, path).await {
@@ -1579,6 +1580,7 @@ async fn submission_loop(
                                 if !saved.items.is_empty() {
                                     restored_items = Some(saved.items);
                                 }
+                                rollout_path_for_session = Some(path.clone());
                                 Some(rec)
                             }
                             Err(e) => {
@@ -1596,7 +1598,10 @@ async fn submission_loop(
                         match RolloutRecorder::new(&config, session_id, user_instructions.clone())
                             .await
                         {
-                            Ok(r) => Some(r),
+                            Ok((r, path)) => {
+                                rollout_path_for_session = Some(path);
+                                Some(r)
+                            }
                             Err(e) => {
                                 warn!("failed to initialise rollout recorder: {e}");
                                 None
@@ -1727,6 +1732,7 @@ async fn submission_loop(
                     msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                         session_id,
                         model,
+                        rollout_path: rollout_path_for_session.unwrap_or_else(|| config.codex_home.join("sessions")).join("unknown.jsonl"),
                         history_log_id,
                         history_entry_count,
                     }),
