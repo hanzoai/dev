@@ -8,6 +8,11 @@ use std::path::PathBuf;
 use wildmatch::WildMatchPattern;
 
 use serde::Deserialize;
+// Re-export selected config enums from protocol for workspace callers that
+// historically imported them from `codex_core::config_types`.
+pub use codex_protocol::config_types::ReasoningEffort;
+pub use codex_protocol::config_types::ReasoningSummary;
+pub use codex_protocol::config_types::Verbosity;
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct McpServerConfig {
