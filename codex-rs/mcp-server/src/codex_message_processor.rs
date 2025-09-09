@@ -58,8 +58,8 @@ pub(crate) struct CodexMessageProcessor {
     codex_linux_sandbox_exe: Option<PathBuf>,
     _config: Arc<Config>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
-    // Queue of pending interrupt requests per conversation (unused in this minimal impl).
-    pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
+    // Queue of pending interrupt requests per conversation (currently unused).
+    _pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
 }
 
 impl CodexMessageProcessor {
@@ -77,7 +77,7 @@ impl CodexMessageProcessor {
             codex_linux_sandbox_exe,
             _config: config,
             conversation_listeners: HashMap::new(),
-            pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
+            _pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
