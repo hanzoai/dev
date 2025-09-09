@@ -85,7 +85,7 @@ enum Subcommand {
     /// Diagnose PATH, binary collisions, and versions.
     Doctor,
 
-    /// Download and run preview artifact for a GitHub run id.
+    /// Download and run preview artifact by slug.
     Preview(PreviewArgs),
 }
 
@@ -156,8 +156,8 @@ struct OrderReplayArgs {
 
 #[derive(Debug, Parser)]
 struct PreviewArgs {
-    /// Identifier: slug (preferred), or pr:<number>, or bare <number> (compat)
-    id: String,
+    /// Slug identifier (e.g., faster-downloads)
+    slug: String,
     /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
@@ -387,33 +387,13 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let client = reqwest::Client::builder().user_agent("codex-preview/1").build()?;
 
     // Resolve slug/tag from id
-    let id = args.id.trim().to_string();
+    let id = args.slug.trim().to_string();
     async fn fetch_json(client: &reqwest::Client, url: &str) -> anyhow::Result<serde_json::Value> {
         let r = client.get(url).send().await?;
         let s = r.status();
         let t = r.text().await?;
         if !s.is_success() { anyhow::bail!(format!("GET {} -> {} {}", url, s.as_u16(), t)); }
         Ok(serde_json::from_str(&t).unwrap_or(serde_json::Value::Null))
-    }
-    async fn resolve_slug_from_pr(client: &reqwest::Client, owner: &str, name: &str, pr: u64) -> anyhow::Result<String> {
-        let url = format!("https://api.github.com/repos/{owner}/{name}/pulls/{pr}");
-        let v = fetch_json(client, &url).await?;
-        let body = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
-        let re = regex::Regex::new(r"<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->").unwrap();
-        if let Some(c) = re.captures(body) { return Ok(c.get(1).unwrap().as_str().to_string()); }
-        if let Some(head) = v.get("head").and_then(|h| h.get("ref")).and_then(|s| s.as_str()) {
-            if let Some(m) = head.strip_prefix("issue-") { if let Ok(iss) = m.parse::<u64>() {
-                let url = format!("https://api.github.com/repos/{owner}/{name}/issues/{iss}/comments");
-                let arr = fetch_json(client, &url).await?;
-                if let Some(a) = arr.as_array() {
-                    for it in a {
-                        let b = it.get("body").and_then(|x| x.as_str()).unwrap_or("");
-                        if let Some(c) = re.captures(b) { return Ok(c.get(1).unwrap().as_str().to_string()); }
-                    }
-                }
-            }}
-        }
-        anyhow::bail!(format!("Could not resolve codex-id for PR {}. Ensure PR body contains <!-- codex-id: ... -->.", pr))
     }
     async fn latest_tag_for_slug(client: &reqwest::Client, owner: &str, name: &str, slug: &str) -> anyhow::Result<String> {
         let base = format!("preview-{}", slug);
@@ -435,21 +415,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         }
         Ok(latest)
     }
-    let (slug, tag) = if let Some(rest) = id.strip_prefix("pr:") {
-        let pr: u64 = rest.parse().context("parse pr:<number>")?;
-        let s = resolve_slug_from_pr(&client, &owner, &name, pr).await?;
-        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
-        (s, t)
-    } else if id.chars().all(|c| c.is_ascii_digit()) {
-        let pr: u64 = id.parse().context("parse PR number")?;
-        let s = resolve_slug_from_pr(&client, &owner, &name, pr).await?;
-        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
-        (s, t)
-    } else {
-        let s = id.to_lowercase();
-        let t = latest_tag_for_slug(&client, &owner, &name, &s).await?;
-        (s, t)
-    };
+    let slug = id.to_lowercase();
+    let tag = latest_tag_for_slug(&client, &owner, &name, &slug).await?;
+    let (slug, tag) = (slug, tag);
     let base = format!("https://github.com/{owner}/{name}/releases/download/{tag}");
 
     // Try to download the best asset for this platform; prefer .tar.gz on Unix and .zip on Windows; fallback to .zst.
