@@ -1,13 +1,10 @@
-## @just-every/code v0.2.101
+## @just-every/code v0.2.102
 
-This release improves build reliability, restores core exports, and brings a few TUI and MCP usability fixes.
+This release tightens triage push behavior and improves agent setup reliability.
 
 ### Changes
-- Build: remove OpenSSL by using rustls in codex-ollama; fix macOS whoami scope.
-- Core: restore API re-exports and resolve visibility warning.
-- TUI: Ctrl+C clears non-empty prompts.
-- TUI: paste with Ctrl+V checks file_list.
-- MCP: add per-server startup timeout.
+- CI/Triage: fetch remote before push and fall back to force-with-lease on non-fast-forward for bot-owned branches.
+- Agents: pre-create writable CARGO_HOME and target dirs for agent runs to avoid permission errors.
 
 ### Install
 ```
@@ -15,5 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.100...v0.2.101
-
+Compare: https://github.com/just-every/code/compare/v0.2.101...v0.2.102
