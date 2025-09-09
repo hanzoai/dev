@@ -282,6 +282,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
         Clear.render(render_area, buf);
 
+        // Add one row of padding above the top border (clear + background)
+        if render_area.y > 0 {
+            let pad = Rect { x: render_area.x, y: render_area.y - 1, width: render_area.width, height: 1 };
+            Clear.render(pad, buf);
+            let pad_bg = Block::default().style(Style::default().bg(crate::colors::background()));
+            pad_bg.render(pad, buf);
+        }
+
         // Build a styled title similar to Diff Viewer
         let t_dim = Style::default().fg(crate::colors::text_dim());
         let t_fg = Style::default().fg(crate::colors::text());
@@ -482,27 +490,6 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         } else {
             lines.push(Line::from(" "));
         }
-
-        lines.push(Line::from(vec![
-            Span::styled("←→", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
-            Span::styled(" tabs • ", Style::default().fg(theme.text_dim)),
-            Span::styled("↑↓", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
-            Span::styled(" select • ", Style::default().fg(theme.text_dim)),
-            Span::styled(
-                "Enter",
-                Style::default()
-                    .fg(theme.keyword)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" confirm • ", Style::default().fg(theme.text_dim)),
-            Span::styled(
-                "Esc",
-                Style::default()
-                    .fg(theme.keyword)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" cancel", Style::default().fg(theme.text_dim)),
-        ]));
 
         // Render the body content paragraph inside body area
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
