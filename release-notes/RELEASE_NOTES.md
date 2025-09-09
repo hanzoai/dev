@@ -1,10 +1,11 @@
-## @just-every/code v0.2.102
+## @just-every/code v0.2.103
 
-This release tightens triage push behavior and improves agent setup reliability.
+This release improves build ergonomics and stabilizes CI/triage behavior.
 
 ### Changes
-- CI/Triage: fetch remote before push and fall back to force-with-lease on non-fast-forward for bot-owned branches.
-- Agents: pre-create writable CARGO_HOME and target dirs for agent runs to avoid permission errors.
+- Build: add STRICT_CARGO_HOME to enforce CARGO_HOME; default stays repo-local when unset.
+- Triage/Agent: standardize CARGO_HOME and share with rust-cache; prevent env overrides and unintended cargo updates.
+- CI/Upstream-merge: fix YAML quoting and no-op outputs; split precheck and gate heavy work at job level for reliability.
 
 ### Install
 ```
@@ -12,4 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.101...v0.2.102
+Compare: https://github.com/just-every/code/compare/v0.2.102...v0.2.103
