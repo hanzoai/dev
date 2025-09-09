@@ -13,6 +13,7 @@ use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Tabs;
+use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
@@ -281,28 +282,22 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         // Use full width for better integration and draw an outer border
         let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
 
-        // Clear and fill background
-        for y in render_area.y..render_area.y + render_area.height {
-            for x in render_area.x..render_area.x + render_area.width {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_style(Style::default().bg(theme.background));
-                }
-            }
-        }
+        // Clear then fill outer area similar to Diff Viewer (selection background)
+        Clear.render(render_area, buf);
 
         let outer = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_focused))
-            .style(Style::default().bg(theme.background).fg(theme.text));
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::selection()).fg(theme.text));
         outer.clone().render(render_area, buf);
         let inner = outer.inner(render_area);
 
         // Split inner into a 3-row tabs header and the body (like Diff Viewer)
         let [tabs_area_all, body_area] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(inner);
 
-        // Fill tabs strip with selection background so inactive tabs blend in
-        let tabs_bg = Block::default().style(Style::default().bg(crate::colors::selection()));
-        tabs_bg.render(tabs_area_all, buf);
+        // Fill inner content with selection so inactive tabs blend in (Diff Viewer parity)
+        let inner_bg = Block::default().style(Style::default().bg(crate::colors::selection()));
+        inner_bg.render(tabs_area_all, buf);
 
         // Center the tabs within the 3-row header
         let [_, tabs_area, _] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
@@ -321,7 +316,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             .divider(" ");
         Widget::render(tabs, tabs_area, buf);
 
-        // Body background (standard background, not selection)
+        // Body background uses normal background (like Diff Viewer)
         let body_bg = Block::default().style(Style::default().bg(crate::colors::background()));
         body_bg.render(body_area, buf);
 
