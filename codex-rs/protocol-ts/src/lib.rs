@@ -47,6 +47,9 @@ pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
     codex_protocol::mcp_protocol::ExecCommandApprovalParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ExecCommandApprovalResponse::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ServerNotification::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::ListConversationsResponse::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::ResumeConversationResponse::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::ArchiveConversationResponse::export_all_to(out_dir)?;
 
     generate_index_ts(out_dir)?;
 
