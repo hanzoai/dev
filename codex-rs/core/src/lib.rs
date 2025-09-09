@@ -67,6 +67,12 @@ pub mod spawn;
 pub mod terminal;
 mod tool_apply_patch;
 pub mod turn_diff_tracker;
+<<<<<<< HEAD
+=======
+pub use rollout::RolloutRecorder;
+pub use rollout::SessionMeta;
+pub use rollout::list::ConversationItem;
+>>>>>>> upstream/main
 pub use rollout::list::ConversationsPage;
 mod user_notification;
 pub mod util;

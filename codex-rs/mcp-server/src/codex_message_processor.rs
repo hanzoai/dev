@@ -1,74 +1,111 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use codex_core::AuthManager;
-use codex_core::CodexConversation;
-use codex_core::ConversationManager;
-use codex_core::NewConversation;
-use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
-use codex_core::config::ConfigToml;
-use codex_core::config::load_config_as_toml;
-use codex_core::git_info::git_diff_to_remote;
-use codex_core::protocol::ApplyPatchApprovalRequestEvent;
-use codex_core::protocol::Event;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::ExecApprovalRequestEvent;
-use codex_protocol::protocol::ReviewDecision;
-use mcp_types::JSONRPCErrorError;
-use mcp_types::RequestId;
-use tokio::sync::Mutex;
-use tokio::sync::oneshot;
-use tracing::error;
-use uuid::Uuid;
-
 use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::json_to_toml::json_to_toml;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
-use codex_protocol::protocol::TurnAbortReason;
+use codex_core::AuthManager;
+use codex_core::CodexConversation;
+use codex_core::ConversationManager;
+use codex_core::Cursor as RolloutCursor;
+use codex_core::NewConversation;
+use codex_core::RolloutRecorder;
+use codex_core::SessionMeta;
+use codex_core::auth::CLIENT_ID;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
+use codex_core::config::ConfigToml;
+use codex_core::config::load_config_as_toml;
+use codex_core::default_client::get_codex_user_agent;
+use codex_core::exec::ExecParams;
+use codex_core::exec_env::create_env;
+use codex_core::get_platform_sandbox;
+use codex_core::git_info::git_diff_to_remote;
+use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+use codex_core::protocol::Event;
+use codex_core::protocol::EventMsg;
+use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::InputItem as CoreInputItem;
 use codex_core::protocol::Op;
-use codex_core::protocol as core_protocol;
+use codex_core::protocol::ReviewDecision;
+use codex_login::ServerOptions as LoginServerOptions;
+use codex_login::ShutdownHandle;
+use codex_login::run_login_server;
 use codex_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
 use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalParams;
 use codex_protocol::mcp_protocol::ApplyPatchApprovalResponse;
+use codex_protocol::mcp_protocol::AuthMode;
+use codex_protocol::mcp_protocol::AuthStatusChangeNotification;
 use codex_protocol::mcp_protocol::ClientRequest;
 use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::mcp_protocol::ConversationSummary;
 use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
+use codex_protocol::mcp_protocol::ExecArbitraryCommandResponse;
 use codex_protocol::mcp_protocol::ExecCommandApprovalParams;
 use codex_protocol::mcp_protocol::ExecCommandApprovalResponse;
-use codex_protocol::mcp_protocol::GetConfigTomlResponse;
+use codex_protocol::mcp_protocol::ExecOneOffCommandParams;
+use codex_protocol::mcp_protocol::GetUserAgentResponse;
+use codex_protocol::mcp_protocol::GetUserSavedConfigResponse;
+use codex_protocol::mcp_protocol::GitDiffToRemoteResponse;
 use codex_protocol::mcp_protocol::InputItem as WireInputItem;
 use codex_protocol::mcp_protocol::InterruptConversationParams;
 use codex_protocol::mcp_protocol::InterruptConversationResponse;
-// Unused login-related and diff param imports removed
-use codex_protocol::mcp_protocol::GitDiffToRemoteResponse;
+use codex_protocol::mcp_protocol::ListConversationsParams;
+use codex_protocol::mcp_protocol::ListConversationsResponse;
+use codex_protocol::mcp_protocol::LoginChatGptCompleteNotification;
+use codex_protocol::mcp_protocol::LoginChatGptResponse;
 use codex_protocol::mcp_protocol::NewConversationParams;
 use codex_protocol::mcp_protocol::NewConversationResponse;
 use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
 use codex_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::ResumeConversationParams;
 use codex_protocol::mcp_protocol::SendUserMessageParams;
 use codex_protocol::mcp_protocol::SendUserMessageResponse;
 use codex_protocol::mcp_protocol::SendUserTurnParams;
 use codex_protocol::mcp_protocol::SendUserTurnResponse;
+use codex_protocol::mcp_protocol::ServerNotification;
+use codex_protocol::mcp_protocol::UserSavedConfig;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::InputMessageKind;
+use codex_protocol::protocol::USER_MESSAGE_BEGIN;
+use mcp_types::JSONRPCErrorError;
+use mcp_types::RequestId;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::sync::oneshot;
+use tracing::error;
+use uuid::Uuid;
 
-// Removed deprecated ChatGPT login support scaffolding
+// Duration before a ChatGPT login attempt is abandoned.
+const LOGIN_CHATGPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+struct ActiveLogin {
+    shutdown_handle: ShutdownHandle,
+    login_id: Uuid,
+}
+
+impl ActiveLogin {
+    fn drop(&self) {
+        self.shutdown_handle.shutdown();
+    }
+}
 
 /// Handles JSON-RPC messages for Codex conversations.
 pub(crate) struct CodexMessageProcessor {
-    _auth_manager: Arc<AuthManager>,
+    auth_manager: Arc<AuthManager>,
     conversation_manager: Arc<ConversationManager>,
     outgoing: Arc<OutgoingMessageSender>,
     codex_linux_sandbox_exe: Option<PathBuf>,
-    _config: Arc<Config>,
+    config: Arc<Config>,
     conversation_listeners: HashMap<Uuid, oneshot::Sender<()>>,
+    active_login: Arc<Mutex<Option<ActiveLogin>>>,
     // Queue of pending interrupt requests per conversation. We reply when TurnAborted arrives.
-    pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
+    pending_interrupts: Arc<Mutex<HashMap<ConversationId, Vec<RequestId>>>>,
 }
 
 impl CodexMessageProcessor {
@@ -80,12 +117,13 @@ impl CodexMessageProcessor {
         config: Arc<Config>,
     ) -> Self {
         Self {
-            _auth_manager: auth_manager,
+            auth_manager,
             conversation_manager,
             outgoing,
             codex_linux_sandbox_exe,
-            _config: config,
+            config,
             conversation_listeners: HashMap::new(),
+            active_login: Arc::new(Mutex::new(None)),
             pending_interrupts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -98,8 +136,17 @@ impl CodexMessageProcessor {
                 // created before processing any subsequent messages.
                 self.process_new_conversation(request_id, params).await;
             }
+            ClientRequest::ListConversations { request_id, params } => {
+                self.handle_list_conversations(request_id, params).await;
+            }
+            ClientRequest::ResumeConversation { request_id, params } => {
+                self.handle_resume_conversation(request_id, params).await;
+            }
             ClientRequest::SendUserMessage { request_id, params } => {
                 self.send_user_message(request_id, params).await;
+            }
+            ClientRequest::SendUserTurn { request_id, params } => {
+                self.send_user_turn(request_id, params).await;
             }
             ClientRequest::InterruptConversation { request_id, params } => {
                 self.interrupt_conversation(request_id, params).await;
@@ -110,54 +157,250 @@ impl CodexMessageProcessor {
             ClientRequest::RemoveConversationListener { request_id, params } => {
                 self.remove_conversation_listener(request_id, params).await;
             }
-            ClientRequest::SendUserTurn { request_id, params } => {
-                self.send_user_turn_compat(request_id, params).await;
-            }
-            ClientRequest::LoginChatGpt { request_id } => {
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "login is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
-            }
-            ClientRequest::CancelLoginChatGpt { request_id, .. } => {
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "cancel login is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
-            }
-            ClientRequest::LogoutChatGpt { request_id } => {
-                // Not supported by this server implementation
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "logout is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
-            }
-            ClientRequest::GetAuthStatus { request_id, .. } => {
-                // Not supported by this server implementation
-                let error = JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: "auth status is not supported by this server".to_string(),
-                    data: None,
-                };
-                self.outgoing.send_error(request_id, error).await;
-            }
             ClientRequest::GitDiffToRemote { request_id, params } => {
                 self.git_diff_to_origin(request_id, params.cwd).await;
             }
-            ClientRequest::GetConfigToml { request_id } => {
-                self.get_config_toml(request_id).await;
+            ClientRequest::LoginChatGpt { request_id } => {
+                self.login_chatgpt(request_id).await;
+            }
+            ClientRequest::CancelLoginChatGpt { request_id, params } => {
+                self.cancel_login_chatgpt(request_id, params.login_id).await;
+            }
+            ClientRequest::LogoutChatGpt { request_id } => {
+                self.logout_chatgpt(request_id).await;
+            }
+            ClientRequest::GetAuthStatus { request_id, params } => {
+                self.get_auth_status(request_id, params).await;
+            }
+            ClientRequest::GetUserSavedConfig { request_id } => {
+                self.get_user_saved_config(request_id).await;
+            }
+            ClientRequest::GetUserAgent { request_id } => {
+                self.get_user_agent(request_id).await;
+            }
+            ClientRequest::ExecOneOffCommand { request_id, params } => {
+                self.exec_one_off_command(request_id, params).await;
             }
         }
     }
 
-    async fn get_config_toml(&self, request_id: RequestId) {
-        let toml_value = match load_config_as_toml(&self._config.codex_home) {
+    async fn login_chatgpt(&mut self, request_id: RequestId) {
+        let config = self.config.as_ref();
+
+        let opts = LoginServerOptions {
+            open_browser: false,
+            ..LoginServerOptions::new(
+                config.codex_home.clone(),
+                CLIENT_ID.to_string(),
+                config.responses_originator_header.clone(),
+            )
+        };
+
+        enum LoginChatGptReply {
+            Response(LoginChatGptResponse),
+            Error(JSONRPCErrorError),
+        }
+
+        let reply = match run_login_server(opts) {
+            Ok(server) => {
+                let login_id = Uuid::new_v4();
+                let shutdown_handle = server.cancel_handle();
+
+                // Replace active login if present.
+                {
+                    let mut guard = self.active_login.lock().await;
+                    if let Some(existing) = guard.take() {
+                        existing.drop();
+                    }
+                    *guard = Some(ActiveLogin {
+                        shutdown_handle: shutdown_handle.clone(),
+                        login_id,
+                    });
+                }
+
+                let response = LoginChatGptResponse {
+                    login_id,
+                    auth_url: server.auth_url.clone(),
+                };
+
+                // Spawn background task to monitor completion.
+                let outgoing_clone = self.outgoing.clone();
+                let active_login = self.active_login.clone();
+                let auth_manager = self.auth_manager.clone();
+                tokio::spawn(async move {
+                    let (success, error_msg) = match tokio::time::timeout(
+                        LOGIN_CHATGPT_TIMEOUT,
+                        server.block_until_done(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => (true, None),
+                        Ok(Err(err)) => (false, Some(format!("Login server error: {err}"))),
+                        Err(_elapsed) => {
+                            // Timeout: cancel server and report
+                            shutdown_handle.shutdown();
+                            (false, Some("Login timed out".to_string()))
+                        }
+                    };
+                    let payload = LoginChatGptCompleteNotification {
+                        login_id,
+                        success,
+                        error: error_msg,
+                    };
+                    outgoing_clone
+                        .send_server_notification(ServerNotification::LoginChatGptComplete(payload))
+                        .await;
+
+                    // Send an auth status change notification.
+                    if success {
+                        // Update in-memory auth cache now that login completed.
+                        auth_manager.reload();
+
+                        // Notify clients with the actual current auth mode.
+                        let current_auth_method = auth_manager.auth().map(|a| a.mode);
+                        let payload = AuthStatusChangeNotification {
+                            auth_method: current_auth_method,
+                        };
+                        outgoing_clone
+                            .send_server_notification(ServerNotification::AuthStatusChange(payload))
+                            .await;
+                    }
+
+                    // Clear the active login if it matches this attempt. It may have been replaced or cancelled.
+                    let mut guard = active_login.lock().await;
+                    if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+                        *guard = None;
+                    }
+                });
+
+                LoginChatGptReply::Response(response)
+            }
+            Err(err) => LoginChatGptReply::Error(JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: format!("failed to start login server: {err}"),
+                data: None,
+            }),
+        };
+
+        match reply {
+            LoginChatGptReply::Response(resp) => {
+                self.outgoing.send_response(request_id, resp).await
+            }
+            LoginChatGptReply::Error(err) => self.outgoing.send_error(request_id, err).await,
+        }
+    }
+
+    async fn cancel_login_chatgpt(&mut self, request_id: RequestId, login_id: Uuid) {
+        let mut guard = self.active_login.lock().await;
+        if guard.as_ref().map(|l| l.login_id) == Some(login_id) {
+            if let Some(active) = guard.take() {
+                active.drop();
+            }
+            drop(guard);
+            self.outgoing
+                .send_response(
+                    request_id,
+                    codex_protocol::mcp_protocol::CancelLoginChatGptResponse {},
+                )
+                .await;
+        } else {
+            drop(guard);
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("login id not found: {login_id}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+        }
+    }
+
+    async fn logout_chatgpt(&mut self, request_id: RequestId) {
+        {
+            // Cancel any active login attempt.
+            let mut guard = self.active_login.lock().await;
+            if let Some(active) = guard.take() {
+                active.drop();
+            }
+        }
+
+        if let Err(err) = self.auth_manager.logout() {
+            let error = JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: format!("logout failed: {err}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        self.outgoing
+            .send_response(
+                request_id,
+                codex_protocol::mcp_protocol::LogoutChatGptResponse {},
+            )
+            .await;
+
+        // Send auth status change notification reflecting the current auth mode
+        // after logout (which may fall back to API key via env var).
+        let current_auth_method = self.auth_manager.auth().map(|auth| auth.mode);
+        let payload = AuthStatusChangeNotification {
+            auth_method: current_auth_method,
+        };
+        self.outgoing
+            .send_server_notification(ServerNotification::AuthStatusChange(payload))
+            .await;
+    }
+
+    async fn get_auth_status(
+        &self,
+        request_id: RequestId,
+        params: codex_protocol::mcp_protocol::GetAuthStatusParams,
+    ) {
+        let preferred_auth_method: AuthMode = self.auth_manager.preferred_auth_method();
+        let include_token = params.include_token.unwrap_or(false);
+        let do_refresh = params.refresh_token.unwrap_or(false);
+
+        if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
+            tracing::warn!("failed to refresh token while getting auth status: {err}");
+        }
+
+        let response = match self.auth_manager.auth() {
+            Some(auth) => {
+                let (reported_auth_method, token_opt) = match auth.get_token().await {
+                    Ok(token) if !token.is_empty() => {
+                        let tok = if include_token { Some(token) } else { None };
+                        (Some(auth.mode), tok)
+                    }
+                    Ok(_) => (None, None),
+                    Err(err) => {
+                        tracing::warn!("failed to get token for auth status: {err}");
+                        (None, None)
+                    }
+                };
+                codex_protocol::mcp_protocol::GetAuthStatusResponse {
+                    auth_method: reported_auth_method,
+                    preferred_auth_method,
+                    auth_token: token_opt,
+                }
+            }
+            None => codex_protocol::mcp_protocol::GetAuthStatusResponse {
+                auth_method: None,
+                preferred_auth_method,
+                auth_token: None,
+            },
+        };
+
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn get_user_agent(&self, request_id: RequestId) {
+        let user_agent = get_codex_user_agent(Some(&self.config.responses_originator_header));
+        let response = GetUserAgentResponse { user_agent };
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn get_user_saved_config(&self, request_id: RequestId) {
+        let toml_value = match load_config_as_toml(&self.config.codex_home) {
             Ok(val) => val,
             Err(err) => {
                 let error = JSONRPCErrorError {
@@ -183,33 +426,82 @@ impl CodexMessageProcessor {
             }
         };
 
-        let profiles: HashMap<String, codex_protocol::config_types::ConfigProfile> = cfg
-            .profiles
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    k,
-                    // Define this explicitly here to avoid the need to
-                    // implement `From<codex_core::config_profile::ConfigProfile>`
-                    // for the `ConfigProfile` type and introduce a dependency on codex_core
-                    codex_protocol::config_types::ConfigProfile {
-                        model: v.model,
-                        approval_policy: v.approval_policy.map(map_ask_for_approval_to_wire),
-                        model_reasoning_effort: v.model_reasoning_effort.map(map_reasoning_effort_to_wire),
-                    },
-                )
-            })
-            .collect();
+        let user_saved_config: UserSavedConfig = cfg.into();
 
-        let response = GetConfigTomlResponse {
-            approval_policy: cfg.approval_policy.map(map_ask_for_approval_to_wire),
-            sandbox_mode: cfg.sandbox_mode,
-            model_reasoning_effort: cfg.model_reasoning_effort.map(map_reasoning_effort_to_wire),
-            profile: cfg.profile,
-            profiles: Some(profiles),
+        let response = GetUserSavedConfigResponse {
+            config: user_saved_config,
+        };
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn exec_one_off_command(&self, request_id: RequestId, params: ExecOneOffCommandParams) {
+        tracing::debug!("ExecOneOffCommand params: {params:?}");
+
+        if params.command.is_empty() {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "command must not be empty".to_string(),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        }
+
+        let cwd = params.cwd.unwrap_or_else(|| self.config.cwd.clone());
+        let env = create_env(&self.config.shell_environment_policy);
+        let timeout_ms = params.timeout_ms;
+        let exec_params = ExecParams {
+            command: params.command,
+            cwd,
+            timeout_ms,
+            env,
+            with_escalated_permissions: None,
+            justification: None,
         };
 
-        self.outgoing.send_response(request_id, response).await;
+        let effective_policy = params
+            .sandbox_policy
+            .unwrap_or_else(|| self.config.sandbox_policy.clone());
+
+        let sandbox_type = match &effective_policy {
+            codex_core::protocol::SandboxPolicy::DangerFullAccess => {
+                codex_core::exec::SandboxType::None
+            }
+            _ => get_platform_sandbox().unwrap_or(codex_core::exec::SandboxType::None),
+        };
+        tracing::debug!("Sandbox type: {sandbox_type:?}");
+        let codex_linux_sandbox_exe = self.config.codex_linux_sandbox_exe.clone();
+        let outgoing = self.outgoing.clone();
+        let req_id = request_id;
+
+        tokio::spawn(async move {
+            match codex_core::exec::process_exec_tool_call(
+                exec_params,
+                sandbox_type,
+                &effective_policy,
+                &codex_linux_sandbox_exe,
+                None,
+            )
+            .await
+            {
+                Ok(output) => {
+                    let response = ExecArbitraryCommandResponse {
+                        exit_code: output.exit_code,
+                        stdout: output.stdout.text,
+                        stderr: output.stderr.text,
+                    };
+                    outgoing.send_response(req_id, response).await;
+                }
+                Err(err) => {
+                    let error = JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("exec failed: {err}"),
+                        data: None,
+                    };
+                    outgoing.send_error(req_id, error).await;
+                }
+            }
+        });
     }
 
     async fn process_new_conversation(&self, request_id: RequestId, params: NewConversationParams) {
@@ -234,7 +526,7 @@ impl CodexMessageProcessor {
                     ..
                 } = conversation_id;
                 let response = NewConversationResponse {
-                    conversation_id: ConversationId(conversation_id),
+                    conversation_id,
                     model: session_configured.model,
                 };
                 self.outgoing.send_response(request_id, response).await;
@@ -250,6 +542,133 @@ impl CodexMessageProcessor {
         }
     }
 
+    async fn handle_list_conversations(
+        &self,
+        request_id: RequestId,
+        params: ListConversationsParams,
+    ) {
+        let page_size = params.page_size.unwrap_or(25);
+        // Decode the optional cursor string to a Cursor via serde (Cursor implements Deserialize from string)
+        let cursor_obj: Option<RolloutCursor> = match params.cursor {
+            Some(s) => serde_json::from_str::<RolloutCursor>(&format!("\"{s}\"")).ok(),
+            None => None,
+        };
+        let cursor_ref = cursor_obj.as_ref();
+
+        let page = match RolloutRecorder::list_conversations(
+            &self.config.codex_home,
+            page_size,
+            cursor_ref,
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to list conversations: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let items = page
+            .items
+            .into_iter()
+            .filter_map(|it| extract_conversation_summary(it.path, &it.head))
+            .collect();
+
+        // Encode next_cursor as a plain string
+        let next_cursor = match page.next_cursor {
+            Some(c) => match serde_json::to_value(&c) {
+                Ok(serde_json::Value::String(s)) => Some(s),
+                _ => None,
+            },
+            None => None,
+        };
+
+        let response = ListConversationsResponse { items, next_cursor };
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn handle_resume_conversation(
+        &self,
+        request_id: RequestId,
+        params: ResumeConversationParams,
+    ) {
+        // Derive a Config using the same logic as new conversation, honoring overrides if provided.
+        let config = match params.overrides {
+            Some(overrides) => {
+                derive_config_from_params(overrides, self.codex_linux_sandbox_exe.clone())
+            }
+            None => Ok(self.config.as_ref().clone()),
+        };
+        let config = match config {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: format!("error deriving config: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match self
+            .conversation_manager
+            .resume_conversation_from_rollout(
+                config,
+                params.path.clone(),
+                self.auth_manager.clone(),
+            )
+            .await
+        {
+            Ok(NewConversation {
+                conversation_id,
+                session_configured,
+                ..
+            }) => {
+                let event = Event {
+                    id: "".to_string(),
+                    msg: EventMsg::SessionConfigured(session_configured.clone()),
+                };
+                self.outgoing.send_event_as_notification(&event, None).await;
+                let initial_messages = session_configured.initial_messages.map(|msgs| {
+                    msgs.into_iter()
+                        .filter(|event| {
+                            // Don't send non-plain user messages (like user instructions
+                            // or environment context) back so they don't get rendered.
+                            if let EventMsg::UserMessage(user_message) = event {
+                                return matches!(user_message.kind, Some(InputMessageKind::Plain));
+                            }
+                            true
+                        })
+                        .collect()
+                });
+
+                // Reply with conversation id + model and initial messages (when present)
+                let response = codex_protocol::mcp_protocol::ResumeConversationResponse {
+                    conversation_id,
+                    model: session_configured.model.clone(),
+                    initial_messages,
+                };
+                self.outgoing.send_response(request_id, response).await;
+            }
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("error resuming conversation: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+        }
+    }
+
     async fn send_user_message(&self, request_id: RequestId, params: SendUserMessageParams) {
         let SendUserMessageParams {
             conversation_id,
@@ -257,7 +676,7 @@ impl CodexMessageProcessor {
         } = params;
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -291,15 +710,21 @@ impl CodexMessageProcessor {
             .await;
     }
 
-    async fn interrupt_conversation(
-        &mut self,
-        request_id: RequestId,
-        params: InterruptConversationParams,
-    ) {
-        let InterruptConversationParams { conversation_id } = params;
+    async fn send_user_turn(&self, request_id: RequestId, params: SendUserTurnParams) {
+        let SendUserTurnParams {
+            conversation_id,
+            items,
+            cwd,
+            approval_policy,
+            sandbox_policy,
+            model,
+            effort,
+            summary,
+        } = params;
+
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -311,10 +736,60 @@ impl CodexMessageProcessor {
             return;
         };
 
-        // Submit the interrupt and respond immediately (core does not emit a dedicated event).
+        let mapped_items: Vec<CoreInputItem> = items
+            .into_iter()
+            .map(|item| match item {
+                WireInputItem::Text { text } => CoreInputItem::Text { text },
+                WireInputItem::Image { image_url } => CoreInputItem::Image { image_url },
+                WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
+            })
+            .collect();
+
+        let _ = conversation
+            .submit(Op::UserTurn {
+                items: mapped_items,
+                cwd,
+                approval_policy,
+                sandbox_policy,
+                model,
+                effort,
+                summary,
+            })
+            .await;
+
+        self.outgoing
+            .send_response(request_id, SendUserTurnResponse {})
+            .await;
+    }
+
+    async fn interrupt_conversation(
+        &mut self,
+        request_id: RequestId,
+        params: InterruptConversationParams,
+    ) {
+        let InterruptConversationParams { conversation_id } = params;
+        let Ok(conversation) = self
+            .conversation_manager
+            .get_conversation(conversation_id)
+            .await
+        else {
+            let error = JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("conversation not found: {conversation_id}"),
+                data: None,
+            };
+            self.outgoing.send_error(request_id, error).await;
+            return;
+        };
+
+        // Record the pending interrupt so we can reply when TurnAborted arrives.
+        {
+            let mut map = self.pending_interrupts.lock().await;
+            map.entry(conversation_id).or_default().push(request_id);
+        }
+
+        // Submit the interrupt; we'll respond upon TurnAborted.
         let _ = conversation.submit(Op::Interrupt).await;
-        let response = InterruptConversationResponse { abort_reason: TurnAbortReason::Interrupted };
-        self.outgoing.send_response(request_id, response).await;
     }
 
     async fn add_conversation_listener(
@@ -325,12 +800,12 @@ impl CodexMessageProcessor {
         let AddConversationListenerParams { conversation_id } = params;
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
-                message: format!("conversation not found: {}", conversation_id.0),
+                message: format!("conversation not found: {conversation_id}"),
                 data: None,
             };
             self.outgoing.send_error(request_id, error).await;
@@ -360,18 +835,18 @@ impl CodexMessageProcessor {
                         };
 
                         // For now, we send a notification for every event,
-                        // JSON-serializing the `Event` as-is, but we will move
-                        // to creating a special enum for notifications with a
-                        // stable wire format.
+                        // JSON-serializing the `Event` as-is, but these should
+                        // be migrated to be variants of `ServerNotification`
+                        // instead.
                         let method = format!("codex/event/{}", event.msg);
                         let mut params = match serde_json::to_value(event.clone()) {
                             Ok(serde_json::Value::Object(map)) => map,
                             Ok(_) => {
-                                tracing::error!("event did not serialize to an object");
+                                error!("event did not serialize to an object");
                                 continue;
                             }
                             Err(err) => {
-                                tracing::error!("failed to serialize event: {err}");
+                                error!("failed to serialize event: {err}");
                                 continue;
                             }
                         };
@@ -438,67 +913,14 @@ impl CodexMessageProcessor {
     }
 }
 
-impl CodexMessageProcessor {
-    // Minimal compatibility layer: translate SendUserTurn into our current
-    // flow by submitting only the user items. We intentionally do not attempt
-    // per‑turn reconfiguration here (model, cwd, approval, sandbox) to avoid
-    // destabilizing the session. This preserves behavior and acks the request
-    // so clients using the new method continue to function.
-    async fn send_user_turn_compat(
-        &self,
-        request_id: RequestId,
-        params: SendUserTurnParams,
-    ) {
-        let SendUserTurnParams {
-            conversation_id,
-            items,
-            ..
-        } = params;
-
-        let Ok(conversation) = self
-            .conversation_manager
-            .get_conversation(conversation_id.0)
-            .await
-        else {
-            let error = JSONRPCErrorError {
-                code: INVALID_REQUEST_ERROR_CODE,
-                message: format!("conversation not found: {conversation_id}"),
-                data: None,
-            };
-            self.outgoing.send_error(request_id, error).await;
-            return;
-        };
-
-        // Map wire input items into core protocol items.
-        let mapped_items: Vec<CoreInputItem> = items
-            .into_iter()
-            .map(|item| match item {
-                WireInputItem::Text { text } => CoreInputItem::Text { text },
-                WireInputItem::Image { image_url } => CoreInputItem::Image { image_url },
-                WireInputItem::LocalImage { path } => CoreInputItem::LocalImage { path },
-            })
-            .collect();
-
-        // Submit user input to the conversation.
-        let _ = conversation
-            .submit(Op::UserInput {
-                items: mapped_items,
-            })
-            .await;
-
-        // Acknowledge.
-        self.outgoing.send_response(request_id, SendUserTurnResponse {}).await;
-    }
-}
-
 async fn apply_bespoke_event_handling(
     event: Event,
     conversation_id: ConversationId,
     conversation: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
-    _pending_interrupts: Arc<Mutex<HashMap<Uuid, Vec<RequestId>>>>,
+    pending_interrupts: Arc<Mutex<HashMap<ConversationId, Vec<RequestId>>>>,
 ) {
-    let Event { id: _event_id, msg, .. } = event;
+    let Event { id: event_id, msg } = event;
     match msg {
         EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
             call_id,
@@ -506,29 +928,10 @@ async fn apply_bespoke_event_handling(
             reason,
             grant_root,
         }) => {
-            // Map core FileChange to wire FileChange
-            let file_changes: HashMap<PathBuf, codex_protocol::protocol::FileChange> = changes
-                .into_iter()
-                .map(|(p, c)| {
-                    let mapped = match c {
-                        codex_core::protocol::FileChange::Add { content } => {
-                            codex_protocol::protocol::FileChange::Add { content }
-                        }
-                        codex_core::protocol::FileChange::Delete => {
-                            codex_protocol::protocol::FileChange::Delete { content: String::new() }
-                        }
-                        codex_core::protocol::FileChange::Update { unified_diff, move_path } => {
-                            codex_protocol::protocol::FileChange::Update { unified_diff, move_path }
-                        }
-                    };
-                    (p, mapped)
-                })
-                .collect();
-
             let params = ApplyPatchApprovalParams {
                 conversation_id,
-                call_id: call_id.clone(),
-                file_changes,
+                call_id,
+                file_changes: changes,
                 reason,
                 grant_root,
             };
@@ -537,9 +940,8 @@ async fn apply_bespoke_event_handling(
                 .send_request(APPLY_PATCH_APPROVAL_METHOD, Some(value))
                 .await;
             // TODO(mbolin): Enforce a timeout so this task does not live indefinitely?
-            let approval_id = call_id.clone(); // correlate by call_id, not event_id
             tokio::spawn(async move {
-                on_patch_approval_response(approval_id, rx, conversation).await;
+                on_patch_approval_response(event_id, rx, conversation).await;
             });
         }
         EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
@@ -550,7 +952,7 @@ async fn apply_bespoke_event_handling(
         }) => {
             let params = ExecCommandApprovalParams {
                 conversation_id,
-                call_id: call_id.clone(),
+                call_id,
                 command,
                 cwd,
                 reason,
@@ -561,12 +963,25 @@ async fn apply_bespoke_event_handling(
                 .await;
 
             // TODO(mbolin): Enforce a timeout so this task does not live indefinitely?
-            let approval_id = call_id.clone(); // correlate by call_id, not event_id
             tokio::spawn(async move {
-                on_exec_approval_response(approval_id, rx, conversation).await;
+                on_exec_approval_response(event_id, rx, conversation).await;
             });
         }
-        // No special handling needed for interrupts; responses are sent immediately.
+        // If this is a TurnAborted, reply to any pending interrupt requests.
+        EventMsg::TurnAborted(turn_aborted_event) => {
+            let pending = {
+                let mut map = pending_interrupts.lock().await;
+                map.remove(&conversation_id).unwrap_or_default()
+            };
+            if !pending.is_empty() {
+                let response = InterruptConversationResponse {
+                    abort_reason: turn_aborted_event.reason,
+                };
+                for rid in pending {
+                    outgoing.send_response(rid, response.clone()).await;
+                }
+            }
+        }
 
         _ => {}
     }
@@ -585,21 +1000,21 @@ fn derive_config_from_params(
         config: cli_overrides,
         base_instructions,
         include_plan_tool,
-        ..
+        include_apply_patch_tool,
     } = params;
-        let overrides = ConfigOverrides {
+    let overrides = ConfigOverrides {
         model,
         config_profile: profile,
         cwd: cwd.map(PathBuf::from),
-        approval_policy: approval_policy.map(map_ask_for_approval_from_wire),
+        approval_policy,
         sandbox_mode,
         model_provider: None,
         codex_linux_sandbox_exe,
         base_instructions,
         include_plan_tool,
-        disable_response_storage: None,
+        include_apply_patch_tool,
+        include_view_image_tool: None,
         show_raw_agent_reasoning: None,
-        debug: None,
         tools_web_search_request: None,
     };
 
@@ -613,8 +1028,8 @@ fn derive_config_from_params(
 }
 
 async fn on_patch_approval_response(
-    approval_id: String,
-    receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
+    event_id: String,
+    receiver: oneshot::Receiver<mcp_types::Result>,
     codex: Arc<CodexConversation>,
 ) {
     let response = receiver.await;
@@ -624,8 +1039,8 @@ async fn on_patch_approval_response(
             error!("request failed: {err:?}");
             if let Err(submit_err) = codex
                 .submit(Op::PatchApproval {
-                    id: approval_id.clone(),
-                    decision: core_protocol::ReviewDecision::Denied,
+                    id: event_id.clone(),
+                    decision: ReviewDecision::Denied,
                 })
                 .await
             {
@@ -645,8 +1060,8 @@ async fn on_patch_approval_response(
 
     if let Err(err) = codex
         .submit(Op::PatchApproval {
-            id: approval_id,
-            decision: map_review_decision_from_wire(response.decision),
+            id: event_id,
+            decision: response.decision,
         })
         .await
     {
@@ -655,15 +1070,15 @@ async fn on_patch_approval_response(
 }
 
 async fn on_exec_approval_response(
-    approval_id: String,
-    receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
+    event_id: String,
+    receiver: oneshot::Receiver<mcp_types::Result>,
     conversation: Arc<CodexConversation>,
 ) {
     let response = receiver.await;
     let value = match response {
         Ok(value) => value,
         Err(err) => {
-            tracing::error!("request failed: {err:?}");
+            error!("request failed: {err:?}");
             return;
         }
     };
@@ -681,8 +1096,8 @@ async fn on_exec_approval_response(
 
     if let Err(err) = conversation
         .submit(Op::ExecApproval {
-            id: approval_id,
-            decision: map_review_decision_from_wire(response.decision),
+            id: event_id,
+            decision: response.decision,
         })
         .await
     {
@@ -690,43 +1105,99 @@ async fn on_exec_approval_response(
     }
 }
 
-fn map_review_decision_from_wire(d: codex_protocol::protocol::ReviewDecision) -> core_protocol::ReviewDecision {
-    match d {
-        codex_protocol::protocol::ReviewDecision::Approved => core_protocol::ReviewDecision::Approved,
-        codex_protocol::protocol::ReviewDecision::ApprovedForSession => core_protocol::ReviewDecision::ApprovedForSession,
-        codex_protocol::protocol::ReviewDecision::Denied => core_protocol::ReviewDecision::Denied,
-        codex_protocol::protocol::ReviewDecision::Abort => core_protocol::ReviewDecision::Abort,
-    }
+fn extract_conversation_summary(
+    path: PathBuf,
+    head: &[serde_json::Value],
+) -> Option<ConversationSummary> {
+    let session_meta = match head.first() {
+        Some(first_line) => match serde_json::from_value::<SessionMeta>(first_line.clone()) {
+            Ok(session_meta) => session_meta,
+            Err(..) => return None,
+        },
+        None => return None,
+    };
+
+    let preview = head
+        .iter()
+        .filter_map(|value| serde_json::from_value::<ResponseItem>(value.clone()).ok())
+        .find_map(|item| match item {
+            ResponseItem::Message { content, .. } => {
+                content.into_iter().find_map(|content| match content {
+                    ContentItem::InputText { text } => {
+                        match InputMessageKind::from(("user", &text)) {
+                            InputMessageKind::Plain => Some(text),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+            }
+            _ => None,
+        })?;
+
+    let preview = match preview.find(USER_MESSAGE_BEGIN) {
+        Some(idx) => preview[idx + USER_MESSAGE_BEGIN.len()..].trim(),
+        None => preview.as_str(),
+    };
+
+    let timestamp = if session_meta.timestamp.is_empty() {
+        None
+    } else {
+        Some(session_meta.timestamp.clone())
+    };
+
+    Some(ConversationSummary {
+        conversation_id: session_meta.id,
+        timestamp,
+        path,
+        preview: preview.to_string(),
+    })
 }
 
-fn map_ask_for_approval_from_wire(a: codex_protocol::protocol::AskForApproval) -> core_protocol::AskForApproval {
-    match a {
-        codex_protocol::protocol::AskForApproval::UnlessTrusted => core_protocol::AskForApproval::UnlessTrusted,
-        codex_protocol::protocol::AskForApproval::OnFailure => core_protocol::AskForApproval::OnFailure,
-        codex_protocol::protocol::AskForApproval::OnRequest => core_protocol::AskForApproval::OnRequest,
-        codex_protocol::protocol::AskForApproval::Never => core_protocol::AskForApproval::Never,
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
 
-fn map_ask_for_approval_to_wire(a: core_protocol::AskForApproval) -> codex_protocol::protocol::AskForApproval {
-    match a {
-        core_protocol::AskForApproval::UnlessTrusted => codex_protocol::protocol::AskForApproval::UnlessTrusted,
-        core_protocol::AskForApproval::OnFailure => codex_protocol::protocol::AskForApproval::OnFailure,
-        core_protocol::AskForApproval::OnRequest => codex_protocol::protocol::AskForApproval::OnRequest,
-        core_protocol::AskForApproval::Never => codex_protocol::protocol::AskForApproval::Never,
-    }
-}
+    #[test]
+    fn extract_conversation_summary_prefers_plain_user_messages() {
+        let conversation_id =
+            ConversationId(Uuid::parse_str("3f941c35-29b3-493b-b0a4-e25800d9aeb0").unwrap());
+        let timestamp = Some("2025-09-05T16:53:11.850Z".to_string());
+        let path = PathBuf::from("rollout.jsonl");
 
-fn map_reasoning_effort_to_wire(
-    e: codex_core::config_types::ReasoningEffort,
-) -> codex_protocol::config_types::ReasoningEffort {
-    use codex_core::config_types::ReasoningEffort as CoreRE;
-    use codex_protocol::config_types::ReasoningEffort as WireRE;
-    match e {
-        CoreRE::Minimal => WireRE::Minimal,
-        CoreRE::Low => WireRE::Low,
-        CoreRE::Medium => WireRE::Medium,
-        CoreRE::High => WireRE::High,
-        CoreRE::None => WireRE::Medium,
+        let head = vec![
+            json!({
+                "id": conversation_id.0,
+                "timestamp": timestamp,
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "<user_instructions>\n<AGENTS.md contents>\n</user_instructions>".to_string(),
+                }],
+            }),
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": format!("<prior context> {USER_MESSAGE_BEGIN}Count to 5"),
+                }],
+            }),
+        ];
+
+        let summary = extract_conversation_summary(path.clone(), &head).expect("summary");
+
+        assert_eq!(summary.conversation_id, conversation_id);
+        assert_eq!(
+            summary.timestamp,
+            Some("2025-09-05T16:53:11.850Z".to_string())
+        );
+        assert_eq!(summary.path, path);
+        assert_eq!(summary.preview, "Count to 5");
     }
 }
