@@ -81,7 +81,7 @@ impl RolloutRecorder {
         config: &Config,
         uuid: Uuid,
         instructions: Option<String>,
-    ) -> std::io::Result<Self> {
+    ) -> std::io::Result<(Self, PathBuf)> {
         let LogFileInfo { file, session_id, timestamp, path } = create_log_file(config, uuid)?;
 
         let timestamp_format: &[FormatItem] = format_description!(
@@ -95,7 +95,7 @@ impl RolloutRecorder {
         let index_ctx = Some(IndexContext::new(
             config.codex_home.clone(),
             config.cwd.clone(),
-            path,
+            path.clone(),
             Some(config.model.clone()),
         ));
         tokio::task::spawn(rollout_writer(
@@ -104,7 +104,7 @@ impl RolloutRecorder {
             Some(SessionMeta { timestamp, id: session_id, instructions }),
             index_ctx,
         ));
-        Ok(Self { tx })
+        Ok((Self { tx }, path))
     }
 
     pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {

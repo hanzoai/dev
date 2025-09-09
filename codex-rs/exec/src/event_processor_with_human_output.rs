@@ -511,6 +511,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     model,
                     history_log_id: _,
                     history_entry_count: _,
+                    ..
                 } = session_configured_event;
 
                 ts_println!(

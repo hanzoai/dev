@@ -4311,6 +4311,7 @@ pub(crate) fn new_session_info(
         session_id: _,
         history_log_id: _,
         history_entry_count: _,
+        ..
     } = event;
 
     if is_first_event {
