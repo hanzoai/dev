@@ -139,7 +139,7 @@ jobs:
             }
             lines.push('## Preview command');
             lines.push('```bash');
-            lines.push(`code preview pr:${pr}`);
+            lines.push(`code preview ${pr}`);
             lines.push('```');
             lines.push('');
             lines.push('## Direct downloads');
@@ -242,7 +242,7 @@ jobs:
                 '',
                 'You can run this right now! In your terminal just use:',
                 '```bash',
-                `code preview pr:${pr}`,
+                `code preview ${pr}`,
                 '```',
                 'This will run the version of Code we\'ve created for this issue.',
                 '',
@@ -259,4 +259,3 @@ jobs:
               ].join('\n');
             }
             await github.rest.issues.createComment({ owner, repo, issue_number, body });
-

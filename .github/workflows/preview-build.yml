@@ -244,7 +244,7 @@ jobs:
               '',
               'You can run this right now! In your terminal just use:',
               '```bash',
-              `code preview pr:${pr_number}`,
+              `code preview ${pr_number}`,
               '```',
               'This will run the version of Code we\'ve created for this issue.',
               '',
