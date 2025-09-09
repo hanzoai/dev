@@ -1,11 +1,11 @@
-## @just-every/code v0.2.103
+## @just-every/code v0.2.105
 
-This release improves build ergonomics and stabilizes CI/triage behavior.
+This release refines triage behavior and restores preview build reliability.
 
 ### Changes
-- Build: add STRICT_CARGO_HOME to enforce CARGO_HOME; default stays repo-local when unset.
-- Triage/Agent: standardize CARGO_HOME and share with rust-cache; prevent env overrides and unintended cargo updates.
-- CI/Upstream-merge: fix YAML quoting and no-op outputs; split precheck and gate heavy work at job level for reliability.
+- Triage: make agent failures non-fatal; capture exit code and disable git prompts.
+- Triage: forbid agent git commits; treat agent-made commits as changes; allow branch/push even when clean.
+- Preview: fix code-fence array string and YAML error to restore builds.
 
 ### Install
 ```
@@ -13,22 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.102...v0.2.103
-## @just-every/code v0.2.104
-
-This release improves preview workflows and adds a convenient CLI shorthand for downloading PR preview builds.
-
-### Changes
-
-- CLI: support preview downloads via pr:<number>; keep run-id fallback.
-- Preview: publish prereleases on PRs with release assets; no-auth downloads.
-- PR comment: recommend 'code preview pr:<number>' for clarity.
-
-### Install
-
-```
-npm install -g @just-every/code@latest
-code
-```
-
-Compare: https://github.com/just-every/code/compare/v0.2.103...v0.2.104
+Compare: https://github.com/just-every/code/compare/v0.2.104...v0.2.105
