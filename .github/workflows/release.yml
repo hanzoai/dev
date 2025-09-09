@@ -3,8 +3,12 @@ name: Release
 on:
   push:
     branches: [ main ]
+    # Ignore common non-release paths, but DO NOT ignore release.yml so that
+    # edits to this workflow can intentionally trigger a new release run.
     paths-ignore:
-      - '.github/workflows/**'
+      - '.github/workflows/issue-triage.yml'
+      - '.github/workflows/preview-build.yml'
+      - '.github/workflows/upstream-merge.yml'
       - 'examples/**'
       - '**/*.test.ts'
       - 'test/**'
