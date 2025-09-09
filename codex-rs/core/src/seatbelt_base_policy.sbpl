@@ -70,7 +70,6 @@
 ; Needed for python multiprocessing on MacOS for the SemLock
 (allow ipc-posix-sem)
 
-<<<<<<< HEAD
 ; Allow reading user preferences (common for many CLIs) and basic
 ; OpenDirectory/DirecoryService lookups used by APIs like `os.userInfo()`.
 ; This keeps the policy minimal while avoiding surprising failures from
@@ -83,9 +82,4 @@
   (global-name "com.apple.cfprefsd.agent")
   (global-name "com.apple.cfprefsd.daemon")
   (global-name "com.apple.securityd")
-=======
-; needed to look up user info, see https://crbug.com/792228
-(allow mach-lookup
-  (global-name "com.apple.system.opendirectoryd.libinfo")
->>>>>>> upstream/main
 )
