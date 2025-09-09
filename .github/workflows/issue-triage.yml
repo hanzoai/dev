@@ -90,7 +90,7 @@ jobs:
         with:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo;
-            const issue_number = Number(core.getInput('issue_number'));
+            const issue_number = Number((context.payload && context.payload.inputs && context.payload.inputs.issue_number) || '');
             const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
             core.exportVariable('ISSUE_NUMBER', String(issue.number));
             core.exportVariable('ISSUE_TITLE', issue.title || '');
@@ -104,7 +104,7 @@ jobs:
         with:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
-            const note = `${inputs.note}`;
+            const note = `${{ inputs.note }}`;
             const body = [
               `Manual triage started by @${context.actor}.`,
               '',
