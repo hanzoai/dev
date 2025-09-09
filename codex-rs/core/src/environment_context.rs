@@ -23,7 +23,7 @@ pub enum NetworkAccess {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "environment_context", rename_all = "snake_case")]
-pub(crate) struct EnvironmentContext {
+pub struct EnvironmentContext {
     pub cwd: Option<PathBuf>,
     pub approval_policy: Option<AskForApproval>,
     pub sandbox_mode: Option<SandboxMode>,
