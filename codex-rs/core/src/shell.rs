@@ -119,7 +119,6 @@ fn strip_bash_lc(command: &Vec<String>) -> Option<String> {
 #[cfg(target_os = "macos")]
 pub async fn default_user_shell() -> Shell {
     use tokio::process::Command;
-    use whoami;
 
     let user = whoami::username();
     let home = format!("/Users/{user}");
