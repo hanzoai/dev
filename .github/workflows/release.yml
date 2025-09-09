@@ -3,8 +3,12 @@ name: Release
 on:
   push:
     branches: [ main ]
+    # Ignore common non-release paths, but DO NOT ignore release.yml so that
+    # edits to this workflow can intentionally trigger a new release run.
     paths-ignore:
-      - '.github/workflows/**'
+      - '.github/workflows/issue-triage.yml'
+      - '.github/workflows/preview-build.yml'
+      - '.github/workflows/upstream-merge.yml'
       - 'examples/**'
       - '**/*.test.ts'
       - 'test/**'
@@ -115,7 +119,7 @@ jobs:
 
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs: [determine-version, preflight-tests]
+    needs: [determine-version]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -273,7 +277,7 @@ jobs:
           set -euo pipefail
           exe="codex-rs/target/${{ matrix.target }}/release/code"
           "$exe" --version
-          "$exe" completion --shell bash > /dev/null
+          "$exe" completion bash > /dev/null
 
       - name: Post-build smoke (run binary) [Windows]
         if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
@@ -281,7 +285,7 @@ jobs:
         run: |
           $exe = "codex-rs/target/${{ matrix.target }}/release/code.exe"
           & $exe --version | Out-Null
-          & $exe completion --shell bash | Out-Null
+          & $exe completion bash | Out-Null
 
       - name: sccache stats
         shell: bash
@@ -357,7 +361,7 @@ jobs:
 
   release:
     name: Publish to npm
-    needs: [determine-version, build-binaries]
+    needs: [determine-version, build-binaries, preflight-tests]
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
