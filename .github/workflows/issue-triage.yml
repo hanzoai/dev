@@ -248,6 +248,10 @@ jobs:
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
             const issue_number = parseInt(process.env.ISSUE_NUMBER || '0', 10);
+            if (!issue_number || Number.isNaN(issue_number)) {
+              core.setFailed('ISSUE_NUMBER is not set; manual runs must pass inputs.issue_number and the metadata resolver must run before this step.');
+              process.exit(1);
+            }
             const issue = (await github.rest.issues.get({ owner, repo, issue_number })).data;
             const comments = (await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 })).data;
             const events = (await github.rest.issues.listEvents({ owner, repo, issue_number, per_page: 100 })).data;
