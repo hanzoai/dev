@@ -12,6 +12,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Table, Row, Cell};
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
@@ -383,14 +384,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         // Create body content
         let mut lines = Vec::new();
         if matches!(self.mode, Mode::Overview) {
-            // Overview: show two rows with current values
-            let theme_label = Self::get_theme_options()
-                .iter()
-                .find(|(t, _, _)| *t == self.current_theme)
-                .map(|(_, name, _)| *name)
-                .unwrap_or("Theme");
-            let spinner_label = self.current_spinner.as_str();
-            let items = vec![("Theme", theme_label), ("Spinner", spinner_label)];
+            // Overview: two clear actions
+            let items = vec![("Change theme", ""), ("Change spinner", "")];
             for (i, (k, v)) in items.iter().enumerate() {
                 let selected = i == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
@@ -404,8 +399,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else {
                     spans.push(Span::styled(*k, Style::default().fg(theme.text)));
                 }
-                spans.push(Span::raw(": "));
-                spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
+                if !v.is_empty() {
+                    spans.push(Span::raw(": "));
+                    spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
+                }
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
@@ -460,7 +457,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else {
-            // Spinner tab: list spinner names with a live frame preview
+            // Spinner: render as a table [Name | Preview]
             use std::time::{SystemTime, UNIX_EPOCH};
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -475,6 +472,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 visible,
             );
             let end = (start + visible).min(count);
+
+            // Build table rows
+            let mut rows: Vec<Row> = Vec::new();
             for i in start..end {
                 let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
@@ -482,35 +482,37 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                let prefix_selected = is_selected;
-                let suffix = if is_original { " (original)" } else { "" };
+                // Left cell: name with selector and optional (original)
+                let left = {
+                    let mut s = String::new();
+                    if is_selected { s.push_str("› "); }
+                    s.push_str(&name);
+                    if is_original { s.push_str(" (original)"); }
+                    let style = if is_selected { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    Cell::from(s).style(style)
+                };
 
-                let mut spans = vec![Span::raw(" ")];
-                if prefix_selected {
-                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
-                } else {
-                    spans.push(Span::raw("  "));
-                }
+                // Right cell: preview "Working… <frame>"
+                let right = {
+                    let preview = format!("Working… {}", frame);
+                    Cell::from(preview).style(Style::default().fg(crate::colors::border()))
+                };
 
-                // Show preview frame and name
-                let preview = format!("{} ", frame);
-                spans.push(Span::styled(preview, Style::default().fg(theme.info)));
-
-                if is_selected {
-                    spans.push(Span::styled(
-                        name.clone(),
-                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD),
-                    ));
-                } else {
-                    spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
-                }
-
-                spans.push(Span::styled(suffix, Style::default().fg(theme.text_dim)));
-                lines.push(Line::from(spans));
+                rows.push(Row::new(vec![left, right]));
             }
-            // Keep preview animating while the tab is active
+
+            let widths = [ratatui::layout::Constraint::Percentage(35), ratatui::layout::Constraint::Percentage(65)];
+            let table = Table::new(rows, &widths)
+                .column_spacing(2)
+                .style(Style::default().bg(crate::colors::background()));
+            table.render(body_area, buf);
+
+            // Animate spinner previews while open
             self.app_event_tx
                 .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
+
+            // We rendered directly; skip the paragraph path
+            return;
         }
 
         // No explicit scroll info; list height is fixed to show boundaries naturally
