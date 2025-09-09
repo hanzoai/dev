@@ -84,6 +84,9 @@ enum Subcommand {
 
     /// Diagnose PATH, binary collisions, and versions.
     Doctor,
+
+    /// Download and run preview artifact for a GitHub run id.
+    Preview(PreviewArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -149,6 +152,21 @@ struct OrderReplayArgs {
     response_json: std::path::PathBuf,
     /// Path to codex-tui.log (typically ~/.codex/log/codex-tui.log)
     tui_log: std::path::PathBuf,
+}
+
+#[derive(Debug, Parser)]
+struct PreviewArgs {
+    /// GitHub Actions run id to download artifacts from
+    run_id: String,
+    /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
+    #[arg(long = "repo", value_name = "OWNER/REPO")]
+    repo: Option<String>,
+    /// Output directory where the binary will be extracted
+    #[arg(short = 'o', long = "out", value_name = "DIR")]
+    out_dir: Option<PathBuf>,
+    /// Launch the binary with --help after download (default true)
+    #[arg(long = "no-launch", default_value_t = false)]
+    no_launch: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -233,6 +251,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         }
         Some(Subcommand::Doctor) => {
             doctor_main().await?;
+        }
+        Some(Subcommand::Preview(args)) => {
+            preview_main(args).await?;
         }
     }
 
@@ -332,6 +353,143 @@ fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
+    use anyhow::{bail, Context};
+    use flate2::read::GzDecoder;
+    use std::env;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
+    use zip::ZipArchive;
+
+    let repo = args
+        .repo
+        .or_else(|| env::var("GITHUB_REPOSITORY").ok())
+        .unwrap_or_else(|| "just-every/code".to_string());
+    let (owner, name) = repo
+        .split_once('/')
+        .map(|(o, n)| (o.to_string(), n.to_string()))
+        .ok_or_else(|| anyhow::anyhow!(format!("Invalid repo format: {}", repo)))?;
+
+    let os = env::consts::OS;
+    let arch = env::consts::ARCH;
+    let target = match (os, arch) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-musl",
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", _) => "x86_64-pc-windows-msvc",
+        _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
+    };
+
+    let token = env::var("GH_TOKEN").or_else(|_| env::var("GITHUB_TOKEN"))
+        .context("Set GH_TOKEN (or GITHUB_TOKEN) to a GitHub token with actions:read.")?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("codex-preview/1")
+        .build()?;
+
+    // List artifacts for the run
+    let run_id = args.run_id;
+    let list_url = format!("https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}/artifacts?per_page=100");
+    let arts: serde_json::Value = client
+        .get(list_url)
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let mut found_id: Option<u64> = None;
+    if let Some(list) = arts.get("artifacts").and_then(|a| a.as_array()) {
+        for a in list {
+            let name_v = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if name_v == format!("preview-{}", target) {
+                if let Some(id) = a.get("id").and_then(|v| v.as_u64()) { found_id = Some(id); break; }
+            }
+        }
+    }
+    let art_id = found_id.context(format!("Could not find artifact preview-{target} for run {run_id}"))?;
+
+    let zip_url = format!("https://api.github.com/repos/{owner}/{name}/actions/artifacts/{art_id}/zip");
+    let bytes = client
+        .get(zip_url)
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+
+    let tmp = tempdir()?;
+    let zip_path = tmp.path().join("artifact.zip");
+    fs::write(&zip_path, &bytes)?;
+
+    // Unzip the artifact into tmp
+    let f = fs::File::open(&zip_path)?;
+    let mut zip = ZipArchive::new(f)?;
+    for i in 0..zip.len() { let _ = i; }
+    zip.extract(tmp.path())?;
+
+    // Find the easiest payload
+    fn first_match(dir: &Path, pat: &str) -> Option<std::path::PathBuf> {
+        for entry in fs::read_dir(dir).ok()? {
+            let p = entry.ok()?.path();
+            if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                if name.starts_with(pat) { return Some(p); }
+            }
+        }
+        None
+    }
+
+    let out_dir = args.out_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    fs::create_dir_all(&out_dir).ok();
+
+    #[cfg(target_family = "unix")]
+    fn make_exec(p: &Path) { use std::os::unix::fs::PermissionsExt; let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755)); }
+    #[cfg(target_family = "windows")]
+    fn make_exec(_p: &Path) { }
+
+    if os != "windows" {
+        // Prefer .tar.gz
+        if let Some(tgz) = first_match(tmp.path(), "code-").and_then(|p| if p.extension().and_then(|e| e.to_str()) == Some("gz") { Some(p) } else { None }) {
+            let file = fs::File::open(&tgz)?;
+            let gz = GzDecoder::new(file);
+            let mut ar = tar::Archive::new(gz);
+            ar.unpack(&out_dir)?;
+            // Find extracted binary
+            let bin = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code"));
+            make_exec(&bin);
+            println!("Downloaded preview to {}", bin.display());
+            if !args.no_launch { println!("Launching: {} --help", bin.display()); let _ = std::process::Command::new(&bin).arg("--help").status(); }
+            return Ok(());
+        }
+    } else {
+        // Windows: expand inner code-*.zip if present
+        if let Some(inner_zip) = first_match(tmp.path(), "code-").and_then(|p| if p.extension().and_then(|e| e.to_str()) == Some("zip") { Some(p) } else { None }) {
+            let f = fs::File::open(&inner_zip)?;
+            let mut z = ZipArchive::new(f)?;
+            z.extract(&out_dir)?;
+            let exe = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code.exe"));
+            println!("Downloaded preview to {}", exe.display());
+            if !args.no_launch { println!("Launching: {} --help", exe.display()); let _ = std::process::Command::new(&exe).arg("--help").spawn(); }
+            return Ok(());
+        }
+    }
+
+    // Fallback: raw 'code' file (after .zst) if present
+    if let Some(bin) = first_match(tmp.path(), "code") {
+        let dest = out_dir.join(bin.file_name().unwrap_or_default());
+        fs::copy(&bin, &dest)?;
+        make_exec(&dest);
+        println!("Downloaded preview to {}", dest.display());
+        if !args.no_launch { println!("Launching: {} --help", dest.display()); let _ = std::process::Command::new(&dest).arg("--help").status(); }
+        return Ok(());
+    }
+
+    bail!("No recognized artifact content found.")
 }
 
 async fn doctor_main() -> anyhow::Result<()> {

@@ -12,6 +12,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
+  actions: read
 
 jobs:
   build:
@@ -191,32 +192,22 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue_number = context.payload.pull_request.number;
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+            const runId = context.runId;
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
 
             const marker = '<!-- preview-build:artifacts -->';
+
             const body = [
               marker,
-              '### Preview Binaries',
+              '### Preview Build',
               '',
-              `Artifacts are available for this PR: ${runUrl}`,
-              '',
-              '- Linux (x86_64, aarch64) — .zst and .tar.gz',
-              '- macOS (x86_64, arm64) — .zst and .tar.gz',
-              '- Windows (x86_64) — .zip',
-              '',
-              '**Quick usage**',
-              '',
-              'Linux/macOS (.zst):',
+              'You can run this right now! In your terminal just use:',
               '```bash',
-              'zstd -d code-<target>.zst -o code && chmod +x code && ./code',
+              `code preview ${runId}`,
               '```',
-              'Linux/macOS (.tar.gz):',
-              '```bash',
-              'tar -xzf code-<target>.tar.gz && chmod +x code-<target> && ./code-<target>',
-              '```',
-              'Windows (.zip): unzip and run `code.exe`',
+              'This will run the version of Code we\'ve created for this issue.',
               '',
-              '_Note: macOS may require: `xattr -d com.apple.quarantine ./code`_',
+              'After you run it, please comment here and let me know if it does what you need.',
               marker
             ].join('\n');
 
