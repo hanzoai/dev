@@ -528,6 +528,8 @@ jobs:
           AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
           # Normalize agent mode (trim whitespace/CRs)
           AGENT_MODE=$(printf '%s' "$AGENT_MODE" | tr -d '\r' | xargs)
+          # Ensure local, writable cargo dirs exist for the agent
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$GITHUB_WORKSPACE/codex-rs/target"
           PROMPT=$(cat << 'EOP'
           <task>
             - Understand the issue and list exact edits needed (paths, snippets).
