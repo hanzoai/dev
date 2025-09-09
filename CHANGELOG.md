@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.106] - 2025-09-09
+
+- CLI/Preview: save downloads under ~/.code/bin by default; suffix binaries with PR id. (3bebc2d1)
+- CLI/Preview: run preview binary directly (no --help) for simpler testing. (36cfabfa)
+- Preview build: use gh -R and upload only files; avoid .git dependency. (1b3da3b3)
+
 ## [0.2.105] - 2025-09-09
 
 - Triage: make agent failures non-fatal; capture exit code and disable git prompts. (adbcfbae)
