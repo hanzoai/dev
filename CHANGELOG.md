@@ -3,6 +3,23 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.104] - 2025-09-09
+
+- CLI: support preview downloads via pr:<number>; keep run-id fallback. (73de54da)
+- Preview: publish prereleases on PRs with release assets; no-auth downloads. (73de54da)
+- PR comment: recommend 'code preview pr:<number>' for clarity. (73de54da)
+
+## [0.2.103] - 2025-09-09
+
+- Build: add STRICT_CARGO_HOME to enforce CARGO_HOME; default stays repo-local when unset. (6cbc0555)
+- Triage/Agent: standardize CARGO_HOME and share with rust-cache; prevent env overrides and unintended cargo updates. (13ffc850)
+- CI/Upstream-merge: fix YAML quoting and no-op outputs; split precheck and gate heavy work at job level for reliability. (a1526626, a9bb2b6a)
+
+## [0.2.102] - 2025-09-09
+
+- CI/Triage: fetch remote before push and fall back to force-with-lease on non-fast-forward for bot-owned branches. (f4258aeb, 81dac6d6)
+- Agents: pre-create writable CARGO_HOME and target dirs for agent runs to avoid permission errors. (0ad69c90)
+
 ## [0.2.101] - 2025-09-09
 
 - Build: remove OpenSSL by using rustls in codex-ollama; fix macOS whoami scope. (c3034c38)
