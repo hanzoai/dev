@@ -1024,6 +1024,21 @@ impl App<'_> {
                     self.clear_on_first_frame = true;
                     self.schedule_redraw();
                 }
+                AppEvent::UpdateSpinner(name) => {
+                    // Switch spinner immediately
+                    crate::spinner::switch_spinner(&name);
+                    // Update config and save to file
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_spinner(name.clone());
+                    }
+                    self.schedule_redraw();
+                }
+                AppEvent::PreviewSpinner(name) => {
+                    // Switch spinner immediately for preview (no history event)
+                    crate::spinner::switch_spinner(&name);
+                    // No config change on preview
+                    self.schedule_redraw();
+                }
                 AppEvent::ComposerExpanded => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.on_composer_expanded();
