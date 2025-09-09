@@ -63,6 +63,22 @@ jobs:
             core.setOutput('issue_body', issue.body || '');
             core.setOutput('branch', `issue-${issue.number}`);
 
+      - name: Resolve codex slug
+        id: slug
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = Number(`${{ steps.meta.outputs.issue_number }}`);
+            // Prefer repository_dispatch payload
+            let slug = (context.eventName === 'repository_dispatch' && context.payload.client_payload && context.payload.client_payload.slug) ? String(context.payload.client_payload.slug).toLowerCase() : '';
+            const markerRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            if (!slug) {
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+              for (const c of comments) { const m = (c.body || '').match(markerRe); if (m) { slug = m[1].toLowerCase(); break; } }
+            }
+            core.setOutput('slug', slug || '');
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -256,7 +272,9 @@ jobs:
             const base = process.env.DEFAULT_BRANCH || 'main';
             const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${{ steps.meta.outputs.issue_title }}`);
             const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
-            const footer = ['','---',`Auto-generated for issue #${{ steps.meta.outputs.issue_number }} by a workflow.`,`Author: @${context.actor}`].join('\n');
+            const slug = `${{ steps.slug.outputs.slug }}`;
+            const marker = slug ? `<!-- codex-id: ${slug} -->` : '';
+            const footer = ['','---',`Auto-generated for issue #${{ steps.meta.outputs.issue_number }} by a workflow.`,`Author: @${context.actor}`, marker].filter(Boolean).join('\n');
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer);
             // Attempt create; if exists, reuse
             const params = { owner, repo, title, head, base, body };
@@ -273,4 +291,3 @@ jobs:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
             try { await github.rest.issues.addAssignees({ owner, repo, issue_number, assignees: ['just-every-code'] }); } catch {}
-
