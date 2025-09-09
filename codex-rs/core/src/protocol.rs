@@ -815,6 +815,9 @@ pub struct SessionConfiguredEvent {
     /// Tell the client what model is being queried.
     pub model: String,
 
+    /// Filesystem path where rollout data for this session is recorded.
+    pub rollout_path: PathBuf,
+
     /// Identifier of the history log file (inode on Unix, 0 otherwise).
     pub history_log_id: u64,
 
