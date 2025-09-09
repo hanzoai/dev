@@ -1,11 +1,11 @@
-## @just-every/code v0.2.105
+## @just-every/code v0.2.106
 
-This release refines triage behavior and restores preview build reliability.
+This release improves CLI preview UX and stabilizes preview builds.
 
 ### Changes
-- Triage: make agent failures non-fatal; capture exit code and disable git prompts.
-- Triage: forbid agent git commits; treat agent-made commits as changes; allow branch/push even when clean.
-- Preview: fix code-fence array string and YAML error to restore builds.
+- CLI/Preview: save downloads under ~/.code/bin by default; suffix binaries with PR id.
+- CLI/Preview: run preview binary directly (no --help) for simpler testing.
+- Preview build: use gh -R and upload only files; avoid .git dependency.
 
 ### Install
 ```
@@ -13,4 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.104...v0.2.105
+Compare: https://github.com/just-every/code/compare/v0.2.105...v0.2.106
