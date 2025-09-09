@@ -7,8 +7,6 @@ pub(crate) mod policy;
 pub mod recorder;
 
 pub use recorder::RolloutRecorder;
-pub use recorder::RolloutRecorderParams;
-pub use recorder::SessionMeta;
 pub use recorder::SessionStateSnapshot;
 
 #[cfg(test)]
