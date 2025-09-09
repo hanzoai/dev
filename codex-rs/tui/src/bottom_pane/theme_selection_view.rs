@@ -384,8 +384,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         // Create body content
         let mut lines = Vec::new();
         if matches!(self.mode, Mode::Overview) {
-            // Overview: two clear actions
-            let items = vec![("Change theme", ""), ("Change spinner", "")];
+            // Overview: two clear actions, also show current values
+            let theme_label = Self::get_theme_options()
+                .iter()
+                .find(|(t, _, _)| *t == self.current_theme)
+                .map(|(_, name, _)| *name)
+                .unwrap_or("Theme");
+            let spinner_label = self.current_spinner.as_str();
+            let items = vec![("Change theme", theme_label), ("Change spinner", spinner_label)];
             for (i, (k, v)) in items.iter().enumerate() {
                 let selected = i == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
@@ -399,10 +405,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else {
                     spans.push(Span::styled(*k, Style::default().fg(theme.text)));
                 }
-                if !v.is_empty() {
-                    spans.push(Span::raw(": "));
-                    spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
-                }
+                spans.push(Span::raw(" — "));
+                spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
@@ -473,7 +477,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             );
             let end = (start + visible).min(count);
 
-            // Build table rows
+            // Build table rows using styled cells
             let mut rows: Vec<Row> = Vec::new();
             for i in start..end {
                 let name = names[i].clone();
@@ -482,20 +486,35 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                // Left cell: name with selector and optional (original)
+                // Left cell: selector, name, optional (original)
                 let left = {
-                    let mut s = String::new();
-                    if is_selected { s.push_str("› "); }
-                    s.push_str(&name);
-                    if is_original { s.push_str(" (original)"); }
-                    let style = if is_selected { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
-                    Cell::from(s).style(style)
+                    let mut spans = vec![Span::raw(" ")];
+                    if is_selected {
+                        spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                    } else {
+                        spans.push(Span::raw("  "));
+                    }
+                    if is_selected {
+                        spans.push(Span::styled(name.clone(), Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                    } else {
+                        spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
+                    }
+                    if is_original {
+                        spans.push(Span::styled(" (original)", Style::default().fg(theme.text_dim)));
+                    }
+                    Cell::from(ratatui::text::Text::from(Line::from(spans)))
                 };
 
-                // Right cell: preview "Working… <frame>"
+                // Right cell: exact preview like composer title
                 let right = {
-                    let preview = format!("Working… {}", frame);
-                    Cell::from(preview).style(Style::default().fg(crate::colors::border()))
+                    let mut spans = Vec::new();
+                    // Vertical divider in border color
+                    spans.push(Span::styled("│ ", Style::default().fg(crate::colors::border())));
+                    // Spinner + Working... in info color to match title
+                    spans.push(Span::styled(frame, Style::default().fg(crate::colors::info())));
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled("Working...", Style::default().fg(crate::colors::info())));
+                    Cell::from(ratatui::text::Text::from(Line::from(spans)))
                 };
 
                 rows.push(Row::new(vec![left, right]));
