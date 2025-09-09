@@ -1,0 +1,148 @@
+Run set -euo pipefail
+[2025-09-09T00:20:09] Code v0.2.97
+--------
+workdir: /home/runner/work/code/code
+model: gpt-5
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR] (git writes enabled) (network access enabled)
+reasoning effort: medium
+reasoning summaries: auto
+--------
+[2025-09-09T00:20:09] User instructions:
+Context
+- UPSTREAM_REPO=openai/codex
+- UPSTREAM_BRANCH=main
+- MERGE_BRANCH=upstream-merge
+- DEFAULT_BRANCH=main
+
+Runtime
+- ENV: github-actions
+- MERGE_MODE=by-bucket
+
+Goals
+- Keep our fork in sync with upstream by incorporating genuine improvements.
+- Do not overwrite our unique TUI and tooling approach unless clearly beneficial and compatible.
+- Make granular decisions commit-by-commit or by bucket; do not blanket-drop upstream changes without review.
+
+Artifacts
+- .github/auto/COMMITS.json: upstream commits not in default (sha, title, files, stats).
+- .github/auto/DELETED_ON_DEFAULT.txt: crates/paths removed on our default; avoid re-introducing.
+- .github/auto/CHANGE_HISTOGRAM.txt: rough areas touched.
+- .github/auto/DELTA_FILES.txt and DIFFSTAT.txt: filenames and summary.
+- .github/auto/REINTRODUCED_PATHS.txt: candidate paths removed previously that upstream reintroduced.
+<policy>
+{
+  "prefer_ours_globs": [
+    "codex-rs/tui/**",
+    "codex-cli/**",
+    ".github/workflows/**",
+    "docs/**",
+    "AGENTS.md",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "prefer_theirs_globs": [
+    "codex-rs/core/**",
+    "codex-rs/common/**",
+    "codex-rs/protocol/**",
+    "codex-rs/exec/**",
+    "codex-rs/file-search/**"
+  ],
+  "purge_globs": [
+    ".github/codex-cli-*.png",
+    ".github/codex-cli-*.jpg",
+    ".github/codex-cli-*.jpeg",
+    ".github/codex-cli-*.webp"
+ pub mod codex;
++pub mod debug_logger;
++pub mod slash_commands;
++pub use codex::Codex;
++pub use codex::CodexSpawnOk;
+ mod codex_conversation;
+ pub mod token_data;
+ pub use codex_conversation::CodexConversation;
+@@ -27,6 +33,8 @@
+ pub mod exec_env;
+ mod flags;
+ pub mod git_info;
++pub mod git_worktree;
++mod image_comparison;
+ mod is_safe_command;
+ pub mod landlock;
+ mod mcp_connection_manager;
+@@ -34,14 +42,12 @@
+ mod message_history;
+ mod model_provider_info;
+ pub mod parse_command;
+-mod user_instructions;
+ pub use model_provider_info::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+ pub use model_provider_info::ModelProviderInfo;
+ pub use model_provider_info::WireApi;
+ pub use model_provider_info::built_in_model_providers;
+ pub use model_provider_info::create_oss_provider_with_base_url;
+ mod conversation_manager;
+-mod event_mapping;
+ pub use conversation_manager::ConversationManager;
+ pub use conversation_manager::NewConversation;
+ // Re-export common auth types for workspace consumers
+@@ -61,29 +67,15 @@
+ pub mod terminal;
+ mod tool_apply_patch;
+ pub mod turn_diff_tracker;
+-pub use rollout::RolloutRecorder;
+-pub use rollout::SessionMeta;
+-pub use rollout::list::ConversationItem;
+ pub use rollout::list::ConversationsPage;
+-pub use rollout::list::Cursor;
+ mod user_notification;
+ pub mod util;
++pub mod http_client;
+ pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
+ pub use safety::get_platform_sandbox;
+-// Re-export the protocol types from the standalone `codex-protocol` crate so existing
+-// `codex_core::protocol::...` references continue to work across the workspace.
+-pub use codex_protocol::protocol;
+-// Re-export protocol config enums to ensure call sites can use the same types
+-// as those in the protocol crate when constructing protocol messages.
++// Use our local protocol definitions to preserve custom events and input items.
++pub mod protocol;
++// Optionally expose upstream protocol config enums for callers that need them.
+ pub use codex_protocol::config_types as protocol_config_types;
+-
+-pub use client::ModelClient;
+-pub use client_common::Prompt;
+-pub use client_common::ResponseEvent;
+-pub use client_common::ResponseStream;
+-pub use codex_protocol::models::ContentItem;
+-pub use codex_protocol::models::LocalShellAction;
+-pub use codex_protocol::models::LocalShellExecAction;
+-pub use codex_protocol::models::LocalShellStatus;
+-pub use codex_protocol::models::ReasoningItemContent;
+-pub use codex_protocol::models::ResponseItem;
++// Re-export protocol models for compatibility with existing imports.
++pub use codex_protocol::models as models;
+diff --git a/codex-rs/protocol/Cargo.toml b/codex-rs/protocol/Cargo.toml
+index 8013b6c812a2136a45b6465a50805ff7ac6df597..aac2444014b62289caeaa3361919b41af50aac95
+--- a/codex-rs/protocol/Cargo.toml
++++ b/codex-rs/protocol/Cargo.toml
+@@ -12,8 +12,6 @@
+ 
+ [dependencies]
+ base64 = "0.22.1"
+-icu_decimal = "2.0.0"
+-icu_locale_core = "2.0.0"
+ mcp-types = { path = "../mcp-types" }
+ mime_guess = "2.0.5"
+ serde = { version = "1", features = ["derive"] }
+@@ -21,9 +19,8 @@
+ serde_json = "1"
+ strum = "0.27.2"
+ strum_macros = "0.27.2"
+-sys-locale = "0.3.2"
+ tracing = "0.1.41"
+-ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl", "no-serde-warnings"] }
++ts-rs = { version = "11", features = ["uuid-impl", "serde-json-impl"] }
+ uuid = { version = "1", features = ["serde", "v4"] }
+ 
+ [dev-dependencies]
