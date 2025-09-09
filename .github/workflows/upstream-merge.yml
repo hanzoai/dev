@@ -181,6 +181,21 @@ jobs:
             codex-rs -> target
           save-if: true
 
+      - name: Setup sccache (GHA backend)
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable sccache
+        if: steps.check_upstream.outputs.skip != 'true'
+        run: |
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+          echo 'SCCACHE_IDLE_TIMEOUT=1800' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=5G' >> "$GITHUB_ENV"
+
       # Belt-and-suspenders: explicit cache of the target directory keyed by toolchain + lockfile
       - name: Cache cargo target (direct)
         if: steps.check_upstream.outputs.skip != 'true'
@@ -445,6 +460,11 @@ jobs:
              - Do NOT blanket-delete new crates or reintroduced paths. Surface noteworthy cases in MERGE_REPORT.md and make a reasoned choice.
              - For any path listed in purge_globs or perma_removed_paths, ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). Use repo context and the provided artifacts to make sensible, minimal decisions. Prefer preserving our local UX/branding and workflows; adopt upstream when it improves correctness, security, or compatibility. Record notable decisions in MERGE_REPORT.md.
+          5) Compatibility (do not break callers):
+             - Keep these public re-exports in codex-core: ModelClient, Prompt, ResponseEvent, ResponseStream.
+               Removing them breaks downstream imports and will fail API tests.
+             - Keep codex_core::models namespace as an alias to protocol models.
+             - Do not remove ICU/sys-locale dependencies unless you confirm (via repo-wide search) they are unused across the workspace.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
           7) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
@@ -458,9 +478,18 @@ jobs:
           - If Git reports no merge-base between origin/DEFAULT_BRANCH and upstream/UPSTREAM_BRANCH, you may use `--allow-unrelated-histories` to graft histories and proceed with all policies/guards.
           - If the initial `git merge --no-ff --no-commit upstream/UPSTREAM_BRANCH` fails with unrelated histories, re-run the merge in a separate command with `--allow-unrelated-histories` (do not chain with `||`).
           - Use only the provided GH_TOKEN for push; do not echo it.
+          
+          <tools>
+          - To search for API usages before removing exports:
+              rg -n "^(use\\s+codex_core::|codex_core::)(ModelClient|Prompt|Response(Event|Stream))\\b" codex-rs
+          - To look for ICU/sys-locale usage across workspace:
+              rg -n "\\b(sys_locale|icu_(decimal|locale_core))\\b" codex-rs
+          - To compile API tests without running them:
+              cargo check -p codex-core --tests --quiet
           </constraints>
           EOP
           } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+            RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
@@ -473,9 +502,99 @@ jobs:
             -c sandbox_workspace_write.network_access=true \
             -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
             -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+            -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
+            -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
+            -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
+            -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
+            -c shell_environment_policy.r#set.KEEP_ENV="1" \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
+
+      - name: Compile API surface tests (no run)
+        id: api_check
+        if: steps.check_upstream.outputs.skip != 'true'
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.github/auto"
+          echo "[api-check] cargo check --tests --quiet" | tee "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" >/dev/null
+          if cargo check --tests --quiet 2>&1 | tee -a "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt"; then
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifact - API_CHECK.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: API_CHECK.txt
+          if-no-files-found: warn
+          path: .github/auto/API_CHECK.txt
+
+      - name: Remediate API check failures with Code agent
+        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+        run: |
+          set -euo pipefail
+          SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
+          {
+            echo 'Context';
+            echo "- MERGE_BRANCH=${MERGE_BRANCH}";
+            echo "- DEFAULT_BRANCH=${DEFAULT_BRANCH}";
+            echo '';
+            echo 'Previous step (API_CHECK) failed. Here is the tail of the log:';
+            echo '---8<---';
+            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" 2>/dev/null || true
+            echo '---8<---';
+            echo '';
+            cat << 'PROMPT'
+          You are acting as a maintainer to remediate compile-only API test failures after an upstream merge.
+
+          Tasks (minimal and surgical):
+          - Restore or add back missing public re-exports in codex-core that cause `cargo check --tests` to fail (e.g., ModelClient, Prompt, ResponseEvent, ResponseStream), unless you can conclusively update all workspace imports safely.
+          - Prefer adding compatibility aliases over large refactors.
+          - Do not remove or rename crates. Do not drop ICU/sys-locale unless unused repo-wide.
+          - Run ./build-fast.sh and then `cargo check -p codex-core --tests --quiet` to verify.
+          - Update .github/auto/MERGE_REPORT.md with a short note under "Other changes" describing the compatibility adjustments.
+          - Push to ${MERGE_BRANCH}.
+
+          Constraints:
+          - Keep changes minimal and focused on making tests compile.
+          - Do not modify TUI/CLI user-visible branding.
+          - No history rewriting; only commit on ${MERGE_BRANCH}.
+          - Treat warnings as failures during the build-fast step.
+          PROMPT
+          } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+            GH_TOKEN="$GH_TOKEN" \
+            RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
+            npm_config_cache="$SAFE_HOME/.npm" \
+            npx -y @just-every/code@latest \
+            exec \
+            -s workspace-write \
+            -c sandbox_workspace_write.allow_git_writes=true \
+            -c sandbox_workspace_write.network_access=true \
+            -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
+            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+            -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
+            -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
+            -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
+            -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
+            -c shell_environment_policy.r#set.KEEP_ENV="1" \
+            --cd "$GITHUB_WORKSPACE" \
+            --skip-git-repo-check \
+            - | tee "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
+
+      - name: Re-run API surface tests after remediation
+        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          cargo check --tests --quiet
 
       - name: Enforce policy removals on merge branch (images + caches + purge_globs)
         if: steps.check_upstream.outputs.skip != 'true'
@@ -543,15 +662,20 @@ jobs:
           if git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | grep -q .; then
             echo "::notice::docs/** changed on upstream-merge; ensuring agent reviews and preserves local branding where needed." >&2
           fi
-          # Branding guard: block additions of user-visible 'Codex' in TUI/CLI/docs (allow crate/package contexts)
-          if git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- codex-rs/tui/** codex-cli/** docs/** \
-            | grep -E '^\+' \
-            | grep -Ei '\bCodex\b' \
-            | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
-            echo "Branding guard tripped: new user-visible 'Codex' strings detected in TUI/CLI/docs." >&2
-            git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- codex-rs/tui/** codex-cli/** docs/** \
-              | grep -E '^\+' | grep -Ei '\bCodex\b' | sed 's/^/> /' >&2 || true
-            exit 1
+          # Branding guard: user-facing strings only, in TUI/CLI code (ignore docs/ and comments)
+          changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
+          if [ -n "${changed_files:-}" ]; then
+            if git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
+              | grep -E '^\+' \
+              | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
+              | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
+              echo "Branding guard tripped: new user-visible 'Codex' strings detected in TUI/CLI code." >&2
+              git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
+                | grep -E '^\+' \
+                | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
+                | sed 's/^/> /' >&2 || true
+              exit 1
+            fi
           fi
           # Perma-deleted guard: ensure none of perma_removed_paths exist on branch
           if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then

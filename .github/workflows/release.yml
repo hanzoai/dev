@@ -21,6 +21,39 @@ permissions:
   contents: write
 
 jobs:
+  preflight-tests:
+    name: Preflight Tests (Linux fast E2E)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust (1.89)
+        shell: bash
+        run: |
+          rustup set profile minimal
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v5-rust
+          shared-key: codex-preflight-1.89
+          workspaces: |
+            codex-rs -> target
+          cache-targets: true
+          cache-workspace-crates: true
+          cache-on-failure: true
+
+      - name: Build (fast profile)
+        shell: bash
+        run: ./build-fast.sh
+
+      - name: Curated tests + CLI smokes
+        shell: bash
+        run: bash scripts/ci-tests.sh
+
   determine-version:
     name: Determine Version
     runs-on: ubuntu-latest
@@ -82,7 +115,7 @@ jobs:
 
   build-binaries:
     name: Build ${{ matrix.target }}
-    needs: determine-version
+    needs: [determine-version, preflight-tests]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -229,6 +262,26 @@ jobs:
         run: |
           cd codex-rs
           cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
+
+      - name: Post-build smoke (run binary) [Unix]
+        if: |
+          (contains(matrix.os, 'ubuntu')  && matrix.target == 'x86_64-unknown-linux-musl') ||
+          (matrix.os == 'ubuntu-24.04-arm' && matrix.target == 'aarch64-unknown-linux-musl') ||
+          (startsWith(matrix.os, 'macos-') && matrix.target == 'aarch64-apple-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="codex-rs/target/${{ matrix.target }}/release/code"
+          "$exe" --version
+          "$exe" completion --shell bash > /dev/null
+
+      - name: Post-build smoke (run binary) [Windows]
+        if: matrix.os == 'windows-latest' && matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $exe = "codex-rs/target/${{ matrix.target }}/release/code.exe"
+          & $exe --version | Out-Null
+          & $exe completion --shell bash | Out-Null
 
       - name: sccache stats
         shell: bash
