@@ -11,9 +11,13 @@ on:
         description: "Issue number to triage"
         required: true
         type: number
+      note:
+        description: "Optional comment to post when starting manual triage"
+        required: false
+        type: string
 
 concurrency:
-  group: issue-triage-${{ github.event.issue.number }}
+  group: issue-triage-${{ (github.event_name == 'workflow_dispatch' && inputs.issue_number) || github.event.issue.number }}
   # Do not cancel in-progress runs when our own bot writes a comment.
   # We'll guard re-entrancy inside the job and exit fast for bot actors.
   cancel-in-progress: false
@@ -40,6 +44,8 @@ jobs:
         github.event.issue.state == 'open' &&
         contains(toJson(github.event.issue.assignees), 'just-every-code') &&
         github.actor != 'just-every-code')
+      ||
+      (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -75,7 +81,7 @@ jobs:
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 1
-      persist-credentials: false
+          persist-credentials: false
 
       - name: Resolve issue metadata (manual trigger support)
         if: github.event_name == 'workflow_dispatch'
@@ -91,6 +97,20 @@ jobs:
             core.exportVariable('ISSUE_BODY', issue.body || '');
             core.exportVariable('BRANCH_NAME', `issue-${issue.number}`);
             core.notice(`Resolved issue #${issue.number} for manual triage.`);
+
+      - name: Manual kick-off comment (optional)
+        if: github.event_name == 'workflow_dispatch' && inputs.note != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
+            const note = `${inputs.note}`;
+            const body = [
+              `Manual triage started by @${context.actor}.`,
+              '',
+              note
+            ].join('\n');
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
 
       - name: Setup Node.js
         timeout-minutes: 5
