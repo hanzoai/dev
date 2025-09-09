@@ -512,7 +512,85 @@ jobs:
             - | tee .github/auto/AGENT_STDOUT.txt
 
       - name: Compile API surface tests (no run)
+        id: api_check
         if: steps.check_upstream.outputs.skip != 'true'
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.github/auto"
+          echo "[api-check] cargo check --tests --quiet" | tee "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" >/dev/null
+          if cargo check --tests --quiet 2>&1 | tee -a "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt"; then
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifact - API_CHECK.txt
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: API_CHECK.txt
+          if-no-files-found: warn
+          path: .github/auto/API_CHECK.txt
+
+      - name: Remediate API check failures with Code agent
+        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+        run: |
+          set -euo pipefail
+          SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
+          {
+            echo 'Context';
+            echo "- MERGE_BRANCH=${MERGE_BRANCH}";
+            echo "- DEFAULT_BRANCH=${DEFAULT_BRANCH}";
+            echo '';
+            echo 'Previous step (API_CHECK) failed. Here is the tail of the log:';
+            echo '---8<---';
+            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" 2>/dev/null || true
+            echo '---8<---';
+            echo '';
+            cat << 'PROMPT'
+          You are acting as a maintainer to remediate compile-only API test failures after an upstream merge.
+
+          Tasks (minimal and surgical):
+          - Restore or add back missing public re-exports in codex-core that cause `cargo check --tests` to fail (e.g., ModelClient, Prompt, ResponseEvent, ResponseStream), unless you can conclusively update all workspace imports safely.
+          - Prefer adding compatibility aliases over large refactors.
+          - Do not remove or rename crates. Do not drop ICU/sys-locale unless unused repo-wide.
+          - Run ./build-fast.sh and then `cargo check -p codex-core --tests --quiet` to verify.
+          - Update .github/auto/MERGE_REPORT.md with a short note under "Other changes" describing the compatibility adjustments.
+          - Push to ${MERGE_BRANCH}.
+
+          Constraints:
+          - Keep changes minimal and focused on making tests compile.
+          - Do not modify TUI/CLI user-visible branding.
+          - No history rewriting; only commit on ${MERGE_BRANCH}.
+          - Treat warnings as failures during the build-fast step.
+          PROMPT
+          } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+            GH_TOKEN="$GH_TOKEN" \
+            RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
+            npm_config_cache="$SAFE_HOME/.npm" \
+            npx -y @just-every/code@latest \
+            exec \
+            -s workspace-write \
+            -c sandbox_workspace_write.allow_git_writes=true \
+            -c sandbox_workspace_write.network_access=true \
+            -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
+            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+            -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
+            -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
+            -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
+            -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
+            -c shell_environment_policy.r#set.KEEP_ENV="1" \
+            --cd "$GITHUB_WORKSPACE" \
+            --skip-git-repo-check \
+            - | tee "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
+
+      - name: Re-run API surface tests after remediation
+        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
         working-directory: codex-rs
         run: |
           set -euo pipefail
