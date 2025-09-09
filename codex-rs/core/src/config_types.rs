@@ -206,3 +206,78 @@ pub enum ReasoningSummaryFormat {
     None,
     Experimental,
 }
+
+// --- TUI presentation-related config types (fork extension) ---
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TextVerbosity {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ThemeName {
+    LightPhoton,
+    LightPrismRainbow,
+    LightVividTriad,
+    LightPorcelain,
+    LightSandbar,
+    LightGlacier,
+    DarkPaperLightPro,
+    DarkCarbonNight,
+    DarkShinobiDusk,
+    DarkOledBlackPro,
+    DarkAmberTerminal,
+    DarkAuroraFlux,
+    DarkCharcoalRainbow,
+    DarkZenGarden,
+    Custom,
+}
+
+impl Default for ThemeName {
+    fn default() -> Self { ThemeName::LightPhoton }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeColors {
+    pub primary: Option<String>,
+    pub secondary: Option<String>,
+    pub background: Option<String>,
+    pub foreground: Option<String>,
+
+    pub border: Option<String>,
+    pub border_focused: Option<String>,
+    pub selection: Option<String>,
+    pub cursor: Option<String>,
+
+    pub success: Option<String>,
+    pub warning: Option<String>,
+    pub error: Option<String>,
+    pub info: Option<String>,
+
+    pub text: Option<String>,
+    pub text_dim: Option<String>,
+    pub text_bright: Option<String>,
+
+    pub keyword: Option<String>,
+    pub string: Option<String>,
+    pub comment: Option<String>,
+    pub function: Option<String>,
+
+    pub spinner: Option<String>,
+    pub progress: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeConfig {
+    #[serde(default)]
+    pub name: ThemeName,
+    #[serde(default)]
+    pub colors: ThemeColors,
+}
