@@ -13,7 +13,6 @@ use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id;
 use core_test_support::wait_for_event;
 use serde_json::json;
-use std::io::Write;
 use tempfile::TempDir;
 use uuid::Uuid;
 use wiremock::Mock;
@@ -98,7 +97,7 @@ fn write_auth_json(
         "OPENAI_API_KEY": openai_api_key,
         "tokens": tokens,
         // RFC3339 datetime; value doesn't matter for these tests
-        "last_refresh": chrono::Utc::now(),
+        "last_refresh": "2025-08-06T20:41:36.232376Z",
     });
 
     std::fs::write(
@@ -111,6 +110,9 @@ fn write_auth_json(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+<<<<<<< HEAD
+async fn includes_session_id_and_model_headers_in_request() {
+=======
 async fn resume_includes_initial_messages_and_sends_prior_items() {
     if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
@@ -243,6 +245,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn includes_conversation_id_and_model_headers_in_request() {
+>>>>>>> upstream/main
     if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
@@ -493,6 +496,7 @@ async fn chatgpt_auth_sends_correct_request() {
         "Bearer Access Token"
     );
     assert_eq!(request_chatgpt_account_id.to_str().unwrap(), "account_id");
+    assert!(!request_body["store"].as_bool().unwrap());
     assert!(request_body["stream"].as_bool().unwrap());
     assert_eq!(
         request_body["include"][0].as_str().unwrap(),
@@ -574,6 +578,14 @@ async fn prefers_chatgpt_token_when_config_prefers_chatgpt() {
         .unwrap();
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    // verify request body flags
+    let request = &server.received_requests().await.unwrap()[0];
+    let request_body = request.body_json::<serde_json::Value>().unwrap();
+    assert!(
+        !request_body["store"].as_bool().unwrap(),
+        "store should be false for ChatGPT auth"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -650,6 +662,14 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         .unwrap();
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    // verify request body flags
+    let request = &server.received_requests().await.unwrap()[0];
+    let request_body = request.body_json::<serde_json::Value>().unwrap();
+    assert!(
+        request_body["store"].as_bool().unwrap(),
+        "store should be true for API key auth"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -970,26 +990,31 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
     let r3_tail_expected = json!([
         {
             "type": "message",
+            "id": null,
             "role": "user",
             "content": [{"type":"input_text","text":"U1"}]
         },
         {
             "type": "message",
+            "id": null,
             "role": "assistant",
             "content": [{"type":"output_text","text":"Hey there!\n"}]
         },
         {
             "type": "message",
+            "id": null,
             "role": "user",
             "content": [{"type":"input_text","text":"U2"}]
         },
         {
             "type": "message",
+            "id": null,
             "role": "assistant",
             "content": [{"type":"output_text","text":"Hey there!\n"}]
         },
         {
             "type": "message",
+            "id": null,
             "role": "user",
             "content": [{"type":"input_text","text":"U3"}]
         }
