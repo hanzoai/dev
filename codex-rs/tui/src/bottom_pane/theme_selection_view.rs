@@ -20,11 +20,17 @@ use crate::app_event_sender::AppEventSender;
 use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
 
-/// Interactive UI for selecting theme
+/// Interactive UI for selecting appearance (Theme & Spinner)
 pub(crate) struct ThemeSelectionView {
     original_theme: ThemeName, // Theme to restore on cancel
     current_theme: ThemeName,  // Currently displayed theme
-    selected_index: usize,
+    selected_theme_index: usize,
+    // Spinner tab state
+    original_spinner: String,
+    current_spinner: String,
+    selected_spinner_index: usize,
+    // Tab selection
+    active_tab: Tab,
     app_event_tx: AppEventSender,
     is_complete: bool,
 }
@@ -32,15 +38,27 @@ pub(crate) struct ThemeSelectionView {
 impl ThemeSelectionView {
     pub fn new(current_theme: ThemeName, app_event_tx: AppEventSender) -> Self {
         let themes = Self::get_theme_options();
-        let selected_index = themes
+        let selected_theme_index = themes
             .iter()
             .position(|(t, _, _)| *t == current_theme)
+            .unwrap_or(0);
+
+        // Initialize spinner selection from current runtime spinner
+        let spinner_names = crate::spinner::spinner_names();
+        let current_spinner_name = crate::spinner::current_spinner().name.to_string();
+        let selected_spinner_index = spinner_names
+            .iter()
+            .position(|n| *n == current_spinner_name)
             .unwrap_or(0);
 
         Self {
             original_theme: current_theme,
             current_theme,
-            selected_index,
+            selected_theme_index,
+            original_spinner: current_spinner_name.clone(),
+            current_spinner: current_spinner_name,
+            selected_spinner_index,
+            active_tab: Tab::Themes,
             app_event_tx,
             is_complete: false,
         }
@@ -125,47 +143,83 @@ impl ThemeSelectionView {
 
     fn move_selection_up(&mut self) {
         let options = Self::get_theme_options();
-        if self.selected_index == 0 {
-            self.selected_index = options.len() - 1;
+        if matches!(self.active_tab, Tab::Themes) {
+            if self.selected_theme_index == 0 {
+                self.selected_theme_index = options.len() - 1;
+            } else {
+                self.selected_theme_index -= 1;
+            }
+            self.current_theme = options[self.selected_theme_index].0;
+            // Live preview - update theme immediately (no history event)
+            self.app_event_tx
+                .send(AppEvent::PreviewTheme(self.current_theme));
         } else {
-            self.selected_index -= 1;
+            let names = crate::spinner::spinner_names();
+            if self.selected_spinner_index == 0 {
+                self.selected_spinner_index = names.len().saturating_sub(1);
+            } else {
+                self.selected_spinner_index -= 1;
+            }
+            if let Some(name) = names.get(self.selected_spinner_index) {
+                self.current_spinner = (*name).to_string();
+                self.app_event_tx
+                    .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+            }
         }
-        self.current_theme = options[self.selected_index].0;
-        // Live preview - update theme immediately (no history event)
-        self.app_event_tx
-            .send(AppEvent::PreviewTheme(self.current_theme));
     }
 
     fn move_selection_down(&mut self) {
-        let options = Self::get_theme_options();
-        self.selected_index = (self.selected_index + 1) % options.len();
-        self.current_theme = options[self.selected_index].0;
-        // Live preview - update theme immediately (no history event)
-        self.app_event_tx
-            .send(AppEvent::PreviewTheme(self.current_theme));
+        if matches!(self.active_tab, Tab::Themes) {
+            let options = Self::get_theme_options();
+            self.selected_theme_index = (self.selected_theme_index + 1) % options.len();
+            self.current_theme = options[self.selected_theme_index].0;
+            // Live preview - update theme immediately (no history event)
+            self.app_event_tx
+                .send(AppEvent::PreviewTheme(self.current_theme));
+        } else {
+            let names = crate::spinner::spinner_names();
+            if !names.is_empty() {
+                self.selected_spinner_index = (self.selected_spinner_index + 1) % names.len();
+                if let Some(name) = names.get(self.selected_spinner_index) {
+                    self.current_spinner = (*name).to_string();
+                    self.app_event_tx
+                        .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                }
+            }
+        }
     }
 
     fn confirm_selection(&self) {
         // Confirm the selection - this will add it to history
         self.app_event_tx
             .send(AppEvent::UpdateTheme(self.current_theme));
+        self.app_event_tx
+            .send(AppEvent::UpdateSpinner(self.current_spinner.clone()));
     }
 
     fn cancel_selection(&mut self) {
-        // Restore original theme on cancel (no history event)
+        // Restore original selections on cancel (no history event)
         if self.current_theme != self.original_theme {
             self.app_event_tx
                 .send(AppEvent::PreviewTheme(self.original_theme));
         }
+        if self.current_spinner != self.original_spinner {
+            self.app_event_tx
+                .send(AppEvent::PreviewSpinner(self.original_spinner.clone()));
+        }
     }
 }
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum Tab { Themes, Spinner }
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
         // Use most of the available screen for better scrolling
         // But cap it at the number of themes + header/footer
         let theme_count = Self::get_theme_options().len() as u16;
-        (theme_count + 4).min(20)
+        // Leave room for header/tabs/footer
+        (theme_count.max(crate::spinner::spinner_names().len() as u16) + 6).min(22)
     }
 
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
@@ -183,6 +237,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 ..
             } => {
                 self.move_selection_down();
+            }
+            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
+                self.active_tab = Tab::Themes;
+                // Schedule a near-future redraw so spinner previews continue animating
+                self.app_event_tx
+                    .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+            }
+            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+                self.active_tab = Tab::Spinner;
+                self.app_event_tx
+                    .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -219,15 +284,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let scroll_offset = if available_height >= options.len() {
             // All items fit, no scrolling needed
             0
-        } else if self.selected_index < available_height / 2 {
+        } else if self.selected_theme_index < available_height / 2 {
             // Near the top
             0
-        } else if self.selected_index >= options.len() - available_height / 2 {
+        } else if self.selected_theme_index >= options.len() - available_height / 2 {
             // Near the bottom
             options.len().saturating_sub(available_height)
         } else {
             // Center the selected item
-            self.selected_index.saturating_sub(available_height / 2)
+            self.selected_theme_index.saturating_sub(available_height / 2)
         };
 
         // Create content
@@ -235,58 +300,111 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Line::from(vec![
                 Span::raw(" "),
                 Span::styled(
-                    "Theme Selection",
+                    "Appearance",
                     Style::default()
                         .fg(theme.text_bright)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
+            // Tabs header
+            {
+                let tab_themes = if matches!(self.active_tab, Tab::Themes) { "[Themes]" } else { " Themes " };
+                let tab_spinner = if matches!(self.active_tab, Tab::Spinner) { "[Spinner]" } else { " Spinner " };
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(tab_themes, Style::default().fg(theme.keyword)),
+                    Span::raw("  "),
+                    Span::styled(tab_spinner, Style::default().fg(theme.keyword)),
+                ])
+            },
             Line::from(" "),
         ];
 
-        // Add visible themes based on scroll offset
-        let visible_end = (scroll_offset + available_height).min(options.len());
-        for i in scroll_offset..visible_end {
-            let (theme_enum, name, description) = &options[i];
-            let is_selected = i == self.selected_index;
-            let is_original = *theme_enum == self.original_theme;
+        if matches!(self.active_tab, Tab::Themes) {
+            // Add visible themes based on scroll offset
+            let visible_end = (scroll_offset + available_height).min(options.len());
+            for i in scroll_offset..visible_end {
+                let (theme_enum, name, description) = &options[i];
+                let is_selected = i == self.selected_theme_index;
+                let is_original = *theme_enum == self.original_theme;
 
-            let prefix = if is_selected { "› " } else { "  " };
-            let suffix = if is_original { " (original)" } else { "" };
+                let prefix = if is_selected { "› " } else { "  " };
+                let suffix = if is_original { " (original)" } else { "" };
 
-            let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
 
-            if is_selected {
+                if is_selected {
+                    spans.push(Span::styled(
+                        *name,
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled(*name, Style::default().fg(theme.text)));
+                }
+
+                spans.push(Span::styled(suffix, Style::default().fg(theme.text_dim)));
+
+                if !suffix.is_empty() {
+                    spans.push(Span::raw(" "));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
+
                 spans.push(Span::styled(
-                    *name,
-                    Style::default()
-                        .fg(theme.primary)
-                        .add_modifier(Modifier::BOLD),
+                    *description,
+                    Style::default().fg(theme.text_dim),
                 ));
-            } else {
-                spans.push(Span::styled(*name, Style::default().fg(theme.text)));
+
+                lines.push(Line::from(spans));
             }
+        } else {
+            // Spinner tab: list spinner names with a live frame preview
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let names = crate::spinner::spinner_names();
+            let visible_end = (scroll_offset + available_height).min(names.len());
+            for i in scroll_offset..visible_end {
+                let name = names[i];
+                let is_selected = i == self.selected_spinner_index;
+                let is_original = name == self.original_spinner;
+                let def = crate::spinner::find_spinner_by_name(name).unwrap_or(crate::spinner::current_spinner());
+                let frame = crate::spinner::frame_at_time(def, now_ms);
 
-            spans.push(Span::styled(suffix, Style::default().fg(theme.text_dim)));
+                let prefix = if is_selected { "› " } else { "  " };
+                let suffix = if is_original { " (original)" } else { "" };
 
-            if !suffix.is_empty() {
-                spans.push(Span::raw(" "));
-            } else {
-                spans.push(Span::raw("  "));
+                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+
+                // Show preview frame and name
+                let preview = format!("{} ", frame);
+                spans.push(Span::styled(preview, Style::default().fg(theme.info)));
+
+                if is_selected {
+                    spans.push(Span::styled(
+                        name,
+                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled(name, Style::default().fg(theme.text)));
+                }
+
+                spans.push(Span::styled(suffix, Style::default().fg(theme.text_dim)));
+                lines.push(Line::from(spans));
             }
-
-            spans.push(Span::styled(
-                *description,
-                Style::default().fg(theme.text_dim),
-            ));
-
-            lines.push(Line::from(spans));
+            // Keep preview animating while the tab is active
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
         }
 
         // Add scroll indicators if needed
-        if scroll_offset > 0 || visible_end < options.len() {
+        if matches!(self.active_tab, Tab::Themes) && (scroll_offset > 0 || (scroll_offset + available_height).min(options.len()) < options.len()) {
             lines.push(Line::from(" "));
-            let scroll_info = format!("[{}/{}]", self.selected_index + 1, options.len());
+            let scroll_info = format!("[{}/{}]", self.selected_theme_index + 1, options.len());
             lines.push(Line::from(vec![Span::raw(" "), Span::styled(
                 scroll_info,
                 Style::default().fg(theme.text_dim),
@@ -296,13 +414,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         }
 
         lines.push(Line::from(vec![
-            Span::styled(
-                "↑↓",
-                Style::default()
-                    .fg(theme.keyword)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" preview • ", Style::default().fg(theme.text_dim)),
+            Span::styled("←→", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
+            Span::styled(" tabs • ", Style::default().fg(theme.text_dim)),
+            Span::styled("↑↓", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
+            Span::styled(" select • ", Style::default().fg(theme.text_dim)),
             Span::styled(
                 "Enter",
                 Style::default()
