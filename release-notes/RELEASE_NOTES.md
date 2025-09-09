@@ -1,13 +1,11 @@
-## @just-every/code v0.2.98
+## @just-every/code v0.2.99
 
-This release polishes the TUI footer to match 0.2.96 behavior and improves readability.
+This release improves branch finalize reliability and speeds up history rendering.
 
 ### Changes
 
-- TUI/Footer: restore 0.2.96 behavior; remove duplicate Access flash; add Shift+Tab to Help; make 'Full Access' label ephemeral.
-- TUI/Footer: fix ephemeral 'Full Access' label on Shift+Tab so it doesn't clear immediately.
-- TUI/Footer: reapply DIM styling so footer text is visibly dimmer (matches 0.2.96).
-- TUI/Footer: remove bold from access label and add a leading space for padding.
+- TUI/Branch: finalize merges default into worktree first; prefer fast-forward; start agent on conflicts.
+- TUI/History: cache Exec wrap counts and precompute PatchSummary layout per width to reduce measurement.
 
 ### Install
 
@@ -16,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.97...v0.2.98
+Compare: https://github.com/just-every/code/compare/v0.2.98...v0.2.99
