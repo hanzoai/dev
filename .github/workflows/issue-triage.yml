@@ -855,13 +855,25 @@ jobs:
             git config user.email "issue-bot@users.noreply.github.com"
           fi
           # Reuse stable branch per issue so subsequent runs update the same PR
+          # IMPORTANT: Do NOT create a local branch via fetch before switching
+          # or checkout will fail with uncommitted changes. Instead, create/switch first,
+          # then optionally rebase onto remote if it exists.
           if git ls-remote --exit-code --heads origin "${BRANCH_NAME}" >/dev/null 2>&1; then
-            git fetch origin "${BRANCH_NAME}:${BRANCH_NAME}" || true
-          fi
-          if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
-            git checkout "${BRANCH_NAME}"
+            # Remote branch exists. Create local branch from current HEAD (preserving worktree),
+            # then rebase onto remote to include prior commits.
+            if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
+              git checkout "${BRANCH_NAME}"
+            else
+              git checkout -b "${BRANCH_NAME}"
+            fi
+            git pull --rebase origin "${BRANCH_NAME}" || true
           else
-            git checkout -b "${BRANCH_NAME}"
+            # No remote branch yet; create local branch preserving worktree
+            if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
+              git checkout "${BRANCH_NAME}"
+            else
+              git checkout -b "${BRANCH_NAME}"
+            fi
           fi
           # Stage tracked changes only; exclude working files generated under .github/auto
           git add -A
@@ -874,7 +886,11 @@ jobs:
             git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-          git push --set-upstream origin "${BRANCH_NAME}" || git push origin "${BRANCH_NAME}"
+          if ! git push --set-upstream origin "${BRANCH_NAME}"; then
+            # Handle non-fast-forward: rebase onto remote then push
+            git pull --rebase origin "${BRANCH_NAME}" || true
+            git push origin "${BRANCH_NAME}"
+          fi
 
       - name: Open or update PR with AI-written title/body (no comment yet)
         timeout-minutes: 5
