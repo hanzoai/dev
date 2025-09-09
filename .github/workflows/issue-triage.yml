@@ -889,8 +889,9 @@ jobs:
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           if ! git push --set-upstream origin "${BRANCH_NAME}"; then
-            # Handle non-fast-forward by force-with-lease (bot-owned triage branch)
-            git push --force-with-lease origin "${BRANCH_NAME}"
+            # Handle non-fast-forward: update remote refs and force push (bot-owned triage branch)
+            git fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
+            git push -f origin "${BRANCH_NAME}"
           fi
 
       - name: Open or update PR with AI-written title/body (no comment yet)

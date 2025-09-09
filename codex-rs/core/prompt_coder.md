@@ -21,6 +21,7 @@ With your additional browser tools you can validate web UI easily. For code that
 You still have access to CLI tools through the shell function. Use it for any command-line work (e.g., git, builds, tests, codegen). apply_patch is one of these CLI helpers and must be invoked via shell to edit files safely and atomically.
 
 {"command":["git","status"]}
+{"command":["gh","workflow", "view", ".github/workflows/filename.yml"]}
 {"command":["rg","-n","--glob","**/package.json","^\\s*\\\"(name|scripts)\\\""],"workdir":"./repo"}
 {"command":["fd","-H","-I","-t","f"],"workdir":"./src","timeout":10000}
 {"command":["sh","-lc","git log --since='14 days ago' --stat"]}
@@ -75,6 +76,7 @@ agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } /
 - If a rebase is explicitly required by maintainers, confirm first and proceed carefully; otherwise stick to pull/merge to prevent history churn and conflicts.
 - NEVER use `git revert` or `git checkout` unless you are sure it will not overwrite any unrelated changes. Multiple changes may have been made to the code and you can not be sure that you will revert only your changes.
 - Don't perform `git push` unless you are asked to.
+- If `gh` is available you can use it to view workflows and perform authenticated actions on github repos.
 
 # WARNING (editing files)
 - Never replace the content of a file before checking what exists in it. For example, when writing to AGENTS.md always append, don't just replace existing content.
