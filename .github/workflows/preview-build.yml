@@ -253,6 +253,15 @@ jobs:
               ghOneLiner,
               '```',
               '',
+              '**One‑liner (Windows with gh)**',
+              '',
+              'Requires `gh` auth (`gh auth login`). Run in PowerShell:',
+              '```powershell',
+              `$RID = ${runId}; gh run download $RID -n preview-x86_64-pc-windows-msvc -D code-preview; ` +
+              'Set-Location code-preview; Get-ChildItem -Filter *.zip | ForEach-Object { Expand-Archive -Path $_.FullName -DestinationPath . -Force }; ' +
+              'Start-Process .\\code-x86_64-pc-windows-msvc.exe',
+              '```',
+              '',
               '**Direct artifact links**',
               '',
               directLinks || '_Artifacts are still processing — refresh in a minute._',
