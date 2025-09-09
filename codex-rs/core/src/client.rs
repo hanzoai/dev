@@ -6,11 +6,8 @@ use std::time::Duration;
 use crate::AuthManager;
 use bytes::Bytes;
 use codex_protocol::mcp_protocol::AuthMode;
-<<<<<<< HEAD
-use codex_protocol::models::ResponseItem;
-=======
 use codex_protocol::mcp_protocol::ConversationId;
->>>>>>> upstream/main
+use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 // use regex_lite::Regex;
@@ -92,13 +89,9 @@ impl ModelClient {
         provider: ModelProviderInfo,
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
-<<<<<<< HEAD
         verbosity: TextVerbosityConfig,
-        session_id: Uuid,
-        debug_logger: Arc<Mutex<DebugLogger>>,
-=======
         conversation_id: ConversationId,
->>>>>>> upstream/main
+        debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
         let client = create_client(&config.responses_originator_header);
 
@@ -242,12 +235,7 @@ impl ModelClient {
             store,
             stream: true,
             include,
-<<<<<<< HEAD
-            prompt_cache_key: Some(self.session_id.to_string()),
-=======
             prompt_cache_key: Some(self.conversation_id.to_string()),
-            text,
->>>>>>> upstream/main
         };
 
         let mut attempt = 0;
