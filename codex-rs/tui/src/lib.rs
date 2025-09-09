@@ -64,6 +64,9 @@ mod terminal_info;
 mod text_formatting;
 mod text_processing;
 mod theme;
+mod util {
+    pub mod list_window;
+}
 mod spinner;
 mod tui;
 mod user_approval_widget;
