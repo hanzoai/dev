@@ -20,33 +20,25 @@ pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
     codex_protocol::mcp_protocol::InputItem::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ClientRequest::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ServerRequest::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::NewConversationParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::NewConversationResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::AddConversationListenerParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::AddConversationSubscriptionResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::RemoveConversationListenerParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::RemoveConversationSubscriptionResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::SendUserMessageParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::SendUserMessageResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::SendUserTurnParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::SendUserTurnResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::InterruptConversationParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::InterruptConversationResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::GitDiffToRemoteParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::GitDiffToRemoteResponse::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::LoginChatGptResponse::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::LoginChatGptCompleteNotification::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::CancelLoginChatGptParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::CancelLoginChatGptResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::LogoutChatGptParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::LogoutChatGptResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::GetAuthStatusParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::GetAuthStatusResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::ApplyPatchApprovalParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ApplyPatchApprovalResponse::export_all_to(out_dir)?;
-    codex_protocol::mcp_protocol::ExecCommandApprovalParams::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ExecCommandApprovalResponse::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::GetUserSavedConfigResponse::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::GetUserAgentResponse::export_all_to(out_dir)?;
     codex_protocol::mcp_protocol::ServerNotification::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::ListConversationsResponse::export_all_to(out_dir)?;
+    codex_protocol::mcp_protocol::ResumeConversationResponse::export_all_to(out_dir)?;
 
     generate_index_ts(out_dir)?;
 
@@ -57,16 +49,16 @@ pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
     }
 
     // Format with Prettier by passing individual files (no shell globbing)
-    if let Some(prettier_bin) = prettier {
-        if !ts_files.is_empty() {
-            let status = Command::new(prettier_bin)
-                .arg("--write")
-                .args(ts_files.iter().map(|p| p.as_os_str()))
-                .status()
-                .with_context(|| format!("Failed to invoke Prettier at {}", prettier_bin.display()))?;
-            if !status.success() {
-                return Err(anyhow!("Prettier failed with status {}", status));
-            }
+    if let Some(prettier_bin) = prettier
+        && !ts_files.is_empty()
+    {
+        let status = Command::new(prettier_bin)
+            .arg("--write")
+            .args(ts_files.iter().map(|p| p.as_os_str()))
+            .status()
+            .with_context(|| format!("Failed to invoke Prettier at {}", prettier_bin.display()))?;
+        if !status.success() {
+            return Err(anyhow!("Prettier failed with status {}", status));
         }
     }
 

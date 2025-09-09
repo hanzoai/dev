@@ -3,8 +3,14 @@
 use std::fs::File;
 use std::fs::{self};
 use std::io::Error as IoError;
+<<<<<<< HEAD
 use std::path::{Path, PathBuf};
+=======
+use std::path::Path;
+use std::path::PathBuf;
+>>>>>>> upstream/main
 
+use codex_protocol::mcp_protocol::ConversationId;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -17,7 +23,6 @@ use tokio::sync::mpsc::{self};
 use tokio::sync::oneshot;
 use tracing::info;
 use tracing::warn;
-use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
 use super::list::ConversationsPage;
@@ -26,11 +31,17 @@ use super::list::get_conversations;
 use crate::config::Config;
 use super::policy::is_persisted_response_item;
 use crate::conversation_manager::InitialHistory;
+<<<<<<< HEAD
+=======
+use crate::conversation_manager::ResumedHistory;
+use crate::git_info::GitInfo;
+use crate::git_info::collect_git_info;
+>>>>>>> upstream/main
 use codex_protocol::models::ResponseItem;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct SessionMeta {
-    pub id: Uuid,
+    pub id: ConversationId,
     pub timestamp: String,
     pub instructions: Option<String>,
 }
@@ -53,7 +64,7 @@ pub struct SavedSession {
     pub items: Vec<ResponseItem>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
-    pub session_id: Uuid,
+    pub session_id: ConversationId,
 }
 
 #[derive(Clone)]
@@ -61,10 +72,34 @@ pub struct RolloutRecorder {
     tx: Sender<RolloutCmd>,
 }
 
+#[derive(Clone)]
+pub enum RolloutRecorderParams {
+    Create {
+        conversation_id: ConversationId,
+        instructions: Option<String>,
+    },
+    Resume {
+        path: PathBuf,
+    },
+}
+
 enum RolloutCmd {
     AddItems(Vec<ResponseItem>),
     UpdateState(SessionStateSnapshot),
     Shutdown { ack: oneshot::Sender<()> },
+}
+
+impl RolloutRecorderParams {
+    pub fn new(conversation_id: ConversationId, instructions: Option<String>) -> Self {
+        Self::Create {
+            conversation_id,
+            instructions,
+        }
+    }
+
+    pub fn resume(path: PathBuf) -> Self {
+        Self::Resume { path }
+    }
 }
 
 impl RolloutRecorder {
@@ -77,6 +112,7 @@ impl RolloutRecorder {
         get_conversations(codex_home, page_size, cursor).await
     }
 
+<<<<<<< HEAD
     pub async fn new(
         config: &Config,
         uuid: Uuid,
@@ -90,8 +126,51 @@ impl RolloutRecorder {
         let timestamp = timestamp
             .format(timestamp_format)
             .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
+=======
+    /// Attempt to create a new [`RolloutRecorder`]. If the sessions directory
+    /// cannot be created or the rollout file cannot be opened we return the
+    /// error so the caller can decide whether to disable persistence.
+    pub async fn new(config: &Config, params: RolloutRecorderParams) -> std::io::Result<Self> {
+        let (file, meta) = match params {
+            RolloutRecorderParams::Create {
+                conversation_id,
+                instructions,
+            } => {
+                let LogFileInfo {
+                    file,
+                    conversation_id: session_id,
+                    timestamp,
+                } = create_log_file(config, conversation_id)?;
+
+                let timestamp_format: &[FormatItem] = format_description!(
+                    "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+                );
+                let timestamp = timestamp
+                    .to_offset(time::UtcOffset::UTC)
+                    .format(timestamp_format)
+                    .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
+
+                (
+                    tokio::fs::File::from_std(file),
+                    Some(SessionMeta {
+                        timestamp,
+                        id: session_id,
+                        instructions,
+                    }),
+                )
+            }
+            RolloutRecorderParams::Resume { path } => (
+                tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(path)
+                    .await?,
+                None,
+            ),
+        };
+>>>>>>> upstream/main
 
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
+<<<<<<< HEAD
         let index_ctx = Some(IndexContext::new(
             config.codex_home.clone(),
             config.cwd.clone(),
@@ -104,6 +183,14 @@ impl RolloutRecorder {
             Some(SessionMeta { timestamp, id: session_id, instructions }),
             index_ctx,
         ));
+=======
+
+        // Spawn a Tokio task that owns the file handle and performs async
+        // writes. Using `tokio::fs::File` keeps everything on the async I/O
+        // driver instead of blocking the runtime.
+        tokio::task::spawn(rollout_writer(file, rx, meta, cwd));
+
+>>>>>>> upstream/main
         Ok(Self { tx })
     }
 
@@ -188,11 +275,30 @@ impl RolloutRecorder {
 
     pub async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
         info!("Resuming rollout from {path:?}");
+        tracing::error!("Resuming rollout from {path:?}");
         let text = tokio::fs::read_to_string(path).await?;
         let mut lines = text.lines();
-        let _ = lines
+        let first_line = lines
             .next()
             .ok_or_else(|| IoError::other("empty session file"))?;
+<<<<<<< HEAD
+=======
+        let conversation_id = match serde_json::from_str::<SessionMeta>(first_line) {
+            Ok(rollout_session_meta) => {
+                tracing::error!(
+                    "Parsed conversation ID from rollout file: {:?}",
+                    rollout_session_meta.id
+                );
+                Some(rollout_session_meta.id)
+            }
+            Err(e) => {
+                return Err(IoError::other(format!(
+                    "failed to parse first line of rollout file as SessionMeta: {e}"
+                )));
+            }
+        };
+
+>>>>>>> upstream/main
         let mut items = Vec::new();
         for line in lines {
             if line.trim().is_empty() {
@@ -213,11 +319,28 @@ impl RolloutRecorder {
                 items.push(item);
             }
         }
+<<<<<<< HEAD
+=======
+
+        tracing::error!(
+            "Resumed rollout with {} items, conversation ID: {:?}",
+            items.len(),
+            conversation_id
+        );
+        let conversation_id = conversation_id
+            .ok_or_else(|| IoError::other("failed to parse conversation ID from rollout file"))?;
+
+>>>>>>> upstream/main
         if items.is_empty() {
-            Ok(InitialHistory::New)
-        } else {
-            Ok(InitialHistory::Resumed(items))
+            return Ok(InitialHistory::New);
         }
+
+        info!("Resumed rollout successfully from {path:?}");
+        Ok(InitialHistory::Resumed(ResumedHistory {
+            conversation_id,
+            history: items,
+            rollout_path: path.to_path_buf(),
+        }))
     }
 
     pub async fn shutdown(&self) -> std::io::Result<()> {
@@ -238,12 +361,28 @@ impl RolloutRecorder {
 
 struct LogFileInfo {
     file: File,
+<<<<<<< HEAD
     session_id: Uuid,
+=======
+
+    /// Session ID (also embedded in filename).
+    conversation_id: ConversationId,
+
+    /// Timestamp for the start of the session.
+>>>>>>> upstream/main
     timestamp: OffsetDateTime,
     path: PathBuf,
 }
 
+<<<<<<< HEAD
 fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFileInfo> {
+=======
+fn create_log_file(
+    config: &Config,
+    conversation_id: ConversationId,
+) -> std::io::Result<LogFileInfo> {
+    // Resolve ~/.codex/sessions/YYYY/MM/DD and create it if missing.
+>>>>>>> upstream/main
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.codex_home.clone();
@@ -256,10 +395,27 @@ fn create_log_file(config: &Config, session_id: Uuid) -> std::io::Result<LogFile
     let date_str = timestamp
         .format(format)
         .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
+<<<<<<< HEAD
     let filename = format!("rollout-{date_str}-{session_id}.jsonl");
     let path = dir.join(filename);
     let file = std::fs::OpenOptions::new().append(true).create(true).open(&path)?;
     Ok(LogFileInfo { file, session_id, timestamp, path })
+=======
+
+    let filename = format!("rollout-{date_str}-{conversation_id}.jsonl");
+
+    let path = dir.join(filename);
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)?;
+
+    Ok(LogFileInfo {
+        file,
+        conversation_id,
+        timestamp,
+    })
+>>>>>>> upstream/main
 }
 
 async fn rollout_writer(
@@ -361,6 +517,7 @@ struct IndexContext {
     model: Option<String>,
 }
 
+<<<<<<< HEAD
 impl IndexContext {
     fn new(codex_home: PathBuf, cwd: PathBuf, session_path: PathBuf, model: Option<String>) -> Self {
         Self { codex_home, cwd, session_path, model }
@@ -400,6 +557,15 @@ impl IndexContext {
             }
         }
         None
+=======
+impl JsonlWriter {
+    async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
+        let mut json = serde_json::to_string(item)?;
+        json.push('\n');
+        self.file.write_all(json.as_bytes()).await?;
+        self.file.flush().await?;
+        Ok(())
+>>>>>>> upstream/main
     }
 }
 

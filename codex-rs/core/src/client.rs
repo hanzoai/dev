@@ -6,7 +6,11 @@ use std::time::Duration;
 use crate::AuthManager;
 use bytes::Bytes;
 use codex_protocol::mcp_protocol::AuthMode;
+<<<<<<< HEAD
 use codex_protocol::models::ResponseItem;
+=======
+use codex_protocol::mcp_protocol::ConversationId;
+>>>>>>> upstream/main
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
 // use regex_lite::Regex;
@@ -20,7 +24,6 @@ use tokio_util::io::ReaderStream;
 use tracing::debug;
 use tracing::trace;
 use tracing::warn;
-use uuid::Uuid;
 
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
@@ -75,7 +78,7 @@ pub struct ModelClient {
     auth_manager: Option<Arc<AuthManager>>,
     client: reqwest::Client,
     provider: ModelProviderInfo,
-    session_id: Uuid,
+    conversation_id: ConversationId,
     effort: ReasoningEffortConfig,
     summary: ReasoningSummaryConfig,
     verbosity: TextVerbosityConfig,
@@ -89,9 +92,13 @@ impl ModelClient {
         provider: ModelProviderInfo,
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
+<<<<<<< HEAD
         verbosity: TextVerbosityConfig,
         session_id: Uuid,
         debug_logger: Arc<Mutex<DebugLogger>>,
+=======
+        conversation_id: ConversationId,
+>>>>>>> upstream/main
     ) -> Self {
         let client = create_client(&config.responses_originator_header);
 
@@ -100,7 +107,7 @@ impl ModelClient {
             auth_manager,
             client,
             provider,
-            session_id,
+            conversation_id,
             effort,
             summary,
             verbosity,
@@ -235,7 +242,12 @@ impl ModelClient {
             store,
             stream: true,
             include,
+<<<<<<< HEAD
             prompt_cache_key: Some(self.session_id.to_string()),
+=======
+            prompt_cache_key: Some(self.conversation_id.to_string()),
+            text,
+>>>>>>> upstream/main
         };
 
         let mut attempt = 0;
@@ -275,7 +287,9 @@ impl ModelClient {
 
             req_builder = req_builder
                 .header("OpenAI-Beta", "responses=experimental")
-                .header("session_id", self.session_id.to_string())
+                // Send session_id for compatibility.
+                .header("conversation_id", self.conversation_id.to_string())
+                .header("session_id", self.conversation_id.to_string())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload);
 
