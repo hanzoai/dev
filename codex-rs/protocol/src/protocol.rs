@@ -23,12 +23,10 @@ use mcp_types::CallToolResult;
 use mcp_types::Tool as McpTool;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_bytes::ByteBuf;
+use serde_with::serde_as;
 use strum_macros::Display;
 use ts_rs::TS;
 
-<<<<<<< HEAD
-=======
 /// Open/close tags for special user-input blocks. Used across crates to avoid
 /// duplicated hardcoded strings.
 pub const USER_INSTRUCTIONS_OPEN_TAG: &str = "<user_instructions>";
@@ -37,7 +35,6 @@ pub const ENVIRONMENT_CONTEXT_OPEN_TAG: &str = "<environment_context>";
 pub const ENVIRONMENT_CONTEXT_CLOSE_TAG: &str = "</environment_context>";
 pub const USER_MESSAGE_BEGIN: &str = "## My request for Codex:";
 
->>>>>>> upstream/main
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Submission {
@@ -234,16 +231,8 @@ pub enum SandboxPolicy {
         /// writable roots on UNIX. Defaults to `false`.
         #[serde(default)]
         exclude_slash_tmp: bool,
-
-        /// When true, do not protect the top-level `.git` folder under a
-        /// writable root. Defaults to true (historical behavior allows Git writes).
-        #[serde(default = "crate::protocol::default_true_bool")]
-        allow_git_writes: bool,
     },
 }
-
-// Serde helper: default to true for flags where we want historical permissive behavior.
-pub(crate) const fn default_true_bool() -> bool { true }
 
 /// A writable root path accompanied by a list of subpaths that should remain
 /// read‑only even when the root is writable. This is primarily used to ensure
@@ -299,7 +288,6 @@ impl SandboxPolicy {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
-            allow_git_writes: true,
         }
     }
 
@@ -335,7 +323,6 @@ impl SandboxPolicy {
                 writable_roots,
                 exclude_tmpdir_env_var,
                 exclude_slash_tmp,
-                allow_git_writes,
                 network_access: _,
             } => {
                 // Start from explicitly configured writable roots.
@@ -361,12 +348,11 @@ impl SandboxPolicy {
                 // Linux or Windows, but supporting it here gives users a way to
                 // provide the model with their own temporary directory without
                 // having to hardcode it in the config.
-                if !exclude_tmpdir_env_var {
-                    if let Some(tmpdir) = std::env::var_os("TMPDIR") {
-                        if !tmpdir.is_empty() {
-                            roots.push(PathBuf::from(tmpdir));
-                        }
-                    }
+                if !exclude_tmpdir_env_var
+                    && let Some(tmpdir) = std::env::var_os("TMPDIR")
+                    && !tmpdir.is_empty()
+                {
+                    roots.push(PathBuf::from(tmpdir));
                 }
 
                 // For each root, compute subpaths that should remain read-only.
@@ -374,11 +360,9 @@ impl SandboxPolicy {
                     .into_iter()
                     .map(|writable_root| {
                         let mut subpaths = Vec::new();
-                        if !allow_git_writes {
-                            let top_level_git = writable_root.join(".git");
-                            if top_level_git.is_dir() {
-                                subpaths.push(top_level_git);
-                            }
+                        let top_level_git = writable_root.join(".git");
+                        if top_level_git.is_dir() {
+                            subpaths.push(top_level_git);
                         }
                         WritableRoot {
                             root: writable_root,
@@ -434,12 +418,15 @@ pub enum EventMsg {
     /// Agent has completed all actions
     TaskComplete(TaskCompleteEvent),
 
-    /// Token count event, sent periodically to report the number of tokens
-    /// used in the current session.
-    TokenCount(TokenUsage),
+    /// Usage update for the current session, including totals and last turn.
+    /// Optional means unknown — UIs should not display when `None`.
+    TokenCount(TokenCountEvent),
 
     /// Agent text output message
     AgentMessage(AgentMessageEvent),
+
+    /// User/system input message (what was sent to the model)
+    UserMessage(UserMessageEvent),
 
     /// Agent text output delta message
     AgentMessageDelta(AgentMessageDeltaEvent),
@@ -535,14 +522,12 @@ pub struct TaskStartedEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, TS)]
 pub struct TokenUsage {
     pub input_tokens: u64,
-    pub cached_input_tokens: Option<u64>,
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: Option<u64>,
+    pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
 }
 
-<<<<<<< HEAD
-=======
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
@@ -588,14 +573,13 @@ pub struct TokenCountEvent {
 // Includes prompts, tools and space to call compact.
 const BASELINE_TOKENS: u64 = 12000;
 
->>>>>>> upstream/main
 impl TokenUsage {
     pub fn is_zero(&self) -> bool {
         self.total_tokens == 0
     }
 
     pub fn cached_input(&self) -> u64 {
-        self.cached_input_tokens.unwrap_or(0)
+        self.cached_input_tokens
     }
 
     pub fn non_cached_input(&self) -> u64 {
@@ -613,34 +597,39 @@ impl TokenUsage {
     /// This will be off for the current turn and pending function calls.
     pub fn tokens_in_context_window(&self) -> u64 {
         self.total_tokens
-            .saturating_sub(self.reasoning_output_tokens.unwrap_or(0))
+            .saturating_sub(self.reasoning_output_tokens)
     }
 
     /// Estimate the remaining user-controllable percentage of the model's context window.
     ///
     /// `context_window` is the total size of the model's context window.
-    /// `baseline_used_tokens` should capture tokens that are always present in
+    /// `BASELINE_TOKENS` should capture tokens that are always present in
     /// the context (e.g., system prompt and fixed tool instructions) so that
     /// the percentage reflects the portion the user can influence.
     ///
     /// This normalizes both the numerator and denominator by subtracting the
     /// baseline, so immediately after the first prompt the UI shows 100% left
     /// and trends toward 0% as the user fills the effective window.
-    pub fn percent_of_context_window_remaining(
-        &self,
-        context_window: u64,
-        baseline_used_tokens: u64,
-    ) -> u8 {
-        if context_window <= baseline_used_tokens {
+    pub fn percent_of_context_window_remaining(&self, context_window: u64) -> u8 {
+        if context_window <= BASELINE_TOKENS {
             return 0;
         }
 
-        let effective_window = context_window - baseline_used_tokens;
+        let effective_window = context_window - BASELINE_TOKENS;
         let used = self
             .tokens_in_context_window()
-            .saturating_sub(baseline_used_tokens);
+            .saturating_sub(BASELINE_TOKENS);
         let remaining = effective_window.saturating_sub(used);
         ((remaining as f32 / effective_window as f32) * 100.0).clamp(0.0, 100.0) as u8
+    }
+
+    /// In-place element-wise sum of token counts.
+    pub fn add_assign(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.cached_input_tokens += other.cached_input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.reasoning_output_tokens += other.reasoning_output_tokens;
+        self.total_tokens += other.total_tokens;
     }
 }
 
@@ -672,13 +661,6 @@ impl fmt::Display for FinalOutput {
             } else {
                 String::new()
             },
-<<<<<<< HEAD
-            token_usage.output_tokens,
-            token_usage
-                .reasoning_output_tokens
-                .map(|r| format!(" (reasoning {r})"))
-                .unwrap_or_default()
-=======
             format_with_separators(token_usage.output_tokens),
             if token_usage.reasoning_output_tokens > 0 {
                 format!(
@@ -688,7 +670,6 @@ impl fmt::Display for FinalOutput {
             } else {
                 String::new()
             }
->>>>>>> upstream/main
         )
     }
 }
@@ -698,9 +679,6 @@ pub struct AgentMessageEvent {
     pub message: String,
 }
 
-<<<<<<< HEAD
-#[derive(Debug, Clone, Deserialize, Serialize)]
-=======
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum InputMessageKind {
@@ -743,7 +721,6 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
->>>>>>> upstream/main
 pub struct AgentMessageDeltaEvent {
     pub delta: String,
 }
@@ -858,37 +835,24 @@ pub struct ExecCommandEndEvent {
     pub formatted_output: String,
 }
 
-<<<<<<< HEAD
-#[derive(Debug, Clone, Deserialize, Serialize)]
-=======
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
->>>>>>> upstream/main
 #[serde(rename_all = "snake_case")]
 pub enum ExecOutputStream {
     Stdout,
     Stderr,
 }
 
-<<<<<<< HEAD
-#[derive(Debug, Clone, Deserialize, Serialize)]
-=======
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
->>>>>>> upstream/main
 pub struct ExecCommandOutputDeltaEvent {
     /// Identifier for the ExecCommandBegin that produced this chunk.
     pub call_id: String,
     /// Which stream produced this chunk.
     pub stream: ExecOutputStream,
     /// Raw bytes from the stream (may not be valid UTF-8).
-<<<<<<< HEAD
-    #[serde(with = "serde_bytes")]
-    pub chunk: ByteBuf,
-=======
     #[serde_as(as = "serde_with::base64::Base64")]
     #[ts(type = "string")]
     pub chunk: Vec<u8>,
->>>>>>> upstream/main
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -989,6 +953,11 @@ pub struct SessionConfiguredEvent {
 
     /// Current number of entries in the history log.
     pub history_entry_count: usize,
+
+    /// Optional initial messages (as events) for resumed sessions.
+    /// When present, UIs can use these to seed the history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_messages: Option<Vec<EventMsg>>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
@@ -1064,6 +1033,7 @@ mod tests {
                 model: "codex-mini-latest".to_string(),
                 history_log_id: 0,
                 history_entry_count: 0,
+                initial_messages: None,
             }),
         };
         let serialized = serde_json::to_string(&event).unwrap();
@@ -1071,5 +1041,22 @@ mod tests {
             serialized,
             r#"{"id":"1234","msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","history_log_id":0,"history_entry_count":0}}"#
         );
+    }
+
+    #[test]
+    fn vec_u8_as_base64_serialization_and_deserialization() {
+        let event = ExecCommandOutputDeltaEvent {
+            call_id: "call21".to_string(),
+            stream: ExecOutputStream::Stdout,
+            chunk: vec![1, 2, 3, 4, 5],
+        };
+        let serialized = serde_json::to_string(&event).unwrap();
+        assert_eq!(
+            r#"{"call_id":"call21","stream":"stdout","chunk":"AQIDBAU="}"#,
+            serialized,
+        );
+
+        let deserialized: ExecCommandOutputDeltaEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, event);
     }
 }
