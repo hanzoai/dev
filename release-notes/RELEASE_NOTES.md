@@ -1,11 +1,11 @@
-## @just-every/code v0.2.103
+## @just-every/code v0.2.106
 
-This release improves build ergonomics and stabilizes CI/triage behavior.
+This release improves CLI preview UX and stabilizes preview builds.
 
 ### Changes
-- Build: add STRICT_CARGO_HOME to enforce CARGO_HOME; default stays repo-local when unset.
-- Triage/Agent: standardize CARGO_HOME and share with rust-cache; prevent env overrides and unintended cargo updates.
-- CI/Upstream-merge: fix YAML quoting and no-op outputs; split precheck and gate heavy work at job level for reliability.
+- CLI/Preview: save downloads under ~/.code/bin by default; suffix binaries with PR id.
+- CLI/Preview: run preview binary directly (no --help) for simpler testing.
+- Preview build: use gh -R and upload only files; avoid .git dependency.
 
 ### Install
 ```
@@ -13,22 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.102...v0.2.103
-## @just-every/code v0.2.104
-
-This release improves preview workflows and adds a convenient CLI shorthand for downloading PR preview builds.
-
-### Changes
-
-- CLI: support preview downloads via pr:<number>; keep run-id fallback.
-- Preview: publish prereleases on PRs with release assets; no-auth downloads.
-- PR comment: recommend 'code preview pr:<number>' for clarity.
-
-### Install
-
-```
-npm install -g @just-every/code@latest
-code
-```
-
-Compare: https://github.com/just-every/code/compare/v0.2.103...v0.2.104
+Compare: https://github.com/just-every/code/compare/v0.2.105...v0.2.106
