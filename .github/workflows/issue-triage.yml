@@ -866,7 +866,7 @@ jobs:
             else
               git checkout -b "${BRANCH_NAME}"
             fi
-            git pull --rebase origin "${BRANCH_NAME}" || true
+            # Defer reconciliation until after committing local changes
           else
             # No remote branch yet; create local branch preserving worktree
             if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
@@ -887,9 +887,8 @@ jobs:
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           if ! git push --set-upstream origin "${BRANCH_NAME}"; then
-            # Handle non-fast-forward: rebase onto remote then push
-            git pull --rebase origin "${BRANCH_NAME}" || true
-            git push origin "${BRANCH_NAME}"
+            # Handle non-fast-forward by force-with-lease (bot-owned triage branch)
+            git push --force-with-lease origin "${BRANCH_NAME}"
           fi
 
       - name: Open or update PR with AI-written title/body (no comment yet)
