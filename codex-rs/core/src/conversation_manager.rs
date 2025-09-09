@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::AuthManager;
 use crate::CodexAuth;
 use codex_protocol::mcp_protocol::AuthMode;
+use codex_protocol::mcp_protocol::ConversationId;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::codex::Codex;
 use crate::codex::CodexSpawnOk;
@@ -30,7 +30,7 @@ pub enum InitialHistory {
 /// Represents a newly created Codex conversation, including the first event
 /// (which is [`EventMsg::SessionConfigured`]).
 pub struct NewConversation {
-    pub conversation_id: Uuid,
+    pub conversation_id: ConversationId,
     pub conversation: Arc<CodexConversation>,
     pub session_configured: SessionConfiguredEvent,
 }
@@ -48,16 +48,13 @@ impl std::fmt::Debug for NewConversation {
 /// [`ConversationManager`] is responsible for creating conversations and
 /// maintaining them in memory.
 pub struct ConversationManager {
-    conversations: Arc<RwLock<HashMap<Uuid, Arc<CodexConversation>>>>,
+    conversations: Arc<RwLock<HashMap<ConversationId, Arc<CodexConversation>>>>,
     _auth_manager: Arc<AuthManager>,
 }
 
 impl ConversationManager {
     pub fn new(auth_manager: Arc<AuthManager>) -> Self {
-        Self {
-            conversations: Arc::new(RwLock::new(HashMap::new())),
-            _auth_manager: auth_manager,
-        }
+        Self { conversations: Arc::new(RwLock::new(HashMap::new())), _auth_manager: auth_manager }
     }
 
     /// Construct with a dummy AuthManager containing the provided CodexAuth.
@@ -81,18 +78,14 @@ impl ConversationManager {
         config: Config,
         auth: Option<CodexAuth>,
     ) -> CodexResult<NewConversation> {
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id: conversation_id,
-        } = Codex::spawn(config, auth).await?;
-        self.finalize_spawn(codex, conversation_id).await
+        let CodexSpawnOk { codex, init_id: _, session_id } = Codex::spawn(config, auth).await?;
+        self.finalize_spawn(codex, session_id.into()).await
     }
 
     async fn finalize_spawn(
         &self,
         codex: Codex,
-        conversation_id: Uuid,
+        conversation_id: ConversationId,
     ) -> CodexResult<NewConversation> {
         // The first event must be `SessionInitialized`. Validate and forward it
         // to the caller so that they can display it in the conversation
@@ -111,22 +104,18 @@ impl ConversationManager {
             .await
             .insert(conversation_id, conversation.clone());
 
-        Ok(NewConversation {
-            conversation_id,
-            conversation,
-            session_configured,
-        })
+        Ok(NewConversation { conversation_id, conversation, session_configured })
     }
 
     pub async fn get_conversation(
         &self,
-        conversation_id: Uuid,
+        conversation_id: ConversationId,
     ) -> CodexResult<Arc<CodexConversation>> {
         let conversations = self.conversations.read().await;
         conversations
             .get(&conversation_id)
             .cloned()
-            .ok_or_else(|| CodexErr::ConversationNotFound(conversation_id))
+            .ok_or_else(|| CodexErr::ConversationNotFound(conversation_id.into()))
     }
 
     pub async fn resume_conversation_from_rollout(
@@ -136,16 +125,19 @@ impl ConversationManager {
         _auth_manager: Arc<AuthManager>,
     ) -> CodexResult<NewConversation> {
         let _initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id: conversation_id,
-        } = Codex::spawn(config, None).await?;
-        self.finalize_spawn(codex, conversation_id).await
+        let CodexSpawnOk { codex, init_id: _, session_id } = Codex::spawn(config, None).await?;
+        self.finalize_spawn(codex, session_id.into()).await
     }
 
-    pub async fn remove_conversation(&self, conversation_id: Uuid) {
-        self.conversations.write().await.remove(&conversation_id);
+    /// Removes the conversation from the manager's internal map, though the
+    /// conversation is stored as `Arc<CodexConversation>`, it is possible that
+    /// other references to it exist elsewhere. Returns the conversation if the
+    /// conversation was found and removed.
+    pub async fn remove_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Option<Arc<CodexConversation>> {
+        self.conversations.write().await.remove(conversation_id)
     }
 
     /// Fork an existing conversation by dropping the last `drop_last_messages`
@@ -163,13 +155,9 @@ impl ConversationManager {
             truncate_after_dropping_last_messages(conversation_history, num_messages_to_drop);
 
         // Spawn a new conversation with the computed initial history.
-        let CodexSpawnOk {
-            codex,
-            init_id: _,
-            session_id: conversation_id,
-        } = Codex::spawn(config, None).await?;
+        let CodexSpawnOk { codex, init_id: _, session_id } = Codex::spawn(config, None).await?;
 
-        self.finalize_spawn(codex, conversation_id).await
+        self.finalize_spawn(codex, session_id.into()).await
     }
 }
 
@@ -214,18 +202,14 @@ mod tests {
         ResponseItem::Message {
             id: None,
             role: "user".to_string(),
-            content: vec![ContentItem::OutputText {
-                text: text.to_string(),
-            }],
+            content: vec![ContentItem::OutputText { text: text.to_string() }],
         }
     }
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {
             id: None,
             role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText {
-                text: text.to_string(),
-            }],
+            content: vec![ContentItem::OutputText { text: text.to_string() }],
         }
     }
 
@@ -239,18 +223,11 @@ mod tests {
             assistant_msg("a3"),
             ResponseItem::Reasoning {
                 id: "r1".to_string(),
-                summary: vec![ReasoningItemReasoningSummary::SummaryText {
-                    text: "s".to_string(),
-                }],
+                summary: vec![ReasoningItemReasoningSummary::SummaryText { text: "s".to_string() }],
                 content: None,
                 encrypted_content: None,
             },
-            ResponseItem::FunctionCall {
-                id: None,
-                name: "tool".to_string(),
-                arguments: "{}".to_string(),
-                call_id: "c1".to_string(),
-            },
+            ResponseItem::FunctionCall { id: None, name: "tool".to_string(), arguments: "{}".to_string(), call_id: "c1".to_string() },
             assistant_msg("a4"),
         ];
 
