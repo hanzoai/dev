@@ -198,11 +198,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
           # Show files for debugging
           echo "Artifacts directory:"; ls -R artifacts || true
           # Ensure release exists (create if missing)
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
+          if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$REPO" \
               --title "$TITLE" \
               --notes "Automated prerelease with preview binaries for PR #${{ github.event.pull_request.number }} (run ${{ github.run_id }})." \
               --prerelease \
@@ -210,10 +211,9 @@ jobs:
               --target "$GITHUB_SHA"
           fi
           # Upload/replace all artifacts
-          shopt -s globstar nullglob
-          files=(artifacts/**)
+          mapfile -t files < <(find artifacts -type f -print)
           if [ ${#files[@]} -gt 0 ]; then
-            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release upload "$TAG" -R "$REPO" "${files[@]}" --clobber
           else
             echo "No artifacts found to upload." >&2
           fi
