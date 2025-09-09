@@ -26,7 +26,6 @@ pub mod exec;
 mod exec_command;
 pub mod exec_env;
 mod flags;
-pub mod http_client;
 pub mod git_info;
 mod is_safe_command;
 pub mod landlock;
