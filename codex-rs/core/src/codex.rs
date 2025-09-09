@@ -17,14 +17,8 @@ use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
-<<<<<<< HEAD
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
-=======
-use codex_protocol::mcp_protocol::ConversationId;
-use codex_protocol::protocol::ConversationHistoryResponseEvent;
-use codex_protocol::protocol::TaskStartedEvent;
->>>>>>> upstream/main
 use codex_protocol::protocol::TurnAbortReason;
 // unused: TurnAbortedEvent
 use futures::prelude::*;
@@ -39,14 +33,11 @@ use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
-<<<<<<< HEAD
 use uuid::Uuid;
 use crate::CodexAuth;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
-=======
->>>>>>> upstream/main
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -427,7 +418,6 @@ use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
 use crate::protocol::TurnDiffEvent;
 use crate::rollout::RolloutRecorder;
-use crate::rollout::RolloutRecorderParams;
 use crate::safety::SafetyCheck;
 use crate::safety::assess_command_safety;
 use crate::safety::assess_safety_for_untrusted_command;
@@ -451,12 +441,8 @@ pub struct Codex {
 /// unique session id.
 pub struct CodexSpawnOk {
     pub codex: Codex,
-<<<<<<< HEAD
     pub init_id: String,
     pub session_id: Uuid,
-=======
-    pub conversation_id: ConversationId,
->>>>>>> upstream/main
 }
 
 impl Codex {
@@ -491,26 +477,7 @@ impl Codex {
         let config = Arc::new(config);
 
         // Generate a unique ID for the lifetime of this Codex session.
-<<<<<<< HEAD
         let session_id = Uuid::new_v4();
-=======
-        let (session, turn_context) = Session::new(
-            configure_session,
-            config.clone(),
-            auth_manager.clone(),
-            tx_event.clone(),
-            conversation_history.clone(),
-        )
-        .await
-        .map_err(|e| {
-            error!("Failed to create session: {e:#}");
-            CodexErr::InternalAgentDied
-        })?;
-        session
-            .record_initial_history(&turn_context, conversation_history)
-            .await;
-        let conversation_id = session.conversation_id;
->>>>>>> upstream/main
 
         // This task will run until Op::Shutdown is received.
         tokio::spawn(submission_loop(session_id, config, auth, rx_sub, tx_event));
@@ -523,12 +490,8 @@ impl Codex {
 
         Ok(CodexSpawnOk {
             codex,
-<<<<<<< HEAD
             init_id,
             session_id,
-=======
-            conversation_id,
->>>>>>> upstream/main
         })
     }
 
@@ -603,11 +566,7 @@ struct TurnScratchpad {
 ///
 /// A session has at most 1 running agent at a time, and can be interrupted by user input.
 pub(crate) struct Session {
-<<<<<<< HEAD
     client: ModelClient,
-=======
-    conversation_id: ConversationId,
->>>>>>> upstream/main
     tx_event: Sender<Event>,
 
     /// The session's current working directory. All relative paths provided by
@@ -766,7 +725,6 @@ impl Session {
 }
 
 impl Session {
-<<<<<<< HEAD
     pub fn set_agent(&self, agent: AgentAgent) {
         let mut state = self.state.lock().unwrap();
         if let Some(current_agent) = state.current_agent.take() {
@@ -780,246 +738,11 @@ impl Session {
         if let Some(agent) = &state.current_agent {
             if agent.sub_id == sub_id {
                 state.current_agent.take();
-=======
-    async fn new(
-        configure_session: ConfigureSession,
-        config: Arc<Config>,
-        auth_manager: Arc<AuthManager>,
-        tx_event: Sender<Event>,
-        initial_history: InitialHistory,
-    ) -> anyhow::Result<(Arc<Self>, TurnContext)> {
-        let ConfigureSession {
-            provider,
-            model,
-            model_reasoning_effort,
-            model_reasoning_summary,
-            user_instructions,
-            base_instructions,
-            approval_policy,
-            sandbox_policy,
-            notify,
-            cwd,
-        } = configure_session;
-        debug!("Configuring session: model={model}; provider={provider:?}");
-        if !cwd.is_absolute() {
-            return Err(anyhow::anyhow!("cwd is not absolute: {cwd:?}"));
-        }
-
-        let (conversation_id, rollout_params) = match &initial_history {
-            InitialHistory::New | InitialHistory::Forked(_) => {
-                let conversation_id = ConversationId::default();
-                (
-                    conversation_id,
-                    RolloutRecorderParams::new(conversation_id, user_instructions.clone()),
-                )
-            }
-            InitialHistory::Resumed(resumed_history) => (
-                resumed_history.conversation_id,
-                RolloutRecorderParams::resume(resumed_history.rollout_path.clone()),
-            ),
-        };
-
-        // Error messages to dispatch after SessionConfigured is sent.
-        let mut post_session_configured_error_events = Vec::<Event>::new();
-
-        // Kick off independent async setup tasks in parallel to reduce startup latency.
-        //
-        // - initialize RolloutRecorder with new or resumed session info
-        // - spin up MCP connection manager
-        // - perform default shell discovery
-        // - load history metadata
-        let rollout_fut = RolloutRecorder::new(&config, rollout_params);
-
-        let mcp_fut = McpConnectionManager::new(config.mcp_servers.clone());
-        let default_shell_fut = shell::default_user_shell();
-        let history_meta_fut = crate::message_history::history_metadata(&config);
-
-        // Join all independent futures.
-        let (rollout_recorder, mcp_res, default_shell, (history_log_id, history_entry_count)) =
-            tokio::join!(rollout_fut, mcp_fut, default_shell_fut, history_meta_fut);
-
-        let rollout_recorder = rollout_recorder.map_err(|e| {
-            error!("failed to initialize rollout recorder: {e:#}");
-            anyhow::anyhow!("failed to initialize rollout recorder: {e:#}")
-        })?;
-        // Create the mutable state for the Session.
-        let state = State {
-            history: ConversationHistory::new(),
-            ..Default::default()
-        };
-
-        // Handle MCP manager result and record any startup failures.
-        let (mcp_connection_manager, failed_clients) = match mcp_res {
-            Ok((mgr, failures)) => (mgr, failures),
-            Err(e) => {
-                let message = format!("Failed to create MCP connection manager: {e:#}");
-                error!("{message}");
-                post_session_configured_error_events.push(Event {
-                    id: INITIAL_SUBMIT_ID.to_owned(),
-                    msg: EventMsg::Error(ErrorEvent { message }),
-                });
-                (McpConnectionManager::default(), Default::default())
-            }
-        };
-
-        // Surface individual client start-up failures to the user.
-        if !failed_clients.is_empty() {
-            for (server_name, err) in failed_clients {
-                let message = format!("MCP client for `{server_name}` failed to start: {err:#}");
-                error!("{message}");
-                post_session_configured_error_events.push(Event {
-                    id: INITIAL_SUBMIT_ID.to_owned(),
-                    msg: EventMsg::Error(ErrorEvent { message }),
-                });
-            }
-        }
-
-        // Now that the conversation id is final (may have been updated by resume),
-        // construct the model client.
-        let client = ModelClient::new(
-            config.clone(),
-            Some(auth_manager.clone()),
-            provider.clone(),
-            model_reasoning_effort,
-            model_reasoning_summary,
-            conversation_id,
-        );
-        let turn_context = TurnContext {
-            client,
-            tools_config: ToolsConfig::new(&ToolsConfigParams {
-                model_family: &config.model_family,
-                approval_policy,
-                sandbox_policy: sandbox_policy.clone(),
-                include_plan_tool: config.include_plan_tool,
-                include_apply_patch_tool: config.include_apply_patch_tool,
-                include_web_search_request: config.tools_web_search_request,
-                use_streamable_shell_tool: config.use_experimental_streamable_shell_tool,
-                include_view_image_tool: config.include_view_image_tool,
-            }),
-            user_instructions,
-            base_instructions,
-            approval_policy,
-            sandbox_policy,
-            shell_environment_policy: config.shell_environment_policy.clone(),
-            cwd,
-        };
-        let sess = Arc::new(Session {
-            conversation_id,
-            tx_event: tx_event.clone(),
-            mcp_connection_manager,
-            session_manager: ExecSessionManager::default(),
-            notify,
-            state: Mutex::new(state),
-            rollout: Mutex::new(Some(rollout_recorder)),
-            codex_linux_sandbox_exe: config.codex_linux_sandbox_exe.clone(),
-            user_shell: default_shell,
-            show_raw_agent_reasoning: config.show_raw_agent_reasoning,
-        });
-
-        // Dispatch the SessionConfiguredEvent first and then report any errors.
-        // If resuming, include converted initial messages in the payload so UIs can render them immediately.
-        let initial_messages = match &initial_history {
-            InitialHistory::New => None,
-            InitialHistory::Forked(items) => Some(sess.build_initial_messages(items)),
-            InitialHistory::Resumed(resumed_history) => {
-                Some(sess.build_initial_messages(&resumed_history.history))
-            }
-        };
-
-        let events = std::iter::once(Event {
-            id: INITIAL_SUBMIT_ID.to_owned(),
-            msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
-                session_id: conversation_id,
-                model,
-                history_log_id,
-                history_entry_count,
-                initial_messages,
-            }),
-        })
-        .chain(post_session_configured_error_events.into_iter());
-        for event in events {
-            if let Err(e) = tx_event.send(event).await {
-                error!("failed to send event: {e:?}");
-            }
-        }
-
-        Ok((sess, turn_context))
-    }
-
-    pub fn set_task(&self, task: AgentTask) {
-        let mut state = self.state.lock_unchecked();
-        if let Some(current_task) = state.current_task.take() {
-            current_task.abort(TurnAbortReason::Replaced);
-        }
-        state.current_task = Some(task);
-    }
-
-    pub fn remove_task(&self, sub_id: &str) {
-        let mut state = self.state.lock_unchecked();
-        if let Some(task) = &state.current_task
-            && task.sub_id == sub_id
-        {
-            state.current_task.take();
-        }
-    }
-
-    async fn record_initial_history(
-        &self,
-        turn_context: &TurnContext,
-        conversation_history: InitialHistory,
-    ) {
-        match conversation_history {
-            InitialHistory::New => {
-                self.record_initial_history_new(turn_context).await;
-            }
-            InitialHistory::Forked(items) => {
-                self.record_initial_history_from_items(items).await;
-            }
-            InitialHistory::Resumed(resumed_history) => {
-                self.record_initial_history_from_items(resumed_history.history)
-                    .await;
->>>>>>> upstream/main
             }
         }
     }
 
-<<<<<<< HEAD
     /// Sends the given event to the client and swallows the send error, if
-=======
-    async fn record_initial_history_new(&self, turn_context: &TurnContext) {
-        // record the initial user instructions and environment context,
-        // regardless of whether we restored items.
-        // TODO: Those items shouldn't be "user messages" IMO. Maybe developer messages.
-        let mut conversation_items = Vec::<ResponseItem>::with_capacity(2);
-        if let Some(user_instructions) = turn_context.user_instructions.as_deref() {
-            conversation_items.push(UserInstructions::new(user_instructions.to_string()).into());
-        }
-        conversation_items.push(ResponseItem::from(EnvironmentContext::new(
-            Some(turn_context.cwd.clone()),
-            Some(turn_context.approval_policy),
-            Some(turn_context.sandbox_policy.clone()),
-            Some(self.user_shell.clone()),
-        )));
-        self.record_conversation_items(&conversation_items).await;
-    }
-
-    async fn record_initial_history_from_items(&self, items: Vec<ResponseItem>) {
-        self.record_conversation_items_internal(&items, false).await;
-    }
-
-    /// build the initial messages vector for SessionConfigured by converting
-    /// ResponseItems into EventMsg.
-    fn build_initial_messages(&self, items: &[ResponseItem]) -> Vec<EventMsg> {
-        items
-            .iter()
-            .flat_map(|item| {
-                map_response_item_to_event_messages(item, self.show_raw_agent_reasoning)
-            })
-            .collect()
-    }
-
-    /// Sends the given event to the client and swallows the send event, if
->>>>>>> upstream/main
     /// any, logging it as an error.
     pub(crate) async fn send_event(&self, event: Event) {
         if let Err(e) = self.tx_event.send(event).await {
@@ -1165,14 +888,8 @@ impl Session {
     /// Records items to both the rollout and the chat completions/ZDR
     /// transcript, if enabled.
     async fn record_conversation_items(&self, items: &[ResponseItem]) {
-        self.record_conversation_items_internal(items, true).await;
-    }
-
-    async fn record_conversation_items_internal(&self, items: &[ResponseItem], persist: bool) {
         debug!("Recording items for conversation: {items:?}");
-        if persist {
-            self.record_state_snapshot(items).await;
-        }
+        self.record_state_snapshot(items).await;
 
         self.state.lock().unwrap().history.record_items(items);
     }
@@ -1907,19 +1624,12 @@ async fn submission_loop(
                 let client = ModelClient::new(
                     config.clone(),
                     auth_manager,
-<<<<<<< HEAD
                     provider.clone(),
                     model_reasoning_effort,
                     model_reasoning_summary,
                     model_text_verbosity,
                     session_id,
                     debug_logger,
-=======
-                    provider,
-                    effective_effort,
-                    effective_summary,
-                    sess.conversation_id,
->>>>>>> upstream/main
                 );
 
                 // abort any current running session and clone its state
@@ -2062,22 +1772,9 @@ async fn submission_loop(
                     }
                 };
 
-<<<<<<< HEAD
                 // Clean up old status items when new user input arrives
                 // This prevents token buildup from old screenshots/status messages
                 sess.cleanup_old_status_items().await;
-=======
-                    // Build a new client with per‑turn reasoning settings.
-                    // Reuse the same provider and session id; auth defaults to env/API key.
-                    let client = ModelClient::new(
-                        Arc::new(per_turn_config),
-                        auth_manager,
-                        provider,
-                        effort,
-                        summary,
-                        sess.conversation_id,
-                    );
->>>>>>> upstream/main
 
                 // Abort synchronously here to avoid a race that can kill the
                 // newly spawned agent if the async abort runs after set_agent.
@@ -2118,13 +1815,9 @@ async fn submission_loop(
                 }
             }
             Op::AddToHistory { text } => {
-<<<<<<< HEAD
                 // TODO: What should we do if we got AddToHistory before ConfigureSession?
                 // currently, if ConfigureSession has resume path, this history will be ignored
                 let id = session_id;
-=======
-                let id = sess.conversation_id;
->>>>>>> upstream/main
                 let config = config.clone();
                 tokio::spawn(async move {
                     if let Err(e) = crate::message_history::append_entry(&text, &id, &config).await
@@ -2154,17 +1847,7 @@ async fn submission_loop(
                             crate::protocol::GetHistoryEntryResponseEvent {
                                 offset,
                                 log_id,
-<<<<<<< HEAD
                                 entry: entry_opt,
-=======
-                                entry: entry_opt.map(|e| {
-                                    codex_protocol::message_history::HistoryEntry {
-                                        conversation_id: e.session_id,
-                                        ts: e.ts,
-                                        text: e.text,
-                                    }
-                                }),
->>>>>>> upstream/main
                             },
                         ),
                         order: None,
@@ -2230,27 +1913,6 @@ async fn submission_loop(
                 }
                 break;
             }
-<<<<<<< HEAD
-=======
-            Op::GetHistory => {
-                let tx_event = sess.tx_event.clone();
-                let sub_id = sub.id.clone();
-
-                let event = Event {
-                    id: sub_id.clone(),
-                    msg: EventMsg::ConversationHistory(ConversationHistoryResponseEvent {
-                        conversation_id: sess.conversation_id,
-                        entries: sess.state.lock_unchecked().history.contents(),
-                    }),
-                };
-                if let Err(e) = tx_event.send(event).await {
-                    warn!("failed to send ConversationHistory event: {e}");
-                }
-            }
-            _ => {
-                // Ignore unknown ops; enum is non_exhaustive to allow extensions.
-            }
->>>>>>> upstream/main
         }
     }
     debug!("Agent loop exited");
