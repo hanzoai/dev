@@ -79,3 +79,12 @@ pub mod protocol;
 pub use codex_protocol::config_types as protocol_config_types;
 // Re-export protocol models for compatibility with existing imports.
 pub use codex_protocol::models as models;
+// Public re-exports for API compatibility with downstream users and tests.
+// Keep these stable to avoid breaking callers.
+pub use crate::client::ModelClient;
+pub use crate::client_common::Prompt;
+pub use crate::client_common::ResponseEvent;
+pub use crate::client_common::ResponseStream;
+pub use codex_protocol::models::ContentItem;
+pub use codex_protocol::models::ReasoningItemContent;
+pub use codex_protocol::models::ResponseItem;
