@@ -202,7 +202,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = context.payload.issue.number;
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
             const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number, per_page: 100 });
             const hasNeeds = labels.some(l => l.name === 'needs-preview-feedback');
             if (!hasNeeds) return;
@@ -348,11 +348,11 @@ jobs:
                   },
                   {
                     role: 'user',
-                    content: JSON.stringify({
+              content: JSON.stringify({
                       repo: `${context.repo.owner}/${context.repo.repo}`,
-                      issue_number: context.payload.issue.number,
-                      title: context.payload.issue.title,
-                      body: context.payload.issue.body || '',
+                      issue_number: Number(process.env.ISSUE_NUMBER || 0),
+                      title: process.env.ISSUE_TITLE || '',
+                      body: process.env.ISSUE_BODY || '',
                       actor: context.actor
                     })
                   }
@@ -747,7 +747,7 @@ jobs:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md', 'utf8');
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, body };
+            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), body };
             await github.rest.issues.createComment(payload);
 
       - name: Assign after policy block
@@ -759,7 +759,7 @@ jobs:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, assignees: [assignee] };
+            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), assignees: [assignee] };
             await github.rest.issues.addAssignees(payload);
 
       - name: If no changes, post a helpful comment
@@ -781,7 +781,7 @@ jobs:
                 'Please add reproduction steps, expected vs actual behavior, and any logs so we can proceed.',
               ].join('\n');
             }
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, body };
+            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), body };
             await github.rest.issues.createComment(payload);
 
       - name: Optionally close issue (comment-only)
@@ -796,7 +796,7 @@ jobs:
             const body = note ? note : 'Closing as resolved by the bot response.';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const issue_number = context.payload.issue.number;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
             await github.rest.issues.createComment({ owner, repo, issue_number, body });
             await github.rest.issues.update({ owner, repo, issue_number, state: 'closed' });
 
@@ -809,7 +809,7 @@ jobs:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
             const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number, assignees: [assignee] };
+            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), assignees: [assignee] };
             await github.rest.issues.addAssignees(payload);
 
       - name: Find existing PR for this issue/branch
@@ -826,7 +826,7 @@ jobs:
               core.setOutput('number', String(prs[0].number));
               core.setOutput('head', prs[0].head.ref);
             } else {
-              const q = `repo:${owner}/${repo} is:pr is:open ${context.payload.issue.number}`;
+              const q = `repo:${owner}/${repo} is:pr is:open ${process.env.ISSUE_NUMBER}`;
               const s = await github.rest.search.issuesAndPullRequests({ q, per_page: 5 });
               const match = s.data.items.find(i => i.pull_request);
               if (match) core.setOutput('number', String(match.number));
@@ -892,15 +892,15 @@ jobs:
               try { const t = fs.readFileSync(p, 'utf8').trim(); return t || dflt; }
               catch { return dflt; }
             }
-            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${context.payload.issue.title}`);
+            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${process.env.ISSUE_TITLE || ''}`);
             const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
             const footer = [
               '',
               '---',
-              `Auto-generated for issue #${context.payload.issue.number} by a workflow.`,
+              `Auto-generated for issue #${process.env.ISSUE_NUMBER} by a workflow.`,
               `Author: @${context.actor}`
             ].join('\n');
-            const closing = closeIssue ? `\n\nCloses #${context.payload.issue.number}` : '';
+            const closing = closeIssue ? `\n\nCloses #${process.env.ISSUE_NUMBER}` : '';
             const body = (bodyBase ? `${bodyBase}\n${footer}` : footer) + closing;
 
             const owner = context.repo.owner;
@@ -971,7 +971,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const issue_number = context.payload.issue.number;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
             const runId = context.runId;
             const body = [
               '### Preview Build',
@@ -998,7 +998,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = context.payload.issue.number;
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
             await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['needs-preview-feedback'] });
 
       - name: Assign (PR path; PAT→GITHUB_TOKEN fallback)
@@ -1013,7 +1013,7 @@ jobs:
             const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const issue_number = context.payload.issue.number;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
             async function add(token){
               return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/assignees`,{
                 method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({assignees:[assignee]})
