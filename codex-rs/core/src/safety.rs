@@ -30,14 +30,6 @@ pub fn assess_patch_safety(
         };
     }
 
-    // In Read Only mode, write operations are not permitted. Reject immediately
-    // so the agent receives a clear failure without prompting for approval.
-    if matches!(sandbox_policy, SandboxPolicy::ReadOnly) {
-        return SafetyCheck::Reject {
-            reason: "write operations are disabled in read-only mode".to_string(),
-        };
-    }
-
     match policy {
         AskForApproval::OnFailure | AskForApproval::Never | AskForApproval::OnRequest => {
             // Continue to see if this can be auto-approved.
@@ -246,10 +238,10 @@ fn is_write_patch_constrained_to_writable_paths(
                 if !is_path_writable(path) {
                     return false;
                 }
-                if let Some(dest) = move_path {
-                    if !is_path_writable(dest) {
-                        return false;
-                    }
+                if let Some(dest) = move_path
+                    && !is_path_writable(dest)
+                {
+                    return false;
                 }
             }
         }
