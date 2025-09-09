@@ -230,10 +230,10 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const issue_number = context.payload.pull_request.number;
+            const pr_number = context.payload.pull_request.number;
             const runId = context.runId;
             const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
-            const tag = `preview-pr-${issue_number}`;
+            const tag = `preview-pr-${pr_number}`;
             const releaseBase = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
 
             const marker = '<!-- preview-build:artifacts -->';
@@ -244,7 +244,7 @@ jobs:
               '',
               'You can run this right now! In your terminal just use:',
               '```bash',
-              `code preview ${issue_number}`,
+              `code preview pr:${pr_number}`,
               '```',
               'This will run the version of Code we\'ve created for this issue.',
               '',

@@ -4,7 +4,7 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -237,11 +237,15 @@ enum Mode { Overview, Themes, Spinner }
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
-        // Use most of the available screen for better scrolling
-        // But cap it at the number of themes + header/footer
-        let theme_count = Self::get_theme_options().len() as u16;
-        // Leave room for header/tabs/footer
-        (theme_count.max(crate::spinner::spinner_names().len() as u16) + 6).min(22)
+        match self.mode {
+            // Border (2) + inner padding (2) + 2 content rows = 6
+            Mode::Overview => 6,
+            // Detail lists: generous height but capped
+            _ => {
+                let theme_count = Self::get_theme_options().len() as u16;
+                (theme_count.max(crate::spinner::spinner_names().len() as u16) + 6).min(22)
+            }
+        }
     }
 
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
@@ -328,22 +332,25 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             pad_bg.render(pad, buf);
         }
 
-        // Build a styled title similar to Diff Viewer
+        // Build a styled title with concise hints
         let t_dim = Style::default().fg(crate::colors::text_dim());
         let t_fg = Style::default().fg(crate::colors::text());
-        let title_spans = vec![
-            Span::styled(" ", t_dim),
-            Span::styled("/theme", t_fg),
+        let mut title_spans = vec![Span::styled(" ", t_dim), Span::styled("/theme", t_fg)];
+        title_spans.extend_from_slice(&[
             Span::styled(" ——— ", t_dim),
-            Span::styled("◂ ▸", t_fg),
-            Span::styled(" change tabs ", t_dim),
+            Span::styled("▲ ▼", t_fg),
+            Span::styled(" select ", t_dim),
             Span::styled("——— ", t_dim),
             Span::styled("Enter", t_fg),
             Span::styled(" choose ", t_dim),
             Span::styled("——— ", t_dim),
             Span::styled("Esc", t_fg),
-            Span::styled(" cancel ", t_dim),
-        ];
+        ]);
+        if matches!(self.mode, Mode::Overview) {
+            title_spans.push(Span::styled(" close ", t_dim));
+        } else {
+            title_spans.push(Span::styled(" back ", t_dim));
+        }
 
         let outer = Block::default()
             .borders(Borders::ALL)
@@ -361,12 +368,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             }
         }
 
-        // Add one cell padding around the inside and split into spacer + body
+        // Add one cell padding around the inside; body occupies full padded area
         let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
-        let [_, body_area] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(padded);
+        let body_area = padded;
 
         // Body background uses normal background; calculate list height inside body
-        let base_header_lines = 1u16; // spacer line below
+        let base_header_lines = 0u16; // no extra spacer
         let available_height = body_area
             .height
             .saturating_sub(base_header_lines)
@@ -391,7 +398,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         };
 
         // Create body content
-        let mut lines = vec![Line::from(" ")];
+        let mut lines = Vec::new();
         if matches!(self.mode, Mode::Overview) {
             // Overview: show two rows with current values
             let theme_label = Self::get_theme_options()
@@ -506,12 +513,6 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         } else if matches!(self.mode, Mode::Spinner) {
             lines.push(Line::from(" "));
         }
-
-        // Minimal footer with Up/Down hint
-        lines.push(Line::from(vec![
-            Span::styled("▲ ▼", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
-            Span::styled(" select", Style::default().fg(theme.text_dim)),
-        ]));
 
         // Render the body content paragraph inside body area
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
