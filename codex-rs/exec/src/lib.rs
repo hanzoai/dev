@@ -23,6 +23,7 @@ use codex_core::protocol::Op;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_protocol::config_types::SandboxMode;
+use codex_protocol::mcp_protocol::AuthMode;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_json_output::EventProcessorWithJsonOutput;
 use tracing::debug;
@@ -190,7 +191,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
 
     let conversation_manager = ConversationManager::new(AuthManager::shared(
         config.codex_home.clone(),
-        codex_login::AuthMode::ApiKey,
+        AuthMode::ApiKey,
         config.responses_originator_header.clone(),
     ));
     let NewConversation {
