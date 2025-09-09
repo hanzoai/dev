@@ -4,7 +4,7 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -12,6 +12,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Tabs;
 use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
@@ -277,25 +278,72 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let options = Self::get_theme_options();
         let theme = crate::theme::current_theme();
 
-        // Calculate available height for the list (excluding header and footer)
-        let available_height = area.height.saturating_sub(4) as usize;
+        // Use full width for better integration and draw an outer border
+        let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
+
+        // Clear and fill background
+        for y in render_area.y..render_area.y + render_area.height {
+            for x in render_area.x..render_area.x + render_area.width {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_style(Style::default().bg(theme.background));
+                }
+            }
+        }
+
+        let outer = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border_focused))
+            .style(Style::default().bg(theme.background).fg(theme.text));
+        outer.clone().render(render_area, buf);
+        let inner = outer.inner(render_area);
+
+        // Split inner into a 3-row tabs header and the body (like Diff Viewer)
+        let [tabs_area_all, body_area] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(inner);
+
+        // Fill tabs strip with selection background so inactive tabs blend in
+        let tabs_bg = Block::default().style(Style::default().bg(crate::colors::selection()));
+        tabs_bg.render(tabs_area_all, buf);
+
+        // Center the tabs within the 3-row header
+        let [_, tabs_area, _] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
+            .areas(tabs_area_all);
+
+        // Build Tabs titles and styles to match Diff Viewer popup
+        let titles = vec![
+            Line::from(Span::raw(" Themes ")),
+            Line::from(Span::raw(" Spinner ")),
+        ];
+        let selected_idx = if matches!(self.active_tab, Tab::Themes) { 0 } else { 1 };
+        let tabs = Tabs::new(titles)
+            .select(selected_idx)
+            .style(Style::default().bg(crate::colors::selection()).fg(crate::colors::text()))
+            .highlight_style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .divider(" ");
+        Widget::render(tabs, tabs_area, buf);
+
+        // Body background (standard background, not selection)
+        let body_bg = Block::default().style(Style::default().bg(crate::colors::background()));
+        body_bg.render(body_area, buf);
+
+        // Calculate available list height inside body, accounting for header lines below
+        let base_header_lines = 2u16; // "Appearance" + spacer line
+        let available_height = body_area
+            .height
+            .saturating_sub(base_header_lines)
+            as usize;
 
         // Calculate scroll offset to keep selected item visible
         let scroll_offset = if available_height >= options.len() {
-            // All items fit, no scrolling needed
             0
         } else if self.selected_theme_index < available_height / 2 {
-            // Near the top
             0
         } else if self.selected_theme_index >= options.len() - available_height / 2 {
-            // Near the bottom
             options.len().saturating_sub(available_height)
         } else {
-            // Center the selected item
             self.selected_theme_index.saturating_sub(available_height / 2)
         };
 
-        // Create content
+        // Create body content
         let mut lines = vec![
             Line::from(vec![
                 Span::raw(" "),
@@ -306,17 +354,6 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]),
-            // Tabs header
-            {
-                let tab_themes = if matches!(self.active_tab, Tab::Themes) { "[Themes]" } else { " Themes " };
-                let tab_spinner = if matches!(self.active_tab, Tab::Spinner) { "[Spinner]" } else { " Spinner " };
-                Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(tab_themes, Style::default().fg(theme.keyword)),
-                    Span::raw("  "),
-                    Span::styled(tab_spinner, Style::default().fg(theme.keyword)),
-                ])
-            },
             Line::from(" "),
         ];
 
@@ -434,33 +471,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Span::styled(" cancel", Style::default().fg(theme.text_dim)),
         ]));
 
-        // Use full width for better integration
-        let render_area = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: area.height.min(lines.len() as u16 + 2),
-        };
-
-        // Clear the area with theme background
-        for y in render_area.y..render_area.y + render_area.height {
-            for x in render_area.x..render_area.x + render_area.width {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_style(Style::default().bg(theme.background));
-                }
-            }
-        }
-
-        // Render with themed border
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_focused))
-            .style(Style::default().bg(theme.background).fg(theme.text));
-
-        let paragraph = Paragraph::new(lines)
-            .block(block)
-            .alignment(Alignment::Left);
-
-        paragraph.render(render_area, buf);
+        // Render the body content paragraph inside body area
+        let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
+        paragraph.render(body_area, buf);
     }
 }
