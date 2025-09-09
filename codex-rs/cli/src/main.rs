@@ -156,8 +156,8 @@ struct OrderReplayArgs {
 
 #[derive(Debug, Parser)]
 struct PreviewArgs {
-    /// GitHub Actions run id to download artifacts from
-    run_id: String,
+    /// Run id (e.g., 1757...), or pr:<number> to fetch from prerelease assets
+    ref_id: String,
     /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
@@ -384,54 +384,58 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         _ => bail!(format!("Unsupported platform: {}/{}", os, arch)),
     };
 
-    let token = env::var("GH_TOKEN").or_else(|_| env::var("GITHUB_TOKEN"))
-        .context("Set GH_TOKEN (or GITHUB_TOKEN) to a GitHub token with actions:read.")?;
-
     let client = reqwest::Client::builder()
         .user_agent("codex-preview/1")
         .build()?;
 
-    // List artifacts for the run
-    let run_id = args.run_id;
-    let list_url = format!("https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}/artifacts?per_page=100");
-    let arts: serde_json::Value = client
-        .get(list_url)
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    let mut found_id: Option<u64> = None;
-    if let Some(list) = arts.get("artifacts").and_then(|a| a.as_array()) {
-        for a in list {
-            let name_v = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name_v == format!("preview-{}", target) {
-                if let Some(id) = a.get("id").and_then(|v| v.as_u64()) { found_id = Some(id); break; }
-            }
-        }
-    }
-    let art_id = found_id.context(format!("Could not find artifact preview-{target} for run {run_id}"))?;
+    let ref_id = args.ref_id;
+    let (maybe_pr, maybe_run) = if ref_id.starts_with("pr:") || ref_id.starts_with("pr-") {
+        (ref_id.split(|c| c == ':' || c == '-').nth(1).and_then(|s| s.parse::<u64>().ok()), None)
+    } else if let Ok(n) = ref_id.parse::<u64>() { (None, Some(n)) } else { (None, None) };
 
-    let zip_url = format!("https://api.github.com/repos/{owner}/{name}/actions/artifacts/{art_id}/zip");
-    let bytes = client
-        .get(zip_url)
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
+    let pr_number: u64 = if let Some(pr) = maybe_pr {
+        pr
+    } else if let Some(run_id) = maybe_run {
+        // Resolve run -> PR via API (requires token)
+        let token = env::var("GH_TOKEN").or_else(|_| env::var("GITHUB_TOKEN"))
+            .context("Set GH_TOKEN (or GITHUB_TOKEN) to resolve run -> PR; or pass pr:<number> to avoid auth.")?;
+        let run_url = format!("https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}");
+        let run: serde_json::Value = client.get(run_url).bearer_auth(&token).send().await?.error_for_status()?.json().await?;
+        // pull_requests is an array; pick first
+        run.get("pull_requests").and_then(|a| a.as_array()).and_then(|arr| arr.first())
+           .and_then(|pr| pr.get("number")).and_then(|n| n.as_u64())
+           .context("This run is not associated with a pull request; use pr:<number> instead.")?
+    } else {
+        bail!("Unsupported ref. Use pr:<number> or a numeric run id.");
+    };
+
+    let tag = format!("preview-pr-{}", pr_number);
+    let base = format!("https://github.com/{owner}/{name}/releases/download/{tag}");
+
+    // Try to download the best asset for this platform; prefer .tar.gz on Unix and .zip on Windows; fallback to .zst.
+    let mut urls: Vec<String> = vec![];
+    if cfg!(windows) {
+        urls.push(format!("{base}/code-x86_64-pc-windows-msvc.exe.zip"));
+    } else {
+        // tar.gz first, then zst
+        urls.push(format!("{base}/code-{target}.tar.gz"));
+        urls.push(format!("{base}/code-{target}.zst"));
+    }
 
     let tmp = tempdir()?;
-    let zip_path = tmp.path().join("artifact.zip");
-    fs::write(&zip_path, &bytes)?;
-
-    // Unzip the artifact into tmp
-    let f = fs::File::open(&zip_path)?;
-    let mut zip = ZipArchive::new(f)?;
-    for i in 0..zip.len() { let _ = i; }
-    zip.extract(tmp.path())?;
+    let mut downloaded: Option<(std::path::PathBuf, String)> = None;
+    for u in urls.iter() {
+        let resp = client.get(u).send().await?;
+        if resp.status().is_success() {
+            let data = resp.bytes().await?;
+            let filename = u.split('/').last().unwrap_or("download.bin");
+            let p = tmp.path().join(filename);
+            fs::write(&p, &data)?;
+            downloaded = Some((p, u.clone()));
+            break;
+        }
+    }
+    let (path, url_used) = downloaded.context("No matching preview asset found on the prerelease. It may still be uploading; try again shortly.")?;
 
     // Find the easiest payload
     fn first_match(dir: &Path, pat: &str) -> Option<std::path::PathBuf> {
@@ -453,8 +457,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     fn make_exec(_p: &Path) { }
 
     if os != "windows" {
-        // Prefer .tar.gz
-        if let Some(tgz) = first_match(tmp.path(), "code-").and_then(|p| if p.extension().and_then(|e| e.to_str()) == Some("gz") { Some(p) } else { None }) {
+        // If we downloaded a tar.gz, extract
+        if path.extension().and_then(|e| e.to_str()) == Some("gz") {
+            let tgz = path.clone();
             let file = fs::File::open(&tgz)?;
             let gz = GzDecoder::new(file);
             let mut ar = tar::Archive::new(gz);
@@ -467,9 +472,9 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             return Ok(());
         }
     } else {
-        // Windows: expand inner code-*.zip if present
-        if let Some(inner_zip) = first_match(tmp.path(), "code-").and_then(|p| if p.extension().and_then(|e| e.to_str()) == Some("zip") { Some(p) } else { None }) {
-            let f = fs::File::open(&inner_zip)?;
+        // Windows: expand zip
+        if path.extension().and_then(|e| e.to_str()) == Some("zip") {
+            let f = fs::File::open(&path)?;
             let mut z = ZipArchive::new(f)?;
             z.extract(&out_dir)?;
             let exe = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code.exe"));
@@ -480,7 +485,21 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     }
 
     // Fallback: raw 'code' file (after .zst) if present
-    if let Some(bin) = first_match(tmp.path(), "code") {
+    if path.file_name().and_then(|s| s.to_str()).map(|n| n.ends_with(".zst")).unwrap_or(false) {
+        // Try to decompress .zst to 'code'
+        if which::which("zstd").is_ok() {
+            let dest = out_dir.join("code");
+            let status = std::process::Command::new("zstd").arg("-d").arg(&path).arg("-o").arg(&dest).status()?;
+            if status.success() {
+                make_exec(&dest);
+                println!("Downloaded preview from {} to {}", url_used, dest.display());
+                if !args.no_launch { println!("Launching: {} --help", dest.display()); let _ = std::process::Command::new(&dest).arg("--help").status(); }
+                return Ok(());
+            }
+        }
+        // If zstd missing, tell the user
+        bail!("Downloaded .zst but 'zstd' is not installed. Install zstd or download the .tar.gz/.zip asset instead.");
+    } else if let Some(bin) = first_match(tmp.path(), "code") {
         let dest = out_dir.join(bin.file_name().unwrap_or_default());
         fs::copy(&bin, &dest)?;
         make_exec(&dest);
