@@ -43,19 +43,31 @@ lazy_static! {
 pub fn init_spinner(name: &str) { switch_spinner(name); }
 
 pub fn switch_spinner(name: &str) {
-    let needle = name.trim().to_ascii_lowercase();
-    let idx = ALL_SPINNERS
-        .iter()
-        .position(|s| s.name == needle)
-        .unwrap_or_else(|| ALL_SPINNERS.iter().position(|s| s.name == "diamond").unwrap_or(0));
+    let raw = name.trim();
+    // Try exact match first
+    let mut idx = ALL_SPINNERS.iter().position(|s| s.name == raw);
+    if idx.is_none() {
+        // Fallback: case-insensitive match
+        let needle = raw.to_ascii_lowercase();
+        idx = ALL_SPINNERS
+            .iter()
+            .position(|s| s.name.to_ascii_lowercase() == needle);
+    }
+    let idx = idx.unwrap_or_else(|| ALL_SPINNERS.iter().position(|s| s.name == "diamond").unwrap_or(0));
     *CURRENT_INDEX.write().unwrap() = idx;
 }
 
 pub fn current_spinner() -> &'static Spinner { &ALL_SPINNERS[*CURRENT_INDEX.read().unwrap()] }
 
 pub fn find_spinner_by_name(name: &str) -> Option<&'static Spinner> {
-    let needle = name.trim().to_ascii_lowercase();
-    ALL_SPINNERS.iter().find(|s| s.name == needle)
+    let raw = name.trim();
+    ALL_SPINNERS
+        .iter()
+        .find(|s| s.name == raw)
+        .or_else(|| {
+            let needle = raw.to_ascii_lowercase();
+            ALL_SPINNERS.iter().find(|s| s.name.to_ascii_lowercase() == needle)
+        })
 }
 
 pub fn spinner_names() -> Vec<String> { ALL_SPINNERS.iter().map(|s| s.name.clone()).collect() }
