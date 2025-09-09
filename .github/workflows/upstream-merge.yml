@@ -181,6 +181,21 @@ jobs:
             codex-rs -> target
           save-if: true
 
+      - name: Setup sccache (GHA backend)
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.10.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable sccache
+        if: steps.check_upstream.outputs.skip != 'true'
+        run: |
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo 'RUSTC_WRAPPER=sccache' >> "$GITHUB_ENV"
+          echo 'SCCACHE_IDLE_TIMEOUT=1800' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=5G' >> "$GITHUB_ENV"
+
       # Belt-and-suspenders: explicit cache of the target directory keyed by toolchain + lockfile
       - name: Cache cargo target (direct)
         if: steps.check_upstream.outputs.skip != 'true'
@@ -461,6 +476,7 @@ jobs:
           </constraints>
           EOP
           } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+            RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
@@ -473,6 +489,11 @@ jobs:
             -c sandbox_workspace_write.network_access=true \
             -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
             -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+            -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
+            -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
+            -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
+            -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
+            -c shell_environment_policy.r#set.KEEP_ENV="1" \
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
