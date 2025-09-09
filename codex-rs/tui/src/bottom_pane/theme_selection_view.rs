@@ -50,7 +50,7 @@ impl ThemeSelectionView {
 
         // Initialize spinner selection from current runtime spinner
         let spinner_names = crate::spinner::spinner_names();
-        let current_spinner_name = crate::spinner::current_spinner().name.to_string();
+        let current_spinner_name = crate::spinner::current_spinner().name.clone();
         let selected_spinner_index = spinner_names
             .iter()
             .position(|n| *n == current_spinner_name)
@@ -169,7 +169,7 @@ impl ThemeSelectionView {
                 self.selected_spinner_index -= 1;
             }
             if let Some(name) = names.get(self.selected_spinner_index) {
-                self.current_spinner = (*name).to_string();
+                self.current_spinner = name.clone();
                 self.app_event_tx
                     .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
             }
@@ -189,7 +189,7 @@ impl ThemeSelectionView {
             if !names.is_empty() {
                 self.selected_spinner_index = (self.selected_spinner_index + 1) % names.len();
                 if let Some(name) = names.get(self.selected_spinner_index) {
-                    self.current_spinner = (*name).to_string();
+                    self.current_spinner = name.clone();
                     self.app_event_tx
                         .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
                 }
@@ -410,8 +410,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             let items = vec![("Theme", theme_label), ("Spinner", spinner_label)];
             for (i, (k, v)) in items.iter().enumerate() {
                 let selected = i == self.overview_selected_index;
-                let prefix = if selected { "› " } else { "  " };
-                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+                let mut spans = vec![Span::raw(" ")];
+                if selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
                 if selected {
                     spans.push(Span::styled(*k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
                 } else {
@@ -429,10 +433,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 let is_selected = i == self.selected_theme_index;
                 let is_original = *theme_enum == self.original_theme;
 
-                let prefix = if is_selected { "› " } else { "  " };
+                let prefix_selected = is_selected;
                 let suffix = if is_original { " (original)" } else { "" };
 
-                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+                let mut spans = vec![Span::raw(" ")];
+                if prefix_selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
 
                 if is_selected {
                     spans.push(Span::styled(
@@ -470,16 +479,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             let names = crate::spinner::spinner_names();
             let visible_end = (scroll_offset + available_height).min(names.len());
             for i in scroll_offset..visible_end {
-                let name = names[i];
+                let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
                 let is_original = name == self.original_spinner;
-                let def = crate::spinner::find_spinner_by_name(name).unwrap_or(crate::spinner::current_spinner());
+                let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                let prefix = if is_selected { "› " } else { "  " };
+                let prefix_selected = is_selected;
                 let suffix = if is_original { " (original)" } else { "" };
 
-                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+                let mut spans = vec![Span::raw(" ")];
+                if prefix_selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
 
                 // Show preview frame and name
                 let preview = format!("{} ", frame);
@@ -487,11 +501,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
                 if is_selected {
                     spans.push(Span::styled(
-                        name,
+                        name.clone(),
                         Style::default().fg(theme.primary).add_modifier(Modifier::BOLD),
                     ));
                 } else {
-                    spans.push(Span::styled(name, Style::default().fg(theme.text)));
+                    spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
                 }
 
                 spans.push(Span::styled(suffix, Style::default().fg(theme.text_dim)));
