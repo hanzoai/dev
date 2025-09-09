@@ -73,6 +73,9 @@ seccompiler = "0.5.0"
 
 # OpenSSL vendoring removed - using rustls-tls instead for all targets
 
+[target.'cfg(target_os = "macos")'.dependencies]
+whoami = "1.6"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 which = "6"
 
