@@ -156,17 +156,17 @@ struct OrderReplayArgs {
 
 #[derive(Debug, Parser)]
 struct PreviewArgs {
-    /// Run id (e.g., 1757...), or pr:<number> to fetch from prerelease assets
-    ref_id: String,
+    /// PR number whose prerelease assets to download (e.g., 115)
+    pr_number: u64,
     /// Optional owner/repo to override (defaults to just-every/code or $GITHUB_REPOSITORY)
     #[arg(long = "repo", value_name = "OWNER/REPO")]
     repo: Option<String>,
     /// Output directory where the binary will be extracted
     #[arg(short = 'o', long = "out", value_name = "DIR")]
     out_dir: Option<PathBuf>,
-    /// Launch the binary with --help after download (default true)
-    #[arg(long = "no-launch", default_value_t = false)]
-    no_launch: bool,
+    /// Additional args to pass to the downloaded binary
+    #[arg(trailing_var_arg = true)]
+    extra: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -387,27 +387,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .user_agent("codex-preview/1")
         .build()?;
-
-    let ref_id = args.ref_id;
-    let (maybe_pr, maybe_run) = if ref_id.starts_with("pr:") || ref_id.starts_with("pr-") {
-        (ref_id.split(|c| c == ':' || c == '-').nth(1).and_then(|s| s.parse::<u64>().ok()), None)
-    } else if let Ok(n) = ref_id.parse::<u64>() { (None, Some(n)) } else { (None, None) };
-
-    let pr_number: u64 = if let Some(pr) = maybe_pr {
-        pr
-    } else if let Some(run_id) = maybe_run {
-        // Resolve run -> PR via API (requires token)
-        let token = env::var("GH_TOKEN").or_else(|_| env::var("GITHUB_TOKEN"))
-            .context("Set GH_TOKEN (or GITHUB_TOKEN) to resolve run -> PR; or pass pr:<number> to avoid auth.")?;
-        let run_url = format!("https://api.github.com/repos/{owner}/{name}/actions/runs/{run_id}");
-        let run: serde_json::Value = client.get(run_url).bearer_auth(&token).send().await?.error_for_status()?.json().await?;
-        // pull_requests is an array; pick first
-        run.get("pull_requests").and_then(|a| a.as_array()).and_then(|arr| arr.first())
-           .and_then(|pr| pr.get("number")).and_then(|n| n.as_u64())
-           .context("This run is not associated with a pull request; use pr:<number> instead.")?
-    } else {
-        bail!("Unsupported ref. Use pr:<number> or a numeric run id.");
-    };
+    let pr_number: u64 = args.pr_number;
 
     let tag = format!("preview-pr-{}", pr_number);
     let base = format!("https://github.com/{owner}/{name}/releases/download/{tag}");
@@ -448,8 +428,22 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         None
     }
 
-    let out_dir = args.out_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-    fs::create_dir_all(&out_dir).ok();
+    // Determine output directory
+    // Default: ~/.code/bin
+    let out_dir = if let Some(dir) = args.out_dir {
+        dir
+    } else {
+        let home = if cfg!(windows) {
+            env::var_os("USERPROFILE")
+        } else {
+            env::var_os("HOME")
+        };
+        let base = home
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join(".code").join("bin")
+    };
+    let _ = fs::create_dir_all(&out_dir);
 
     #[cfg(target_family = "unix")]
     fn make_exec(p: &Path) { use std::os::unix::fs::PermissionsExt; let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755)); }
@@ -466,9 +460,13 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             ar.unpack(&out_dir)?;
             // Find extracted binary
             let bin = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code"));
-            make_exec(&bin);
-            println!("Downloaded preview to {}", bin.display());
-            if !args.no_launch { println!("Launching: {} --help", bin.display()); let _ = std::process::Command::new(&bin).arg("--help").status(); }
+            let dest_name = format!("{}-{}", bin.file_name().and_then(|s| s.to_str()).unwrap_or("code"), pr_number);
+            let dest = out_dir.join(dest_name);
+            // Rename/move to include PR number suffix
+            let _ = fs::rename(&bin, &dest).or_else(|_| { fs::copy(&bin, &dest).map(|_| () ) });
+            make_exec(&dest);
+            println!("Downloaded preview to {}", dest.display());
+            if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
             return Ok(());
         }
     } else {
@@ -478,8 +476,17 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
             let mut z = ZipArchive::new(f)?;
             z.extract(&out_dir)?;
             let exe = first_match(&out_dir, "code-").unwrap_or(out_dir.join("code.exe"));
-            println!("Downloaded preview to {}", exe.display());
-            if !args.no_launch { println!("Launching: {} --help", exe.display()); let _ = std::process::Command::new(&exe).arg("--help").spawn(); }
+            // Append PR number before extension if present
+            let dest = match exe.extension().and_then(|e| e.to_str()) {
+                Some(ext) => {
+                    let stem = exe.file_stem().and_then(|s| s.to_str()).unwrap_or("code");
+                    out_dir.join(format!("{}-{}.{}", stem, pr_number, ext))
+                }
+                None => out_dir.join(format!("{}-{}", exe.file_name().and_then(|s| s.to_str()).unwrap_or("code"), pr_number)),
+            };
+            let _ = fs::rename(&exe, &dest).or_else(|_| { fs::copy(&exe, &dest).map(|_| () ) });
+            println!("Downloaded preview to {}", dest.display());
+            if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).spawn(); } else { let _ = std::process::Command::new(&dest).spawn(); }
             return Ok(());
         }
     }
@@ -488,12 +495,21 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     if path.file_name().and_then(|s| s.to_str()).map(|n| n.ends_with(".zst")).unwrap_or(false) {
         // Try to decompress .zst to 'code'
         if which::which("zstd").is_ok() {
-            let dest = out_dir.join("code");
+            // Derive base name from archive (e.g., code-aarch64-apple-darwin.zst -> code-aarch64-apple-darwin-<pr>.{exe?})
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("code");
+            let dest = if cfg!(windows) {
+                out_dir.join(format!("{}-{}.exe", stem, pr_number))
+            } else {
+                out_dir.join(format!("{}-{}", stem, pr_number))
+            };
             let status = std::process::Command::new("zstd").arg("-d").arg(&path).arg("-o").arg(&dest).status()?;
             if status.success() {
                 make_exec(&dest);
                 println!("Downloaded preview from {} to {}", url_used, dest.display());
-                if !args.no_launch { println!("Launching: {} --help", dest.display()); let _ = std::process::Command::new(&dest).arg("--help").status(); }
+                if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
                 return Ok(());
             }
         }
@@ -504,7 +520,7 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
         fs::copy(&bin, &dest)?;
         make_exec(&dest);
         println!("Downloaded preview to {}", dest.display());
-        if !args.no_launch { println!("Launching: {} --help", dest.display()); let _ = std::process::Command::new(&dest).arg("--help").status(); }
+        if !args.extra.is_empty() { let _ = std::process::Command::new(&dest).args(&args.extra).status(); } else { let _ = std::process::Command::new(&dest).status(); }
         return Ok(());
     }
 
