@@ -179,16 +179,6 @@ jobs:
           path: artifacts/
           compression-level: 0
 
-      - name: Upload helper scripts (once)
-        if: matrix.os == 'ubuntu-24.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: preview-helper
-          path: |
-            scripts/preview-get.sh
-            scripts/preview-get.ps1
-          compression-level: 0
-
   comment:
     name: Post Artifact Links
     needs: [build]
@@ -207,96 +197,17 @@ jobs:
 
             const marker = '<!-- preview-build:artifacts -->';
 
-            // List artifacts for this run so we can provide direct ZIP links
-            const artsResp = await github.rest.actions.listArtifactsForRun({ owner, repo, run_id: runId, per_page: 100 });
-            const artifacts = artsResp.data.artifacts || [];
-
-            // Map target triple -> friendly label
-            const labelFor = (name) => {
-              if (name.includes('x86_64-unknown-linux-musl')) return 'Linux x86_64 (musl)';
-              if (name.includes('aarch64-unknown-linux-musl')) return 'Linux aarch64 (musl)';
-              if (name.includes('x86_64-apple-darwin')) return 'macOS x86_64';
-              if (name.includes('aarch64-apple-darwin')) return 'macOS arm64 (Apple Silicon)';
-              if (name.includes('x86_64-pc-windows-msvc')) return 'Windows x86_64';
-              if (name.includes('preview-helper')) return 'Helper scripts';
-              return name;
-            };
-
-            // Build a list of direct artifact links (ZIP of the artifact contents)
-            const directLinks = artifacts
-              .filter(a => a.name?.startsWith('preview-'))
-              .map(a => `- ${labelFor(a.name)}: https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${a.id}/zip`)
-              .join('\n');
-
-            // Single-command helper (Linux/macOS) using gh to fetch + extract + run
-            const ghOneLiner = [
-              'bash -lc "set -euo pipefail; ',
-              'RID=', runId, '; ',
-              'OS=$(uname -s); ARCH=$(uname -m); ',
-              'case \"$OS-$ARCH\" in ',
-              'Linux-x86_64) T=x86_64-unknown-linux-musl ;; ',
-              'Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl ;; ',
-              'Darwin-x86_64) T=x86_64-apple-darwin ;; ',
-              'Darwin-arm64) T=aarch64-apple-darwin ;; ',
-              '*) echo \"Unsupported: $OS/$ARCH\" >&2; exit 1 ;; ',
-              'esac; ',
-              'D=code-preview-$T; rm -rf \"$D\"; ',
-              'gh run download \"$RID\" -n preview-$T -D \"$D\" >/dev/null; ',
-              'cd \"$D\"; ',
-              'if ls code-*.zst >/dev/null 2>&1; then F=$(ls code-*.zst | head -n1); zstd -d \"$F\" -o code; chmod +x code; ./code --help; ',
-              'elif ls code-*.tar.gz >/dev/null 2>&1; then F=$(ls code-*.tar.gz | head -n1); B=$(tar -tzf \"$F\" | head -n1 | xargs basename); tar -xzf \"$F\"; chmod +x \"$B\"; ./\"$B\" --help; ',
-              'else echo \"No known artifact format found\" >&2; exit 2; fi"'
-            ].join('');
-
             const body = [
               marker,
-              '### Preview Binaries',
+              '### Preview Build',
               '',
-              `Artifacts are available for this PR: ${runUrl}`,
-              '',
-              '- Linux (x86_64, aarch64) — .zst and .tar.gz',
-              '- macOS (x86_64, arm64) — .zst and .tar.gz',
-              '- Windows (x86_64) — .zip',
-              '',
-              '**Quick one‑liner (Linux/macOS)**',
-              '',
-              'Option A (gh): requires `gh auth login`',
+              'You can run this right now! In your terminal just use:',
               '```bash',
-              ghOneLiner,
+              `code preview ${runId}`,
               '```',
-              'Option B (curl raw helper):',
-              '```bash',
-              `curl -fsSL https://raw.githubusercontent.com/${owner}/${repo}/${context.sha}/scripts/preview-get.sh | bash -s -- ${runId}`,
-              '```',
+              'This will run the version of Code we\'ve created for this issue.',
               '',
-              '**One‑liner (Windows with gh)**',
-              '',
-              'Option A (gh): requires `gh auth login`',
-              '```powershell',
-              `$RID = ${runId}; gh run download $RID -n preview-x86_64-pc-windows-msvc -D code-preview; Set-Location code-preview; Get-ChildItem -Filter *.zip | ForEach-Object { Expand-Archive -Path $_.FullName -DestinationPath . -Force }; Start-Process .\\code-x86_64-pc-windows-msvc.exe`,
-              '```',
-              'Option B (script helper):',
-              '```powershell',
-              `iwr -useb https://raw.githubusercontent.com/${owner}/${repo}/${context.sha}/scripts/preview-get.ps1 -OutFile preview-get.ps1; .\\preview-get.ps1 -RunId ${runId}`,
-              '```',
-              '',
-              '**Direct artifact links**',
-              '',
-              directLinks || '_Artifacts are still processing — refresh in a minute._',
-              '',
-              '**Manual usage**',
-              '',
-              'Linux/macOS (.zst):',
-              '```bash',
-              'zstd -d code-<target>.zst -o code && chmod +x code && ./code',
-              '```',
-              'Linux/macOS (.tar.gz):',
-              '```bash',
-              'tar -xzf code-<target>.tar.gz && chmod +x code-<target> && ./code-<target>',
-              '```',
-              'Windows (.zip): unzip and run `code.exe`',
-              '',
-              '_Note: macOS may require: `xattr -d com.apple.quarantine ./code`_',
+              'After you run it, please comment here and let me know if it does what you need.',
               marker
             ].join('\n');
 
