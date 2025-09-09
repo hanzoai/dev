@@ -287,7 +287,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let t_fg = Style::default().fg(crate::colors::text());
         let title_spans = vec![
             Span::styled(" ", t_dim),
-            Span::styled("Appearance", t_fg),
+            Span::styled("/theme", t_fg),
             Span::styled(" ——— ", t_dim),
             Span::styled("◂ ▸", t_fg),
             Span::styled(" change tabs ", t_dim),
