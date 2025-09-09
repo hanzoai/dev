@@ -90,6 +90,13 @@ jobs:
             const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: prNumber, per_page: 100 });
             const changed = files.map(f => `- ${f.status.padEnd(6)} ${f.filename}`).slice(0, 50);
 
+            // Collect latest commit subjects on the PR (brief)
+            let commits = [];
+            try {
+              const all = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: prNumber, per_page: 100 });
+              commits = all.slice(-5).map(c => `- ${c.commit.message.split('\n')[0]}`);
+            } catch {}
+
             core.setOutput('pr_number', String(prNumber));
             core.setOutput('issue_number', String(issueNumber || 0));
             core.setOutput('title', pr.title || '');
@@ -97,6 +104,7 @@ jobs:
             core.setOutput('head', pr.head.ref || '');
             core.setOutput('base', pr.base.ref || '');
             core.setOutput('changed', changed.join('\n'));
+            core.setOutput('commits', commits.join('\n'));
 
       - name: Prepare context file
         id: ctx
@@ -106,6 +114,7 @@ jobs:
           TITLE: ${{ steps.meta.outputs.title }}
           BODY: ${{ steps.meta.outputs.body }}
           CHANGED: ${{ steps.meta.outputs.changed }}
+          COMMITS: ${{ steps.meta.outputs.commits }}
         with:
           script: |
             const fs = require('fs');
@@ -159,6 +168,11 @@ jobs:
             if ((process.env.CHANGED || '').trim()) {
               lines.push('## Changed files (first 50)');
               lines.push(process.env.CHANGED.trim());
+              lines.push('');
+            }
+            if ((process.env.COMMITS || '').trim()) {
+              lines.push('## What changed in this build (recent commits)');
+              lines.push(process.env.COMMITS.trim());
               lines.push('');
             }
             lines.push('## Preview command');
