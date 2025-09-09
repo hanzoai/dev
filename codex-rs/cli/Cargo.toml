@@ -46,3 +46,4 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tar = "0.4"
 tempfile = "3"
+which = "6"
