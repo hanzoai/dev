@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.104] - 2025-09-09
+
+- CLI: support preview downloads via pr:<number>; keep run-id fallback. (73de54da)
+- Preview: publish prereleases on PRs with release assets; no-auth downloads. (73de54da)
+- PR comment: recommend 'code preview pr:<number>' for clarity. (73de54da)
+
 ## [0.2.103] - 2025-09-09
 
 - Build: add STRICT_CARGO_HOME to enforce CARGO_HOME; default stays repo-local when unset. (6cbc0555)
