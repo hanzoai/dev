@@ -246,8 +246,7 @@ jobs:
               'In your terminal use:',
               '```bash',
               `code preview pr:${issue_number}`,
-              '```
-',
+              '```',
               'This downloads from the prerelease for this PR (no GitHub token required).',
               '',
               'Direct downloads:',
