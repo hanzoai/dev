@@ -12,7 +12,7 @@ Inputs
 - Upstream: openai/codex@main
 - Current branch: upstream-merge
 - Artifacts:
-  - COMMITS.json: 2 commits (latest: fix rollout_path in NewConversationResponse).
+- COMMITS.json: 3 commits (ArchiveConversation; rollout_path fix; CI speedup).
   - CHANGE_HISTOGRAM: tui-heavy changes; core/protocol touched.
   - DELTA_FILES/DIFFSTAT: new images, workflows, and multiple codex-rs crates updated.
   - REINTRODUCED_PATHS: several TUI tests/fixtures and GitHub assets.
