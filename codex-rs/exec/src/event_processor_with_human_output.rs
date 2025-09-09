@@ -301,23 +301,43 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ("".to_string(), format!("exec('{call_id}')"))
                 };
 
-                let combined = if exit_code == 0 { stdout } else { stderr };
-                let truncated_output = combined
+                // Always compute truncated stdout and stderr so we can present
+                // a clear separation when the command fails. The model cannot
+                // rely on ANSI colors, so we include a plain "ERROR" divider
+                // before stderr in the failure case.
+                let truncated_stdout = stdout
                     .lines()
                     .take(MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL)
                     .collect::<Vec<_>>()
                     .join("\n");
+                let truncated_stderr = stderr
+                    .lines()
+                    .take(MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
                 match exit_code {
                     0 => {
                         let title = format!("{call} succeeded{duration}:");
                         ts_println!(self, "{}", title.style(self.green));
+                        if !truncated_stdout.is_empty() {
+                            println!("{}", truncated_stdout.style(self.dimmed));
+                        }
                     }
                     _ => {
                         let title = format!("{call} exited {exit_code}{duration}:");
                         ts_println!(self, "{}", title.style(self.red));
+                        if !truncated_stdout.is_empty() {
+                            println!("{}", truncated_stdout.style(self.dimmed));
+                            println!();
+                        }
+                        // Separator visible to both humans and the model
+                        println!("ERROR");
+                        if !truncated_stderr.is_empty() {
+                            println!("{}", truncated_stderr);
+                        }
                     }
                 }
-                println!("{}", truncated_output.style(self.dimmed));
             }
             EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
                 call_id: _,
