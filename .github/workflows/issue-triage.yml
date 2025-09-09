@@ -514,6 +514,13 @@ jobs:
           restore-keys: |
             agent-cargo-${{ runner.os }}-
 
+      - name: Configure authenticated origin for agent (read-only fetch allowed)
+        # Point 'origin' to a tokened URL so accidental fetches inside the agent don't prompt for auth.
+        # This is safe; later push steps reset origin to CODE_GH_PAT before pushing.
+        run: |
+          set -eu
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
       - name: Run Code agent to implement or respond
         timeout-minutes: 20
         if: steps.gate.outputs.allow_agent == 'true'
