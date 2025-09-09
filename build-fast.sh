@@ -126,10 +126,16 @@ else
   CANONICAL_ENV_APPLIED=0
 fi
 
-# Ensure Cargo writes inside the workspace when running under sandboxes that
-# make $HOME read-only (e.g. CI workspace-write). Allow explicit overrides.
-if [ -z "${CARGO_HOME:-}" ]; then
-  export CARGO_HOME="${REPO_ROOT}/.cargo-home"
+# Ensure Cargo cache locations are stable.
+# In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
+# by setting STRICT_CARGO_HOME=1 (used by Issue Triage workflow to keep caching deterministic).
+if [ "${STRICT_CARGO_HOME:-}" = "1" ]; then
+  export CARGO_HOME="${CARGO_HOME_ENFORCED:-${HOME}/.cargo}"
+else
+  # Default: write inside workspace if not set to avoid HOME permission issues
+  if [ -z "${CARGO_HOME:-}" ]; then
+    export CARGO_HOME="${REPO_ROOT}/.cargo-home"
+  fi
 fi
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
   export CARGO_TARGET_DIR="${SCRIPT_DIR}/codex-rs/target"
