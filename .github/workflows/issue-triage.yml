@@ -518,6 +518,7 @@ jobs:
         timeout-minutes: 20
         if: steps.gate.outputs.allow_agent == 'true'
         id: run_agent
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -576,25 +577,28 @@ jobs:
 
           set +e
           set +o pipefail
-          printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
-            OPENAI_API_KEY="x" \
-            OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
-            OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
-            CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
-            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
-            STRICT_CARGO_HOME="1" \
-            CARGO_HOME_ENFORCED="$GITHUB_WORKSPACE/.cargo-home" \
-            GIT_TERMINAL_PROMPT="0" \
-            GIT_ASKPASS="/bin/false" \
-            npm_config_cache="$SAFE_HOME/.npm" \
-            npx -y @just-every/code@latest \
-            exec \
-            -s "$CODE_SANDBOX" \
-            -c sandbox_workspace_write.network_access=true \
-            --cd "$GITHUB_WORKSPACE" \
-            --skip-git-repo-check \
-            - | tee .github/auto/AGENT_STDOUT.txt
-          AGENT_RC=${PIPESTATUS[1]}
+          # Feed prompt via pipe, capture agent exit via PIPESTATUS[1], but never fail the step
+          { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+              OPENAI_API_KEY="x" \
+              OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
+              OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
+              CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
+              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
+              STRICT_CARGO_HOME="1" \
+              CARGO_HOME_ENFORCED="$GITHUB_WORKSPACE/.cargo-home" \
+              GIT_TERMINAL_PROMPT="0" \
+              GIT_ASKPASS="/bin/false" \
+              npm_config_cache="$SAFE_HOME/.npm" \
+              npx -y @just-every/code@latest \
+              exec \
+              -s "$CODE_SANDBOX" \
+              -c sandbox_workspace_write.network_access=true \
+              --cd "$GITHUB_WORKSPACE" \
+              --skip-git-repo-check \
+              -; } 2>&1 | tee .github/auto/AGENT_STDOUT.txt
+          AGENT_RC=${PIPESTATUS[0]}
+          # Force success regardless of agent_rc
+          true
           set -e
           set -o pipefail
           echo "agent_rc=$AGENT_RC" >> "$GITHUB_OUTPUT"
