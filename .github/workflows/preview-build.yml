@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   actions: read
 
@@ -179,9 +179,48 @@ jobs:
           path: artifacts/
           compression-level: 0
 
+  release:
+    name: Publish prerelease (all targets)
+    needs: [build]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref != 'upstream-merge'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create or update prerelease with assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: preview-pr-${{ github.event.pull_request.number }}
+          TITLE: Preview for PR #${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Show files for debugging
+          echo "Artifacts directory:"; ls -R artifacts || true
+          # Ensure release exists (create if missing)
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes "Automated prerelease with preview binaries for PR #${{ github.event.pull_request.number }} (run ${{ github.run_id }})." \
+              --prerelease \
+              --latest=false \
+              --target "$GITHUB_SHA"
+          fi
+          # Upload/replace all artifacts
+          shopt -s globstar nullglob
+          files=(artifacts/**)
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            echo "No artifacts found to upload." >&2
+          fi
+
   comment:
     name: Post Artifact Links
-    needs: [build]
+    needs: [build, release]
     runs-on: ubuntu-latest
     steps:
       - name: Upsert PR comment with artifact info
@@ -194,6 +233,8 @@ jobs:
             const issue_number = context.payload.pull_request.number;
             const runId = context.runId;
             const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
+            const tag = `preview-pr-${issue_number}`;
+            const releaseBase = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
 
             const marker = '<!-- preview-build:artifacts -->';
 
@@ -201,7 +242,26 @@ jobs:
               marker,
               '### Preview Build',
               '',
-              'You can run this right now! In your terminal just use:',
+              'Option A (no auth):',
+              'In your terminal use:',
+              '```bash',
+              `code preview pr:${issue_number}`,
+              '```',
+              'This downloads from the prerelease for this PR (no GitHub token required).',
+              '',
+              'Direct downloads:',
+              `- Linux x86_64 (.zst): ${releaseBase}/code-x86_64-unknown-linux-musl.zst`,
+              `- Linux x86_64 (.tar.gz): ${releaseBase}/code-x86_64-unknown-linux-musl.tar.gz`,
+              `- Linux aarch64 (.zst): ${releaseBase}/code-aarch64-unknown-linux-musl.zst`,
+              `- Linux aarch64 (.tar.gz): ${releaseBase}/code-aarch64-unknown-linux-musl.tar.gz`,
+              `- macOS x86_64 (.zst): ${releaseBase}/code-x86_64-apple-darwin.zst`,
+              `- macOS x86_64 (.tar.gz): ${releaseBase}/code-x86_64-apple-darwin.tar.gz`,
+              `- macOS arm64 (.zst): ${releaseBase}/code-aarch64-apple-darwin.zst`,
+              `- macOS arm64 (.tar.gz): ${releaseBase}/code-aarch64-apple-darwin.tar.gz`,
+              `- Windows x86_64 (.zip): ${releaseBase}/code-x86_64-pc-windows-msvc.exe.zip`,
+              '',
+              'Option B:',
+              'You can also run by Actions run id (requires auth):',
               '```bash',
               `code preview ${runId}`,
               '```',
