@@ -3,6 +3,18 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.106] - 2025-09-09
+
+- CLI/Preview: save downloads under ~/.code/bin by default; suffix binaries with PR id. (3bebc2d1)
+- CLI/Preview: run preview binary directly (no --help) for simpler testing. (36cfabfa)
+- Preview build: use gh -R and upload only files; avoid .git dependency. (1b3da3b3)
+
+## [0.2.105] - 2025-09-09
+
+- Triage: make agent failures non-fatal; capture exit code and disable git prompts. (adbcfbae)
+- Triage: forbid agent git commits; treat agent-made commits as changes; allow branch/push even when clean. (11f7adcb)
+- Preview: fix code-fence array string and YAML error to restore builds. (7522c49f)
+
 ## [0.2.104] - 2025-09-09
 
 - CLI: support preview downloads via pr:<number>; keep run-id fallback. (73de54da)
