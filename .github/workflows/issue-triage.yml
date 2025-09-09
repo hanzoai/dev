@@ -528,8 +528,8 @@ jobs:
           AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
           # Normalize agent mode (trim whitespace/CRs)
           AGENT_MODE=$(printf '%s' "$AGENT_MODE" | tr -d '\r' | xargs)
-          # Ensure local, writable cargo dirs exist for the agent
-          mkdir -p "$RUNNER_TEMP/cargo-home" "$GITHUB_WORKSPACE/codex-rs/target"
+          # Ensure local, writable cargo dirs exist for the agent (share cache with rust-cache)
+          mkdir -p "$HOME/.cargo" "$GITHUB_WORKSPACE/codex-rs/target"
           PROMPT=$(cat << 'EOP'
           <task>
             - Understand the issue and list exact edits needed (paths, snippets).
@@ -564,6 +564,7 @@ jobs:
             Set close_issue=true when your comment fully resolves the issue (e.g., answered question, duplicate with link, usage fix).
           - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
             If your changes/PR fully resolve the issue, write .github/auto/DECISION.json with close_issue=true and assignee=\"just-every-code\".
+          - Build policy: Do NOT override CARGO_HOME or CARGO_TARGET_DIR; do NOT run \"cargo update\"; run ./build-fast.sh as-is and ignore non-fatal lockfile warnings. The CI sets caches for determinism and speed.
           "
           # Choose sandbox mode based on agent_mode (robust compare)
           case "$AGENT_MODE" in
@@ -576,7 +577,7 @@ jobs:
             OPENAI_API_KEY="x" \
             OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
             OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
-            CARGO_HOME="$RUNNER_TEMP/cargo-home" \
+            CARGO_HOME="$SAFE_HOME/.cargo" \
             CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
