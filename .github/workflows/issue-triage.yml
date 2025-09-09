@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: issue-triage-${{ github.event.issue.number }}
-  cancel-in-progress: true
+  # Do not cancel in-progress runs when our own bot writes a comment.
+  # We'll guard re-entrancy inside the job and exit fast for bot actors.
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -816,9 +818,10 @@ jobs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git push --set-upstream origin "${BRANCH_NAME}" || git push origin "${BRANCH_NAME}"
 
-      - name: Open or update PR with AI-written title/body (PAT→GITHUB_TOKEN fallback)
+      - name: Open or update PR with AI-written title/body (no comment yet)
         timeout-minutes: 5
         if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
+        id: open_pr
         uses: actions/github-script@v7
         env:
           PAT: ${{ secrets.CODE_GH_PAT }}
@@ -848,48 +851,34 @@ jobs:
             const repo = context.repo.repo;
             const head = process.env.BRANCH_NAME;
             const base = process.env.DEFAULT_BRANCH;
-            const issue_number = context.payload.issue.number;
+            const existing = (process.env.EXISTING_PR || '').trim();
+            if (existing) {
+              core.setOutput('number', existing);
+              return;
+            }
             async function createPR(token){
               const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`,{
                 method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({ title, head, base, body })
               });
               const text = await r.text();
-              return { ok: r.ok, status: r.status, statusText: r.statusText, text };
+              if (!r.ok) return { ok: r.ok, status: r.status, statusText: r.statusText, text };
+              let num = 0; try { num = JSON.parse(text).number || 0; } catch {}
+              return { ok: true, number: num };
             }
-            async function commentIssue(token, msg){
-              return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`,{
-                method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({ body: msg })
-              });
-            }
-            let prNum = 0;
-            const existing = (process.env.EXISTING_PR || '').trim();
-            if (existing) {
-              prNum = parseInt(existing, 10);
-            } else {
-              let pr = await createPR(process.env.PAT);
-              if (!pr.ok && pr.status === 403) pr = await createPR(process.env.FALLBACK);
-              if (!pr.ok && pr.status === 422) {
-                const s = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${owner}:${head}`, { headers: {authorization:`Bearer ${process.env.PAT}`}})).json();
-                if (Array.isArray(s) && s.length) prNum = s[0].number;
+            let pr = await createPR(process.env.PAT);
+            if (!pr.ok && pr.status === 403) pr = await createPR(process.env.FALLBACK);
+            if (!pr.ok) {
+              // If it already exists, fetch it
+              const head = process.env.BRANCH_NAME;
+              const s = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${owner}:${head}`, { headers: {authorization:`Bearer ${process.env.PAT}`}})).json();
+              if (Array.isArray(s) && s.length) {
+                core.setOutput('number', String(s[0].number));
+              } else {
+                throw new Error(`create PR failed: ${pr.status} ${pr.statusText} ${pr.text}`);
               }
-              if (!pr.ok && !prNum) throw new Error(`create PR failed: ${pr.status} ${pr.statusText} ${pr.text}`);
-              if (!prNum) { try { prNum = JSON.parse(pr.text).number || 0; } catch {} }
+            } else {
+              core.setOutput('number', String(pr.number || 0));
             }
-
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
-            const summary = bodyBase.split(/\r?\n/).find(l => l.trim()) || title;
-            const msg = prNum
-              ? [
-                  `Opened/updated PR #${prNum} to address this issue.`,
-                  '',
-                  `Summary: ${summary}`,
-                  '',
-                  `Preview binaries (Linux x64) will appear under Artifacts for this run: ${runUrl}`,
-                ].join('\n')
-              : `Opened PR to address this issue.`;
-            let rc = await commentIssue(process.env.PAT, msg);
-            if (rc.status === 403) rc = await commentIssue(process.env.FALLBACK, msg);
-            if (!rc.ok) core.warning(`comment after PR failed: ${rc.status} ${rc.statusText}`);
 
       - name: Preview build (Linux x86_64 MUSL) and upload artifact
         if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
@@ -915,6 +904,57 @@ jobs:
           name: preview-code-linux-x64
           path: preview/
           compression-level: 0
+
+      - name: Comment with direct artifact link and run instructions (after upload)
+        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
+        uses: actions/github-script@v7
+        env:
+          PAT: ${{ secrets.CODE_GH_PAT }}
+          FALLBACK: ${{ github.token }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.payload.issue.number;
+            const prNum = (core.getInput('pr') || '') || (process.env.PR_NUMBER || '') || (core.getState('pr') || '');
+            // List artifacts for this run and find the preview artifact
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: context.runId, per_page: 100 });
+            const art = data.artifacts.find(a => a.name === 'preview-code-linux-x64');
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+            let link = runUrl;
+            if (art) {
+              // Direct download URL (zip); requires auth and expires, but fine for triage use
+              link = `https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${art.id}/zip`;
+            }
+            const body = [
+              '### Preview Binary (Linux x86_64)',
+              '',
+              `- Direct download: ${link}`,
+              '',
+              '**How to run (Linux)**',
+              '```bash',
+              'unzip preview-code-linux-x64.zip -d preview',
+              'cd preview',
+              'chmod +x code-x86_64-unknown-linux-musl',
+              './code-x86_64-unknown-linux-musl --help',
+              '```',
+              '',
+              '_Alternative (zstd):_',
+              '```bash',
+              'zstd -d code-x86_64-unknown-linux-musl.zst -o code && chmod +x code && ./code --help',
+              '```',
+              '',
+              '_Note: Links require GitHub auth and may expire. If it has expired, use the Artifacts section on the run:_',
+              runUrl
+            ].join('\n');
+            async function commentIssue(token, msg){
+              return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`,{
+                method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({ body: msg })
+              });
+            }
+            let rc = await commentIssue(process.env.PAT, body);
+            if (rc.status === 403) rc = await commentIssue(process.env.FALLBACK, body);
+            if (!rc.ok) core.warning(`comment with artifacts failed: ${rc.status} ${rc.statusText}`);
 
       - name: Assign (PR path; PAT→GITHUB_TOKEN fallback)
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'

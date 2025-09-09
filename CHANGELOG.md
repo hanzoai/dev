@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.100] - 2025-09-09
+
+- Core: fix date parsing in rollout preflight to compile. (6eec307f)
+- Build: speed up build-fast via sccache; keep env passthrough for agents. (ff4b0160)
+- Release: add preflight E2E tests and post-build smoke checks to improve publish reliability. (a97b8460, 6c09ac42)
+- Upstream-merge: refine branding guard to check only user-facing strings. (da7581de)
+
 ## [0.2.99] - 2025-09-09
 
 - TUI/Branch: finalize merges default into worktree first; prefer fast-forward; start agent on conflicts. (8e1cbd20)
