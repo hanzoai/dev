@@ -36,6 +36,9 @@ pub(crate) struct ThemeSelectionView {
     // Revert points when backing out of detail views
     revert_theme_on_back: ThemeName,
     revert_spinner_on_back: String,
+    // Scroll offsets for detail lists
+    theme_scroll_offset: usize,
+    spinner_scroll_offset: usize,
     app_event_tx: AppEventSender,
     is_complete: bool,
 }
@@ -67,6 +70,8 @@ impl ThemeSelectionView {
             overview_selected_index: 0,
             revert_theme_on_back: current_theme,
             revert_spinner_on_back: current_spinner_name,
+            theme_scroll_offset: 0,
+            spinner_scroll_offset: 0,
             app_event_tx,
             is_complete: false,
         }
@@ -152,26 +157,40 @@ impl ThemeSelectionView {
     fn move_selection_up(&mut self) {
         let options = Self::get_theme_options();
         if matches!(self.mode, Mode::Themes) {
-            if self.selected_theme_index == 0 {
-                self.selected_theme_index = options.len() - 1;
-            } else {
-                self.selected_theme_index -= 1;
+            let count = options.len();
+            if count == 0 { return; }
+            let visible = 10usize.min(count);
+            let middle = visible / 2;
+            if self.selected_theme_index > 0 {
+                if self.selected_theme_index.saturating_sub(self.theme_scroll_offset) > middle {
+                    self.selected_theme_index -= 1;
+                } else if self.theme_scroll_offset > 0 {
+                    self.theme_scroll_offset -= 1;
+                } else {
+                    self.selected_theme_index -= 1;
+                }
+                self.current_theme = options[self.selected_theme_index].0;
+                self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
             }
-            self.current_theme = options[self.selected_theme_index].0;
-            // Live preview - update theme immediately (no history event)
-            self.app_event_tx
-                .send(AppEvent::PreviewTheme(self.current_theme));
         } else {
             let names = crate::spinner::spinner_names();
-            if self.selected_spinner_index == 0 {
-                self.selected_spinner_index = names.len().saturating_sub(1);
-            } else {
-                self.selected_spinner_index -= 1;
-            }
-            if let Some(name) = names.get(self.selected_spinner_index) {
-                self.current_spinner = name.clone();
-                self.app_event_tx
-                    .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+            let count = names.len();
+            if count == 0 { return; }
+            let visible = 10usize.min(count);
+            let middle = visible / 2;
+            if self.selected_spinner_index > 0 {
+                if self.selected_spinner_index.saturating_sub(self.spinner_scroll_offset) > middle {
+                    self.selected_spinner_index -= 1;
+                } else if self.spinner_scroll_offset > 0 {
+                    self.spinner_scroll_offset -= 1;
+                } else {
+                    self.selected_spinner_index -= 1;
+                }
+                if let Some(name) = names.get(self.selected_spinner_index) {
+                    self.current_spinner = name.clone();
+                    self.app_event_tx
+                        .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                }
             }
         }
     }
@@ -240,10 +259,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         match self.mode {
             // Border (2) + inner padding (2) + 2 content rows = 6
             Mode::Overview => 6,
-            // Detail lists: generous height but capped
-            _ => {
-                let theme_count = Self::get_theme_options().len() as u16;
-                (theme_count.max(crate::spinner::spinner_names().len() as u16) + 6).min(22)
+            // Detail lists: fixed 10 visible rows (max), shrink if fewer
+            Mode::Themes => {
+                let n = Self::get_theme_options().len() as u16;
+                4 + n.min(10)
+            }
+            Mode::Spinner => {
+                let n = crate::spinner::spinner_names().len() as u16;
+                4 + n.min(10)
             }
         }
     }
@@ -372,27 +395,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
         let body_area = padded;
 
-        // Body background uses normal background; calculate list height inside body
-        let base_header_lines = 0u16; // no extra spacer
-        let available_height = body_area
-            .height
-            .saturating_sub(base_header_lines)
-            as usize;
-
-        // Calculate scroll offset depending on mode
+        // List height equals available body height
+        let available_height = body_area.height as usize;
+        // Use stored scroll offsets; clamp to bounds
         let scroll_offset = match self.mode {
             Mode::Themes => {
-                if available_height >= options.len() { 0 }
-                else if self.selected_theme_index < available_height / 2 { 0 }
-                else if self.selected_theme_index >= options.len() - available_height / 2 { options.len().saturating_sub(available_height) }
-                else { self.selected_theme_index.saturating_sub(available_height / 2) }
+                let count = options.len();
+                self.theme_scroll_offset.min(count.saturating_sub(available_height))
             }
             Mode::Spinner => {
-                let names_len = crate::spinner::spinner_names().len();
-                if available_height >= names_len { 0 }
-                else if self.selected_spinner_index < available_height / 2 { 0 }
-                else if self.selected_spinner_index >= names_len.saturating_sub(available_height) { names_len.saturating_sub(available_height) }
-                else { self.selected_spinner_index.saturating_sub(available_height / 2) }
+                let count = crate::spinner::spinner_names().len();
+                self.spinner_scroll_offset.min(count.saturating_sub(available_height))
             }
             Mode::Overview => 0,
         };
@@ -426,9 +439,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
-            // Add visible themes based on scroll offset
-            let visible_end = (scroll_offset + available_height).min(options.len());
-            for i in scroll_offset..visible_end {
+            // Add visible themes based on stored scroll offset
+            let visible = available_height;
+            let start = scroll_offset.min(options.len().saturating_sub(visible));
+            let end = (start + visible).min(options.len());
+            for i in start..end {
                 let (theme_enum, name, description) = &options[i];
                 let is_selected = i == self.selected_theme_index;
                 let is_original = *theme_enum == self.original_theme;
@@ -477,8 +492,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .unwrap_or_default()
                 .as_millis();
             let names = crate::spinner::spinner_names();
-            let visible_end = (scroll_offset + available_height).min(names.len());
-            for i in scroll_offset..visible_end {
+            let visible = available_height;
+            let start = scroll_offset.min(names.len().saturating_sub(visible));
+            let end = (start + visible).min(names.len());
+            for i in start..end {
                 let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
                 let is_original = name == self.original_spinner;
@@ -516,17 +533,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
         }
 
-        // Add scroll indicators if needed (only for lists)
-        if matches!(self.mode, Mode::Themes) && (scroll_offset > 0 || (scroll_offset + available_height).min(options.len()) < options.len()) {
-            lines.push(Line::from(" "));
-            let scroll_info = format!("[{}/{}]", self.selected_theme_index + 1, options.len());
-            lines.push(Line::from(vec![Span::raw(" "), Span::styled(
-                scroll_info,
-                Style::default().fg(theme.text_dim),
-            )]));
-        } else if matches!(self.mode, Mode::Spinner) {
-            lines.push(Line::from(" "));
-        }
+        // No explicit scroll info; list height is fixed to show boundaries naturally
 
         // Render the body content paragraph inside body area
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);

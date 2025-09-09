@@ -334,6 +334,7 @@ jobs:
                       'Use comment_only only when details are too ambiguous to act safely or when it is a support/troubleshooting request without a concrete change path.',
                       'Block high-risk issues which are potentially harmful or when the request would touch sensitive areas.',
                       'Code changes will be reviewed before being merged, so it\'s safe to attempt many concrete tasks. This safety check is to catch exfiltration and risky requests.',
+                      'Also propose a short, human‑readable ID to label this work across PRs/releases. The ID must be 2–4 lowercase words, a–z0–9 only, separated by single dashes (e.g., "faster-downloads" or "preview-cache-fix"). Avoid generic terms.',
                       'Output must strictly match the JSON schema provided via text.format.'
                     ].join(' ')
                   },
@@ -367,6 +368,11 @@ jobs:
                           reason: {
                             type: 'string',
                             description: 'The reason for the decision',
+                          },
+                          id: {
+                            type: 'string',
+                            description: '2–4 lowercase words a–z0–9 joined by single dashes (repo-unique if possible).',
+                            pattern: '^[a-z0-9]+(?:-[a-z0-9]+){1,3}$'
                           }
                         },
                         additionalProperties: false,
@@ -412,8 +418,10 @@ jobs:
                 }
                 const decision = (json.decision === 'allow' || json.decision === 'block' || json.decision === 'comment_only') ? json.decision : 'comment_only';
                 const reason = json.reason || 'Insufficient rationale';
+                const id = (typeof json.id === 'string') ? json.id.trim().toLowerCase() : '';
                 core.setOutput('decision', decision);
                 core.setOutput('reason', reason);
+                if (id) core.setOutput('suggested_id', id);
                 core.notice(`Safety: ${decision} - ${reason}`);
               }
             }
@@ -458,352 +466,52 @@ jobs:
           echo "allow_agent=${allow_agent}" >> "$GITHUB_OUTPUT"
           echo "agent_mode=${agent_mode}" >> "$GITHUB_OUTPUT"
 
-      - name: Start local OpenAI proxy (no key to agent)
-        timeout-minutes: 5
-        if: steps.gate.outputs.allow_agent == 'true'
-        id: openai_proxy
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "OPENAI_API_KEY secret is required to start the proxy." >&2
-            exit 1
-          fi
-          mkdir -p .github/auto
-          cat > .github/auto/openai-proxy.js <<'JS'
-          const http = require('http');
-          const https = require('https');
-          const { URL } = require('url');
-          const PORT = process.env.PORT || 5055;
-          const API_KEY = process.env.OPENAI_API_KEY || '';
-          const ALLOWED = ['/v1/chat/completions','/v1/responses'];
-          if (!API_KEY) { console.error('OPENAI_API_KEY missing'); process.exit(1); }
-          const server = http.createServer((req, res) => {
-            if (req.method !== 'POST' || !ALLOWED.some(p => req.url.startsWith(p))) {
-              res.writeHead(403, { 'content-type': 'application/json' });
-              res.end(JSON.stringify({ error: 'blocked' }));
-              return;
-            }
-            const chunks = [];
-            req.on('data', c => { chunks.push(c); if (Buffer.concat(chunks).length > 1024*1024) req.destroy(); });
-            req.on('end', () => {
-              const up = new URL('https://api.openai.com' + req.url);
-              const fw = https.request({
-                method: 'POST',
-                hostname: up.hostname,
-                path: up.pathname + up.search,
-                headers: { 'content-type': 'application/json', 'authorization': `Bearer ${API_KEY}` }
-              }, r => { res.writeHead(r.statusCode || 500, r.headers); r.pipe(res); });
-              fw.on('error', e => { res.writeHead(502, {'content-type':'application/json'}); res.end(JSON.stringify({ error:'upstream', message: e.message })); });
-              fw.end(Buffer.concat(chunks));
-            });
-          });
-          server.listen(PORT, '127.0.0.1', () => { console.log('proxy listening on 127.0.0.1:'+PORT); });
-          JS
-          node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
-          echo "pid=$!" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Cargo registry/git for agent (workspace-local)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.cargo-home/registry
-            ${{ github.workspace }}/.cargo-home/git
-          key: agent-cargo-${{ runner.os }}-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}
-          restore-keys: |
-            agent-cargo-${{ runner.os }}-
-
-      - name: Configure authenticated origin for agent (read-only fetch allowed)
-        # Point 'origin' to a tokened URL so accidental fetches inside the agent don't prompt for auth.
-        # This is safe; later push steps reset origin to CODE_GH_PAT before pushing.
-        run: |
-          set -eu
-          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-
-      - name: Run Code agent to implement or respond
-        timeout-minutes: 20
-        if: steps.gate.outputs.allow_agent == 'true'
-        id: run_agent
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Sanitize environment before invoking the agent: strip all runner/env vars
-          # Keep only essentials (PATH, HOME) and the model API key.
-          SAFE_PATH="$PATH"
-          SAFE_HOME="$HOME"
-          AGENT_MODE='${{ steps.gate.outputs.agent_mode }}'
-          # Normalize agent mode (trim whitespace/CRs)
-          AGENT_MODE=$(printf '%s' "$AGENT_MODE" | tr -d '\r' | xargs)
-          # Ensure local, writable cargo dirs exist for the agent inside workspace (sandbox allows workdir writes)
-          mkdir -p "$GITHUB_WORKSPACE/.cargo-home" "$GITHUB_WORKSPACE/codex-rs/target"
-          PROMPT=$(cat << 'EOP'
-          <task>
-            - Understand the issue and list exact edits needed (paths, snippets).
-            - If edits are warranted, make them and ensure the repo still builds locally if applicable (use ./build-fast.sh).
-            - If no edits are warranted, prepare a high-signal maintainer comment.
-          </task>
-
-          <context>
-            Repository: ${{ env.REPO }}
-            Default branch: ${{ env.DEFAULT_BRANCH }}
-            Issue #${{ env.ISSUE_NUMBER }}: ${{ env.ISSUE_TITLE }}
-
-            Issue body:
-            ${{ env.ISSUE_BODY }}
-
-            Actor: ${{ env.ACTOR }}
-
-            Instructions:
-          EOP
-          )
-          # Append the latest agent instructions from file, then close the context block
-          if [ -f .github/auto/CONTEXT.md ]; then
-            PROMPT="$PROMPT\n$(cat .github/auto/CONTEXT.md)"
-          fi
-          PROMPT="$PROMPT\n</context>"
-          PROMPT="$PROMPT
-
-          <agent_mode>$AGENT_MODE</agent_mode>
-          - If agent_mode=comment: do NOT change any files. Output MUST include two XML-style wrappers:
-            <comment>…your single, final maintainer-quality comment in Markdown…</comment>
-            <decision>{\"close_issue\": boolean, \"assignee\": \"just-every-code\"|\"zemaj\", \"close_message\": \"short optional note\"}</decision>
-            Set close_issue=true when your comment fully resolves the issue (e.g., answered question, duplicate with link, usage fix).
-          - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
-            If your changes/PR fully resolve the issue, write .github/auto/DECISION.json with close_issue=true and assignee=\"just-every-code\".
-          - Build policy: Do NOT change CARGO_HOME or CARGO_TARGET_DIR; do NOT run \"cargo update\". Use ./build-fast.sh as-is. CI sets caches for determinism and speed.
-          - Git policy: Do NOT run `git commit` or `git push`. Leave changes uncommitted; the workflow will branch, commit, and open the PR.
-          "
-          # Choose sandbox mode based on agent_mode (robust compare)
-          case "$AGENT_MODE" in
-            full) CODE_SANDBOX="workspace-write" ;;
-            *)    CODE_SANDBOX="read-only" ;;
-          esac
-          echo "Agent mode: $AGENT_MODE -> sandbox: $CODE_SANDBOX"
-
-          set +e
-          set +o pipefail
-          # Feed prompt via pipe, capture agent exit via PIPESTATUS[1], but never fail the step
-          { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
-              OPENAI_API_KEY="x" \
-              OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
-              OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
-              CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
-              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
-              STRICT_CARGO_HOME="1" \
-              CARGO_HOME_ENFORCED="$GITHUB_WORKSPACE/.cargo-home" \
-              GIT_TERMINAL_PROMPT="0" \
-              GIT_ASKPASS="/bin/false" \
-              npm_config_cache="$SAFE_HOME/.npm" \
-              npx -y @just-every/code@latest \
-              exec \
-              -s "$CODE_SANDBOX" \
-              -c sandbox_workspace_write.network_access=true \
-              --cd "$GITHUB_WORKSPACE" \
-              --skip-git-repo-check \
-              -; } 2>&1 | tee .github/auto/AGENT_STDOUT.txt
-          AGENT_RC=${PIPESTATUS[0]}
-          # Force success regardless of agent_rc
-          true
-          set -e
-          set -o pipefail
-          echo "agent_rc=$AGENT_RC" >> "$GITHUB_OUTPUT"
-
-      - name: Extract agent comment (comment mode)
-        if: steps.gate.outputs.agent_mode == 'comment'
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'JS'
-          const fs = require('fs');
-          const p = '.github/auto/AGENT_STDOUT.txt';
-          if (!fs.existsSync(p)) process.exit(0);
-          const t = fs.readFileSync(p,'utf8');
-          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
-          if (!all.length) process.exit(0);
-          // Prefer the last occurrence and ignore placeholder examples if present
-          const placeholder = '…your single, final maintainer-quality comment in Markdown…';
-          let body = '';
-          for (let i = all.length - 1; i >= 0; i--) {
-            const cand = (all[i][1] || '').trim();
-            if (!cand) continue;
-            if (cand.includes(placeholder)) continue;
-            body = cand; break;
-          }
-          if (!body) body = (all[all.length-1][1] || '').trim();
-          if (body) {
-            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
-          }
-          JS
-
-      - name: Extract agent decision (comment mode)
-        if: steps.gate.outputs.agent_mode == 'comment'
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'JS'
-          const fs = require('fs');
-          const p = '.github/auto/AGENT_STDOUT.txt';
-          if (!fs.existsSync(p)) process.exit(0);
-          const t = fs.readFileSync(p,'utf8');
-          const m = t.match(/<decision>([\s\S]*?)<\/decision>/i);
-          if (!m) process.exit(0);
-          let j = {};
-          try { j = JSON.parse(m[1]); } catch { process.exit(0); }
-          const out = {};
-          if (typeof j.close_issue === 'boolean') out.close_issue = j.close_issue; else out.close_issue = false;
-          if (typeof j.assignee === 'string' && j.assignee) out.assignee = j.assignee;
-          if (typeof j.close_message === 'string') out.close_message = j.close_message;
-          if (Object.keys(out).length) fs.writeFileSync('.github/auto/DECISION.json', JSON.stringify(out));
-          JS
-
-      - name: Detect changes or new commits
-        timeout-minutes: 5
-        id: changes
-        run: |
-          set -euo pipefail
-          base="${BASE_HEAD:-}"
-          commits=0
-          if [ -n "$base" ]; then
-            commits=$(git rev-list --count "$base..HEAD" || echo 0)
-          fi
-          dirty=0
-          if ! git diff --quiet || [ -n "$(git ls-files -mo --exclude-standard | grep -v '^.github/auto/' || true)" ]; then
-            dirty=1
-          fi
-          if [ "$commits" -gt 0 ]; then echo "agent_committed=true" >> "$GITHUB_OUTPUT"; else echo "agent_committed=false" >> "$GITHUB_OUTPUT"; fi
-          if [ "$dirty" -eq 1 ] || [ "$commits" -gt 0 ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Parse agent decision
-        id: agent_decision
-        timeout-minutes: 2
-        env:
-          CHANGED: ${{ steps.changes.outputs.changed }}
-          AGENT_MODE: ${{ steps.gate.outputs.agent_mode }}
+      - name: Ensure codex slug (single source of truth)
+        id: slug
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const fs = require('fs');
-            const changed = (process.env.CHANGED || 'false') === 'true';
-            const mode = (process.env.AGENT_MODE || '').trim();
-            let dec = { close_issue: false, assignee: 'just-every-code', close_message: '' };
-            try {
-              const t = fs.readFileSync('.github/auto/DECISION.json', 'utf8');
-              const j = JSON.parse(t || '{}');
-              if (typeof j.close_issue === 'boolean') dec.close_issue = j.close_issue;
-              if (typeof j.assignee === 'string' && j.assignee) dec.assignee = j.assignee;
-              if (typeof j.close_message === 'string') dec.close_message = j.close_message;
-              if (typeof j.apply_changes === 'boolean') dec.apply_changes = j.apply_changes; else dec.apply_changes = (mode === 'full');
-              if (typeof j.action === 'string') dec.action = j.action;
-            } catch (e) {
-              // Defaults already set
-              dec.apply_changes = (mode === 'full');
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            // Find existing issue marker
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const markerRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            let existing = '';
+            for (const c of comments) {
+              const m = (c.body || '').match(markerRe);
+              if (m) { existing = m[1].toLowerCase(); break; }
             }
-            // Heuristic: if changes exist and agent didn't explicitly choose to keep it open, close on merge.
-            if (changed && dec.close_issue !== true) {
-              // Lean optimistic for straightforward fixes/features
-              dec.close_issue = true;
+            let slug = existing;
+            if (!slug) {
+              const sugg = (process.env.SUGGESTED_ID || '').trim().toLowerCase();
+              const isValid = s => /^[a-z0-9]+(?:-[a-z0-9]+){1,3}$/.test(s);
+              if (sugg && isValid(sugg)) slug = sugg; else {
+                const raw = (process.env.ISSUE_TITLE || '').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+                const words = raw.split(/\s+/).filter(Boolean).slice(0,4);
+                if (words.length < 2) words.push('update');
+                slug = words.join('-');
+              }
+              // Ensure uniqueness across repo
+              async function inUse(s) {
+                // Search issues/PRs for marker
+                const q = `repo:${owner}/${repo} "codex-id: ${s}" in:comments in:body`;
+                let used = false;
+                try { const res = await github.rest.search.issuesAndPullRequests({ q, per_page: 1 }); used = (res.data.total_count || 0) > 0; } catch {}
+                // Check releases with prefix
+                try { const rels = (await github.rest.repos.listReleases({ owner, repo, per_page: 100 })).data; used = used || rels.some(r => (r.tag_name || '').startsWith(`preview-${s}`)); } catch {}
+                return used;
+              }
+              if (await inUse(slug)) slug = `${slug}-${issue_number}`;
+              const body = [`<!-- codex-id: ${slug} -->`, '', `ID: \`${slug}\``].join('\n');
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-            // Always self-assign if not specified
-            if (!dec.assignee) dec.assignee = 'just-every-code';
-            core.setOutput('close_issue', dec.close_issue ? 'true' : 'false');
-            core.setOutput('assignee', dec.assignee);
-            core.setOutput('close_message', dec.close_message || '');
-            core.setOutput('apply_changes', dec.apply_changes ? 'true' : 'false');
-            core.setOutput('action', dec.action || '');
-
-      - name: Honor agent decision (comment-only wins)
-        id: effective
-        timeout-minutes: 2
+            core.setOutput('slug', slug);
         env:
-          CHANGED: ${{ steps.changes.outputs.changed }}
-          APPLY_CHANGES: ${{ steps.agent_decision.outputs.apply_changes }}
-          AGENT_COMMITTED: ${{ steps.changes.outputs.agent_committed }}
-        run: |
-          set -euo pipefail
-          changed="${CHANGED:-false}"
-          apply="${APPLY_CHANGES:-true}"
-          # If the agent created commits, honor them even if working tree is clean.
-          if [ "${AGENT_COMMITTED:-false}" = "true" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$changed" = "true" ] && [ "$apply" != "true" ]; then
-            echo "Agent requested comment-only; reverting local edits."
-            git restore -s HEAD -W . || true
-            git clean -fdx || true
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=${changed}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Path policy (block unsafe changes)
-        timeout-minutes: 5
-        id: path_policy
-        if: steps.effective.outputs.changed == 'true'
-        shell: bash
-        env:
-          PROTECTED_GLOBS: ${{ env.PROTECTED_GLOBS }}
-          ACTOR: ${{ env.ACTOR }}
-        run: |
-          set -euo pipefail
-          mapfile -t files < <(git diff --name-only)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Load protected patterns
-          mapfile -t patterns < <(printf '%s\n' "$PROTECTED_GLOBS" | sed '/^\s*$/d')
-          violations=()
-          for f in "${files[@]}"; do
-            for p in "${patterns[@]}"; do
-              case "$f" in
-                $p)
-                  violations+=("$f");;
-              esac
-            done
-          done
-          if [ ${#violations[@]} -eq 0 ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          printf 'ok=false\n' >> "$GITHUB_OUTPUT"
-          {
-            printf 'Thanks @%s! This issue was auto-reviewed.\n\n' "$ACTOR"
-            printf 'For safety, the bot did not apply changes because edits touched protected files:\n'
-            for v in "${violations[@]}"; do printf ' - %s\n' "$v"; done
-            printf '\nIf these changes are intended, a maintainer can apply them manually or adjust the policy.\n'
-          } > .github/auto/ISSUE_COMMENT.md
-
-      - name: If blocked by path policy, post a comment
-        timeout-minutes: 5
-        if: steps.path_policy.outputs.ok == 'false'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md', 'utf8');
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), body };
-            await github.rest.issues.createComment(payload);
-
-      - name: Assign after policy block
-        if: steps.path_policy.outputs.ok == 'false'
-        uses: actions/github-script@v7
-        env:
-          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
-        with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
-          script: |
-            const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), assignees: [assignee] };
-            await github.rest.issues.addAssignees(payload);
+          SUGGESTED_ID: ${{ steps.safety.outputs.suggested_id }}
 
       - name: If no changes, post a helpful comment
         timeout-minutes: 5
-        if: steps.effective.outputs.changed == 'false'
+        if: steps.gate.outputs.allow_agent != 'true' || steps.gate.outputs.agent_mode != 'full'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
@@ -823,197 +531,29 @@ jobs:
             const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), body };
             await github.rest.issues.createComment(payload);
 
-      - name: Optionally close issue (comment-only)
-        if: steps.effective.outputs.changed == 'false' && steps.agent_decision.outputs.close_issue == 'true'
+      - name: Queue implementation (issue-code workflow)
+        if: steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
         uses: actions/github-script@v7
-        env:
-          CLOSE_MESSAGE: ${{ steps.agent_decision.outputs.close_message }}
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const note = (process.env.CLOSE_MESSAGE || '').trim();
-            const body = note ? note : 'Closing as resolved by the bot response.';
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
+            const owner = context.repo.owner; const repo = context.repo.repo;
             const issue_number = Number(process.env.ISSUE_NUMBER);
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            await github.rest.issues.update({ owner, repo, issue_number, state: 'closed' });
+            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-code', client_payload: { issue_number } });
+            core.notice(`Queued issue-code for #${issue_number}`);
 
-      - name: Assign (comment-only path)
-        if: steps.effective.outputs.changed == 'false'
-        uses: actions/github-script@v7
-        env:
-          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
-        with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
-          script: |
-            const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), assignees: [assignee] };
-            await github.rest.issues.addAssignees(payload);
-
-      - name: Find existing PR for this issue/branch
-        id: existing_pr
-        if: steps.effective.outputs.changed == 'true'
+      - name: Acknowledge queueing
+        if: steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const owner = context.repo.owner, repo = context.repo.repo;
-            const head = process.env.BRANCH_NAME;
-            const prs = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', head: `${owner}:${head}` });
-            if (prs.length) {
-              core.setOutput('number', String(prs[0].number));
-              core.setOutput('head', prs[0].head.ref);
-            } else {
-              const q = `repo:${owner}/${repo} is:pr is:open ${process.env.ISSUE_NUMBER}`;
-              const s = await github.rest.search.issuesAndPullRequests({ q, per_page: 5 });
-              const match = s.data.items.find(i => i.pull_request);
-              if (match) core.setOutput('number', String(match.number));
-            }
-
-      - name: If changes exist, create branch, commit, push
-        timeout-minutes: 5
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.CODE_GH_PAT }}
-          REPO: ${{ env.REPO }}
-          BOT_LOGIN: ${{ steps.bot.outputs.login }}
-          BOT_ID: ${{ steps.bot.outputs.id }}
-          CLOSE_ISSUE: ${{ steps.agent_decision.outputs.close_issue }}
-          EXISTING_PR: ${{ steps.existing_pr.outputs.number }}
-          AGENT_COMMITTED: ${{ steps.changes.outputs.agent_committed }}
-        run: |
-          set -euo pipefail
-          # Configure commit author to the PAT identity's noreply address when available
-          if [ -n "${BOT_LOGIN:-}" ] && [ -n "${BOT_ID:-}" ] && [ "${BOT_ID}" != "0" ]; then
-            git config user.name "${BOT_LOGIN}"
-            git config user.email "${BOT_ID}+${BOT_LOGIN}@users.noreply.github.com"
-          else
-            git config user.name "issue-bot[bot]"
-            git config user.email "issue-bot@users.noreply.github.com"
-          fi
-          # Reuse stable branch per issue so subsequent runs update the same PR
-          # IMPORTANT: Do NOT create a local branch via fetch before switching
-          # or checkout will fail with uncommitted changes. Instead, create/switch first,
-          # then optionally rebase onto remote if it exists.
-          if git ls-remote --exit-code --heads origin "${BRANCH_NAME}" >/dev/null 2>&1; then
-            # Remote branch exists. Create local branch from current HEAD (preserving worktree),
-            # then rebase onto remote to include prior commits.
-            if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
-              git checkout "${BRANCH_NAME}"
-            else
-              git checkout -b "${BRANCH_NAME}"
-            fi
-            # Defer reconciliation until after committing local changes
-          else
-            # No remote branch yet; create local branch preserving worktree
-            if git show-ref --verify --quiet "refs/heads/${BRANCH_NAME}"; then
-              git checkout "${BRANCH_NAME}"
-            else
-              git checkout -b "${BRANCH_NAME}"
-            fi
-          fi
-          if [ "${AGENT_COMMITTED}" != "true" ]; then
-            # Stage tracked changes only; exclude working files generated under .github/auto
-            git add -A
-            git restore --staged .github/auto || true
-            git rm -r --cached .github/auto 2>/dev/null || true
-            if [ "${CLOSE_ISSUE}" = 'true' ]; then
-              git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}" \
-                -m "Closes #${ISSUE_NUMBER}"
-            else
-              git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
-            fi
-          fi
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-          if ! git push --set-upstream origin "${BRANCH_NAME}"; then
-            # Handle non-fast-forward: update remote refs and force push (bot-owned triage branch)
-            git fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
-            git push -f origin "${BRANCH_NAME}"
-          fi
-
-      - name: Open or update PR with AI-written title/body (no comment yet)
-        timeout-minutes: 5
-        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        id: open_pr
-        uses: actions/github-script@v7
-        env:
-          PAT: ${{ secrets.CODE_GH_PAT }}
-          FALLBACK: ${{ github.token }}
-          CLOSE_ISSUE: ${{ steps.agent_decision.outputs.close_issue }}
-          EXISTING_PR: ${{ steps.existing_pr.outputs.number }}
-        with:
-          script: |
-            const fs = require('fs');
-            const closeIssue = process.env.CLOSE_ISSUE === 'true';
-            function readOrDefault(p, dflt) {
-              try { const t = fs.readFileSync(p, 'utf8').trim(); return t || dflt; }
-              catch { return dflt; }
-            }
-            const title = readOrDefault('.github/auto/PR_TITLE.txt', `Auto PR: ${process.env.ISSUE_TITLE || ''}`);
-            const bodyBase = readOrDefault('.github/auto/PR_BODY.md', '');
-            const footer = [
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
+            const body = [
+              `Thanks @${context.actor}! I queued an implementation run.`,
               '',
-              '---',
-              `Auto-generated for issue #${process.env.ISSUE_NUMBER} by a workflow.`,
-              `Author: @${context.actor}`
+              'I will open a PR shortly; once the preview build finishes, this issue will receive instructions to try it with:',
+              '```bash',
+              'code preview <PR_NUMBER>',
+              '```'
             ].join('\n');
-            const closing = closeIssue ? `\n\nCloses #${process.env.ISSUE_NUMBER}` : '';
-            const body = (bodyBase ? `${bodyBase}\n${footer}` : footer) + closing;
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const head = process.env.BRANCH_NAME;
-            const base = process.env.DEFAULT_BRANCH;
-            const existing = (process.env.EXISTING_PR || '').trim();
-            if (existing) {
-              core.setOutput('number', existing);
-              return;
-            }
-            async function createPR(token){
-              const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`,{
-                method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({ title, head, base, body })
-              });
-              const text = await r.text();
-              if (!r.ok) return { ok: r.ok, status: r.status, statusText: r.statusText, text };
-              let num = 0; try { num = JSON.parse(text).number || 0; } catch {}
-              return { ok: true, number: num };
-            }
-            let pr = await createPR(process.env.PAT);
-            if (!pr.ok && pr.status === 403) pr = await createPR(process.env.FALLBACK);
-            if (!pr.ok) {
-              // If it already exists, fetch it
-              const head = process.env.BRANCH_NAME;
-              const s = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${owner}:${head}`, { headers: {authorization:`Bearer ${process.env.PAT}`}})).json();
-              if (Array.isArray(s) && s.length) {
-                core.setOutput('number', String(s[0].number));
-              } else {
-                throw new Error(`create PR failed: ${pr.status} ${pr.statusText} ${pr.text}`);
-              }
-            } else {
-              core.setOutput('number', String(pr.number || 0));
-            }
-
-      # Preview artifacts and feedback labels are no longer handled here. Cross-platform preview builds are handled by the PR Preview Build workflow.
-
-      - name: Assign (PR path; PAT→GITHUB_TOKEN fallback)
-        if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
-        uses: actions/github-script@v7
-        env:
-          ASSIGNEE: ${{ steps.agent_decision.outputs.assignee }}
-          PAT: ${{ secrets.CODE_GH_PAT }}
-          FALLBACK: ${{ github.token }}
-        with:
-          script: |
-            const assignee = (process.env.ASSIGNEE || 'just-every-code').trim();
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issue_number = Number(process.env.ISSUE_NUMBER);
-            async function add(token){
-              return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/assignees`,{
-                method:'POST', headers:{'authorization':`Bearer ${token}`,'content-type':'application/json'}, body: JSON.stringify({assignees:[assignee]})
-              });
-            }
-            let r = await add(process.env.PAT);
-            if (r.status === 403) r = await add(process.env.FALLBACK);
-            if (!r.ok) core.warning(`assign failed: ${r.status} ${r.statusText}`);
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
