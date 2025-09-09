@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.98] - 2025-09-09
+
+- TUI/Footer: restore 0.2.96 behavior; remove duplicate Access flash; add Shift+Tab to Help; make 'Full Access' label ephemeral. (8e4c96de)
+- TUI/Footer: fix ephemeral 'Full Access' label on Shift+Tab so it doesn't clear immediately. (062b83d7)
+- TUI/Footer: reapply DIM styling so footer text is visibly dimmer (matches 0.2.96). (78b3d998)
+- TUI/Footer: remove bold from access label and add a leading space for padding. (4e8bece8, 950fbacf)
+
 ## [0.2.97] - 2025-09-08
 
 - CI/Preview: add PR preview builds for faster review. (cd624877)
