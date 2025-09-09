@@ -465,10 +465,10 @@ jobs:
                Removing them breaks downstream imports and will fail API tests.
              - Keep codex_core::models namespace as an alias to protocol models.
              - Do not remove ICU/sys-locale dependencies unless you confirm (via repo-wide search) they are unused across the workspace.
-          5) Stage and commit with a conventional message and short build status.
-          6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
-          7) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
-          8) Push MERGE_BRANCH and prepare PR title/body.
+          6) Verify with scripts/upstream-merge/verify.sh. If it fails, fix minimally and re-run until it passes.
+          7) Stage and commit with a conventional message and short build status.
+          8) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          9) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
           <constraints>
@@ -511,30 +511,30 @@ jobs:
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
 
-      - name: Compile API surface tests (no run)
-        id: api_check
+      - name: Post-merge verify (build-fast + API compile)
+        id: verify
         if: steps.check_upstream.outputs.skip != 'true'
-        working-directory: codex-rs
+        working-directory: .
         run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/.github/auto"
-          echo "[api-check] cargo check --tests --quiet" | tee "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" >/dev/null
-          if cargo check --tests --quiet 2>&1 | tee -a "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt"; then
-            echo "failed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "failed=true" >> "$GITHUB_OUTPUT"
-          fi
+          bash scripts/upstream-merge/verify.sh || true
+          cat .github/auto/VERIFY.json || true
+          if jq -e '.build_fast=="ok" and .api_check=="ok"' .github/auto/VERIFY.json >/dev/null 2>&1; then echo "failed=false" >> "$GITHUB_OUTPUT"; else echo "failed=true" >> "$GITHUB_OUTPUT"; fi
 
-      - name: Upload artifact - API_CHECK.txt
+      - name: Upload artifact - VERIFY logs
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: API_CHECK.txt
+          name: VERIFY
           if-no-files-found: warn
-          path: .github/auto/API_CHECK.txt
+          path: |
+            .github/auto/VERIFY.json
+            .github/auto/VERIFY_build-fast.log
+            .github/auto/VERIFY_api-check.log
 
-      - name: Remediate API check failures with Code agent
-        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
+      - name: Remediate verification failures with Code agent
+        if: steps.check_upstream.outputs.skip != 'true' && steps.verify.outputs.failed == 'true'
         env:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
@@ -547,9 +547,10 @@ jobs:
             echo "- MERGE_BRANCH=${MERGE_BRANCH}";
             echo "- DEFAULT_BRANCH=${DEFAULT_BRANCH}";
             echo '';
-            echo 'Previous step (API_CHECK) failed. Here is the tail of the log:';
+            echo 'Previous step (VERIFY) failed. Here are the logs:';
             echo '---8<---';
-            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/API_CHECK.txt" 2>/dev/null || true
+            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_build-fast.log" 2>/dev/null || true
+            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_api-check.log" 2>/dev/null || true
             echo '---8<---';
             echo '';
             cat << 'PROMPT'
@@ -559,7 +560,7 @@ jobs:
           - Restore or add back missing public re-exports in codex-core that cause `cargo check --tests` to fail (e.g., ModelClient, Prompt, ResponseEvent, ResponseStream), unless you can conclusively update all workspace imports safely.
           - Prefer adding compatibility aliases over large refactors.
           - Do not remove or rename crates. Do not drop ICU/sys-locale unless unused repo-wide.
-          - Run ./build-fast.sh and then `cargo check -p codex-core --tests --quiet` to verify.
+          - Run scripts/upstream-merge/verify.sh and iterate until it returns success.
           - Update .github/auto/MERGE_REPORT.md with a short note under "Other changes" describing the compatibility adjustments.
           - Push to ${MERGE_BRANCH}.
 
@@ -589,12 +590,12 @@ jobs:
             --skip-git-repo-check \
             - | tee "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
 
-      - name: Re-run API surface tests after remediation
-        if: steps.check_upstream.outputs.skip != 'true' && steps.api_check.outputs.failed == 'true'
-        working-directory: codex-rs
+      - name: Re-run verify after remediation
+        if: steps.check_upstream.outputs.skip != 'true' && steps.verify.outputs.failed == 'true'
+        working-directory: .
         run: |
           set -euo pipefail
-          cargo check --tests --quiet
+          bash scripts/upstream-merge/verify.sh
 
       - name: Enforce policy removals on merge branch (images + caches + purge_globs)
         if: steps.check_upstream.outputs.skip != 'true'
