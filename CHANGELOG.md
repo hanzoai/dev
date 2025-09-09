@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.101] - 2025-09-09
+
+- Build: remove OpenSSL by using rustls in codex-ollama; fix macOS whoami scope. (c3034c38)
+- Core: restore API re-exports and resolve visibility warning. (b29212ca)
+- TUI: Ctrl+C clears non-empty prompts. (58d77ca4)
+- TUI: paste with Ctrl+V checks file_list. (1f4f9cde)
+- MCP: add per-server startup timeout. (6efb52e5)
+
 ## [0.2.100] - 2025-09-09
 
 - Core: fix date parsing in rollout preflight to compile. (6eec307f)
