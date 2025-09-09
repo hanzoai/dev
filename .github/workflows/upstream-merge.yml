@@ -53,7 +53,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Quick no-op: upstream ancestor check
+      - name: "Quick no-op: upstream ancestor check"
         id: check
         shell: bash
         env:
