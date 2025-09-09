@@ -18,13 +18,37 @@ use strum_macros::Display;
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Hash)]
 #[ts(type = "string")]
 pub struct ConversationId(pub Uuid);
+
+impl ConversationId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for ConversationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Display for ConversationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl From<Uuid> for ConversationId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ConversationId> for Uuid {
+    fn from(value: ConversationId) -> Self {
+        value.0
     }
 }
 
@@ -106,6 +130,19 @@ pub enum ClientRequest {
         #[serde(rename = "id")]
         request_id: RequestId,
     },
+<<<<<<< HEAD
+=======
+    GetUserAgent {
+        #[serde(rename = "id")]
+        request_id: RequestId,
+    },
+    /// Execute a command (argv vector) under the server's sandbox.
+    ExecOneOffCommand {
+        #[serde(rename = "id")]
+        request_id: RequestId,
+        params: ExecOneOffCommandParams,
+    },
+>>>>>>> upstream/main
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, TS)]
@@ -158,6 +195,60 @@ pub struct NewConversationResponse {
     pub model: String,
 }
 
+<<<<<<< HEAD
+=======
+#[derive(Serialize, Deserialize, Debug, Clone, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeConversationResponse {
+    pub conversation_id: ConversationId,
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_messages: Option<Vec<EventMsg>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ListConversationsParams {
+    /// Optional page size; defaults to a reasonable server-side value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<usize>,
+    /// Opaque pagination cursor returned by a previous call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSummary {
+    pub conversation_id: ConversationId,
+    pub path: PathBuf,
+    pub preview: String,
+    /// RFC3339 timestamp string for the session start, if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ListConversationsResponse {
+    pub items: Vec<ConversationSummary>,
+    /// Opaque cursor to pass to the next call to continue after the last item.
+    /// if None, there are no more items to return.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeConversationParams {
+    /// Absolute path to the rollout JSONL file.
+    pub path: PathBuf,
+    /// Optional overrides to apply when spawning the resumed session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<NewConversationParams>,
+}
+
+>>>>>>> upstream/main
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AddConversationSubscriptionResponse {
@@ -230,7 +321,26 @@ pub struct GetAuthStatusResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+<<<<<<< HEAD
 pub struct GetConfigTomlResponse {
+=======
+pub struct GetUserAgentResponse {
+    pub user_agent: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUserSavedConfigResponse {
+    pub config: UserSavedConfig,
+}
+
+/// UserSavedConfig contains a subset of the config. It is meant to expose mcp
+/// client-configurable settings that can be specified in the NewConversation
+/// and SendUserTurn requests.
+#[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSavedConfig {
+>>>>>>> upstream/main
     /// Approvals
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_policy: Option<AskForApproval>,
@@ -441,5 +551,11 @@ mod tests {
             }),
             serde_json::to_value(&request).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_conversation_id_default_is_not_zeroes() {
+        let id = ConversationId::default();
+        assert_ne!(id.0, Uuid::nil());
     }
 }
