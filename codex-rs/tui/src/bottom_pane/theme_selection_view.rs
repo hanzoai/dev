@@ -157,19 +157,17 @@ impl ThemeSelectionView {
     fn move_selection_up(&mut self) {
         if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
-            if self.selected_theme_index > 0 {
-                self.selected_theme_index -= 1;
-                self.current_theme = options[self.selected_theme_index].0;
-                self.just_entered_themes = false;
-                self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
-            }
+                if self.selected_theme_index > 0 {
+                    self.selected_theme_index -= 1;
+                    self.current_theme = options[self.selected_theme_index].0;
+                    self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
+                }
         } else {
             let names = crate::spinner::spinner_names();
             if self.selected_spinner_index > 0 {
                 self.selected_spinner_index -= 1;
                 if let Some(name) = names.get(self.selected_spinner_index) {
                     self.current_spinner = name.clone();
-                    self.just_entered_spinner = false;
                     self.app_event_tx
                         .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
                 }
@@ -183,7 +181,6 @@ impl ThemeSelectionView {
             if self.selected_theme_index + 1 < options.len() {
                 self.selected_theme_index += 1;
                 self.current_theme = options[self.selected_theme_index].0;
-                self.just_entered_themes = false;
                 self.app_event_tx
                     .send(AppEvent::PreviewTheme(self.current_theme));
             }
@@ -193,7 +190,6 @@ impl ThemeSelectionView {
                 self.selected_spinner_index += 1;
                 if let Some(name) = names.get(self.selected_spinner_index) {
                     self.current_spinner = name.clone();
-                    self.just_entered_spinner = false;
                     self.app_event_tx
                         .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
                 }
@@ -244,14 +240,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         match self.mode {
             // Border (2) + inner padding (2) + 2 content rows = 6
             Mode::Overview => 6,
-            // Detail lists: fixed 10 visible rows (max), shrink if fewer
+            // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
                 let n = Self::get_theme_options().len() as u16;
-                4 + n.min(10)
+                4 + n.min(9)
             }
             Mode::Spinner => {
                 let n = crate::spinner::spinner_names().len() as u16;
-                4 + n.min(10)
+                4 + n.min(9)
             }
         }
     }
@@ -415,19 +411,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         } else if matches!(self.mode, Mode::Themes) {
             // Compute anchored window: top until middle, then center; bottom shows end
             let count = options.len();
-            let visible = available_height.min(10).max(1);
-            let middle = visible / 2;
-            let start = if self.just_entered_themes {
-                self.selected_theme_index.min(count.saturating_sub(visible))
-            } else if count <= visible {
-                0
-            } else if self.selected_theme_index < middle {
-                0
-            } else if self.selected_theme_index > count.saturating_sub(visible - middle) {
-                count.saturating_sub(visible)
-            } else {
-                self.selected_theme_index - middle
-            };
+            let visible = available_height.min(9).max(1);
+            let (start, _vis, _mid) = crate::util::list_window::anchored_window(
+                self.selected_theme_index,
+                count,
+                visible,
+            );
             let end = (start + visible).min(count);
             for i in start..end {
                 let (theme_enum, name, description) = &options[i];
@@ -479,19 +468,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .as_millis();
             let names = crate::spinner::spinner_names();
             let count = names.len();
-            let visible = available_height.min(10).max(1);
-            let middle = visible / 2;
-            let start = if self.just_entered_spinner {
-                self.selected_spinner_index.min(count.saturating_sub(visible))
-            } else if count <= visible {
-                0
-            } else if self.selected_spinner_index < middle {
-                0
-            } else if self.selected_spinner_index > count.saturating_sub(visible - middle) {
-                count.saturating_sub(visible)
-            } else {
-                self.selected_spinner_index - middle
-            };
+            let visible = available_height.min(9).max(1);
+            let (start, _vis, _mid) = crate::util::list_window::anchored_window(
+                self.selected_spinner_index,
+                count,
+                visible,
+            );
             let end = (start + visible).min(count);
             for i in start..end {
                 let name = names[i].clone();
