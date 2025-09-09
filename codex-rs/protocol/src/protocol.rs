@@ -10,30 +10,22 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
-use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::custom_prompts::CustomPrompt;
-use crate::mcp_protocol::ConversationId;
-use crate::message_history::HistoryEntry;
-use crate::models::ResponseItem;
-use crate::num_format::format_with_separators;
-use crate::parse_command::ParsedCommand;
-use crate::plan_tool::UpdatePlanArgs;
 use mcp_types::CallToolResult;
 use mcp_types::Tool as McpTool;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_with::serde_as;
+use serde_bytes::ByteBuf;
 use strum_macros::Display;
 use ts_rs::TS;
+use uuid::Uuid;
 
-/// Open/close tags for special user-input blocks. Used across crates to avoid
-/// duplicated hardcoded strings.
-pub const USER_INSTRUCTIONS_OPEN_TAG: &str = "<user_instructions>";
-pub const USER_INSTRUCTIONS_CLOSE_TAG: &str = "</user_instructions>";
-pub const ENVIRONMENT_CONTEXT_OPEN_TAG: &str = "<environment_context>";
-pub const ENVIRONMENT_CONTEXT_CLOSE_TAG: &str = "</environment_context>";
-pub const USER_MESSAGE_BEGIN: &str = "## My request for Codex:";
+use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
+use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::message_history::HistoryEntry;
+use crate::models::ResponseItem;
+use crate::parse_command::ParsedCommand;
+use crate::plan_tool::UpdatePlanArgs;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -231,8 +223,16 @@ pub enum SandboxPolicy {
         /// writable roots on UNIX. Defaults to `false`.
         #[serde(default)]
         exclude_slash_tmp: bool,
+
+        /// When true, do not protect the top-level `.git` folder under a
+        /// writable root. Defaults to true (historical behavior allows Git writes).
+        #[serde(default = "crate::protocol::default_true_bool")]
+        allow_git_writes: bool,
     },
 }
+
+// Serde helper: default to true for flags where we want historical permissive behavior.
+pub(crate) const fn default_true_bool() -> bool { true }
 
 /// A writable root path accompanied by a list of subpaths that should remain
 /// read‑only even when the root is writable. This is primarily used to ensure
@@ -288,6 +288,7 @@ impl SandboxPolicy {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
+            allow_git_writes: true,
         }
     }
 
@@ -323,6 +324,7 @@ impl SandboxPolicy {
                 writable_roots,
                 exclude_tmpdir_env_var,
                 exclude_slash_tmp,
+                allow_git_writes,
                 network_access: _,
             } => {
                 // Start from explicitly configured writable roots.
@@ -348,11 +350,12 @@ impl SandboxPolicy {
                 // Linux or Windows, but supporting it here gives users a way to
                 // provide the model with their own temporary directory without
                 // having to hardcode it in the config.
-                if !exclude_tmpdir_env_var
-                    && let Some(tmpdir) = std::env::var_os("TMPDIR")
-                    && !tmpdir.is_empty()
-                {
-                    roots.push(PathBuf::from(tmpdir));
+                if !exclude_tmpdir_env_var {
+                    if let Some(tmpdir) = std::env::var_os("TMPDIR") {
+                        if !tmpdir.is_empty() {
+                            roots.push(PathBuf::from(tmpdir));
+                        }
+                    }
                 }
 
                 // For each root, compute subpaths that should remain read-only.
@@ -360,9 +363,11 @@ impl SandboxPolicy {
                     .into_iter()
                     .map(|writable_root| {
                         let mut subpaths = Vec::new();
-                        let top_level_git = writable_root.join(".git");
-                        if top_level_git.is_dir() {
-                            subpaths.push(top_level_git);
+                        if !allow_git_writes {
+                            let top_level_git = writable_root.join(".git");
+                            if top_level_git.is_dir() {
+                                subpaths.push(top_level_git);
+                            }
                         }
                         WritableRoot {
                             root: writable_root,
@@ -405,7 +410,7 @@ pub struct Event {
 }
 
 /// Response event from the agent
-#[derive(Debug, Clone, Deserialize, Serialize, Display, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Display)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum EventMsg {
@@ -418,15 +423,12 @@ pub enum EventMsg {
     /// Agent has completed all actions
     TaskComplete(TaskCompleteEvent),
 
-    /// Usage update for the current session, including totals and last turn.
-    /// Optional means unknown — UIs should not display when `None`.
-    TokenCount(TokenCountEvent),
+    /// Token count event, sent periodically to report the number of tokens
+    /// used in the current session.
+    TokenCount(TokenUsage),
 
     /// Agent text output message
     AgentMessage(AgentMessageEvent),
-
-    /// User/system input message (what was sent to the model)
-    UserMessage(UserMessageEvent),
 
     /// Agent text output delta message
     AgentMessageDelta(AgentMessageDeltaEvent),
@@ -504,74 +506,29 @@ pub enum EventMsg {
 
 // Individual event payload types matching each `EventMsg` variant.
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ErrorEvent {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskCompleteEvent {
     pub last_agent_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskStartedEvent {
     pub model_context_window: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TokenUsage {
     pub input_tokens: u64,
-    pub cached_input_tokens: u64,
+    pub cached_input_tokens: Option<u64>,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: u64,
+    pub reasoning_output_tokens: Option<u64>,
     pub total_tokens: u64,
 }
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct TokenUsageInfo {
-    pub total_token_usage: TokenUsage,
-    pub last_token_usage: TokenUsage,
-    pub model_context_window: Option<u64>,
-}
-
-impl TokenUsageInfo {
-    pub fn new_or_append(
-        info: &Option<TokenUsageInfo>,
-        last: &Option<TokenUsage>,
-        model_context_window: Option<u64>,
-    ) -> Option<Self> {
-        if info.is_none() && last.is_none() {
-            return None;
-        }
-
-        let mut info = match info {
-            Some(info) => info.clone(),
-            None => Self {
-                total_token_usage: TokenUsage::default(),
-                last_token_usage: TokenUsage::default(),
-                model_context_window,
-            },
-        };
-        if let Some(last) = last {
-            info.append_last_usage(last);
-        }
-        Some(info)
-    }
-
-    pub fn append_last_usage(&mut self, last: &TokenUsage) {
-        self.total_token_usage.add_assign(last);
-        self.last_token_usage = last.clone();
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct TokenCountEvent {
-    pub info: Option<TokenUsageInfo>,
-}
-
-// Includes prompts, tools and space to call compact.
-const BASELINE_TOKENS: u64 = 12000;
 
 impl TokenUsage {
     pub fn is_zero(&self) -> bool {
@@ -579,7 +536,7 @@ impl TokenUsage {
     }
 
     pub fn cached_input(&self) -> u64 {
-        self.cached_input_tokens
+        self.cached_input_tokens.unwrap_or(0)
     }
 
     pub fn non_cached_input(&self) -> u64 {
@@ -597,39 +554,34 @@ impl TokenUsage {
     /// This will be off for the current turn and pending function calls.
     pub fn tokens_in_context_window(&self) -> u64 {
         self.total_tokens
-            .saturating_sub(self.reasoning_output_tokens)
+            .saturating_sub(self.reasoning_output_tokens.unwrap_or(0))
     }
 
     /// Estimate the remaining user-controllable percentage of the model's context window.
     ///
     /// `context_window` is the total size of the model's context window.
-    /// `BASELINE_TOKENS` should capture tokens that are always present in
+    /// `baseline_used_tokens` should capture tokens that are always present in
     /// the context (e.g., system prompt and fixed tool instructions) so that
     /// the percentage reflects the portion the user can influence.
     ///
     /// This normalizes both the numerator and denominator by subtracting the
     /// baseline, so immediately after the first prompt the UI shows 100% left
     /// and trends toward 0% as the user fills the effective window.
-    pub fn percent_of_context_window_remaining(&self, context_window: u64) -> u8 {
-        if context_window <= BASELINE_TOKENS {
+    pub fn percent_of_context_window_remaining(
+        &self,
+        context_window: u64,
+        baseline_used_tokens: u64,
+    ) -> u8 {
+        if context_window <= baseline_used_tokens {
             return 0;
         }
 
-        let effective_window = context_window - BASELINE_TOKENS;
+        let effective_window = context_window - baseline_used_tokens;
         let used = self
             .tokens_in_context_window()
-            .saturating_sub(BASELINE_TOKENS);
+            .saturating_sub(baseline_used_tokens);
         let remaining = effective_window.saturating_sub(used);
         ((remaining as f32 / effective_window as f32) * 100.0).clamp(0.0, 100.0) as u8
-    }
-
-    /// In-place element-wise sum of token counts.
-    pub fn add_assign(&mut self, other: &TokenUsage) {
-        self.input_tokens += other.input_tokens;
-        self.cached_input_tokens += other.cached_input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.reasoning_output_tokens += other.reasoning_output_tokens;
-        self.total_tokens += other.total_tokens;
     }
 }
 
@@ -647,108 +599,59 @@ impl From<TokenUsage> for FinalOutput {
 impl fmt::Display for FinalOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let token_usage = &self.token_usage;
-
         write!(
             f,
             "Token usage: total={} input={}{} output={}{}",
-            format_with_separators(token_usage.blended_total()),
-            format_with_separators(token_usage.non_cached_input()),
+            token_usage.blended_total(),
+            token_usage.non_cached_input(),
             if token_usage.cached_input() > 0 {
-                format!(
-                    " (+ {} cached)",
-                    format_with_separators(token_usage.cached_input())
-                )
+                format!(" (+ {} cached)", token_usage.cached_input())
             } else {
                 String::new()
             },
-            format_with_separators(token_usage.output_tokens),
-            if token_usage.reasoning_output_tokens > 0 {
-                format!(
-                    " (reasoning {})",
-                    format_with_separators(token_usage.reasoning_output_tokens)
-                )
-            } else {
-                String::new()
-            }
+            token_usage.output_tokens,
+            token_usage
+                .reasoning_output_tokens
+                .map(|r| format!(" (reasoning {r})"))
+                .unwrap_or_default()
         )
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentMessageEvent {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum InputMessageKind {
-    /// Plain user text (default)
-    Plain,
-    /// XML-wrapped user instructions (<user_instructions>...)
-    UserInstructions,
-    /// XML-wrapped environment context (<environment_context>...)
-    EnvironmentContext,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct UserMessageEvent {
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<InputMessageKind>,
-}
-
-impl<T, U> From<(T, U)> for InputMessageKind
-where
-    T: AsRef<str>,
-    U: AsRef<str>,
-{
-    fn from(value: (T, U)) -> Self {
-        let (_role, message) = value;
-        let message = message.as_ref();
-        let trimmed = message.trim();
-        if trimmed.starts_with(ENVIRONMENT_CONTEXT_OPEN_TAG)
-            && trimmed.ends_with(ENVIRONMENT_CONTEXT_CLOSE_TAG)
-        {
-            InputMessageKind::EnvironmentContext
-        } else if trimmed.starts_with(USER_INSTRUCTIONS_OPEN_TAG)
-            && trimmed.ends_with(USER_INSTRUCTIONS_CLOSE_TAG)
-        {
-            InputMessageKind::UserInstructions
-        } else {
-            InputMessageKind::Plain
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentMessageDeltaEvent {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentReasoningEvent {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentReasoningRawContentEvent {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentReasoningRawContentDeltaEvent {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentReasoningSectionBreakEvent {}
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentReasoningDeltaEvent {
     pub delta: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpInvocation {
     /// Name of the MCP server as defined in the config.
     pub server: String,
@@ -758,19 +661,18 @@ pub struct McpInvocation {
     pub arguments: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpToolCallBeginEvent {
     /// Identifier so this can be paired with the McpToolCallEnd event.
     pub call_id: String,
     pub invocation: McpInvocation,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpToolCallEndEvent {
     /// Identifier for the corresponding McpToolCallBegin that finished.
     pub call_id: String,
     pub invocation: McpInvocation,
-    #[ts(type = "string")]
     pub duration: Duration,
     /// Result of the tool call. Note this could be an error.
     pub result: Result<CallToolResult, String>,
@@ -785,12 +687,12 @@ impl McpToolCallEndEvent {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebSearchBeginEvent {
     pub call_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebSearchEndEvent {
     pub call_id: String,
     pub query: String,
@@ -798,13 +700,13 @@ pub struct WebSearchEndEvent {
 
 /// Response payload for `Op::GetHistory` containing the current session's
 /// in-memory transcript.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConversationHistoryResponseEvent {
-    pub conversation_id: ConversationId,
+    pub conversation_id: Uuid,
     pub entries: Vec<ResponseItem>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecCommandBeginEvent {
     /// Identifier so this can be paired with the ExecCommandEnd event.
     pub call_id: String,
@@ -815,7 +717,7 @@ pub struct ExecCommandBeginEvent {
     pub parsed_cmd: Vec<ParsedCommand>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecCommandEndEvent {
     /// Identifier for the ExecCommandBegin that finished.
     pub call_id: String,
@@ -829,33 +731,30 @@ pub struct ExecCommandEndEvent {
     /// The command's exit code.
     pub exit_code: i32,
     /// The duration of the command execution.
-    #[ts(type = "string")]
     pub duration: Duration,
     /// Formatted output from the command, as seen by the model.
     pub formatted_output: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecOutputStream {
     Stdout,
     Stderr,
 }
 
-#[serde_as]
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecCommandOutputDeltaEvent {
     /// Identifier for the ExecCommandBegin that produced this chunk.
     pub call_id: String,
     /// Which stream produced this chunk.
     pub stream: ExecOutputStream,
     /// Raw bytes from the stream (may not be valid UTF-8).
-    #[serde_as(as = "serde_with::base64::Base64")]
-    #[ts(type = "string")]
-    pub chunk: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub chunk: ByteBuf,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ExecApprovalRequestEvent {
     /// Identifier for the associated exec call, if available.
     pub call_id: String,
@@ -868,7 +767,7 @@ pub struct ExecApprovalRequestEvent {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApplyPatchApprovalRequestEvent {
     /// Responses API call id for the associated patch apply call, if available.
     pub call_id: String,
@@ -881,17 +780,17 @@ pub struct ApplyPatchApprovalRequestEvent {
     pub grant_root: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BackgroundEventEvent {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StreamErrorEvent {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PatchApplyBeginEvent {
     /// Identifier so this can be paired with the PatchApplyEnd event.
     pub call_id: String,
@@ -901,7 +800,7 @@ pub struct PatchApplyBeginEvent {
     pub changes: HashMap<PathBuf, FileChange>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PatchApplyEndEvent {
     /// Identifier for the PatchApplyBegin that finished.
     pub call_id: String,
@@ -913,12 +812,12 @@ pub struct PatchApplyEndEvent {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TurnDiffEvent {
     pub unified_diff: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GetHistoryEntryResponseEvent {
     pub offset: usize,
     pub log_id: u64,
@@ -928,22 +827,22 @@ pub struct GetHistoryEntryResponseEvent {
 }
 
 /// Response payload for `Op::ListMcpTools`.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpListToolsResponseEvent {
     /// Fully qualified tool name -> tool definition.
     pub tools: std::collections::HashMap<String, McpTool>,
 }
 
 /// Response payload for `Op::ListCustomPrompts`.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ListCustomPromptsResponseEvent {
     pub custom_prompts: Vec<CustomPrompt>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct SessionConfiguredEvent {
-    /// Name left as session_id instead of conversation_id for backwards compatibility.
-    pub session_id: ConversationId,
+    /// Unique id for this session.
+    pub session_id: Uuid,
 
     /// Tell the client what model is being queried.
     pub model: String,
@@ -953,11 +852,6 @@ pub struct SessionConfiguredEvent {
 
     /// Current number of entries in the history log.
     pub history_entry_count: usize,
-
-    /// Optional initial messages (as events) for resumed sessions.
-    /// When present, UIs can use these to seed the history.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_messages: Option<Vec<EventMsg>>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
@@ -997,7 +891,7 @@ pub enum FileChange {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Chunk {
     /// 1-based line index of the first line in the original file
     pub orig_index: u32,
@@ -1005,7 +899,7 @@ pub struct Chunk {
     pub inserted_lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TurnAbortedEvent {
     pub reason: TurnAbortReason,
 }
@@ -1025,15 +919,14 @@ mod tests {
     /// amount of nesting.
     #[test]
     fn serialize_event() {
-        let conversation_id = ConversationId(uuid::uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8"));
+        let session_id: Uuid = uuid::uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8");
         let event = Event {
             id: "1234".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
-                session_id: conversation_id,
+                session_id,
                 model: "codex-mini-latest".to_string(),
                 history_log_id: 0,
                 history_entry_count: 0,
-                initial_messages: None,
             }),
         };
         let serialized = serde_json::to_string(&event).unwrap();
@@ -1041,22 +934,5 @@ mod tests {
             serialized,
             r#"{"id":"1234","msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","history_log_id":0,"history_entry_count":0}}"#
         );
-    }
-
-    #[test]
-    fn vec_u8_as_base64_serialization_and_deserialization() {
-        let event = ExecCommandOutputDeltaEvent {
-            call_id: "call21".to_string(),
-            stream: ExecOutputStream::Stdout,
-            chunk: vec![1, 2, 3, 4, 5],
-        };
-        let serialized = serde_json::to_string(&event).unwrap();
-        assert_eq!(
-            r#"{"call_id":"call21","stream":"stdout","chunk":"AQIDBAU="}"#,
-            serialized,
-        );
-
-        let deserialized: ExecCommandOutputDeltaEvent = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, event);
     }
 }
