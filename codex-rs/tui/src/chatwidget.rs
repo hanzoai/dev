@@ -8314,7 +8314,8 @@ impl ChatWidget<'_> {
                 }
             }
 
-            // Determine default branch in main repo
+            // 1) Try to merge the repository default branch into the worktree branch first
+            //    so conflicts can be resolved locally.
             let default_branch = match codex_core::git_worktree::detect_default_branch(&git_root)
                 .await
             {
@@ -8327,6 +8328,79 @@ impl ChatWidget<'_> {
                     return;
                 }
             };
+
+            // Fetch latest default branch; ignore errors
+            let _ = Command::new("git")
+                .current_dir(&git_root)
+                .args(["fetch", "origin", &default_branch])
+                .output()
+                .await;
+
+            // Prefer remote tracking ref when available
+            let remote_ref = format!("origin/{}", default_branch);
+
+            // Attempt a fast-forward merge of default into the worktree branch
+            let ff_only = Command::new("git")
+                .current_dir(&work_cwd)
+                .args(["merge", "--ff-only", &remote_ref])
+                .output()
+                .await;
+
+            if !matches!(ff_only, Ok(ref o) if o.status.success()) {
+                // Try a non-ff merge without committing to see if conflicts arise
+                let try_merge = Command::new("git")
+                    .current_dir(&work_cwd)
+                    .args(["merge", "--no-ff", "--no-commit", &remote_ref])
+                    .output()
+                    .await;
+                if let Ok(out) = try_merge {
+                    if out.status.success() {
+                        // No conflicts; create a merge commit and continue
+                        let _ = Command::new("git")
+                            .current_dir(&work_cwd)
+                            .args(["commit", "-m", &format!("merge {} into {} before finalize", default_branch, branch_name)])
+                            .output()
+                            .await;
+                    } else {
+                        // Likely conflicts. Detect unmerged paths; if any, surface and ask the agent to resolve.
+                        let status = Command::new("git")
+                            .current_dir(&work_cwd)
+                            .args(["status", "--porcelain"])
+                            .output()
+                            .await;
+                        let has_conflicts = status
+                            .ok()
+                            .and_then(|o| String::from_utf8(o.stdout).ok())
+                            .map(|s| s.lines().any(|l| l.starts_with('U') || l.contains("UU ")))
+                            .unwrap_or(false);
+                        if has_conflicts {
+                            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                            let _ = tx.send(AppEvent::CodexEvent(Event {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                event_seq: 0,
+                                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                    message: format!(
+                                        "`/branch finalize` — conflicts while merging '{}' into '{}'. Starting agent to help resolve; re-run '/branch finalize' after conflicts are resolved.",
+                                        default_branch, branch_name
+                                    ),
+                                }),
+                                order: None,
+                            }));
+                            // Prefill composer with a resolution task; keep index in conflicted state
+                            let _ = tx.send(AppEvent::SwitchCwd(
+                                work_cwd.clone(),
+                                Some(format!(
+                                    "Resolve the current git merge conflicts by merging '{}' into '{}', preferring the branch's intent where appropriate. Explain changes briefly, then stage and commit with an informative message.",
+                                    default_branch, branch_name
+                                )),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // 2) Merge the worktree branch into the default branch at the repo root
 
             // Merge branch into default from the main repo root
             // Skip checkout if already on the default branch
