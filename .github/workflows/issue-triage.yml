@@ -5,6 +5,12 @@ on:
     types: [opened, reopened, assigned]
   issue_comment:
     types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to triage"
+        required: true
+        type: number
 
 concurrency:
   group: issue-triage-${{ github.event.issue.number }}
@@ -16,6 +22,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: read
 
 jobs:
   triage:
@@ -68,7 +75,22 @@ jobs:
         with:
           ref: ${{ env.DEFAULT_BRANCH }}
           fetch-depth: 1
-          persist-credentials: false
+      persist-credentials: false
+
+      - name: Resolve issue metadata (manual trigger support)
+        if: github.event_name == 'workflow_dispatch'
+        id: resolve_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = Number(core.getInput('issue_number'));
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+            core.exportVariable('ISSUE_NUMBER', String(issue.number));
+            core.exportVariable('ISSUE_TITLE', issue.title || '');
+            core.exportVariable('ISSUE_BODY', issue.body || '');
+            core.exportVariable('BRANCH_NAME', `issue-${issue.number}`);
+            core.notice(`Resolved issue #${issue.number} for manual triage.`);
 
       - name: Setup Node.js
         timeout-minutes: 5
@@ -154,6 +176,20 @@ jobs:
         run: |
           echo "Skipping: self/bot comment"
           exit 0
+
+      - name: Handle preview feedback (label flip + ack)
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = context.payload.issue.number;
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number, per_page: 100 });
+            const hasNeeds = labels.some(l => l.name === 'needs-preview-feedback');
+            if (!hasNeeds) return;
+            try { await github.rest.issues.removeLabel({ owner, repo, issue_number, name: 'needs-preview-feedback' }); } catch {}
+            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['preview-feedback-received'] });
+            const body = [`Thanks @${context.actor}! We received your feedback on the preview build.`, 'Triage is reviewing it now and will follow up soon.'].join('\n\n');
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
 
       - name: Prepare working files for the agent
         timeout-minutes: 5
@@ -901,11 +937,11 @@ jobs:
         if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: preview-code-linux-x64
+          name: preview-x86_64-unknown-linux-musl
           path: preview/
           compression-level: 0
 
-      - name: Comment with direct artifact link and run instructions (after upload)
+      - name: Comment with run instructions (after preview upload)
         if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/github-script@v7
         env:
@@ -916,36 +952,17 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue_number = context.payload.issue.number;
-            const prNum = (core.getInput('pr') || '') || (process.env.PR_NUMBER || '') || (core.getState('pr') || '');
-            // List artifacts for this run and find the preview artifact
-            const { data } = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: context.runId, per_page: 100 });
-            const art = data.artifacts.find(a => a.name === 'preview-code-linux-x64');
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
-            let link = runUrl;
-            if (art) {
-              // Direct download URL (zip); requires auth and expires, but fine for triage use
-              link = `https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${art.id}/zip`;
-            }
+            const runId = context.runId;
             const body = [
-              '### Preview Binary (Linux x86_64)',
+              '### Preview Build',
               '',
-              `- Direct download: ${link}`,
-              '',
-              '**How to run (Linux)**',
+              'You can run this right now! In your terminal just use:',
               '```bash',
-              'unzip preview-code-linux-x64.zip -d preview',
-              'cd preview',
-              'chmod +x code-x86_64-unknown-linux-musl',
-              './code-x86_64-unknown-linux-musl --help',
+              `code preview ${runId}`,
               '```',
+              'This will run the version of Code we\'ve created for this issue.',
               '',
-              '_Alternative (zstd):_',
-              '```bash',
-              'zstd -d code-x86_64-unknown-linux-musl.zst -o code && chmod +x code && ./code --help',
-              '```',
-              '',
-              '_Note: Links require GitHub auth and may expire. If it has expired, use the Artifacts section on the run:_',
-              runUrl
+              'After you run it, please comment here and let me know if it does what you need.',
             ].join('\n');
             async function commentIssue(token, msg){
               return fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issue_number}/comments`,{
@@ -955,6 +972,14 @@ jobs:
             let rc = await commentIssue(process.env.PAT, body);
             if (rc.status === 403) rc = await commentIssue(process.env.FALLBACK, body);
             if (!rc.ok) core.warning(`comment with artifacts failed: ${rc.status} ${rc.statusText}`);
+
+      - name: Add label: needs-preview-feedback
+        if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = context.payload.issue.number;
+            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['needs-preview-feedback'] });
 
       - name: Assign (PR path; PAT→GITHUB_TOKEN fallback)
         if: steps.changes.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
