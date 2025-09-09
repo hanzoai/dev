@@ -6,7 +6,6 @@ use std::time::Duration;
 use crate::AuthManager;
 use bytes::Bytes;
 use codex_protocol::mcp_protocol::AuthMode;
-use codex_protocol::mcp_protocol::ConversationId;
 use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
@@ -21,6 +20,7 @@ use tokio_util::io::ReaderStream;
 use tracing::debug;
 use tracing::trace;
 use tracing::warn;
+use uuid::Uuid;
 
 use crate::chat_completions::AggregateStreamExt;
 use crate::chat_completions::stream_chat_completions;
@@ -75,7 +75,7 @@ pub struct ModelClient {
     auth_manager: Option<Arc<AuthManager>>,
     client: reqwest::Client,
     provider: ModelProviderInfo,
-    conversation_id: ConversationId,
+    session_id: Uuid,
     effort: ReasoningEffortConfig,
     summary: ReasoningSummaryConfig,
     verbosity: TextVerbosityConfig,
@@ -90,7 +90,7 @@ impl ModelClient {
         effort: ReasoningEffortConfig,
         summary: ReasoningSummaryConfig,
         verbosity: TextVerbosityConfig,
-        conversation_id: ConversationId,
+        session_id: Uuid,
         debug_logger: Arc<Mutex<DebugLogger>>,
     ) -> Self {
         let client = create_client(&config.responses_originator_header);
@@ -100,7 +100,7 @@ impl ModelClient {
             auth_manager,
             client,
             provider,
-            conversation_id,
+            session_id,
             effort,
             summary,
             verbosity,
@@ -235,7 +235,7 @@ impl ModelClient {
             store,
             stream: true,
             include,
-            prompt_cache_key: Some(self.conversation_id.to_string()),
+            prompt_cache_key: Some(self.session_id.to_string()),
         };
 
         let mut attempt = 0;
@@ -275,9 +275,7 @@ impl ModelClient {
 
             req_builder = req_builder
                 .header("OpenAI-Beta", "responses=experimental")
-                // Send session_id for compatibility.
-                .header("conversation_id", self.conversation_id.to_string())
-                .header("session_id", self.conversation_id.to_string())
+                .header("session_id", self.session_id.to_string())
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload);
 
