@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.107] - 2025-09-09
+
+- Core: Fix planning crash on UTF-8 boundary when previewing streamed text. (daa76709)
+- Stability: Use char-safe slicing for last 800 chars to prevent panics. (daa76709)
+
 ## [0.2.106] - 2025-09-09
 
 - CLI/Preview: save downloads under ~/.code/bin by default; suffix binaries with PR id. (3bebc2d1)
