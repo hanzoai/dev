@@ -538,7 +538,8 @@ jobs:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo;
             const issue_number = Number(process.env.ISSUE_NUMBER);
-            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-code', client_payload: { issue_number } });
+            const slug = `${{ steps.slug.outputs.slug }}`;
+            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-code', client_payload: { issue_number, slug } });
             core.notice(`Queued issue-code for #${issue_number}`);
 
       - name: Acknowledge queueing

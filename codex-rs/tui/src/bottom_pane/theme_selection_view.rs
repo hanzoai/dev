@@ -36,9 +36,9 @@ pub(crate) struct ThemeSelectionView {
     // Revert points when backing out of detail views
     revert_theme_on_back: ThemeName,
     revert_spinner_on_back: String,
-    // Scroll offsets for detail lists
-    theme_scroll_offset: usize,
-    spinner_scroll_offset: usize,
+    // One-shot flags to show selection at top on first render of detail views
+    just_entered_themes: bool,
+    just_entered_spinner: bool,
     app_event_tx: AppEventSender,
     is_complete: bool,
 }
@@ -70,8 +70,8 @@ impl ThemeSelectionView {
             overview_selected_index: 0,
             revert_theme_on_back: current_theme,
             revert_spinner_on_back: current_spinner_name,
-            theme_scroll_offset: 0,
-            spinner_scroll_offset: 0,
+            just_entered_themes: false,
+            just_entered_spinner: false,
             app_event_tx,
             is_complete: false,
         }
@@ -155,39 +155,21 @@ impl ThemeSelectionView {
     }
 
     fn move_selection_up(&mut self) {
-        let options = Self::get_theme_options();
         if matches!(self.mode, Mode::Themes) {
-            let count = options.len();
-            if count == 0 { return; }
-            let visible = 10usize.min(count);
-            let middle = visible / 2;
+            let options = Self::get_theme_options();
             if self.selected_theme_index > 0 {
-                if self.selected_theme_index.saturating_sub(self.theme_scroll_offset) > middle {
-                    self.selected_theme_index -= 1;
-                } else if self.theme_scroll_offset > 0 {
-                    self.theme_scroll_offset -= 1;
-                } else {
-                    self.selected_theme_index -= 1;
-                }
+                self.selected_theme_index -= 1;
                 self.current_theme = options[self.selected_theme_index].0;
+                self.just_entered_themes = false;
                 self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
             }
         } else {
             let names = crate::spinner::spinner_names();
-            let count = names.len();
-            if count == 0 { return; }
-            let visible = 10usize.min(count);
-            let middle = visible / 2;
             if self.selected_spinner_index > 0 {
-                if self.selected_spinner_index.saturating_sub(self.spinner_scroll_offset) > middle {
-                    self.selected_spinner_index -= 1;
-                } else if self.spinner_scroll_offset > 0 {
-                    self.spinner_scroll_offset -= 1;
-                } else {
-                    self.selected_spinner_index -= 1;
-                }
+                self.selected_spinner_index -= 1;
                 if let Some(name) = names.get(self.selected_spinner_index) {
                     self.current_spinner = name.clone();
+                    self.just_entered_spinner = false;
                     self.app_event_tx
                         .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
                 }
@@ -198,17 +180,20 @@ impl ThemeSelectionView {
     fn move_selection_down(&mut self) {
         if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
-            self.selected_theme_index = (self.selected_theme_index + 1) % options.len();
-            self.current_theme = options[self.selected_theme_index].0;
-            // Live preview - update theme immediately (no history event)
-            self.app_event_tx
-                .send(AppEvent::PreviewTheme(self.current_theme));
+            if self.selected_theme_index + 1 < options.len() {
+                self.selected_theme_index += 1;
+                self.current_theme = options[self.selected_theme_index].0;
+                self.just_entered_themes = false;
+                self.app_event_tx
+                    .send(AppEvent::PreviewTheme(self.current_theme));
+            }
         } else {
             let names = crate::spinner::spinner_names();
-            if !names.is_empty() {
-                self.selected_spinner_index = (self.selected_spinner_index + 1) % names.len();
+            if self.selected_spinner_index + 1 < names.len() {
+                self.selected_spinner_index += 1;
                 if let Some(name) = names.get(self.selected_spinner_index) {
                     self.current_spinner = name.clone();
+                    self.just_entered_spinner = false;
                     self.app_event_tx
                         .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
                 }
@@ -309,12 +294,13 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         if self.overview_selected_index == 0 {
                             self.revert_theme_on_back = self.current_theme;
                             self.mode = Mode::Themes;
+                            self.just_entered_themes = true;
                         } else {
                             self.revert_spinner_on_back = self.current_spinner.clone();
                             self.mode = Mode::Spinner;
-                            // Keep preview animating
                             self.app_event_tx
                                 .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                            self.just_entered_spinner = true;
                         }
                     }
                     Mode::Themes => self.confirm_theme(),
@@ -395,20 +381,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
         let body_area = padded;
 
-        // List height equals available body height
+        // Visible rows = available body height (already sized to ≤10)
         let available_height = body_area.height as usize;
-        // Use stored scroll offsets; clamp to bounds
-        let scroll_offset = match self.mode {
-            Mode::Themes => {
-                let count = options.len();
-                self.theme_scroll_offset.min(count.saturating_sub(available_height))
-            }
-            Mode::Spinner => {
-                let count = crate::spinner::spinner_names().len();
-                self.spinner_scroll_offset.min(count.saturating_sub(available_height))
-            }
-            Mode::Overview => 0,
-        };
 
         // Create body content
         let mut lines = Vec::new();
@@ -439,10 +413,22 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
-            // Add visible themes based on stored scroll offset
-            let visible = available_height;
-            let start = scroll_offset.min(options.len().saturating_sub(visible));
-            let end = (start + visible).min(options.len());
+            // Compute anchored window: top until middle, then center; bottom shows end
+            let count = options.len();
+            let visible = available_height.min(10).max(1);
+            let middle = visible / 2;
+            let start = if self.just_entered_themes {
+                self.selected_theme_index.min(count.saturating_sub(visible))
+            } else if count <= visible {
+                0
+            } else if self.selected_theme_index < middle {
+                0
+            } else if self.selected_theme_index > count.saturating_sub(visible - middle) {
+                count.saturating_sub(visible)
+            } else {
+                self.selected_theme_index - middle
+            };
+            let end = (start + visible).min(count);
             for i in start..end {
                 let (theme_enum, name, description) = &options[i];
                 let is_selected = i == self.selected_theme_index;
@@ -492,9 +478,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .unwrap_or_default()
                 .as_millis();
             let names = crate::spinner::spinner_names();
-            let visible = available_height;
-            let start = scroll_offset.min(names.len().saturating_sub(visible));
-            let end = (start + visible).min(names.len());
+            let count = names.len();
+            let visible = available_height.min(10).max(1);
+            let middle = visible / 2;
+            let start = if self.just_entered_spinner {
+                self.selected_spinner_index.min(count.saturating_sub(visible))
+            } else if count <= visible {
+                0
+            } else if self.selected_spinner_index < middle {
+                0
+            } else if self.selected_spinner_index > count.saturating_sub(visible - middle) {
+                count.saturating_sub(visible)
+            } else {
+                self.selected_spinner_index - middle
+            };
+            let end = (start + visible).min(count);
             for i in start..end {
                 let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
