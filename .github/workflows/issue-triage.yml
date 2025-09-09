@@ -993,7 +993,7 @@ jobs:
             if (rc.status === 403) rc = await commentIssue(process.env.FALLBACK, body);
             if (!rc.ok) core.warning(`comment with artifacts failed: ${rc.status} ${rc.statusText}`);
 
-      - name: Add label: needs-preview-feedback
+      - name: "Add label: needs-preview-feedback"
         if: steps.effective.outputs.changed == 'true' && steps.path_policy.outputs.ok == 'true'
         uses: actions/github-script@v7
         with:
