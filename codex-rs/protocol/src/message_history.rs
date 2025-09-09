@@ -1,10 +1,9 @@
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 
-#[derive(Serialize, Deserialize, Debug, Clone, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HistoryEntry {
-    pub conversation_id: String,
+    pub session_id: String,
     pub ts: u64,
     pub text: String,
 }
