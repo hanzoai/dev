@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.99] - 2025-09-09
+
+- TUI/Branch: finalize merges default into worktree first; prefer fast-forward; start agent on conflicts. (8e1cbd20)
+- TUI/History: cache Exec wrap counts and precompute PatchSummary layout per width to reduce measurement. (be3154b9)
+
 ## [0.2.98] - 2025-09-09
 
 - TUI/Footer: restore 0.2.96 behavior; remove duplicate Access flash; add Shift+Tab to Help; make 'Full Access' label ephemeral. (8e4c96de)
