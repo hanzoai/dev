@@ -13,6 +13,7 @@ use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::{Table, Row, Cell};
+use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
@@ -461,7 +462,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else {
-            // Spinner: render as a table [Name | Preview]
+            // Spinner: render a two-column view [Name | Preview] with the
+            // preview styled like the composer title (centered line with spinner and text).
             use std::time::{SystemTime, UNIX_EPOCH};
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -477,60 +479,58 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             );
             let end = (start + visible).min(count);
 
-            // Build table rows using styled cells
-            let mut rows: Vec<Row> = Vec::new();
-            for i in start..end {
+            // Compute column rects once
+            let left_w = (body_area.width as f32 * 0.35) as u16;
+            let right_w = body_area.width.saturating_sub(left_w);
+            for (row_idx, i) in (start..end).enumerate() {
+                let y = body_area.y + row_idx as u16;
+                if y >= body_area.y + body_area.height { break; }
+
+                // Left column rect
+                let left_rect = Rect { x: body_area.x, y, width: left_w, height: 1 };
+                // Right column rect
+                let right_rect = Rect { x: body_area.x + left_w, y, width: right_w, height: 1 };
+
                 let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
                 let is_original = name == self.original_spinner;
                 let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                // Left cell: selector, name, optional (original)
-                let left = {
-                    let mut spans = vec![Span::raw(" ")];
-                    if is_selected {
-                        spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
-                    } else {
-                        spans.push(Span::raw("  "));
-                    }
-                    if is_selected {
-                        spans.push(Span::styled(name.clone(), Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
-                    } else {
-                        spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
-                    }
-                    if is_original {
-                        spans.push(Span::styled(" (original)", Style::default().fg(theme.text_dim)));
-                    }
-                    Cell::from(ratatui::text::Text::from(Line::from(spans)))
-                };
+                // Render left cell (selector + name + optional tag)
+                let mut left_spans = vec![Span::raw(" ")];
+                if is_selected { left_spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { left_spans.push(Span::raw("  ")); }
+                if is_selected {
+                    left_spans.push(Span::styled(name.clone(), Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                } else {
+                    left_spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
+                }
+                if is_original { left_spans.push(Span::styled(" (original)", Style::default().fg(theme.text_dim))); }
+                Paragraph::new(Line::from(left_spans)).alignment(Alignment::Left).render(left_rect, buf);
 
-                // Right cell: exact preview like composer title
-                let right = {
-                    let mut spans = Vec::new();
-                    // Vertical divider in border color
-                    spans.push(Span::styled("│ ", Style::default().fg(crate::colors::border())));
-                    // Spinner + Working... in info color to match title
-                    spans.push(Span::styled(frame, Style::default().fg(crate::colors::info())));
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::styled("Working...", Style::default().fg(crate::colors::info())));
-                    Cell::from(ratatui::text::Text::from(Line::from(spans)))
-                };
-
-                rows.push(Row::new(vec![left, right]));
+                // Render right cell: centered preview with border-colored rules
+                let info = Style::default().fg(crate::colors::info());
+                let border = Style::default().fg(crate::colors::border());
+                let content = format!("{} Thinking...", frame);
+                let content_len = content.chars().count() as u16 + 2; // spaces around
+                let total = right_rect.width;
+                let rule_total = total.saturating_sub(content_len);
+                let left_rule = rule_total / 2;
+                let right_rule = rule_total.saturating_sub(left_rule);
+                let mut right_spans: Vec<Span> = Vec::new();
+                right_spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(Span::styled(content, info));
+                right_spans.push(Span::raw(" "));
+                right_spans.push(Span::styled("─".repeat(right_rule as usize), border));
+                Paragraph::new(Line::from(right_spans)).alignment(Alignment::Left).render(right_rect, buf);
             }
-
-            let widths = [ratatui::layout::Constraint::Percentage(35), ratatui::layout::Constraint::Percentage(65)];
-            let table = Table::new(rows, &widths)
-                .column_spacing(2)
-                .style(Style::default().bg(crate::colors::background()));
-            table.render(body_area, buf);
 
             // Animate spinner previews while open
             self.app_event_tx
                 .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
 
-            // We rendered directly; skip the paragraph path
+            // Done rendering spinners
             return;
         }
 
