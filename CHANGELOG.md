@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.102] - 2025-09-09
+
+- CI/Triage: fetch remote before push and fall back to force-with-lease on non-fast-forward for bot-owned branches. (f4258aeb, 81dac6d6)
+- Agents: pre-create writable CARGO_HOME and target dirs for agent runs to avoid permission errors. (0ad69c90)
+
 ## [0.2.101] - 2025-09-09
 
 - Build: remove OpenSSL by using rustls in codex-ollama; fix macOS whoami scope. (c3034c38)
