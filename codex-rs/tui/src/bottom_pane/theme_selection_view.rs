@@ -30,8 +30,12 @@ pub(crate) struct ThemeSelectionView {
     original_spinner: String,
     current_spinner: String,
     selected_spinner_index: usize,
-    // Tab selection
-    active_tab: Tab,
+    // UI mode/state
+    mode: Mode,
+    overview_selected_index: usize, // 0 = Theme, 1 = Spinner
+    // Revert points when backing out of detail views
+    revert_theme_on_back: ThemeName,
+    revert_spinner_on_back: String,
     app_event_tx: AppEventSender,
     is_complete: bool,
 }
@@ -57,9 +61,12 @@ impl ThemeSelectionView {
             current_theme,
             selected_theme_index,
             original_spinner: current_spinner_name.clone(),
-            current_spinner: current_spinner_name,
+            current_spinner: current_spinner_name.clone(),
             selected_spinner_index,
-            active_tab: Tab::Themes,
+            mode: Mode::Overview,
+            overview_selected_index: 0,
+            revert_theme_on_back: current_theme,
+            revert_spinner_on_back: current_spinner_name,
             app_event_tx,
             is_complete: false,
         }
@@ -144,7 +151,7 @@ impl ThemeSelectionView {
 
     fn move_selection_up(&mut self) {
         let options = Self::get_theme_options();
-        if matches!(self.active_tab, Tab::Themes) {
+        if matches!(self.mode, Mode::Themes) {
             if self.selected_theme_index == 0 {
                 self.selected_theme_index = options.len() - 1;
             } else {
@@ -170,7 +177,7 @@ impl ThemeSelectionView {
     }
 
     fn move_selection_down(&mut self) {
-        if matches!(self.active_tab, Tab::Themes) {
+        if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
             self.selected_theme_index = (self.selected_theme_index + 1) % options.len();
             self.current_theme = options[self.selected_theme_index].0;
@@ -190,29 +197,43 @@ impl ThemeSelectionView {
         }
     }
 
-    fn confirm_selection(&self) {
-        // Confirm the selection - this will add it to history
-        self.app_event_tx
-            .send(AppEvent::UpdateTheme(self.current_theme));
-        self.app_event_tx
-            .send(AppEvent::UpdateSpinner(self.current_spinner.clone()));
+    fn confirm_theme(&mut self) {
+        self.app_event_tx.send(AppEvent::UpdateTheme(self.current_theme));
+        self.revert_theme_on_back = self.current_theme;
+        self.mode = Mode::Overview;
     }
 
-    fn cancel_selection(&mut self) {
-        // Restore original selections on cancel (no history event)
-        if self.current_theme != self.original_theme {
-            self.app_event_tx
-                .send(AppEvent::PreviewTheme(self.original_theme));
+    fn confirm_spinner(&mut self) {
+        self.app_event_tx
+            .send(AppEvent::UpdateSpinner(self.current_spinner.clone()));
+        self.revert_spinner_on_back = self.current_spinner.clone();
+        self.mode = Mode::Overview;
+    }
+
+    fn cancel_detail(&mut self) {
+        match self.mode {
+            Mode::Themes => {
+                if self.current_theme != self.revert_theme_on_back {
+                    self.current_theme = self.revert_theme_on_back;
+                    self.app_event_tx
+                        .send(AppEvent::PreviewTheme(self.current_theme));
+                }
+            }
+            Mode::Spinner => {
+                if self.current_spinner != self.revert_spinner_on_back {
+                    self.current_spinner = self.revert_spinner_on_back.clone();
+                    self.app_event_tx
+                        .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                }
+            }
+            Mode::Overview => {}
         }
-        if self.current_spinner != self.original_spinner {
-            self.app_event_tx
-                .send(AppEvent::PreviewSpinner(self.original_spinner.clone()));
-        }
+        self.mode = Mode::Overview;
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-enum Tab { Themes, Spinner }
+enum Mode { Overview, Themes, Spinner }
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
@@ -230,41 +251,58 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                self.move_selection_up();
+                match self.mode {
+                    Mode::Overview => {
+                        self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
+                    }
+                    _ => self.move_selection_up(),
+                }
             }
             KeyEvent {
                 code: KeyCode::Down,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                self.move_selection_down();
+                match self.mode {
+                    Mode::Overview => {
+                        self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                    }
+                    _ => self.move_selection_down(),
+                }
             }
-            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {
-                self.active_tab = Tab::Themes;
-                // Schedule a near-future redraw so spinner previews continue animating
-                self.app_event_tx
-                    .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
-            }
-            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
-                self.active_tab = Tab::Spinner;
-                self.app_event_tx
-                    .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
-            }
+            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {}
+            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {}
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                self.confirm_selection();
-                self.is_complete = true;
+                match self.mode {
+                    Mode::Overview => {
+                        if self.overview_selected_index == 0 {
+                            self.revert_theme_on_back = self.current_theme;
+                            self.mode = Mode::Themes;
+                        } else {
+                            self.revert_spinner_on_back = self.current_spinner.clone();
+                            self.mode = Mode::Spinner;
+                            // Keep preview animating
+                            self.app_event_tx
+                                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                        }
+                    }
+                    Mode::Themes => self.confirm_theme(),
+                    Mode::Spinner => self.confirm_spinner(),
+                }
             }
             KeyEvent {
                 code: KeyCode::Esc,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                self.cancel_selection();
-                self.is_complete = true;
+                match self.mode {
+                    Mode::Overview => self.is_complete = true,
+                    _ => self.cancel_detail(),
+                }
             }
             _ => {}
         }
@@ -323,59 +361,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             }
         }
 
-        // Add one cell padding around the inside and split into tabs strip and body
+        // Add one cell padding around the inside and split into spacer + body
         let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
-        let [tabs_area, body_area] = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(padded);
-
-        // Render a tabs strip like Diff Viewer: plain background with a bottom rule
-        let labels = vec!["  Themes  ".to_string(), "  Spinner  ".to_string()];
-        let selected_idx = if matches!(self.active_tab, Tab::Themes) { 0 } else { 1 };
-
-        // Layout each label horizontally and add a trailing filler
-        let mut constraints: Vec<Constraint> = Vec::new();
-        let mut total: u16 = 0;
-        for label in &labels {
-            let w = (label.chars().count() as u16).min(tabs_area.width.saturating_sub(total));
-            constraints.push(Constraint::Length(w));
-            total = total.saturating_add(w);
-            if total >= tabs_area.width.saturating_sub(4) {
-                break;
-            }
-        }
-        constraints.push(Constraint::Fill(1));
-        let chunks = Layout::horizontal(constraints).split(tabs_area);
-
-        // Bottom rule across the strip
-        let tabs_bottom_rule = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(crate::colors::border()));
-        tabs_bottom_rule.render(tabs_area, buf);
-
-        // Render labels and selected underline
-        for i in 0..labels.len() {
-            if i >= chunks.len().saturating_sub(1) { break; }
-            let rect = chunks[i];
-            if rect.width == 0 { continue; }
-            let selected = i == selected_idx;
-            // background is normal
-            let bg_style = Style::default().bg(crate::colors::background());
-            for y in rect.y..rect.y + rect.height { for x in rect.x..rect.x + rect.width { buf[(x,y)].set_style(bg_style); } }
-
-            // Label
-            let label_rect = Rect { x: rect.x + 1, y: rect.y, width: rect.width.saturating_sub(2), height: 1 };
-            let label_style = if selected { Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::text_dim()) };
-            let line = Line::from(Span::styled(labels[i].clone(), label_style));
-            Paragraph::new(line).wrap(ratatui::widgets::Wrap { trim: true }).render(label_rect, buf);
-
-            // Selected underline
-            if selected {
-                let label_len = labels[i].chars().count() as u16;
-                let accent_w = label_len.min(rect.width.saturating_sub(2)).max(1);
-                let accent_rect = Rect { x: label_rect.x, y: rect.y + rect.height.saturating_sub(1), width: accent_w, height: 1 };
-                let underline = Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(crate::colors::text_bright()));
-                underline.render(accent_rect, buf);
-            }
-        }
+        let [_, body_area] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(padded);
 
         // Body background uses normal background; calculate list height inside body
         let base_header_lines = 1u16; // spacer line below
@@ -384,21 +372,49 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             .saturating_sub(base_header_lines)
             as usize;
 
-        // Calculate scroll offset to keep selected item visible
-        let scroll_offset = if available_height >= options.len() {
-            0
-        } else if self.selected_theme_index < available_height / 2 {
-            0
-        } else if self.selected_theme_index >= options.len() - available_height / 2 {
-            options.len().saturating_sub(available_height)
-        } else {
-            self.selected_theme_index.saturating_sub(available_height / 2)
+        // Calculate scroll offset depending on mode
+        let scroll_offset = match self.mode {
+            Mode::Themes => {
+                if available_height >= options.len() { 0 }
+                else if self.selected_theme_index < available_height / 2 { 0 }
+                else if self.selected_theme_index >= options.len() - available_height / 2 { options.len().saturating_sub(available_height) }
+                else { self.selected_theme_index.saturating_sub(available_height / 2) }
+            }
+            Mode::Spinner => {
+                let names_len = crate::spinner::spinner_names().len();
+                if available_height >= names_len { 0 }
+                else if self.selected_spinner_index < available_height / 2 { 0 }
+                else if self.selected_spinner_index >= names_len.saturating_sub(available_height) { names_len.saturating_sub(available_height) }
+                else { self.selected_spinner_index.saturating_sub(available_height / 2) }
+            }
+            Mode::Overview => 0,
         };
 
         // Create body content
         let mut lines = vec![Line::from(" ")];
-
-        if matches!(self.active_tab, Tab::Themes) {
+        if matches!(self.mode, Mode::Overview) {
+            // Overview: show two rows with current values
+            let theme_label = Self::get_theme_options()
+                .iter()
+                .find(|(t, _, _)| *t == self.current_theme)
+                .map(|(_, name, _)| *name)
+                .unwrap_or("Theme");
+            let spinner_label = self.current_spinner.as_str();
+            let items = vec![("Theme", theme_label), ("Spinner", spinner_label)];
+            for (i, (k, v)) in items.iter().enumerate() {
+                let selected = i == self.overview_selected_index;
+                let prefix = if selected { "› " } else { "  " };
+                let mut spans = vec![Span::raw(" "), Span::raw(prefix)];
+                if selected {
+                    spans.push(Span::styled(*k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                } else {
+                    spans.push(Span::styled(*k, Style::default().fg(theme.text)));
+                }
+                spans.push(Span::raw(": "));
+                spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
+                lines.push(Line::from(spans));
+            }
+        } else if matches!(self.mode, Mode::Themes) {
             // Add visible themes based on scroll offset
             let visible_end = (scroll_offset + available_height).min(options.len());
             for i in scroll_offset..visible_end {
@@ -479,15 +495,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
         }
 
-        // Add scroll indicators if needed
-        if matches!(self.active_tab, Tab::Themes) && (scroll_offset > 0 || (scroll_offset + available_height).min(options.len()) < options.len()) {
+        // Add scroll indicators if needed (only for lists)
+        if matches!(self.mode, Mode::Themes) && (scroll_offset > 0 || (scroll_offset + available_height).min(options.len()) < options.len()) {
             lines.push(Line::from(" "));
             let scroll_info = format!("[{}/{}]", self.selected_theme_index + 1, options.len());
             lines.push(Line::from(vec![Span::raw(" "), Span::styled(
                 scroll_info,
                 Style::default().fg(theme.text_dim),
             )]));
-        } else {
+        } else if matches!(self.mode, Mode::Spinner) {
             lines.push(Line::from(" "));
         }
 
