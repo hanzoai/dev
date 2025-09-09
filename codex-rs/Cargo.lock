@@ -828,6 +828,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "which",
  "zip",
 ]
 
