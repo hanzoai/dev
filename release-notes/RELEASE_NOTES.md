@@ -1,12 +1,13 @@
-## @just-every/code v0.2.100
+## @just-every/code v0.2.101
 
-This release improves build speed and release reliability, and includes a core date parsing fix.
+This release improves build reliability, restores core exports, and brings a few TUI and MCP usability fixes.
 
 ### Changes
-- Core: fix date parsing in rollout preflight to compile.
-- Build: speed up build-fast via sccache; keep env passthrough for agents.
-- Release: add preflight E2E tests and post-build smoke checks to improve publish reliability.
-- Upstream-merge: refine branding guard to check only user-facing strings.
+- Build: remove OpenSSL by using rustls in codex-ollama; fix macOS whoami scope.
+- Core: restore API re-exports and resolve visibility warning.
+- TUI: Ctrl+C clears non-empty prompts.
+- TUI: paste with Ctrl+V checks file_list.
+- MCP: add per-server startup timeout.
 
 ### Install
 ```
@@ -14,4 +15,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.99...v0.2.100
+Compare: https://github.com/just-every/code/compare/v0.2.100...v0.2.101
+
