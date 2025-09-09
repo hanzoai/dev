@@ -1,8 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 
-#[derive(Serialize, Deserialize, Debug, Clone, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HistoryEntry {
     pub session_id: String,
     pub ts: u64,
