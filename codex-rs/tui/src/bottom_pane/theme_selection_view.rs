@@ -301,7 +301,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Span::styled(" change tabs ", t_dim),
             Span::styled("——— ", t_dim),
             Span::styled("Enter", t_fg),
-            Span::styled(" select ", t_dim),
+            Span::styled(" choose ", t_dim),
             Span::styled("——— ", t_dim),
             Span::styled("Esc", t_fg),
             Span::styled(" cancel ", t_dim),
@@ -490,6 +490,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         } else {
             lines.push(Line::from(" "));
         }
+
+        // Minimal footer with Up/Down hint
+        lines.push(Line::from(vec![
+            Span::styled("▲ ▼", Style::default().fg(theme.keyword).add_modifier(Modifier::BOLD)),
+            Span::styled(" select", Style::default().fg(theme.text_dim)),
+        ]));
 
         // Render the body content paragraph inside body area
         let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
