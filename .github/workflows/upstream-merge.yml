@@ -29,6 +29,11 @@ env:
   UPSTREAM_REPO: ${{ inputs.upstream_repo || 'openai/codex' }}
   UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'main' }}
   MERGE_BRANCH: upstream-merge
+  # Controls whether we auto-close an existing upstream-merge PR when the run
+  # skips due to no upstream changes and the branch is zero‑diff vs base.
+  # This used to be true when we reset the branch each run; now we carry
+  # forward the branch for incremental merges, so default this to false.
+  CLOSE_ZERO_DIFF_ON_SKIP: 'false'
   RG_VERSION: '14.1.0'
   JQ_VERSION: '1.7.1'
 
@@ -434,11 +439,12 @@ jobs:
           2) Write .github/auto/MERGE_PLAN.md summarizing strategy (one-shot, by-bucket, or per-commit) based on MERGE_MODE and artifacts.
           3) Use existing MERGE_BRANCH (prepared earlier). Do not reset or recreate it.
           4) Merge upstream/UPSTREAM_BRANCH into MERGE_BRANCH using `--no-commit`.
-             - Use the <policy> JSON for prefer_ours_globs and purge_globs (prefer_theirs_globs is intentionally empty).
-             - Keep ours by default. Do NOT attempt to realign or reintroduce crates/dirs we removed locally.
-             - For files matching prefer_ours_globs: keep ours; if upstream added new files under these globs that we don’t have, prefer deletion.
-             - For any path listed in purge_globs: ensure it remains deleted if upstream reintroduced it.
-             - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). For each upstream commit, use repo context and history to judge whether to incorporate or to keep ours. Prefer preserving our local intent and removals; incorporate upstream when it improves correctness, security, or compatibility without violating protected areas (themes/UX/docs/workflows). Record notable decisions in MERGE_REPORT.md.
+             - Use the <policy> JSON for prefer_ours_globs, prefer_theirs_globs, and purge_globs.
+             - Default: adopt upstream outside prefer_ours_globs. In protected areas (prefer_ours_globs), keep ours unless you identify a clearly beneficial, compatible upstream change.
+             - For files matching prefer_theirs_globs, lean towards upstream unless it breaks our build or documented behavior.
+             - Do NOT blanket-delete new crates or reintroduced paths. Surface noteworthy cases in MERGE_REPORT.md and make a reasoned choice.
+             - For any path listed in purge_globs or perma_removed_paths, ensure it remains deleted if upstream reintroduced it.
+             - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). Use repo context and the provided artifacts to make sensible, minimal decisions. Prefer preserving our local UX/branding and workflows; adopt upstream when it improves correctness, security, or compatibility. Record notable decisions in MERGE_REPORT.md.
           5) Stage and commit with a conventional message and short build status.
           6) Run ./build-fast.sh (warnings treated as failures). Apply minimal safe fixes only.
           7) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
@@ -507,19 +513,7 @@ jobs:
             files=$(git ls-files -- "$d/**" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
-          # Drop any codex-rs/<crate> directories that do not exist on the default branch (we removed/renamed them locally)
-          DEF_REF="origin/${DEFAULT_BRANCH}"
-          # Collect crate dirs on default and on current worktree
-          mapfile -t default_crates < <(git ls-tree -r --name-only "$DEF_REF" | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u)
-          mapfile -t branch_crates  < <(git ls-files | awk -F'/' '/^codex-rs\//{print $1"/"$2}' | sort -u)
-          for c in "${branch_crates[@]}"; do
-            keep=0
-            for d in "${default_crates[@]}"; do [ "$c" = "$d" ] && keep=1 && break; done
-            if [ $keep -eq 0 ]; then
-              files=$(git ls-files -- "$c/**" || true)
-              if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
-            fi
-          done
+          # Do NOT drop new upstream crates automatically. Let the agent decide with context.
           # Apply purge_globs and perma_removed_paths from merge-policy.json when present
           if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then
             mapfile -t purges < <(jq -r '.purge_globs[]? // empty' .github/merge-policy.json 2>/dev/null || true)
@@ -530,14 +524,7 @@ jobs:
               if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
             done
           fi
-          # Remove any reintroduced paths detected during precompute
-          if [ -f "$GITHUB_WORKSPACE/.github/auto/REINTRODUCED_PATHS.txt" ]; then
-            mapfile -t reintro < "$GITHUB_WORKSPACE/.github/auto/REINTRODUCED_PATHS.txt" || true
-            if [ ${#reintro[@]} -gt 0 ]; then
-              files=$(git ls-files -- "${reintro[@]}" || true)
-              if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
-            fi
-          fi
+          # Do NOT automatically remove reintroduced paths; the agent reviews and decides.
           if [ "$removed" = true ]; then
             git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
               commit -m "chore(merge): enforce policy removals (images + cargo caches)"
@@ -546,18 +533,15 @@ jobs:
           popd >/dev/null
           git worktree remove -f "$wt"
       
-      - name: Policy guard checks (docs, branding, perma-deleted)
+      - name: Policy guard checks (branding, perma-deleted)
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
-          # Fail if docs/** changed between default and upstream-merge (we prefer ours)
-          changed=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | wc -l | tr -d ' ')
-          if [ "$changed" != "0" ]; then
-            echo "docs/** changed on upstream-merge; policy prefers ours. Failing." >&2
-            git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' >&2 || true
-            exit 1
+          # docs/** changes are allowed; we may still prefer ours but do not hard-fail here.
+          if git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | grep -q .; then
+            echo "::notice::docs/** changed on upstream-merge; ensuring agent reviews and preserves local branding where needed." >&2
           fi
           # Branding guard: block additions of user-visible 'Codex' in TUI/CLI/docs (allow crate/package contexts)
           if git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- codex-rs/tui/** codex-cli/** docs/** \
@@ -741,8 +725,8 @@ jobs:
               core.notice(`Created PR #${pr.data.number}`);
             }
 
-      - name: Close stale upstream-merge PR on skip when zero diff
-        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true'
+      - name: Close stale upstream-merge PR on skip when zero diff (opt-in)
+        if: steps.check_upstream.outputs.skip == 'true' && steps.check_upstream.outputs.mirror_on_skip == 'true' && env.CLOSE_ZERO_DIFF_ON_SKIP == 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
@@ -757,7 +741,7 @@ jobs:
             const headRef = `${owner}:${head}`;
             const prs = await github.rest.pulls.list({ owner, repo, state: 'open', head: headRef });
             if (!prs.data.length) { return; }
-            // Only close if zero diff after we reset upstream-merge
+            // Only close if zero diff (opt-in path; branch is carried forward)
             let zeroDiff = false;
             try {
               const cmp = await github.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${base}...${head}` });
