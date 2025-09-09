@@ -205,6 +205,7 @@ jobs:
           DEFAULT_ASSIGNEE: ${{ steps.bot.outputs.login }}
         run: |
           mkdir -p .github/auto
+          echo "BASE_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           : > .github/auto/PR_TITLE.txt
           : > .github/auto/PR_BODY.md
           : > .github/auto/ISSUE_COMMENT.md
@@ -563,6 +564,7 @@ jobs:
           - If agent_mode=full: you may make minimal safe edits as needed and also write .github/auto/ISSUE_COMMENT.md when helpful.
             If your changes/PR fully resolve the issue, write .github/auto/DECISION.json with close_issue=true and assignee=\"just-every-code\".
           - Build policy: Do NOT change CARGO_HOME or CARGO_TARGET_DIR; do NOT run \"cargo update\". Use ./build-fast.sh as-is. CI sets caches for determinism and speed.
+          - Git policy: Do NOT run `git commit` or `git push`. Leave changes uncommitted; the workflow will branch, commit, and open the PR.
           "
           # Choose sandbox mode based on agent_mode (robust compare)
           case "$AGENT_MODE" in
@@ -636,16 +638,22 @@ jobs:
           if (Object.keys(out).length) fs.writeFileSync('.github/auto/DECISION.json', JSON.stringify(out));
           JS
 
-      - name: Detect changes (tracked + untracked)
+      - name: Detect changes or new commits
         timeout-minutes: 5
         id: changes
         run: |
           set -euo pipefail
-          if git diff --quiet && [ -z "$(git ls-files -mo --exclude-standard | grep -v '^.github/auto/' || true)" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          base="${BASE_HEAD:-}"
+          commits=0
+          if [ -n "$base" ]; then
+            commits=$(git rev-list --count "$base..HEAD" || echo 0)
           fi
+          dirty=0
+          if ! git diff --quiet || [ -n "$(git ls-files -mo --exclude-standard | grep -v '^.github/auto/' || true)" ]; then
+            dirty=1
+          fi
+          if [ "$commits" -gt 0 ]; then echo "agent_committed=true" >> "$GITHUB_OUTPUT"; else echo "agent_committed=false" >> "$GITHUB_OUTPUT"; fi
+          if [ "$dirty" -eq 1 ] || [ "$commits" -gt 0 ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; else echo "changed=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Parse agent decision
         id: agent_decision
@@ -692,10 +700,16 @@ jobs:
         env:
           CHANGED: ${{ steps.changes.outputs.changed }}
           APPLY_CHANGES: ${{ steps.agent_decision.outputs.apply_changes }}
+          AGENT_COMMITTED: ${{ steps.changes.outputs.agent_committed }}
         run: |
           set -euo pipefail
           changed="${CHANGED:-false}"
           apply="${APPLY_CHANGES:-true}"
+          # If the agent created commits, honor them even if working tree is clean.
+          if [ "${AGENT_COMMITTED:-false}" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$changed" = "true" ] && [ "$apply" != "true" ]; then
             echo "Agent requested comment-only; reverting local edits."
             git restore -s HEAD -W . || true
@@ -847,6 +861,7 @@ jobs:
           BOT_ID: ${{ steps.bot.outputs.id }}
           CLOSE_ISSUE: ${{ steps.agent_decision.outputs.close_issue }}
           EXISTING_PR: ${{ steps.existing_pr.outputs.number }}
+          AGENT_COMMITTED: ${{ steps.changes.outputs.agent_committed }}
         run: |
           set -euo pipefail
           # Configure commit author to the PAT identity's noreply address when available
@@ -878,15 +893,17 @@ jobs:
               git checkout -b "${BRANCH_NAME}"
             fi
           fi
-          # Stage tracked changes only; exclude working files generated under .github/auto
-          git add -A
-          git restore --staged .github/auto || true
-          git rm -r --cached .github/auto 2>/dev/null || true
-          if [ "${CLOSE_ISSUE}" = 'true' ]; then
-            git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}" \
-              -m "Closes #${ISSUE_NUMBER}"
-          else
-            git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
+          if [ "${AGENT_COMMITTED}" != "true" ]; then
+            # Stage tracked changes only; exclude working files generated under .github/auto
+            git add -A
+            git restore --staged .github/auto || true
+            git rm -r --cached .github/auto 2>/dev/null || true
+            if [ "${CLOSE_ISSUE}" = 'true' ]; then
+              git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}" \
+                -m "Closes #${ISSUE_NUMBER}"
+            else
+              git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
+            fi
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           if ! git push --set-upstream origin "${BRANCH_NAME}"; then
