@@ -12,7 +12,6 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::Tabs;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
@@ -279,49 +278,99 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let options = Self::get_theme_options();
         let theme = crate::theme::current_theme();
 
-        // Use full width for better integration and draw an outer border
+        // Use full width and draw an outer window styled like the Diff overlay
         let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
-
-        // Clear then fill outer area similar to Diff Viewer (selection background)
         Clear.render(render_area, buf);
+
+        // Build a styled title similar to Diff Viewer
+        let t_dim = Style::default().fg(crate::colors::text_dim());
+        let t_fg = Style::default().fg(crate::colors::text());
+        let title_spans = vec![
+            Span::styled(" ", t_dim),
+            Span::styled("Appearance", t_fg),
+            Span::styled(" ——— ", t_dim),
+            Span::styled("◂ ▸", t_fg),
+            Span::styled(" change tabs ", t_dim),
+            Span::styled("——— ", t_dim),
+            Span::styled("Enter", t_fg),
+            Span::styled(" select ", t_dim),
+            Span::styled("——— ", t_dim),
+            Span::styled("Esc", t_fg),
+            Span::styled(" cancel ", t_dim),
+        ];
 
         let outer = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::selection()).fg(theme.text));
-        outer.clone().render(render_area, buf);
+            .title(Line::from(title_spans))
+            .style(Style::default().bg(crate::colors::background()))
+            .border_style(Style::default().fg(crate::colors::border()).bg(crate::colors::background()));
         let inner = outer.inner(render_area);
+        outer.render(render_area, buf);
 
-        // Split inner into a 3-row tabs header and the body (like Diff Viewer)
-        let [tabs_area_all, body_area] = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(inner);
+        // Paint inner content background as the normal theme background
+        let inner_bg_style = Style::default().bg(crate::colors::background());
+        for y in inner.y..inner.y + inner.height {
+            for x in inner.x..inner.x + inner.width {
+                buf[(x, y)].set_style(inner_bg_style);
+            }
+        }
 
-        // Fill inner content with selection so inactive tabs blend in (Diff Viewer parity)
-        let inner_bg = Block::default().style(Style::default().bg(crate::colors::selection()));
-        inner_bg.render(tabs_area_all, buf);
+        // Add one cell padding around the inside and split into tabs strip and body
+        let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
+        let [tabs_area, body_area] = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(padded);
 
-        // Center the tabs within the 3-row header
-        let [_, tabs_area, _] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
-            .areas(tabs_area_all);
-
-        // Build Tabs titles and styles to match Diff Viewer popup
-        let titles = vec![
-            Line::from(Span::raw(" Themes ")),
-            Line::from(Span::raw(" Spinner ")),
-        ];
+        // Render a tabs strip like Diff Viewer: plain background with a bottom rule
+        let labels = vec!["  Themes  ".to_string(), "  Spinner  ".to_string()];
         let selected_idx = if matches!(self.active_tab, Tab::Themes) { 0 } else { 1 };
-        let tabs = Tabs::new(titles)
-            .select(selected_idx)
-            .style(Style::default().bg(crate::colors::selection()).fg(crate::colors::text()))
-            .highlight_style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .divider(" ");
-        Widget::render(tabs, tabs_area, buf);
 
-        // Body background uses normal background (like Diff Viewer)
-        let body_bg = Block::default().style(Style::default().bg(crate::colors::background()));
-        body_bg.render(body_area, buf);
+        // Layout each label horizontally and add a trailing filler
+        let mut constraints: Vec<Constraint> = Vec::new();
+        let mut total: u16 = 0;
+        for label in &labels {
+            let w = (label.chars().count() as u16).min(tabs_area.width.saturating_sub(total));
+            constraints.push(Constraint::Length(w));
+            total = total.saturating_add(w);
+            if total >= tabs_area.width.saturating_sub(4) {
+                break;
+            }
+        }
+        constraints.push(Constraint::Fill(1));
+        let chunks = Layout::horizontal(constraints).split(tabs_area);
 
-        // Calculate available list height inside body, accounting for header lines below
-        let base_header_lines = 2u16; // "Appearance" + spacer line
+        // Bottom rule across the strip
+        let tabs_bottom_rule = Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(crate::colors::border()));
+        tabs_bottom_rule.render(tabs_area, buf);
+
+        // Render labels and selected underline
+        for i in 0..labels.len() {
+            if i >= chunks.len().saturating_sub(1) { break; }
+            let rect = chunks[i];
+            if rect.width == 0 { continue; }
+            let selected = i == selected_idx;
+            // background is normal
+            let bg_style = Style::default().bg(crate::colors::background());
+            for y in rect.y..rect.y + rect.height { for x in rect.x..rect.x + rect.width { buf[(x,y)].set_style(bg_style); } }
+
+            // Label
+            let label_rect = Rect { x: rect.x + 1, y: rect.y, width: rect.width.saturating_sub(2), height: 1 };
+            let label_style = if selected { Style::default().fg(crate::colors::text()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::text_dim()) };
+            let line = Line::from(Span::styled(labels[i].clone(), label_style));
+            Paragraph::new(line).wrap(ratatui::widgets::Wrap { trim: true }).render(label_rect, buf);
+
+            // Selected underline
+            if selected {
+                let label_len = labels[i].chars().count() as u16;
+                let accent_w = label_len.min(rect.width.saturating_sub(2)).max(1);
+                let accent_rect = Rect { x: label_rect.x, y: rect.y + rect.height.saturating_sub(1), width: accent_w, height: 1 };
+                let underline = Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(crate::colors::text_bright()));
+                underline.render(accent_rect, buf);
+            }
+        }
+
+        // Body background uses normal background; calculate list height inside body
+        let base_header_lines = 1u16; // spacer line below
         let available_height = body_area
             .height
             .saturating_sub(base_header_lines)
@@ -339,18 +388,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         };
 
         // Create body content
-        let mut lines = vec![
-            Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    "Appearance",
-                    Style::default()
-                        .fg(theme.text_bright)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(" "),
-        ];
+        let mut lines = vec![Line::from(" ")];
 
         if matches!(self.active_tab, Tab::Themes) {
             // Add visible themes based on scroll offset
