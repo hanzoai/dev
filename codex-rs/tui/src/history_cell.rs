@@ -515,7 +515,13 @@ pub(crate) struct ExecCell {
     cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    // Cached per-width wrap totals (rows) for finalized execs
+    cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>, 
 }
+
+// Cache of wrapped-row totals for ExecCell at a given width.
+#[derive(Clone, Copy)]
+struct ExecWrapCache { width: u16, pre_total: u16, out_total: u16 }
 
 // ==================== AssistantMarkdownCell ====================
 // Stores raw assistant markdown and rebuilds on demand (e.g., theme/syntax changes)
@@ -942,23 +948,7 @@ impl HistoryCell for ExecCell {
         true
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Measure exactly like custom_render_with_skip: preamble at full width,
-        // output inside a left-bordered block with left padding (width - 2).
-        let (pre_lines, out_lines) = self.exec_render_parts();
-        let pre_text = Text::from(trim_empty_lines(pre_lines));
-        let out_text = Text::from(trim_empty_lines(out_lines));
-        let pre_wrap_width = width;
-        let out_wrap_width = width.saturating_sub(2);
-        let pre_total: u16 = Paragraph::new(pre_text)
-            .wrap(Wrap { trim: false })
-            .line_count(pre_wrap_width)
-            .try_into()
-            .unwrap_or(0);
-        let out_total: u16 = Paragraph::new(out_text)
-            .wrap(Wrap { trim: false })
-            .line_count(out_wrap_width)
-            .try_into()
-            .unwrap_or(0);
+        let (pre_total, out_total) = self.ensure_wrap_totals(width);
         pre_total.saturating_add(out_total)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -969,21 +959,8 @@ impl HistoryCell for ExecCell {
         // (e.g., "└ ") in the preamble to show the connector on the first line.
         let pre_text = Text::from(trim_empty_lines(pre_lines));
         let out_text = Text::from(trim_empty_lines(out_lines));
-        // Measure with the same widths we will render with.
-        let pre_wrap_width = area.width;
-        // Output renders inside a Block with a LEFT border (1 col) and left padding of 1,
-        // so the inner text width is reduced accordingly.
-        let out_wrap_width = area.width.saturating_sub(2);
-        let pre_total: u16 = Paragraph::new(pre_text.clone())
-            .wrap(Wrap { trim: false })
-            .line_count(pre_wrap_width)
-            .try_into()
-            .unwrap_or(0);
-        let out_total: u16 = Paragraph::new(out_text.clone())
-            .wrap(Wrap { trim: false })
-            .line_count(out_wrap_width)
-            .try_into()
-            .unwrap_or(0);
+        // Measure with cached/fast-path totals.
+        let (pre_total, out_total) = self.ensure_wrap_totals(area.width);
 
         // Compute how many rows to skip from the preamble, then from the output
         let pre_skip = skip_rows.min(pre_total);
@@ -1073,6 +1050,60 @@ impl HistoryCell for ExecCell {
 }
 
 impl ExecCell {
+    /// Compute wrapped row totals for the preamble and the output at the given width.
+    /// Uses an ASCII fast path when all spans are ASCII; caches totals for finalized execs.
+    fn ensure_wrap_totals(&self, width: u16) -> (u16, u16) {
+        if self.output.is_some() {
+            if let Some(cache) = self.cached_wrap.borrow().as_ref() {
+                if cache.width == width { return (cache.pre_total, cache.out_total); }
+            }
+        }
+
+        let (pre_lines, out_lines) = self.exec_render_parts();
+        let pre = trim_empty_lines(pre_lines);
+        let out = trim_empty_lines(out_lines);
+
+        let pre_wrap_width = width;
+        let out_wrap_width = width.saturating_sub(2);
+
+        fn ascii_rows(lines: &[Line<'_>], wrap_w: u16) -> Option<u16> {
+            if wrap_w == 0 { return Some(0); }
+            let w = wrap_w as usize;
+            let mut rows: u64 = 0;
+            for line in lines {
+                let mut len = 0usize;
+                for sp in &line.spans {
+                    let s = sp.content.as_ref();
+                    if !s.is_ascii() { return None; }
+                    len += s.len();
+                }
+                let row = if len == 0 { 1 } else { (len + w - 1) / w };
+                rows = rows.saturating_add(row as u64);
+                if rows > u16::MAX as u64 { return Some(u16::MAX); }
+            }
+            Some(rows as u16)
+        }
+
+        let pre_total = ascii_rows(&pre, pre_wrap_width).unwrap_or_else(|| {
+            Paragraph::new(Text::from(pre.clone()))
+                .wrap(Wrap { trim: false })
+                .line_count(pre_wrap_width)
+                .try_into()
+                .unwrap_or(0)
+        });
+        let out_total = ascii_rows(&out, out_wrap_width).unwrap_or_else(|| {
+            Paragraph::new(Text::from(out.clone()))
+                .wrap(Wrap { trim: false })
+                .line_count(out_wrap_width)
+                .try_into()
+                .unwrap_or(0)
+        });
+
+        if self.output.is_some() {
+            *self.cached_wrap.borrow_mut() = Some(ExecWrapCache { width, pre_total, out_total });
+        }
+        (pre_total, out_total)
+    }
     // Build separate segments: (preamble lines, output lines)
     fn exec_render_parts(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         // For completed executions, cache pre/output segments since they are immutable.
@@ -4510,6 +4541,7 @@ fn new_exec_cell(
         cached_display_lines: std::cell::RefCell::new(None),
         cached_pre_lines: std::cell::RefCell::new(None),
         cached_out_lines: std::cell::RefCell::new(None),
+        cached_wrap: std::cell::RefCell::new(None),
     }
 }
 
@@ -6361,6 +6393,7 @@ pub(crate) fn new_patch_event(
         changes,
         event_type,
         kind,
+        cached: std::cell::RefCell::new(None),
     }
 }
 
@@ -6396,6 +6429,30 @@ pub(crate) struct PatchSummaryCell {
     pub(crate) changes: HashMap<PathBuf, FileChange>,
     pub(crate) event_type: PatchEventType,
     pub(crate) kind: PatchKind,
+    // Cache width-specific rendered lines to avoid repeated filesystem reads
+    // and pre-wrapping work inside create_diff_summary_with_width.
+    cached: std::cell::RefCell<Option<PatchLayoutCache>>, 
+}
+
+#[derive(Clone)]
+struct PatchLayoutCache { width: u16, lines: Vec<Line<'static>> }
+
+impl PatchSummaryCell {
+    fn ensure_lines(&self, width: u16) -> Vec<Line<'static>> {
+        if let Some(c) = self.cached.borrow().as_ref() {
+            if c.width == width { return c.lines.clone(); }
+        }
+        let lines: Vec<Line<'static>> = create_diff_summary_with_width(
+            &self.title,
+            &self.changes,
+            self.event_type,
+            Some(width as usize),
+        )
+        .into_iter()
+        .collect();
+        *self.cached.borrow_mut() = Some(PatchLayoutCache { width, lines: lines.clone() });
+        lines
+    }
 }
 
 impl HistoryCell for PatchSummaryCell {
@@ -6411,25 +6468,14 @@ impl HistoryCell for PatchSummaryCell {
 
     // We compute lines based on width at render time; provide a conservative
     // default for non-width callers (not normally used in our pipeline).
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        create_diff_summary_with_width(&self.title, &self.changes, self.event_type, Some(80))
-            .into_iter()
-            .collect()
-    }
+    fn display_lines(&self) -> Vec<Line<'static>> { self.ensure_lines(80) }
 
     fn has_custom_render(&self) -> bool {
         true
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let lines: Vec<Line<'static>> = create_diff_summary_with_width(
-            &self.title,
-            &self.changes,
-            self.event_type,
-            Some(width as usize),
-        )
-        .into_iter()
-        .collect();
+        let lines = self.ensure_lines(width);
         Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
             .line_count(width)
@@ -6438,16 +6484,7 @@ impl HistoryCell for PatchSummaryCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        let lines: Vec<Line<'static>> = create_diff_summary_with_width(
-            &self.title,
-            &self.changes,
-            self.event_type,
-            Some(area.width as usize),
-        )
-        .into_iter()
-        .collect();
-
-        let text = Text::from(lines);
+        let text = Text::from(self.ensure_lines(area.width));
         let bg_block = Block::default().style(Style::default().bg(crate::colors::background()));
         Paragraph::new(text)
             .block(bg_block)
