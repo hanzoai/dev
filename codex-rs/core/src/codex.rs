@@ -412,6 +412,7 @@ use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
 use crate::protocol::TurnDiffEvent;
 use crate::rollout::RolloutRecorder;
+use codex_protocol::mcp_protocol::ConversationId;
 use crate::safety::SafetyCheck;
 use crate::safety::assess_command_safety;
 use crate::safety::assess_safety_for_untrusted_command;
@@ -1590,7 +1591,13 @@ async fn submission_loop(
                 let rollout_recorder = match rollout_recorder {
                     Some(rec) => Some(rec),
                     None => {
-                        match RolloutRecorder::new(&config, session_id, user_instructions.clone())
+                        match RolloutRecorder::new(
+                            &config,
+                            crate::rollout::recorder::RolloutRecorderParams::new(
+                                ConversationId(session_id),
+                                user_instructions.clone(),
+                            ),
+                        )
                             .await
                         {
                             Ok(r) => Some(r),
