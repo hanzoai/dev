@@ -451,7 +451,6 @@ enum SystemPlacement {
 }
 
 impl ChatWidget<'_> {
-
     /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
     /// creating multiple synthetic request buckets before the first provider turn.
     fn system_order_key(
@@ -483,9 +482,21 @@ impl ChatWidget<'_> {
 
         self.internal_seq = self.internal_seq.saturating_add(1);
         match placement {
-            SystemPlacement::EarlyInCurrent => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
-            SystemPlacement::EndOfCurrent => OrderKey { req, out: i32::MAX, seq: self.internal_seq },
-            SystemPlacement::PrePromptInCurrent => OrderKey { req, out: i32::MIN, seq: self.internal_seq },
+            SystemPlacement::EarlyInCurrent => OrderKey {
+                req,
+                out: i32::MIN + 2,
+                seq: self.internal_seq,
+            },
+            SystemPlacement::EndOfCurrent => OrderKey {
+                req,
+                out: i32::MAX,
+                seq: self.internal_seq,
+            },
+            SystemPlacement::PrePromptInCurrent => OrderKey {
+                req,
+                out: i32::MIN,
+                seq: self.internal_seq,
+            },
         }
     }
 
@@ -642,7 +653,11 @@ impl ChatWidget<'_> {
             if k.req == req {
                 last_in_req = Some(match last_in_req {
                     Some(prev) => {
-                        if *k > prev { *k } else { prev }
+                        if *k > prev {
+                            *k
+                        } else {
+                            prev
+                        }
                     }
                     None => *k,
                 });
@@ -650,8 +665,16 @@ impl ChatWidget<'_> {
         }
         self.internal_seq = self.internal_seq.saturating_add(1);
         match last_in_req {
-            Some(last) => OrderKey { req, out: last.out, seq: last.seq.saturating_add(1) },
-            None => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
+            Some(last) => OrderKey {
+                req,
+                out: last.out,
+                seq: last.seq.saturating_add(1),
+            },
+            None => OrderKey {
+                req,
+                out: i32::MIN + 2,
+                seq: self.internal_seq,
+            },
         }
     }
 
@@ -4652,7 +4675,7 @@ impl ChatWidget<'_> {
             codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro",
             codex_core::config_types::ThemeName::Custom => "Custom",
         };
-        let message = format!("✓ Theme changed to {}", theme_name);
+        let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
         self.push_system_cell(
             history_cell::new_background_event(message),
@@ -4677,7 +4700,7 @@ impl ChatWidget<'_> {
         }
 
         // Confirmation message (replaceable system notice)
-        let message = format!("✓ Spinner changed to {}", spinner_name);
+        let message = format!("Spinner changed to {}", spinner_name);
         let placement = self.ui_placement_for_now();
         self.push_system_cell(
             history_cell::new_background_event(message),
@@ -8536,7 +8559,14 @@ impl ChatWidget<'_> {
                         // No conflicts; create a merge commit and continue
                         let _ = Command::new("git")
                             .current_dir(&work_cwd)
-                            .args(["commit", "-m", &format!("merge {} into {} before finalize", default_branch, branch_name)])
+                            .args([
+                                "commit",
+                                "-m",
+                                &format!(
+                                    "merge {} into {} before finalize",
+                                    default_branch, branch_name
+                                ),
+                            ])
                             .output()
                             .await;
                     } else {
@@ -8552,7 +8582,9 @@ impl ChatWidget<'_> {
                             .map(|s| s.lines().any(|l| l.starts_with('U') || l.contains("UU ")))
                             .unwrap_or(false);
                         if has_conflicts {
-                            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                            use codex_core::protocol::BackgroundEventEvent;
+                            use codex_core::protocol::Event;
+                            use codex_core::protocol::EventMsg;
                             let _ = tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,

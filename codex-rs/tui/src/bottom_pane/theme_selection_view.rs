@@ -187,12 +187,17 @@ impl ThemeSelectionView {
             }
         } else {
             let names = crate::spinner::spinner_names();
-            if self.selected_spinner_index + 1 < names.len() {
+            // Allow moving onto the extra pseudo-row (Create your own…)
+            if self.selected_spinner_index + 1 <= names.len() {
                 self.selected_spinner_index += 1;
-                if let Some(name) = names.get(self.selected_spinner_index) {
-                    self.current_spinner = name.clone();
-                    self.app_event_tx
-                        .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                if self.selected_spinner_index < names.len() {
+                    if let Some(name) = names.get(self.selected_spinner_index) {
+                        self.current_spinner = name.clone();
+                        self.app_event_tx
+                            .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                    }
+                } else {
+                    // On the pseudo-row: do not change current spinner preview
                 }
             }
         }
@@ -228,28 +233,46 @@ impl ThemeSelectionView {
                 }
             }
             Mode::Overview => {}
+            Mode::CreateSpinner(_) => {}
         }
         self.mode = Mode::Overview;
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-enum Mode { Overview, Themes, Spinner }
+#[derive(Clone, PartialEq)]
+enum Mode { Overview, Themes, Spinner, CreateSpinner(CreateState) }
+
+#[derive(Clone, PartialEq)]
+struct CreateState {
+    step: CreateStep,
+    interval: String,
+    frames: String,
+    action_idx: usize, // 0 = Save, 1 = Cancel
+}
+
+#[derive(Clone, PartialEq)]
+enum CreateStep { Interval, Frames, Action }
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
-        match self.mode {
+        match &self.mode {
             // Border (2) + inner padding (2) + 2 content rows = 6
             Mode::Overview => 6,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
                 let n = Self::get_theme_options().len() as u16;
-                4 + n.min(9)
+                // Border(2) + padding(2) + title(1)+space(1) + list
+                6 + n.min(9)
             }
             Mode::Spinner => {
-                let n = crate::spinner::spinner_names().len() as u16;
-                4 + n.min(9)
+                // +1 for the "Create your own…" pseudo-row
+                let n = (crate::spinner::spinner_names().len() as u16) + 1;
+                // Border(2) + padding(2) + title(1)+space(1) + list
+                6 + n.min(9)
             }
+            // Title + spacer + 2 fields + buttons + help = 6 content rows
+            // plus border(2) + padding(2) = 10; add 2 rows headroom for small terminals
+            Mode::CreateSpinner(_) => 12,
         }
     }
 
@@ -260,11 +283,20 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
-                    Mode::Overview => {
-                        self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
+                // In create form, Up navigates fields/buttons
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    s.step = match s.step {
+                        CreateStep::Interval => CreateStep::Action,
+                        CreateStep::Frames => CreateStep::Interval,
+                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Action }
+                    };
+                } else {
+                    match self.mode.clone() {
+                        Mode::Overview => {
+                            self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
+                        }
+                        _ => self.move_selection_up(),
                     }
-                    _ => self.move_selection_up(),
                 }
             }
             KeyEvent {
@@ -272,11 +304,20 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
-                    Mode::Overview => {
-                        self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                // In create form, Down navigates fields/buttons
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    s.step = match s.step {
+                        CreateStep::Interval => CreateStep::Frames,
+                        CreateStep::Frames => CreateStep::Action,
+                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Action }
+                    };
+                } else {
+                    match &self.mode.clone() {
+                        Mode::Overview => {
+                            self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                        }
+                        _ => self.move_selection_down(),
                     }
-                    _ => self.move_selection_down(),
                 }
             }
             KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {}
@@ -286,7 +327,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
+                // Take ownership of mode to avoid borrowing self while we may assign to self.mode
+                let current_mode = std::mem::replace(&mut self.mode, Mode::Overview);
+                match current_mode {
                     Mode::Overview => {
                         if self.overview_selected_index == 0 {
                             self.revert_theme_on_back = self.current_theme;
@@ -300,8 +343,44 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                             self.just_entered_spinner = true;
                         }
                     }
-                    Mode::Themes => self.confirm_theme(),
-                    Mode::Spinner => self.confirm_spinner(),
+                    Mode::Themes => {
+                        // confirm_theme sets self.mode back to Overview
+                        self.confirm_theme()
+                    }
+                    Mode::Spinner => {
+                        // If tail row selected (Create your own…), open create form
+                        let names = crate::spinner::spinner_names();
+                        if self.selected_spinner_index >= names.len() {
+                            self.mode = Mode::CreateSpinner(CreateState { step: CreateStep::Interval, interval: String::from("120"), frames: String::new(), action_idx: 0 });
+                        } else {
+                            self.confirm_spinner()
+                        }
+                    }
+                    Mode::CreateSpinner(mut s) => {
+                        let mut go_overview = false;
+                        match s.step {
+                            CreateStep::Interval => { s.step = CreateStep::Frames; }
+                            CreateStep::Frames => { s.step = CreateStep::Action; }
+                            CreateStep::Action => {
+                                if s.action_idx == 0 {
+                                    let interval = s.interval.trim().parse::<u64>().unwrap_or(120);
+                                    let frames: Vec<String> = s.frames.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect();
+                                    if !frames.is_empty() {
+                                        if let Ok(home) = codex_core::config::find_codex_home() { let _ = codex_core::config::set_custom_spinner(&home, "custom", interval, &frames); }
+                                        crate::spinner::add_custom_spinner("custom".to_string(), "Custom".to_string(), interval, frames);
+                                        crate::spinner::switch_spinner("custom");
+                                        self.current_spinner = "custom".to_string();
+                                        self.revert_spinner_on_back = self.current_spinner.clone();
+                                        self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("✓ Custom spinner saved".to_string()));
+                                        go_overview = true;
+                                    } else {
+                                        self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("Provide at least one frame (comma-separated)".to_string()));
+                                    }
+                                } else { /* Cancel → return to overview */ go_overview = true; }
+                            }
+                        }
+                        if go_overview { self.mode = Mode::Overview; } else { self.mode = Mode::CreateSpinner(s); }
+                    }
                 }
             }
             KeyEvent {
@@ -311,7 +390,19 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             } => {
                 match self.mode {
                     Mode::Overview => self.is_complete = true,
+                    Mode::CreateSpinner(_) => { self.mode = Mode::Spinner; }
                     _ => self.cancel_detail(),
+                }
+            }
+            KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    match s.step { CreateStep::Interval => s.interval.push(c), CreateStep::Frames => s.frames.push(c), CreateStep::Action => {} }
+                }
+            }
+            KeyEvent { code: KeyCode::Backspace, .. } => {
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    let tgt = match s.step { CreateStep::Interval => &mut s.interval, CreateStep::Frames => &mut s.frames, CreateStep::Action => { return; } };
+                    tgt.pop();
                 }
             }
             _ => {}
@@ -410,15 +501,20 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
+            // Header: Choose Theme
+            lines.push(Line::from(Span::styled(
+                "Choose Theme",
+                Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+            )));
             // Compute anchored window: top until middle, then center; bottom shows end
             let count = options.len();
-            let visible = available_height.min(9).max(1);
+            let visible = available_height.saturating_sub(1).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_theme_index,
                 count,
                 visible,
             );
-            let end = (start + visible).min(count);
+            let end = (start + visible).min(count + 1); // +1 for "Create your own…"
             for i in start..end {
                 let (theme_enum, name, description) = &options[i];
                 let is_selected = i == self.selected_theme_index;
@@ -460,6 +556,58 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
                 lines.push(Line::from(spans));
             }
+        } else if matches!(self.mode, Mode::CreateSpinner(_)) {
+            // Inline form for custom spinner with visible selection & caret
+            let theme = crate::theme::current_theme();
+            if let Mode::CreateSpinner(s) = &self.mode {
+                let mut form_lines = Vec::new();
+                form_lines.push(Line::from(Span::styled(
+                    "Overview » Change Spinner » Create Custom",
+                    Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                )));
+                form_lines.push(Line::from(" "));
+
+                let caret = Span::styled("▏", Style::default().fg(theme.info));
+                // Interval line
+                {
+                    let active = matches!(s.step, CreateStep::Interval);
+                    let mut spans: Vec<Span> = Vec::new();
+                    spans.push(Span::styled(if active { "› " } else { "  " }, Style::default().fg(theme.keyword)));
+                    spans.push(Span::styled("Interval (ms): ", Style::default().fg(theme.keyword)));
+                    if s.interval.is_empty() && active { spans.push(Span::styled("(e.g., 120)", Style::default().fg(theme.text_dim))); spans.push(caret.clone()); }
+                    else if active { spans.push(Span::raw(s.interval.clone())); spans.push(caret.clone()); }
+                    else { spans.push(Span::raw(s.interval.clone())); }
+                    form_lines.push(Line::from(spans));
+                }
+                // Frames line
+                {
+                    let active = matches!(s.step, CreateStep::Frames);
+                    let mut spans: Vec<Span> = Vec::new();
+                    spans.push(Span::styled(if active { "› " } else { "  " }, Style::default().fg(theme.keyword)));
+                    spans.push(Span::styled("Frames (comma-separated): ", Style::default().fg(theme.keyword)));
+                    if s.frames.is_empty() && active { spans.push(Span::styled("(e.g., ., .., …)", Style::default().fg(theme.text_dim))); spans.push(caret.clone()); }
+                    else if active { spans.push(Span::raw(s.frames.clone())); spans.push(caret.clone()); }
+                    else { spans.push(Span::raw(s.frames.clone())); }
+                    form_lines.push(Line::from(spans));
+                }
+
+                // Action buttons (Save / Cancel)
+                {
+                    let mut spans: Vec<Span> = Vec::new();
+                    let active = matches!(s.step, CreateStep::Action);
+                    let save_selected = active && s.action_idx == 0;
+                    let cancel_selected = active && s.action_idx == 1;
+                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("[ Save ]", sel(save_selected)));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("[ Cancel ]", sel(cancel_selected)));
+                    form_lines.push(Line::from(spans));
+                }
+
+                Paragraph::new(form_lines).alignment(Alignment::Left).render(body_area, buf);
+            }
+            return;
         } else {
             // Spinner: render one centered preview row per spinner, matching the composer title
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -468,8 +616,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .unwrap_or_default()
                 .as_millis();
             let names = crate::spinner::spinner_names();
-            let count = names.len();
-            let visible = available_height.min(9).max(1);
+            // Include an extra pseudo-row for "Create your own…"
+            let count = names.len() + 1;
+            // Reserve two rows (header + spacer)
+            let visible = available_height.saturating_sub(2).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_spinner_index,
                 count,
@@ -485,12 +635,33 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 max_label_len = max_label_len.max(label.chars().count() as u16);
             }
 
+            // Render header (left-aligned) and spacer row
+            let header_rect = Rect { x: body_area.x, y: body_area.y, width: body_area.width, height: 1 };
+            let header = Line::from(Span::styled(
+                "Overview » Change Spinner",
+                Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+            ));
+            Paragraph::new(header).alignment(Alignment::Left).render(header_rect, buf);
+            if header_rect.y + 1 < body_area.y + body_area.height {
+                let spacer = Rect { x: body_area.x, y: body_area.y + 1, width: body_area.width, height: 1 };
+                Paragraph::new(Line::from(" ")).render(spacer, buf);
+            }
+
             for row_idx in 0..(end - start) {
                 let i = start + row_idx;
-                let y = body_area.y + row_idx as u16;
+                // rows start two below (header + spacer)
+                let y = body_area.y + 2 + row_idx as u16;
                 if y >= body_area.y + body_area.height { break; }
 
                 let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
+                if i >= names.len() {
+                    let mut spans = Vec::new();
+                    let is_selected = i == self.selected_spinner_index;
+                    spans.push(Span::styled(if is_selected { "› " } else { "  " }.to_string(), Style::default().fg(if is_selected { theme.keyword } else { theme.text } )));
+                    spans.push(Span::styled("Create your own…", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                    Paragraph::new(Line::from(spans)).render(row_rect, buf);
+                    continue;
+                }
                 let name = &names[i];
                 let is_selected = i == self.selected_spinner_index;
                 let def = crate::spinner::find_spinner_by_name(name).unwrap_or(crate::spinner::current_spinner());
