@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.108] - 2025-09-10
+
+- TUI: Add /theme Overview→Detail flow with live previews for Theme and Spinner selection. (535d0a9c)
+- TUI: Bundle full cli-spinners set and allow choosing your loading spinner; 'diamond' stays default. (990b07a6, 247bb19c)
+- TUI: Improve scrolling with anchored 9-row viewport; keep selector visible and dark-theme friendly. (ad859a33, 8deb7afc)
+- Core: Split stdout/stderr in Exec output and add ERROR divider on failures for clarity. (dff216ec)
+
 ## [0.2.107] - 2025-09-09
 
 - Core: Fix planning crash on UTF-8 boundary when previewing streamed text. (daa76709)
