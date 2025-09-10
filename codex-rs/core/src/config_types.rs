@@ -229,14 +229,27 @@ pub struct SpinnerSelection {
     /// by Codex. Defaults to "diamond".
     #[serde(default = "default_spinner_name")] 
     pub name: String,
+    /// Custom spinner definitions saved by the user
+    #[serde(default)]
+    pub custom: std::collections::HashMap<String, CustomSpinner>,
 }
 
 fn default_spinner_name() -> String { "diamond".to_string() }
 
 impl Default for SpinnerSelection {
     fn default() -> Self {
-        Self { name: default_spinner_name() }
+        Self { name: default_spinner_name(), custom: Default::default() }
     }
+}
+
+/// User-defined custom spinner
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct CustomSpinner {
+    pub interval: u64,
+    pub frames: Vec<String>,
+    /// Optional human-readable label to display in the UI
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 /// Configuration for syntax highlighting in Markdown code blocks.

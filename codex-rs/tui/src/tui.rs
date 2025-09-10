@@ -50,8 +50,25 @@ impl std::fmt::Debug for TerminalInfo {
 pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     // Initialize the theme based on config
     crate::theme::init_theme(&config.tui.theme);
-    // Initialize spinner selection based on config
+    // Initialize spinner selection and register custom spinners from config
     crate::spinner::init_spinner(&config.tui.spinner.name);
+    if !config.tui.spinner.custom.is_empty() {
+        let mut custom = Vec::new();
+        for (name, cs) in &config.tui.spinner.custom {
+            let label = cs
+                .label
+                .clone()
+                .unwrap_or_else(|| crate::spinner::spinner_label_for(name));
+            custom.push(crate::spinner::Spinner {
+                name: name.clone(),
+                label,
+                group: "Custom".to_string(),
+                interval_ms: cs.interval,
+                frames: cs.frames.clone(),
+            });
+        }
+        crate::spinner::set_custom_spinners(custom);
+    }
     // Initialize syntax highlighting preference from config
     crate::syntax_highlight::init_highlight_from_config(&config.tui.highlight);
 

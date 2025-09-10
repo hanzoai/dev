@@ -3,6 +3,35 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.117] - 2025-09-10
+
+- TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt. (a48ad2a1)
+- TUI/Spinner: balance Create preview spacing; adjust border width and message text. (998d3db9)
+
+## [0.2.116] - 2025-09-10
+
+- TUI: AI-driven custom spinner generator with live streaming, JSON schema, and preview. (d7728375)
+- Spinner: accept "name" in custom JSON; persist label; show labels in Overview; replace on save. (704286d3)
+- TUI: dim "Create your own…" until selected; use primary + bold on selection. (09685ea5)
+- TUI: fix Create Spinner spacing; avoid double blank lines; keep single spacer. (7fe209a0)
+- Core: add TextFormat and include text.format in requests. (d7728375)
+
+## [0.2.115] - 2025-09-10
+
+- TUI/Status: keep spinner visible during transient stream errors; show 'Reconnecting' instead of clearing. (56d7784f)
+- TUI/Status: treat retry/disconnect errors as background notices rather than fatal failures. (56d7784f)
+
+## [0.2.114] - 2025-09-10
+
+- TUI: honor custom spinner selection by name; treat as current. (a806d640)
+- TUI: show custom spinner immediately and return to Overview on save. (a806d640)
+
+## [0.2.113] - 2025-09-10
+
+- TUI: improve Create Custom spinner UX with focused fields, keyboard navigation, and clear Save/Cancel flow; activating saved spinner immediately. (08a2f0ee)
+- TUI: refine spinner list spacing and borders; dim non-selected rows for clearer focus. (a6009916, 7e865ac9)
+- Build: fix preview release slug resolution from code/<slug> with fallbacks. (722af737)
+
 ## [0.2.112] - 2025-09-10
 
 - TUI: group spinner list with dim headers and restore selector arrow for clearer navigation. (085fe5f3)

@@ -58,6 +58,9 @@ pub struct Prompt {
 
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
+
+    /// Optional `text.format` for structured outputs (used by side-channel requests).
+    pub text_format: Option<TextFormat>,
 }
 
 impl Prompt {
@@ -212,6 +215,8 @@ pub(crate) struct Reasoning {
 #[derive(Debug, Serialize)]
 pub(crate) struct Text {
     pub(crate) verbosity: OpenAiTextVerbosity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<TextFormat>,
 }
 
 /// OpenAI text verbosity level for serialization.
@@ -232,6 +237,19 @@ impl From<TextVerbosityConfig> for OpenAiTextVerbosity {
             TextVerbosityConfig::High => OpenAiTextVerbosity::High,
         }
     }
+}
+
+/// Optional structured output format for `text.format` in the Responses API.
+#[derive(Debug, Serialize, Clone)]
+pub struct TextFormat {
+    #[serde(rename = "type")]
+    pub r#type: String, // e.g. "json_schema"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<serde_json::Value>,
 }
 
 /// Limits the number of screenshots in the input to a maximum of 5.

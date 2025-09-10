@@ -83,6 +83,7 @@ pub use codex_protocol::models as models;
 // Keep these stable to avoid breaking callers.
 pub use crate::client::ModelClient;
 pub use crate::client_common::Prompt;
+pub use crate::client_common::TextFormat;
 pub use crate::client_common::ResponseEvent;
 pub use crate::client_common::ResponseStream;
 pub use codex_protocol::models::ContentItem;

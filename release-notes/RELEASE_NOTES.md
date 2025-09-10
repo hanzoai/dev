@@ -1,16 +1,18 @@
-## @just-every/code v0.2.112
+## @just-every/code v0.2.117
 
-This release improves TUI spinner navigation and refines labels/triage workflows.
+This release improves paste handling in the TUI and refines the Create Spinner preview for clearer visuals.
 
 ### Changes
-- TUI: group spinner list with dim headers and restore selector arrow for clearer navigation
-- Repo: adopt code/<slug> label prefix with id/ fallback across workflows
-- Triage: add allow/block/building/complete labels and use label as SSOT for slug in workflows
+
+- TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt.
+- TUI/Spinner: balance Create preview spacing; adjust border width and message text.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.111...v0.2.112
+Compare: https://github.com/just-every/code/compare/v0.2.116...v0.2.117
+
