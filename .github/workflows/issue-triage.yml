@@ -460,6 +460,7 @@ jobs:
             gate_reason=$(printf "Rate: %s\nSafety: %s" "${reason_rate:-none}" "${reason_safety:-none}")
             printf '%s\n\n%s\n' \
               "Thanks @${ACTOR}! This issue was auto-reviewed." \
+              "" \
               "For safety, the bot did not auto-apply changes." \
               "${gate_reason}" \
               > .github/auto/ISSUE_COMMENT.md
@@ -510,14 +511,14 @@ jobs:
         env:
           SUGGESTED_ID: ${{ steps.safety.outputs.suggested_id }}
 
-      - name: Apply id/<slug> label and remove ID marker comments
+      - name: Apply code/<slug> label and remove ID marker comments
         uses: actions/github-script@v7
         with:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
             const slug = `${{ steps.slug.outputs.slug }}`;
             if (slug) {
-              try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [`id/${slug}`] }); } catch {}
+              try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [`code/${slug}`] }); } catch {}
             }
             // Remove any previous codex-id marker comments to keep issues tidy
             try {
