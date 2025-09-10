@@ -4511,6 +4511,25 @@ impl ChatWidget<'_> {
         self.history_push(history_cell::new_background_event(message));
     }
 
+    pub(crate) fn set_spinner(&mut self, spinner_name: String) {
+        // Update the config
+        self.config.tui.spinner.name = spinner_name.clone();
+        // Persist selection to config file
+        if let Ok(home) = codex_core::config::find_codex_home() {
+            if let Err(e) = codex_core::config::set_tui_spinner_name(&home, &spinner_name) {
+                tracing::warn!("Failed to persist spinner to config.toml: {}", e);
+            } else {
+                tracing::info!("Persisted TUI spinner selection to config.toml");
+            }
+        } else {
+            tracing::warn!("Could not locate Codex home to persist spinner selection");
+        }
+
+        // Confirmation message
+        let message = format!("✓ Spinner changed to {}", spinner_name);
+        self.history_push(history_cell::new_background_event(message));
+    }
+
     fn apply_access_mode_indicator_from_config(&mut self) {
         use codex_core::protocol::AskForApproval;
         use codex_core::protocol::SandboxPolicy;
