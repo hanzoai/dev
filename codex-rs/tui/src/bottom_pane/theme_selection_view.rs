@@ -154,13 +154,25 @@ impl ThemeSelectionView {
             ),
         ];
         // Append custom theme if available (use saved label and light/dark prefix)
-        if let Some(label) = crate::theme::custom_theme_label() {
+        if let Some(label0) = crate::theme::custom_theme_label() {
+            // Sanitize any leading Light/Dark prefix the model may have included
+            let mut label = label0.trim().to_string();
+            for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
+                if label.starts_with(pref) {
+                    label = label[pref.len()..].trim().to_string();
+                    break;
+                }
+            }
             let name = if crate::theme::custom_theme_is_dark().unwrap_or(false) {
                 format!("Dark - {}", label)
             } else {
                 format!("Light - {}", label)
             };
-            v.push((ThemeName::Custom, Box::leak(name.into_boxed_str()), "Your saved custom theme"));
+            v.push((
+                ThemeName::Custom,
+                Box::leak(name.into_boxed_str()),
+                "Your saved custom theme",
+            ));
         }
         v
     }
@@ -597,7 +609,7 @@ impl ThemeSelectionView {
                             "additionalProperties": false
                         }
                     },
-                    "required": ["name", "colors"],
+                    "required": ["name", "is_dark", "colors"],
                     "additionalProperties": false
                 });
                 let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
@@ -989,7 +1001,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         // If tail row selected (Create your own…), open create form
                         let names = crate::spinner::spinner_names();
                         // Defensive: if selection somehow points to pseudo-row, clamp to current spinner index
-                        if self.selected_spinner_index > names.len() { self.selected_spinner_index = names.len().saturating_sub(1); }
+                        if self.selected_spinner_index > names.len() {
+                            self.selected_spinner_index = names.len().saturating_sub(1);
+                        }
                         if self.selected_spinner_index >= names.len() {
                             self.mode = Mode::CreateSpinner(CreateState {
                                 step: std::cell::Cell::new(CreateStep::Prompt),
@@ -1146,24 +1160,24 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         ) {
                                             crate::theme::set_custom_theme_colors(colors.clone());
                                             crate::theme::set_custom_theme_label(name.clone());
-                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig {
-                                                name: ThemeName::Custom,
-                                                colors,
-                                                label: Some(name),
-                                                is_dark: s.proposed_is_dark.get(),
-                                            });
+                                            crate::theme::init_theme(
+                                                &codex_core::config_types::ThemeConfig {
+                                                    name: ThemeName::Custom,
+                                                    colors,
+                                                    label: Some(name),
+                                                    is_dark: s.proposed_is_dark.get(),
+                                                },
+                                            );
                                         }
                                     } else {
                                         // Revert to previous built-in or Photon if previous was Custom
-                                        let fallback = if self.revert_theme_on_back
-                                            == ThemeName::Custom
-                                        {
-                                            ThemeName::LightPhoton
-                                        } else {
-                                            self.revert_theme_on_back
-                                        };
-                                        self.app_event_tx
-                                            .send(AppEvent::PreviewTheme(fallback));
+                                        let fallback =
+                                            if self.revert_theme_on_back == ThemeName::Custom {
+                                                ThemeName::LightPhoton
+                                            } else {
+                                                self.revert_theme_on_back
+                                            };
+                                        self.app_event_tx.send(AppEvent::PreviewTheme(fallback));
                                     }
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
                                 } else if s.action_idx == 0 {
@@ -1183,7 +1197,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         }
                                         crate::theme::set_custom_theme_label(name.clone());
                                         crate::theme::set_custom_theme_colors(colors.clone());
-                                        crate::theme::set_custom_theme_is_dark(s.proposed_is_dark.get());
+                                        crate::theme::set_custom_theme_is_dark(
+                                            s.proposed_is_dark.get(),
+                                        );
                                         if s.preview_on.get() {
                                             // Keep preview and set active in UI if chosen
                                             crate::theme::init_theme(
@@ -1207,15 +1223,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         // Informative status depending on whether we set active
                                         if s.preview_on.get() {
                                             self.app_event_tx.send(
-                                                AppEvent::InsertBackgroundEventEarly(
-                                                    format!("Set theme to {}", name),
-                                                ),
+                                                AppEvent::InsertBackgroundEventEarly(format!(
+                                                    "Set theme to {}",
+                                                    name
+                                                )),
                                             );
                                         } else {
                                             self.app_event_tx.send(
-                                                AppEvent::InsertBackgroundEventEarly(
-                                                    format!("Saved custom theme {} (not active)", name),
-                                                ),
+                                                AppEvent::InsertBackgroundEventEarly(format!(
+                                                    "Saved custom theme {} (not active)",
+                                                    name
+                                                )),
                                             );
                                         }
                                         go_overview = true;
@@ -1259,33 +1277,31 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 }
                 _ => self.cancel_detail(),
             },
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Char(c), modifiers, .. } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
                     }
-                    match s.step.get() {
-                        CreateStep::Prompt => s.prompt.push(c),
-                        CreateStep::Action | CreateStep::Review => {}
+                    // Accept typing when no modifiers or Shift is held
+                    if matches!(modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+                        match s.step.get() {
+                            CreateStep::Prompt => s.prompt.push(c),
+                            CreateStep::Action | CreateStep::Review => {}
+                        }
                     }
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
                     }
-                    match s.step.get() {
-                        CreateStep::Prompt => s.prompt.push(c),
-                        CreateStep::Action | CreateStep::Review => {}
+                    if matches!(modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+                        match s.step.get() {
+                            CreateStep::Prompt => s.prompt.push(c),
+                            CreateStep::Action | CreateStep::Review => {}
+                        }
                     }
                 }
             }
-            KeyEvent {
-                code: KeyCode::Backspace,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Backspace, .. } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
@@ -1696,7 +1712,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     if let Mode::CreateTheme(ref st) = self.mode {
                         form_lines.push(Line::from(Span::styled(
                             "Overview » Change Theme » Create Custom",
-                            Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(theme.text_bright)
+                                .add_modifier(Modifier::BOLD),
                         )));
                         form_lines.push(Line::default());
                         let name = st
@@ -1707,7 +1725,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         let onoff = if st.preview_on.get() { "on" } else { "off" };
                         let sel = st.review_focus_is_toggle.get();
                         let style = if sel {
-                            Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(theme.text)
                         };
@@ -1718,9 +1738,19 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         form_lines.push(Line::default());
                         let mut spans: Vec<Span> = Vec::new();
                         // When toggle is focused, buttons are unselected
-                        let primary_selected = !st.review_focus_is_toggle.get() && s.action_idx == 0;
-                        let secondary_selected = !st.review_focus_is_toggle.get() && s.action_idx == 1;
-                        let selbtn = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                        let primary_selected =
+                            !st.review_focus_is_toggle.get() && s.action_idx == 0;
+                        let secondary_selected =
+                            !st.review_focus_is_toggle.get() && s.action_idx == 1;
+                        let selbtn = |b: bool| {
+                            if b {
+                                Style::default()
+                                    .fg(theme.primary)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(theme.text)
+                            }
+                        };
                         spans.push(Span::styled("[ Save ]", selbtn(primary_selected)));
                         spans.push(Span::raw("  "));
                         spans.push(Span::styled("[ Retry ]", selbtn(secondary_selected)));
@@ -1734,7 +1764,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     // Spinner review layout (header + preview + buttons)
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Spinner » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     // Theme review header with preview toggle when in theme mode
                     if let Mode::CreateTheme(ref st) = self.mode {
@@ -2040,7 +2072,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     // Header
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Theme » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     form_lines.push(Line::default());
                     // Toggle line: Now showing <Name> [on|off]
@@ -2051,7 +2085,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         .unwrap_or_else(|| "Custom".to_string());
                     let onoff = if s.preview_on.get() { "on" } else { "off" };
                     let toggle_style = if s.review_focus_is_toggle.get() {
-                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme.text)
                     };
@@ -2064,7 +2100,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     let mut spans: Vec<Span> = Vec::new();
                     let save_sel = !s.review_focus_is_toggle.get() && s.action_idx == 0;
                     let retry_sel = !s.review_focus_is_toggle.get() && s.action_idx == 1;
-                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    let sel = |b: bool| {
+                        if b {
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        }
+                    };
                     spans.push(Span::styled("[ Save ]", sel(save_sel)));
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled("[ Retry ]", sel(retry_sel)));
@@ -2110,7 +2154,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     Style::default().fg(theme.text),
                 )));
                 form_lines.push(Line::from(Span::styled(
-                    "What should it look like? (e.g. OLED dark with cyan + violet accents)",
+                    "What should it look like? (e.g. Light Sunrise with Palm Trees, Dark River with Fireflies)",
                     Style::default().fg(theme.text_dim),
                 )));
                 form_lines.push(Line::default());

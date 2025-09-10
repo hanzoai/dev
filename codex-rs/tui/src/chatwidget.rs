@@ -4702,7 +4702,11 @@ impl ChatWidget<'_> {
             codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro".to_string(),
             codex_core::config_types::ThemeName::Custom => {
                 // Use saved custom name and is_dark to show a friendly label
-                let label = crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
+                let mut label = crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
+                // Sanitize leading Light/Dark if present
+                for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
+                    if label.starts_with(pref) { label = label[pref.len()..].trim().to_string(); break; }
+                }
                 if crate::theme::custom_theme_is_dark().unwrap_or(false) {
                     format!("Dark - {}", label)
                 } else {
