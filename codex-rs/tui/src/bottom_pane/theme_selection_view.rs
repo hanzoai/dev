@@ -191,7 +191,7 @@ impl ThemeSelectionView {
             }
         } else {
             let names = crate::spinner::spinner_names();
-            // Allow moving onto the extra pseudo-row (Create your own…)
+            // Allow moving onto the extra pseudo-row (Generate your own…)
             if self.selected_spinner_index + 1 <= names.len() {
                 self.selected_spinner_index += 1;
                 if self.selected_spinner_index < names.len() {
@@ -633,14 +633,44 @@ impl ThemeSelectionView {
                 }
 
                 let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+                // Try strict parse first; if that fails, salvage the first JSON object in the text.
                 let v: serde_json::Value = match serde_json::from_str(&out) {
                     Ok(v) => v,
-                    Err(_) => {
-                        let _ = progress_tx.send(ProgressMsg::CompletedErr {
-                            error: "invalid json".to_string(),
-                            _raw_snippet: out.chars().take(200).collect(),
-                        });
-                        return;
+                    Err(e) => {
+                        // Attempt to extract the first top-level JSON object from the stream text
+                        fn extract_first_json_object(s: &str) -> Option<String> {
+                            let mut depth = 0usize;
+                            let mut in_str = false;
+                            let mut esc = false;
+                            let mut start: Option<usize> = None;
+                            for (i, ch) in s.char_indices() {
+                                if in_str {
+                                    if esc { esc = false; }
+                                    else if ch == '\\' { esc = true; }
+                                    else if ch == '"' { in_str = false; }
+                                    continue;
+                                }
+                                match ch {
+                                    '"' => in_str = true,
+                                    '{' => { if depth == 0 { start = Some(i); } depth += 1; },
+                                    '}' => { if depth > 0 { depth -= 1; if depth == 0 { let end = i + ch.len_utf8(); return start.map(|st| s[st..end].to_string()); } } },
+                                    _ => {}
+                                }
+                            }
+                            None
+                        }
+                        if let Some(obj) = extract_first_json_object(&out) {
+                            match serde_json::from_str::<serde_json::Value>(&obj) {
+                                Ok(v) => v,
+                                Err(e2) => {
+                                    let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e2), _raw_snippet: out.chars().take(200).collect() });
+                                    return;
+                                }
+                            }
+                        } else {
+                            let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e), _raw_snippet: out.chars().take(200).collect() });
+                            return;
+                        }
                     }
                 };
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Custom").trim().to_string();
@@ -775,12 +805,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Mode::Overview => 6,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
-                let n = (Self::get_theme_options().len() as u16) + 1; // +1 for "Create your own…"
+                let n = (Self::get_theme_options().len() as u16) + 1; // +1 for "Generate your own…"
                 // Border(2) + padding(2) + title(1)+space(1) + list
                 6 + n.min(9)
             }
             Mode::Spinner => {
-                // +1 for the "Create your own…" pseudo-row
+                // +1 for the "Generate your own…" pseudo-row
                 let n = (crate::spinner::spinner_names().len() as u16) + 1;
                 // Border(2) + padding(2) + title(1)+space(1) + list
                 6 + n.min(9)
@@ -794,7 +824,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
         match key_event {
-            KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Up,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 // In create form, Up navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
@@ -816,8 +850,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     match s.step.get() {
                         CreateStep::Prompt => s.step.set(CreateStep::Action),
-                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } },
-                        CreateStep::Review => { s.review_focus_is_toggle.set(true); },
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                        }
+                        CreateStep::Review => {
+                            s.review_focus_is_toggle.set(true);
+                        }
                     }
                 } else {
                     match self.mode {
@@ -829,7 +869,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
                 // In create form, Down navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
@@ -851,8 +895,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     match s.step.get() {
                         CreateStep::Prompt => s.step.set(CreateStep::Action),
-                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } },
-                        CreateStep::Review => { s.review_focus_is_toggle.set(false); },
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                        }
+                        CreateStep::Review => {
+                            s.review_focus_is_toggle.set(false);
+                        }
                     }
                 } else {
                     match &self.mode {
@@ -896,7 +946,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         }
                     }
                     Mode::Themes => {
-                        // If tail row selected (Create your own…), open create form
+                        // If tail row selected (Generate your own…), open create form
                         let count = Self::get_theme_options().len();
                         if self.selected_theme_index >= count {
                             // Revert preview to the theme before entering Themes list for better legibility
@@ -922,7 +972,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         }
                     }
                     Mode::Spinner => {
-                        // If tail row selected (Create your own…), open create form
+                        // If tail row selected (Generate your own…), open create form
                         let names = crate::spinner::spinner_names();
                         if self.selected_spinner_index >= names.len() {
                             self.mode = Mode::CreateSpinner(CreateState {
@@ -1079,11 +1129,19 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             s.proposed_colors.borrow().clone(),
                                         ) {
                                             crate::theme::set_custom_theme_label(name.clone());
-                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors, label: Some(name) });
+                                            crate::theme::init_theme(
+                                                &codex_core::config_types::ThemeConfig {
+                                                    name: ThemeName::Custom,
+                                                    colors,
+                                                    label: Some(name),
+                                                },
+                                            );
                                         }
                                     } else {
                                         // Revert to previous theme
-                                        self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                        self.app_event_tx.send(AppEvent::PreviewTheme(
+                                            self.revert_theme_on_back,
+                                        ));
                                     }
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
                                 } else if s.action_idx == 0 {
@@ -1093,18 +1151,32 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         s.proposed_colors.borrow().clone(),
                                     ) {
                                         if let Ok(home) = codex_core::config::find_codex_home() {
-                                            let _ = codex_core::config::set_custom_theme(&home, &name, &colors, s.preview_on.get());
+                                            let _ = codex_core::config::set_custom_theme(
+                                                &home,
+                                                &name,
+                                                &colors,
+                                                s.preview_on.get(),
+                                            );
                                         }
                                         crate::theme::set_custom_theme_label(name.clone());
                                         if s.preview_on.get() {
                                             // Keep preview and set active in UI if chosen
-                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors: colors.clone(), label: Some(name.clone()) });
+                                            crate::theme::init_theme(
+                                                &codex_core::config_types::ThemeConfig {
+                                                    name: ThemeName::Custom,
+                                                    colors: colors.clone(),
+                                                    label: Some(name.clone()),
+                                                },
+                                            );
                                             self.revert_theme_on_back = ThemeName::Custom;
                                             self.current_theme = ThemeName::Custom;
-                                            self.app_event_tx.send(AppEvent::UpdateTheme(ThemeName::Custom));
+                                            self.app_event_tx
+                                                .send(AppEvent::UpdateTheme(ThemeName::Custom));
                                         } else {
                                             // Saved but not active: revert to previous theme visually
-                                            self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                            self.app_event_tx.send(AppEvent::PreviewTheme(
+                                                self.revert_theme_on_back,
+                                            ));
                                         }
                                         self.app_event_tx.send(
                                             AppEvent::InsertBackgroundEventEarly(
@@ -1361,7 +1433,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     .add_modifier(Modifier::BOLD),
             )));
             // Compute anchored window: top until middle, then center; bottom shows end
-            let count = options.len() + 1; // include pseudo-row for Create your own…
+            let count = options.len() + 1; // include pseudo-row for Generate your own…
             let visible = available_height.saturating_sub(1).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_theme_index,
@@ -1372,7 +1444,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             for i in start..end {
                 let is_selected = i == self.selected_theme_index;
                 if i >= options.len() {
-                    // Pseudo-row: Create your own…
+                    // Pseudo-row: Generate your own…
                     let mut spans = vec![Span::raw(" ")];
                     if is_selected {
                         spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
@@ -1386,7 +1458,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     } else {
                         Style::default().fg(theme.text_dim)
                     };
-                    spans.push(Span::styled("Create your own…", label_style));
+                    spans.push(Span::styled("Generate your own…", label_style));
                     lines.push(Line::from(spans));
                     continue;
                 }
@@ -1598,7 +1670,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         let onoff = if st.preview_on.get() { "on" } else { "off" };
                         let sel = st.review_focus_is_toggle.get();
                         let style = if sel {
-                            Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(theme.text)
                         };
@@ -1992,7 +2066,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .unwrap_or_default()
                 .as_millis();
             let names = crate::spinner::spinner_names();
-            // Include an extra pseudo-row for "Create your own…"
+            // Include an extra pseudo-row for "Generate your own…"
             let count = names.len() + 1;
             // Reserve two rows (header + spacer)
             let visible = available_height.saturating_sub(2).min(9).max(1);
@@ -2071,7 +2145,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     } else {
                         Style::default().fg(theme.text_dim)
                     };
-                    spans.push(Span::styled("Create your own…", label_style));
+                    spans.push(Span::styled("Generate your own…", label_style));
                     Paragraph::new(Line::from(spans)).render(row_rect, buf);
                     continue;
                 }
