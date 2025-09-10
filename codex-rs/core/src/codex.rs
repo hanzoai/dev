@@ -1435,6 +1435,9 @@ impl State {
         Self {
             approved_commands: self.approved_commands.clone(),
             history: self.history.clone(),
+            // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
+            // do not reset provider ordering mid-session.
+            request_ordinal: self.request_ordinal,
             ..Default::default()
         }
     }
