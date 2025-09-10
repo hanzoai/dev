@@ -4,6 +4,7 @@ use crate::config_types::BrowserConfig;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
 use crate::config_types::ThemeName;
+use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
@@ -451,6 +452,70 @@ pub fn set_custom_spinner(
 
     // Set as active
     doc["tui"]["spinner"]["name"] = toml_edit::value(id);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Save or update a custom theme with a display `label` and color overrides
+/// under `[tui.theme]`, and set it active by writing `[tui.theme].name = "custom"`.
+pub fn set_custom_theme(
+    codex_home: &Path,
+    label: &str,
+    colors: &ThemeColors,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    // Activate custom theme and persist label
+    doc["tui"]["theme"]["name"] = toml_edit::value("custom");
+    doc["tui"]["theme"]["label"] = toml_edit::value(label);
+
+    // Ensure colors table exists and write provided keys
+    {
+        use toml_edit::Item as It;
+        if !doc["tui"]["theme"].is_table() {
+            doc["tui"]["theme"] = It::Table(toml_edit::Table::new());
+        }
+        let theme_tbl = doc["tui"]["theme"].as_table_mut().unwrap();
+        if !theme_tbl.contains_key("colors") {
+            theme_tbl.insert("colors", It::Table(toml_edit::Table::new()));
+        }
+        let colors_tbl = theme_tbl["colors"].as_table_mut().unwrap();
+        macro_rules! set_opt {
+            ($key:ident) => {
+                if let Some(ref v) = colors.$key { colors_tbl.insert(stringify!($key), toml_edit::value(v.clone())); }
+            };
+        }
+        set_opt!(primary);
+        set_opt!(secondary);
+        set_opt!(background);
+        set_opt!(foreground);
+        set_opt!(border);
+        set_opt!(border_focused);
+        set_opt!(selection);
+        set_opt!(cursor);
+        set_opt!(success);
+        set_opt!(warning);
+        set_opt!(error);
+        set_opt!(info);
+        set_opt!(text);
+        set_opt!(text_dim);
+        set_opt!(text_bright);
+        set_opt!(keyword);
+        set_opt!(string);
+        set_opt!(comment);
+        set_opt!(function);
+        set_opt!(spinner);
+        set_opt!(progress);
+    }
 
     std::fs::create_dir_all(codex_home)?;
     let tmp = NamedTempFile::new_in(codex_home)?;
