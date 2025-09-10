@@ -90,6 +90,15 @@ jobs:
             const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: prNumber, per_page: 100 });
             const changed = files.map(f => `- ${f.status.padEnd(6)} ${f.filename}`).slice(0, 50);
 
+            // Issue author
+            let issueAuthor = '';
+            if (issueNumber) {
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                issueAuthor = iss.user?.login || '';
+              } catch {}
+            }
+
             // Collect latest commit subjects on the PR (brief)
             let commits = [];
             try {
@@ -105,6 +114,7 @@ jobs:
             core.setOutput('base', pr.base.ref || '');
             core.setOutput('changed', changed.join('\n'));
             core.setOutput('commits', commits.join('\n'));
+            core.setOutput('issue_author', issueAuthor);
 
       - name: Prepare context file
         id: ctx
@@ -115,6 +125,7 @@ jobs:
           BODY: ${{ steps.meta.outputs.body }}
           CHANGED: ${{ steps.meta.outputs.changed }}
           COMMITS: ${{ steps.meta.outputs.commits }}
+          ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
         with:
           script: |
             const fs = require('fs');
@@ -146,17 +157,6 @@ jobs:
               if (mm) { const n = parseInt(mm[1], 10); if (n > maxN) { maxN = n; tag = t; } }
             }
             const releaseBase = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
-            const dl = [
-              `- Linux x86_64 (.zst): ${releaseBase}/code-x86_64-unknown-linux-musl.zst`,
-              `- Linux x86_64 (.tar.gz): ${releaseBase}/code-x86_64-unknown-linux-musl.tar.gz`,
-              `- Linux aarch64 (.zst): ${releaseBase}/code-aarch64-unknown-linux-musl.zst`,
-              `- Linux aarch64 (.tar.gz): ${releaseBase}/code-aarch64-unknown-linux-musl.tar.gz`,
-              `- macOS x86_64 (.zst): ${releaseBase}/code-x86_64-apple-darwin.zst`,
-              `- macOS x86_64 (.tar.gz): ${releaseBase}/code-x86_64-apple-darwin.tar.gz`,
-              `- macOS arm64 (.zst): ${releaseBase}/code-aarch64-apple-darwin.zst`,
-              `- macOS arm64 (.tar.gz): ${releaseBase}/code-aarch64-apple-darwin.tar.gz`,
-              `- Windows x86_64 (.zip): ${releaseBase}/code-x86_64-pc-windows-msvc.exe.zip`,
-            ].join('\n');
             const lines = [];
             lines.push(`# PR #${pr}: ${process.env.TITLE || ''}`);
             lines.push('');
@@ -180,8 +180,7 @@ jobs:
             lines.push(`code preview ${slug}`);
             lines.push('```');
             lines.push('');
-            lines.push('## Direct downloads');
-            lines.push(dl);
+            lines.push(`Issue author: @${process.env.ISSUE_AUTHOR || ''}`);
             fs.mkdirSync('.github/auto', { recursive: true });
             fs.writeFileSync('.github/auto/ISSUE_PREVIEW_CONTEXT.md', lines.join('\n'));
 
@@ -222,16 +221,40 @@ jobs:
       - name: Generate comment with Code (read-only)
         id: gen
         continue-on-error: true
+        env:
+          ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME";
           PROMPT=$(cat <<'EOP'
           <task>
-          Write a concise, friendly issue comment that:
-          - Explains what PR below does in 2–4 bullets (user-facing impact only).
-          - Tells the reporter how to run the preview (include the exact command block provided).
-          - Includes the direct download links section.
-          Keep it short and actionable. Do not include CI or maintainer-only details.
+          You are writing a friendly, user‑facing issue reply about a successful preview build.
+          Use the following template, but adapt all language to this specific change. Fix any spelling or grammar.
+          You MUST mention the original issue author (replace @user) at the start.
+          You MAY remove sections that repeat earlier replies.
+
+          TEMPLATE (example):
+          ---
+          @user Thanks for the great feature request! Changing the title is an interesting personalization and ties in really well with our existing theme options. [Replace this sentence with specific feedback to the user and reference their idea. Always start by mentioning them.]
+
+          I’ve added the ability to edit the title from the /theme slash command, since that’s where the existing theme functionality lives. [Explain in simple, non‑technical language what changed.]
+
+          You can run this right now—can’t wait for you to try it! In your terminal, run: [Be excited but concise.]
+          ```
+          code preview <slug here>
+          ```
+          Then run /theme in the terminal to see the new option. [Explain how to try it once launched.]
+
+          Can’t wait for you to try changing your title! Please comment here if it’s working well or needs tweaks. Maintainers will review and, if merged into a release, you’ll get an update here. Thanks again! [Positive, personable close.]
+
+          Changes made:
+          - Added title customization – (link to PR or commit) [Summarize notable change(s).]
+          ---
+
+          REQUIREMENTS:
+          - Replace <slug here> with the exact preview command from the context below.
+          - Do NOT include direct download links.
+          - Keep it brief, clear, and kind.
           </task>
           <context>
           $(cat .github/auto/ISSUE_PREVIEW_CONTEXT.md)
@@ -306,31 +329,22 @@ jobs:
                 const all = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr, per_page: 100 });
                 commits = all.slice(-5).map(c => `- ${c.commit.message.split('\n')[0]}`);
               } catch {}
+              // Synthesized fallback matching the template (no direct downloads)
+              const issueAuthor = `${{ steps.meta.outputs.issue_author }}` || '';
               body = [
                 ISSUE_MARK,
-                '### Preview Build',
+                `@${issueAuthor} Thanks for the great request — a preview is ready!`,
                 '',
-                'You can run this right now! In your terminal just use:',
+                'You can run it right now:',
                 '```bash',
                 `code preview ${slug}`,
                 '```',
-                'This will run the version of Code we\'ve created for this issue.',
-                '',
-                commits.length ? '#### What changed in this build (recent commits)' : '',
+                commits.length ? '\n#### What changed in this build (recent commits)' : '',
                 commits.length ? commits.join('\n') : '',
-                commits.length ? '' : '',
-                'Direct downloads:',
-                `- Linux x86_64 (.zst): ${base}/code-x86_64-unknown-linux-musl.zst`,
-                `- Linux x86_64 (.tar.gz): ${base}/code-x86_64-unknown-linux-musl.tar.gz`,
-                `- Linux aarch64 (.zst): ${base}/code-aarch64-unknown-linux-musl.zst`,
-                `- Linux aarch64 (.tar.gz): ${base}/code-aarch64-unknown-linux-musl.tar.gz`,
-                `- macOS x86_64 (.zst): ${base}/code-x86_64-apple-darwin.zst`,
-                `- macOS x86_64 (.tar.gz): ${base}/code-x86_64-apple-darwin.tar.gz`,
-                `- macOS arm64 (.zst): ${base}/code-aarch64-apple-darwin.zst`,
-                `- macOS arm64 (.tar.gz): ${base}/code-aarch64-apple-darwin.tar.gz`,
-                `- Windows x86_64 (.zip): ${base}/code-x86_64-pc-windows-msvc.exe.zip`,
+                '',
+                'Please let us know here if it works well or needs tweaks. Maintainers will review and, if merged, you’ll get an update here. Thanks again! ',
                 ISSUE_MARK
-              ].join('\n');
+              ].filter(Boolean).join('\n');
             }
             // Upsert by marker on the issue
             const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
