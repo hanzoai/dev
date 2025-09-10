@@ -126,11 +126,13 @@ jobs:
           CHANGED: ${{ steps.meta.outputs.changed }}
           COMMITS: ${{ steps.meta.outputs.commits }}
           ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
+          ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
         with:
           script: |
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
             const pr = Number(process.env.PR_NUMBER);
+            const issue_number = Number(process.env.ISSUE_NUMBER || 0);
             // resolve slug
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
             const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
@@ -160,6 +162,8 @@ jobs:
             const lines = [];
             lines.push(`# PR #${pr}: ${process.env.TITLE || ''}`);
             lines.push('');
+            lines.push(`PR: https://github.com/${owner}/${repo}/pull/${pr}`);
+            lines.push('');
             if ((process.env.BODY || '').trim()) {
               lines.push('## PR body');
               lines.push(process.env.BODY.trim());
@@ -170,10 +174,40 @@ jobs:
               lines.push(process.env.CHANGED.trim());
               lines.push('');
             }
-            if ((process.env.COMMITS || '').trim()) {
-              lines.push('## What changed in this build (recent commits)');
-              lines.push(process.env.COMMITS.trim());
-              lines.push('');
+            // Commit subjects and links
+            try {
+              const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr, per_page: 100 });
+              const recent = commits.slice(-5);
+              if (recent.length) {
+                lines.push('## What changed in this build (recent commits)');
+                lines.push(recent.map(c => `- ${c.commit.message.split('\n')[0]}`).join('\n'));
+                lines.push('');
+                lines.push('## Commit links');
+                lines.push(recent.map(c => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0,7)}): https://github.com/${owner}/${repo}/commit/${c.sha}`).join('\n'));
+                lines.push('');
+              }
+            } catch {}
+            // Issue body and recent comments for agent context
+            if (issue_number) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+                lines.push('## Issue #'+issue_number+' context');
+                lines.push('### Issue body');
+                lines.push((issue.body || '').trim());
+                lines.push('');
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                if (comments.length) {
+                  lines.push('### Recent issue comments (newest first, up to 10)');
+                  const last = comments.slice(-10).reverse();
+                  for (const c of last) {
+                    const when = (c.created_at || '').replace('T',' ').replace('Z','');
+                    lines.push(`- [@${c.user?.login||'unknown'} at ${when}]`);
+                    const body = (c.body || '').trim();
+                    lines.push(body.length > 1200 ? body.slice(0,1200)+"\n…" : body);
+                    lines.push('');
+                  }
+                }
+              } catch {}
             }
             lines.push('## Preview command');
             lines.push('```bash');
@@ -247,7 +281,10 @@ jobs:
           Can’t wait for you to try changing your title! Please comment here if it’s working well or needs tweaks. Maintainers will review and, if merged into a release, you’ll get an update here. Thanks again! [Positive, personable close.]
 
           Changes made:
-          - Added title customization – (link to PR or commit) [Summarize notable change(s).]
+          - Added title customization [Summarize notable change(s).]
+
+          Commits:
+          - [Link to any commits]
           ---
 
           REQUIREMENTS:
