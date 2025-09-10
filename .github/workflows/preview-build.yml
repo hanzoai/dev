@@ -232,6 +232,13 @@ jobs:
           TITLE: ${{ steps.slug.outputs.title }}
         shell: bash
         run: |
+          # Add state label triage/building to the linked issue (best-effort)
+          owner=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1); repo=$(echo "$GITHUB_REPOSITORY" | cut -d/ -f2)
+          pr=${{ github.event.pull_request.number }}
+          issue_number="$(gh pr view "$pr" --json headRefName --jq '.headRefName' | sed -n 's/^issue-\([0-9]\+\)$/\1/p' || true)"
+          if [ -n "$issue_number" ]; then
+            gh api -X POST "/repos/$owner/$repo/issues/$issue_number/labels" -f labels[]='triage/building' >/dev/null 2>&1 || true
+          fi
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY}"
           # Show files for debugging
@@ -273,8 +280,15 @@ jobs:
               const b = pull.head.ref || '';
               const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
               if (issue_number) {
-                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                try {
+                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
+                  const idLabel = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).find(n => typeof n === 'string' && n.startsWith('id/'));
+                  if (idLabel) slug = idLabel.slice(3).toLowerCase();
+                } catch {}
+                if (!slug) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                }
               }
             }
             if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
@@ -337,4 +351,19 @@ jobs:
               await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number: pr_number, body });
+            }
+
+      - name: Mark triage complete on linked issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const pr = context.payload.pull_request.number;
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
+            const b = pull.head.ref || '';
+            const im = b.match(/^issue-(\d+)$/);
+            if (im) {
+              const issue_number = Number(im[1]);
+              try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['triage/complete'] }); } catch {}
+              try { await github.rest.issues.removeLabel({ owner, repo, issue_number, name: 'triage/building' }); } catch {}
             }
