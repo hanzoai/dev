@@ -797,6 +797,7 @@ async fn execute_model_with_permissions(
 }
 
 // Tool creation functions
+#[allow(dead_code)]
 pub fn create_run_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
@@ -862,6 +863,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     })
 }
 
+#[allow(dead_code)]
 pub fn create_check_agent_status_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
@@ -884,6 +886,7 @@ pub fn create_check_agent_status_tool() -> OpenAiTool {
     })
 }
 
+#[allow(dead_code)]
 pub fn create_get_agent_result_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
@@ -906,6 +909,7 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
     })
 }
 
+#[allow(dead_code)]
 pub fn create_cancel_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
@@ -940,6 +944,7 @@ pub fn create_cancel_agent_tool() -> OpenAiTool {
     })
 }
 
+#[allow(dead_code)]
 pub fn create_wait_for_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
@@ -992,6 +997,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
     })
 }
 
+#[allow(dead_code)]
 pub fn create_list_agents_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
 
