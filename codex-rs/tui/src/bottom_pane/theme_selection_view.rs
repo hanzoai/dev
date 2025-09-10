@@ -549,9 +549,9 @@ impl ThemeSelectionView {
                     std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
-                // Prompt with example
+                // Prompt with example and detailed field usage to help the model choose appropriate colors
                 let developer = format!(
-                    "You are designing a TUI color theme.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- Provide a human-friendly `name`.\n- Provide a `colors` object with hex color strings (e.g., #RRGGBB).\n- IMPORTANT: Include EVERY key listed below. If you don't wish to change a color, copy the value from the Current example. Keys: primary, secondary, background, foreground, border, border_focused, selection, cursor, success, warning, error, info, text, text_dim, text_bright, keyword, string, comment, function, spinner, progress.\n- Ensure good contrast and accessibility.\n- Prefer cohesive palettes.\n\nCurrent theme example (for reference; copy unchanged values from here):\n{}",
+                    "You are designing a TUI color theme for a terminal UI.\n\nOutput: Strict JSON only. Include fields: `name` (string), `is_dark` (boolean), and `colors` (object of hex strings #RRGGBB).\n\nImportant rules:\n- Include EVERY `colors` key below. If you are not changing a value, copy it from the Current example.\n- Ensure strong contrast and readability for text vs background and for dim/bright variants.\n- Favor accessible color contrast (WCAG-ish) where possible.\n\nColor semantics (how the UI uses them):\n- background: main screen background.\n- foreground: primary foreground accents for widgets.\n- text: normal body text; must be readable on background.\n- text_dim: secondary/description text; slightly lower contrast than text.\n- text_bright: headings/emphasis; higher contrast than text.\n- primary: primary action/highlight color for selected items/buttons.\n- secondary: secondary accents (less prominent than primary).\n- border: container borders/dividers; should be visible but subtle against background.\n- border_focused: border when focused/active; slightly stronger than border.\n- selection: background for selected list rows; must contrast with text.\n- cursor: text caret color in input fields; must contrast with background.\n- success/warning/error/info: status badges and notices.\n- keyword/string/comment/function: syntax highlight accents in code blocks.\n- spinner: glyph color for loading animations; should be visible on background.\n- progress: progress-bar foreground color.\n\nCurrent theme example (copy unchanged values from here):\n{}",
                     example.to_string()
                 );
                 let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
@@ -1204,11 +1204,20 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                 self.revert_theme_on_back,
                                             ));
                                         }
-                                        self.app_event_tx.send(
-                                            AppEvent::InsertBackgroundEventEarly(
-                                                "Custom theme saved".to_string(),
-                                            ),
-                                        );
+                                        // Informative status depending on whether we set active
+                                        if s.preview_on.get() {
+                                            self.app_event_tx.send(
+                                                AppEvent::InsertBackgroundEventEarly(
+                                                    format!("Set theme to {}", name),
+                                                ),
+                                            );
+                                        } else {
+                                            self.app_event_tx.send(
+                                                AppEvent::InsertBackgroundEventEarly(
+                                                    format!("Saved custom theme {} (not active)", name),
+                                                ),
+                                            );
+                                        }
                                         go_overview = true;
                                     }
                                 } else {
