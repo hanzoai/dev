@@ -74,6 +74,14 @@ jobs:
             let slug = (context.eventName === 'repository_dispatch' && context.payload.client_payload && context.payload.client_payload.slug) ? String(context.payload.client_payload.slug).toLowerCase() : '';
             const markerRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
             if (!slug) {
+              // Try issue label id/<slug>
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+                const idLabel = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name)).find(n => typeof n === 'string' && n.startsWith('id/'));
+                if (idLabel) slug = idLabel.slice(3).toLowerCase();
+              } catch {}
+            }
+            if (!slug) {
               const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
               for (const c of comments) { const m = (c.body || '').match(markerRe); if (m) { slug = m[1].toLowerCase(); break; } }
             }

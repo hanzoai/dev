@@ -295,6 +295,11 @@ pub(crate) struct ChatWidget<'a> {
     // Pending one-shot note about the latest access-mode change to inject into
     // the agent's conversation history on the next user message.
     pending_access_note: Option<String>,
+
+    // Stable synthetic request bucket for pre‑turn system notices (set on first use)
+    synthetic_system_req: Option<u64>,
+    // Map of system notice ids to their history index for in-place replacement
+    system_cell_by_id: std::collections::HashMap<String, usize>,
 }
 
 struct PendingJumpBack {
@@ -433,7 +438,87 @@ impl AsRef<str> for StreamId {
     }
 }
 
+// ---- System notice ordering helpers ----
+#[derive(Copy, Clone)]
+enum SystemPlacement {
+    /// Place near the top of the current request (before most provider output)
+    EarlyInCurrent,
+    /// Place at the end of the current request window (after provider output)
+    EndOfCurrent,
+    /// Place before the first user prompt of the very first request
+    /// (used for pre‑turn UI confirmations like theme/spinner changes)
+    PrePromptInCurrent,
+}
+
 impl ChatWidget<'_> {
+
+    /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
+    /// creating multiple synthetic request buckets before the first provider turn.
+    fn system_order_key(
+        &mut self,
+        placement: SystemPlacement,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) -> OrderKey {
+        // If the provider supplied OrderMeta, honor it strictly.
+        if let Some(om) = order {
+            return Self::order_key_from_order_meta(om);
+        }
+
+        // Derive a stable request bucket for system notices:
+        //  - If we've seen provider traffic, use that request.
+        //  - Otherwise, use a sticky synthetic req = 1 so multiple UI
+        //    notices remain grouped together until first turn arrives.
+        let req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            // Sticky synthetic request (1) until first OrderMeta arrives.
+            // Keep a cached value to avoid accidental drift if logic changes.
+            if self.synthetic_system_req.is_none() {
+                self.synthetic_system_req = Some(1);
+            }
+            self.synthetic_system_req.unwrap_or(1)
+        };
+
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        match placement {
+            SystemPlacement::EarlyInCurrent => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
+            SystemPlacement::EndOfCurrent => OrderKey { req, out: i32::MAX, seq: self.internal_seq },
+            SystemPlacement::PrePromptInCurrent => OrderKey { req, out: i32::MIN, seq: self.internal_seq },
+        }
+    }
+
+    /// Insert or replace a system notice cell with consistent ordering.
+    /// If `id_for_replace` is provided and we have a prior index for it, replace in place.
+    fn push_system_cell(
+        &mut self,
+        cell: impl HistoryCell + 'static,
+        placement: SystemPlacement,
+        id_for_replace: Option<String>,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) {
+        if let Some(id) = id_for_replace.as_ref() {
+            if let Some(&idx) = self.system_cell_by_id.get(id) {
+                self.history_replace_at(idx, Box::new(cell));
+                return;
+            }
+        }
+        let key = self.system_order_key(placement, order);
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "system");
+        if let Some(id) = id_for_replace {
+            self.system_cell_by_id.insert(id, pos);
+        }
+    }
+
+    /// Decide where to place a UI confirmation right now.
+    /// If we're truly pre‑turn (no provider traffic yet, and no queued prompt),
+    /// place before the first user prompt. Otherwise, append to end of current.
+    fn ui_placement_for_now(&self) -> SystemPlacement {
+        if self.last_seen_request_index == 0 && self.pending_user_prompts_for_next_turn == 0 {
+            SystemPlacement::PrePromptInCurrent
+        } else {
+            SystemPlacement::EndOfCurrent
+        }
+    }
     pub(crate) fn enable_perf(&mut self, enable: bool) {
         self.perf_state.enabled = enable;
     }
@@ -1548,6 +1633,8 @@ impl ChatWidget<'_> {
             scroll_history_hint_shown: false,
             access_status_idx: None,
             pending_access_note: None,
+            synthetic_system_req: None,
+            system_cell_by_id: HashMap::new(),
         };
         // Seed footer access indicator based on current config
         new_widget.apply_access_mode_indicator_from_config();
@@ -1721,6 +1808,8 @@ impl ChatWidget<'_> {
             scroll_history_hint_shown: false,
             access_status_idx: None,
             pending_access_note: None,
+            synthetic_system_req: None,
+            system_cell_by_id: HashMap::new(),
         };
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
@@ -3647,13 +3736,20 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
-                // Insert background events at near‑time so they appear where the
-                // user saw them, instead of sinking to the end of the turn.
-                let key = self.near_time_key(event.order.as_ref());
-                let _ = self.history_insert_with_key_global_tagged(
-                    Box::new(history_cell::new_background_event(message.clone())),
-                    key,
-                    "bg-now",
+                // Route through unified system notice helper. If the core ties the
+                // event to a turn (order present), prefer EarlyInCurrent; else append
+                // at EndOfCurrent. Use the event.id for in-place replacement.
+                let placement = if event.order.as_ref().is_some() {
+                    SystemPlacement::EarlyInCurrent
+                } else {
+                    SystemPlacement::EndOfCurrent
+                };
+                let id_for_replace = Some(id.clone());
+                self.push_system_cell(
+                    history_cell::new_background_event(message.clone()),
+                    placement,
+                    id_for_replace,
+                    event.order.as_ref(),
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
@@ -4426,8 +4522,14 @@ impl ChatWidget<'_> {
 
         self.submit_op(op);
 
-        // Add status message to history
-        self.history_push(history_cell::new_reasoning_output(&new_effort));
+        // Add status message to history (replaceable system notice)
+        let placement = self.ui_placement_for_now();
+        self.push_system_cell(
+            history_cell::new_reasoning_output(&new_effort),
+            placement,
+            Some("ui:reasoning".to_string()),
+            None,
+        );
     }
 
     pub(crate) fn set_text_verbosity(&mut self, new_verbosity: TextVerbosity) {
@@ -4487,7 +4589,7 @@ impl ChatWidget<'_> {
         // Retint pre-rendered history cell lines to the new palette
         self.restyle_history_after_theme_change();
 
-        // Add confirmation message to history
+        // Add confirmation message to history (replaceable system notice)
         let theme_name = match new_theme {
             // Light themes
             codex_core::config_types::ThemeName::LightPhoton => "Light - Photon",
@@ -4508,7 +4610,13 @@ impl ChatWidget<'_> {
             codex_core::config_types::ThemeName::Custom => "Custom",
         };
         let message = format!("✓ Theme changed to {}", theme_name);
-        self.history_push(history_cell::new_background_event(message));
+        let placement = self.ui_placement_for_now();
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            placement,
+            Some("ui:theme".to_string()),
+            None,
+        );
     }
 
     pub(crate) fn set_spinner(&mut self, spinner_name: String) {
@@ -4525,9 +4633,15 @@ impl ChatWidget<'_> {
             tracing::warn!("Could not locate Codex home to persist spinner selection");
         }
 
-        // Confirmation message
+        // Confirmation message (replaceable system notice)
         let message = format!("✓ Spinner changed to {}", spinner_name);
-        self.history_push(history_cell::new_background_event(message));
+        let placement = self.ui_placement_for_now();
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            placement,
+            Some("ui:spinner".to_string()),
+            None,
+        );
     }
 
     fn apply_access_mode_indicator_from_config(&mut self) {
@@ -7608,6 +7722,8 @@ impl ChatWidget<'_> {
         self.history_push_top_next_req(history_cell::new_animated_welcome());
         self.reasoning_index.clear();
         self.stream_order_seq.clear();
+        self.synthetic_system_req = None;
+        self.system_cell_by_id.clear();
 
         // Reset the bottom pane with a new composer
         // (This effectively clears the text input)

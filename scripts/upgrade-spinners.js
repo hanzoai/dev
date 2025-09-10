@@ -43,18 +43,33 @@ function groupFor(name) {
 function main() {
   const dryRun = process.argv.includes('--dry-run');
   const text = fs.readFileSync(file, 'utf8');
-  /** @type {Record<string, any>} */
   const data = JSON.parse(text);
   let updated = 0, total = 0;
+  // If already grouped (outer values lack `interval`), normalize labels and return
+  const firstVal = Object.values(data)[0];
+  const alreadyGrouped = firstVal && typeof firstVal === 'object' && !('interval' in firstVal);
   const out = {};
-  for (const [name, v] of Object.entries(data)) {
-    total++;
-    const hasLabel = v && typeof v === 'object' && 'label' in v;
-    const hasGroup = v && typeof v === 'object' && 'group' in v;
-    const label = hasLabel ? v.label : humanize(name);
-    const group = hasGroup ? v.group : groupFor(name);
-    if (!hasLabel || !hasGroup) updated++;
-    out[name] = { interval: v.interval, frames: v.frames, label, group };
+  if (alreadyGrouped) {
+    for (const [group, inner] of Object.entries(data)) {
+      out[group] = {};
+      for (const [name, v] of Object.entries(inner)) {
+        total++;
+        const hasLabel = v && typeof v === 'object' && 'label' in v;
+        const label = hasLabel ? v.label : humanize(name);
+        if (!hasLabel) updated++;
+        out[group][name] = { interval: v.interval, frames: v.frames, label };
+      }
+    }
+  } else {
+    // Flat → Grouped
+    for (const [name, v] of Object.entries(data)) {
+      total++;
+      const label = v && typeof v === 'object' && 'label' in v ? v.label : humanize(name);
+      const group = v && typeof v === 'object' && 'group' in v ? v.group : groupFor(name);
+      if (!('label' in v) || !('group' in v)) updated++;
+      if (!out[group]) out[group] = {};
+      out[group][name] = { interval: v.interval, frames: v.frames, label };
+    }
   }
   if (dryRun) {
     console.log(`Would update ${updated}/${total} entries (labels/groups).`);
@@ -65,4 +80,3 @@ function main() {
 }
 
 if (require.main === module) main();
-
