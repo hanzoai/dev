@@ -9,6 +9,7 @@ lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
     static ref CUSTOM_THEME_COLORS: RwLock<Option<codex_core::config_types::ThemeColors>> = RwLock::new(None);
+    static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -77,6 +78,7 @@ pub fn init_theme(config: &ThemeConfig) {
     if matches!(config.name, ThemeName::Custom) {
         *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
         *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
+        *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
     }
 }
 
@@ -103,6 +105,14 @@ pub fn set_custom_theme_colors(colors: codex_core::config_types::ThemeColors) {
 /// Return the custom theme colors, if known in this session
 pub fn custom_theme_colors() -> Option<codex_core::config_types::ThemeColors> {
     CUSTOM_THEME_COLORS.read().unwrap().clone()
+}
+
+pub fn set_custom_theme_is_dark(is_dark: Option<bool>) {
+    *CUSTOM_THEME_IS_DARK.write().unwrap() = is_dark;
+}
+
+pub fn custom_theme_is_dark() -> Option<bool> {
+    CUSTOM_THEME_IS_DARK.read().unwrap().clone()
 }
 
 /// Switch to a different predefined theme

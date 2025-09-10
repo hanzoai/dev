@@ -153,9 +153,14 @@ impl ThemeSelectionView {
                 "Calm and peaceful",
             ),
         ];
-        // Append custom theme if available
-        if crate::theme::custom_theme_label().is_some() {
-            v.push((ThemeName::Custom, "Custom", "Your saved custom theme"));
+        // Append custom theme if available (use saved label and light/dark prefix)
+        if let Some(label) = crate::theme::custom_theme_label() {
+            let name = if crate::theme::custom_theme_is_dark().unwrap_or(false) {
+                format!("Dark - {}", label)
+            } else {
+                format!("Light - {}", label)
+            };
+            v.push((ThemeName::Custom, Box::leak(name.into_boxed_str()), "Your saved custom theme"));
         }
         v
     }
@@ -557,6 +562,7 @@ impl ThemeSelectionView {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "minLength": 1, "maxLength": 40},
+                        "is_dark": {"type": "boolean"},
                         "colors": {
                             "type": "object",
                             "properties": {
@@ -679,6 +685,7 @@ impl ThemeSelectionView {
                     }
                 };
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Custom").trim().to_string();
+                let is_dark = v.get("is_dark").and_then(|x| x.as_bool());
                 let mut colors = codex_core::config_types::ThemeColors::default();
                 if let Some(map) = v.get("colors").and_then(|x| x.as_object()) {
                     let get = |k: &str| map.get(k).and_then(|x| x.as_str()).map(|s| s.trim().to_string());
@@ -704,7 +711,7 @@ impl ThemeSelectionView {
                     colors.spinner = get("spinner");
                     colors.progress = get("progress");
                 }
-                let _ = progress_tx.send(ProgressMsg::CompletedThemeOk(name, colors));
+                let _ = progress_tx.send(ProgressMsg::CompletedThemeOk(name, colors, is_dark));
             });
         });
     }
@@ -750,6 +757,7 @@ struct CreateThemeState {
     preview_on: std::cell::Cell<bool>,
     review_focus_is_toggle: std::cell::Cell<bool>,
     last_raw_output: std::cell::RefCell<Option<String>>,
+    proposed_is_dark: std::cell::Cell<Option<bool>>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -769,7 +777,7 @@ enum ProgressMsg {
         interval: u64,
         frames: Vec<String>,
     },
-    CompletedThemeOk(String, codex_core::config_types::ThemeColors),
+    CompletedThemeOk(String, codex_core::config_types::ThemeColors, Option<bool>),
     // `_raw_snippet` is captured for potential future display/debugging
     CompletedErr {
         error: String,
@@ -970,6 +978,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 preview_on: std::cell::Cell::new(true),
                                 review_focus_is_toggle: std::cell::Cell::new(true),
                                 last_raw_output: std::cell::RefCell::new(None),
+                                proposed_is_dark: std::cell::Cell::new(None),
                             });
                         } else {
                             // confirm_theme sets self.mode back to Overview
@@ -1135,20 +1144,26 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             s.proposed_name.borrow().clone(),
                                             s.proposed_colors.borrow().clone(),
                                         ) {
+                                            crate::theme::set_custom_theme_colors(colors.clone());
                                             crate::theme::set_custom_theme_label(name.clone());
-                                            crate::theme::init_theme(
-                                                &codex_core::config_types::ThemeConfig {
-                                                    name: ThemeName::Custom,
-                                                    colors,
-                                                    label: Some(name),
-                                                },
-                                            );
+                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig {
+                                                name: ThemeName::Custom,
+                                                colors,
+                                                label: Some(name),
+                                                is_dark: s.proposed_is_dark.get(),
+                                            });
                                         }
                                     } else {
-                                        // Revert to previous theme
-                                        self.app_event_tx.send(AppEvent::PreviewTheme(
-                                            self.revert_theme_on_back,
-                                        ));
+                                        // Revert to previous built-in or Photon if previous was Custom
+                                        let fallback = if self.revert_theme_on_back
+                                            == ThemeName::Custom
+                                        {
+                                            ThemeName::LightPhoton
+                                        } else {
+                                            self.revert_theme_on_back
+                                        };
+                                        self.app_event_tx
+                                            .send(AppEvent::PreviewTheme(fallback));
                                     }
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
                                 } else if s.action_idx == 0 {
@@ -1163,9 +1178,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                 &name,
                                                 &colors,
                                                 s.preview_on.get(),
+                                                s.proposed_is_dark.get(),
                                             );
                                         }
                                         crate::theme::set_custom_theme_label(name.clone());
+                                        crate::theme::set_custom_theme_colors(colors.clone());
+                                        crate::theme::set_custom_theme_is_dark(s.proposed_is_dark.get());
                                         if s.preview_on.get() {
                                             // Keep preview and set active in UI if chosen
                                             crate::theme::init_theme(
@@ -1173,6 +1191,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                                     name: ThemeName::Custom,
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
+                                                    is_dark: s.proposed_is_dark.get(),
                                                 },
                                             );
                                             self.revert_theme_on_back = ThemeName::Custom;
@@ -1597,7 +1616,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                            Ok(ProgressMsg::CompletedThemeOk(_, _)) => {}
+                            Ok(ProgressMsg::CompletedThemeOk(..)) => {}
                             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
                         }
                     }
@@ -1913,18 +1932,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
-                            Ok(ProgressMsg::CompletedThemeOk(name, colors)) => {
+                            Ok(ProgressMsg::CompletedThemeOk(name, colors, is_dark)) => {
                                 if let Mode::CreateTheme(ref sm) = self.mode {
                                     sm.is_loading.set(false);
                                     sm.step.set(CreateStep::Review);
                                     sm.proposed_name.replace(Some(name.clone()));
                                     sm.proposed_colors.replace(Some(colors.clone()));
+                                    sm.proposed_is_dark.set(is_dark);
                                     crate::theme::set_custom_theme_label(name.clone());
+                                    crate::theme::set_custom_theme_is_dark(is_dark);
                                     crate::theme::init_theme(
                                         &codex_core::config_types::ThemeConfig {
                                             name: ThemeName::Custom,
                                             colors: colors.clone(),
                                             label: Some(name),
+                                            is_dark,
                                         },
                                     );
                                 }
