@@ -33,45 +33,59 @@ struct SpinnerJson {
 const SPINNERS_JSON: &str = include_str!("../assets/spinners.json");
 
 lazy_static! {
+    static ref FALLBACK_SPINNER: Spinner = Spinner {
+        name: "fallback".to_string(),
+        label: "Fallback".to_string(),
+        group: "Other".to_string(),
+        interval_ms: 120,
+        frames: vec!["-".into(), "\\".into(), "|".into(), "/".into()],
+    };
     static ref ALL_SPINNERS: Vec<Spinner> = {
         let mut list: Vec<Spinner> = Vec::new();
         let val: Value = serde_json::from_str(SPINNERS_JSON).unwrap_or(Value::Object(Default::default()));
         match val {
             Value::Object(map) => {
-                // Detect grouped vs flat by peeking at first value
-                let is_grouped = map.values().next().map(|v| !v.get("interval").is_some()).unwrap_or(false);
-                if is_grouped {
-                    // Grouped: outer key = group
-                    for (group, inner_val) in map.into_iter() {
-                        if let Value::Object(inner_map) = inner_val {
-                            for (name, val_entry) in inner_map.into_iter() {
-                                if let Ok(sj) = serde_json::from_value::<SpinnerJson>(val_entry) {
-                                    vpush(&mut list, &name, sj, Some(group.clone()));
+                // Mixed-mode tolerant parse: for each top-level entry
+                for (k, v) in map.into_iter() {
+                    if k == "Default" { continue; }
+                    match v {
+                        Value::Object(inner) => {
+                            if inner.get("interval").is_some() {
+                                // Flat entry
+                                if let Ok(sj) = serde_json::from_value::<SpinnerJson>(Value::Object(inner)) {
+                                    vpush(&mut list, &k, sj, None);
+                                }
+                            } else {
+                                // Group container
+                                for (name, val_entry) in inner.into_iter() {
+                                    if let Ok(sj) = serde_json::from_value::<SpinnerJson>(val_entry) {
+                                        vpush(&mut list, &name, sj, Some(k.clone()));
+                                    }
                                 }
                             }
                         }
-                    }
-                } else {
-                    // Flat: each entry includes optional label/group; preserve JSON order
-                    for (name, val_entry) in map.into_iter() {
-                        if let Ok(sj) = serde_json::from_value::<SpinnerJson>(val_entry) {
-                            vpush(&mut list, &name, sj, None);
-                        }
+                        _ => {}
                     }
                 }
             }
             _ => {}
         }
-        // Ensure our default "diamond" exists
-        if !list.iter().any(|s| s.name == "diamond") {
-            list.push(Spinner { name: "diamond".to_string(), label: humanize("diamond"), group: derive_group("diamond").to_string(), interval_ms: 120, frames: vec!["◇".into(), "◆".into()] });
-        }
         // Preserve JSON order: no reordering here
         list
     };
-    static ref CURRENT_INDEX: RwLock<usize> = RwLock::new(
-        ALL_SPINNERS.iter().position(|s| s.name == "diamond").unwrap_or(0)
-    );
+    static ref DEFAULT_INDEX: usize = {
+        let val: Value = serde_json::from_str(SPINNERS_JSON).unwrap_or(Value::Object(Default::default()));
+        let mut idx = 0usize;
+        if let Value::Object(map) = val {
+            if let Some(Value::String(def)) = map.get("Default") {
+                if let Some(found) = ALL_SPINNERS.iter().position(|s| s.name == *def) {
+                    idx = found;
+                }
+            }
+        }
+        idx
+    };
+    static ref CURRENT_INDEX: RwLock<usize> = RwLock::new(*DEFAULT_INDEX);
     static ref GLOBAL_MAX_FRAME_LEN: usize = {
         let mut maxlen = 0usize;
         for s in ALL_SPINNERS.iter() {
@@ -87,6 +101,7 @@ lazy_static! {
 pub fn init_spinner(name: &str) { switch_spinner(name); }
 
 pub fn switch_spinner(name: &str) {
+    if ALL_SPINNERS.is_empty() { return; }
     let raw = name.trim();
     // Try exact match first
     let mut idx = ALL_SPINNERS.iter().position(|s| s.name == raw);
@@ -97,11 +112,16 @@ pub fn switch_spinner(name: &str) {
             .iter()
             .position(|s| s.name.to_ascii_lowercase() == needle);
     }
-    let idx = idx.unwrap_or_else(|| ALL_SPINNERS.iter().position(|s| s.name == "diamond").unwrap_or(0));
+    let idx = idx.unwrap_or(*DEFAULT_INDEX);
     *CURRENT_INDEX.write().unwrap() = idx;
 }
 
-pub fn current_spinner() -> &'static Spinner { &ALL_SPINNERS[*CURRENT_INDEX.read().unwrap()] }
+pub fn current_spinner() -> &'static Spinner {
+    if ALL_SPINNERS.is_empty() { return &FALLBACK_SPINNER; }
+    let idx = *CURRENT_INDEX.read().unwrap();
+    let idx = idx.min(ALL_SPINNERS.len().saturating_sub(1));
+    &ALL_SPINNERS[idx]
+}
 
 pub fn find_spinner_by_name(name: &str) -> Option<&'static Spinner> {
     let raw = name.trim();
