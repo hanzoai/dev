@@ -1989,7 +1989,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         .add_modifier(Modifier::BOLD),
                 )));
                 form_lines.push(Line::default());
-                // If there was a recent error, show it once above description (with raw output snippet)
+                // If there was a recent error, show it once above description (with full raw output)
                 if let Some(last) = s.thinking_lines.borrow().last().cloned() {
                     if last.starts_with("Error:") {
                         form_lines.push(Line::from(Span::styled(
@@ -1997,15 +1997,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                             Style::default().fg(crate::colors::error()),
                         )));
                         if let Some(raw) = s.last_raw_output.borrow().as_ref() {
-                            let snippet: String = raw.chars().take(400).collect();
                             form_lines.push(Line::from(Span::styled(
-                                "Model output (first 400 chars):",
+                                "Model output (raw):",
                                 Style::default().fg(theme.text_dim),
                             )));
-                            form_lines.push(Line::from(Span::styled(
-                                snippet,
-                                Style::default().fg(theme.text),
-                            )));
+                            for ln in raw.split('\n') {
+                                form_lines.push(Line::from(Span::styled(
+                                    ln.to_string(),
+                                    Style::default().fg(theme.text),
+                                )));
+                            }
                         }
                         form_lines.push(Line::default());
                     }
