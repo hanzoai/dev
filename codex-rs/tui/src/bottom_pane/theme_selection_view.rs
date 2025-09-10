@@ -541,7 +541,7 @@ impl ThemeSelectionView {
 
                 // Prompt with example
                 let developer = format!(
-                    "You are designing a TUI color theme.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- Provide a human-friendly `name`.\n- Provide a `colors` object with hex color strings (e.g., #RRGGBB) for any of these keys: primary, secondary, background, foreground, border, border_focused, selection, cursor, success, warning, error, info, text, text_dim, text_bright, keyword, string, comment, function, spinner, progress.\n- Omit keys you don't wish to override.\n- Ensure good contrast and accessibility.\n- Prefer cohesive palettes.\n\nCurrent theme example (for reference, you may adjust it):\n{}",
+                    "You are designing a TUI color theme.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- Provide a human-friendly `name`.\n- Provide a `colors` object with hex color strings (e.g., #RRGGBB).\n- IMPORTANT: Include EVERY key listed below. If you don't wish to change a color, copy the value from the Current example. Keys: primary, secondary, background, foreground, border, border_focused, selection, cursor, success, warning, error, info, text, text_dim, text_bright, keyword, string, comment, function, spinner, progress.\n- Ensure good contrast and accessibility.\n- Prefer cohesive palettes.\n\nCurrent theme example (for reference; copy unchanged values from here):\n{}",
                     example.to_string()
                 );
                 let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
@@ -1785,7 +1785,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                             }
                             Ok(ProgressMsg::CompletedOk { .. }) => {}
                             Ok(ProgressMsg::RawOutput(_)) => {}
-                            Ok(ProgressMsg::CompletedErr { .. }) => {
+                            Ok(ProgressMsg::CompletedErr { error, .. }) => {
+                                if let Mode::CreateTheme(ref sm) = self.mode {
+                                    sm.is_loading.set(false);
+                                    sm.step.set(CreateStep::Action);
+                                    sm.thinking_lines
+                                        .borrow_mut()
+                                        .push(format!("Error: {}", error));
+                                    sm.thinking_current.borrow_mut().clear();
+                                }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Err(std::sync::mpsc::TryRecvError::Empty) => break,
