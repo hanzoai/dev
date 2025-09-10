@@ -325,7 +325,7 @@ impl ThemeSelectionView {
                 let mut think_sum = String::new();
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); }
+                        Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
                         Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
                         Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
                         Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
@@ -603,7 +603,7 @@ impl ThemeSelectionView {
                 while let Some(ev) = stream.next().await {
                     match ev {
                         Ok(codex_core::ResponseEvent::Created) => {
-                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(created)".to_string()));
+                            let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string()));
                         }
                         Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
@@ -717,6 +717,7 @@ enum ProgressMsg {
     ThinkingDelta(String),
     OutputDelta(String),
     RawOutput(String),
+    SetStatus(String),
     CompletedOk {
         name: String,
         interval: u64,
@@ -1468,6 +1469,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Ok(ProgressMsg::RawOutput(_raw)) => {}
+                            Ok(ProgressMsg::SetStatus(s)) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    cur.clear();
+                                    cur.push_str(&s);
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
                             Ok(ProgressMsg::CompletedOk {
                                 name,
                                 interval,
@@ -1746,6 +1755,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             hist.drain(0..len - keep);
                                         }
                                     }
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::SetStatus(s)) => {
+                                if let Mode::CreateTheme(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    cur.clear();
+                                    cur.push_str(&s);
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
