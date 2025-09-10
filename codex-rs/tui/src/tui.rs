@@ -55,9 +55,13 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     if !config.tui.spinner.custom.is_empty() {
         let mut custom = Vec::new();
         for (name, cs) in &config.tui.spinner.custom {
+            let label = cs
+                .label
+                .clone()
+                .unwrap_or_else(|| crate::spinner::spinner_label_for(name));
             custom.push(crate::spinner::Spinner {
                 name: name.clone(),
-                label: crate::spinner::spinner_label_for(name),
+                label,
                 group: "Custom".to_string(),
                 interval_ms: cs.interval,
                 frames: cs.frames.clone(),
