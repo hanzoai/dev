@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.112] - 2025-09-10
+
+- TUI: group spinner list with dim headers and restore selector arrow for clearer navigation. (085fe5f3)
+- Repo: adopt code/<slug> label prefix with id/ fallback across workflows. (dff60022)
+- Triage: add allow/block/building/complete labels and use label as SSOT for slug in workflows. (17cc1dc6)
+
 ## [0.2.111] - 2025-09-10
 
 - Automation: include issue body, recent comments, and commit links in context; expand directly in prompt (b3a1a65b)
