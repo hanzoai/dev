@@ -1246,20 +1246,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if i >= names.len() {
                     let mut spans = Vec::new();
                     let is_selected = i == self.selected_spinner_index;
+                    // selector chevron
                     spans.push(Span::styled(
                         if is_selected { "› " } else { "  " }.to_string(),
-                        Style::default().fg(if is_selected {
-                            theme.keyword
-                        } else {
-                            theme.text
-                        }),
+                        Style::default().fg(if is_selected { theme.keyword } else { theme.text }),
                     ));
-                    spans.push(Span::styled(
-                        "Create your own…",
-                        Style::default()
-                            .fg(theme.primary)
-                            .add_modifier(Modifier::BOLD),
-                    ));
+                    // label color: dim when not selected; primary + bold when selected
+                    let label_style = if is_selected {
+                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text_dim)
+                    };
+                    spans.push(Span::styled("Create your own…", label_style));
                     Paragraph::new(Line::from(spans)).render(row_rect, buf);
                     continue;
                 }
@@ -1312,7 +1310,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 spans.push(Span::styled(frame, fg));
                 spans.push(Span::raw(" "));
                 // label with dots
-                spans.push(Span::styled(format!("{}...", label), fg));
+                spans.push(Span::styled(format!("{}... ", label), fg));
                 // right rule (match left border logic: x - text_len)
                 spans.push(Span::styled("─".repeat(right_rule as usize), border));
                 Paragraph::new(Line::from(spans))
