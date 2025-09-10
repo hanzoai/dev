@@ -386,6 +386,14 @@ pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result
 
     // Write `[tui.theme].name = "…"`
     doc["tui"]["theme"]["name"] = toml_edit::value(theme_str);
+    // When switching away from the Custom theme, clear any lingering custom
+    // overrides so built-in themes render true to spec on next startup.
+    if theme != ThemeName::Custom {
+        if let Some(tbl) = doc["tui"]["theme"].as_table_mut() {
+            tbl.remove("label");
+            tbl.remove("colors");
+        }
+    }
 
     // ensure codex_home exists
     std::fs::create_dir_all(codex_home)?;
