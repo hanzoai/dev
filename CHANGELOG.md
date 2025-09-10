@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.111] - 2025-09-10
+
+- Automation: include issue body, recent comments, and commit links in context; expand directly in prompt (b3a1a65b)
+- Automation: pick last non-placeholder comment block to avoid stale summaries (e18f1cbd)
+
 ## [0.2.110] - 2025-09-10
 
 - Automation: update issue comments — remove direct download links, add LLM template and user mentions; keep commit summary (546b0a4e)
