@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.110] - 2025-09-10
+
+- Automation: update issue comments — remove direct download links, add LLM template and user mentions; keep commit summary (546b0a4e)
+- Triage: defer user messaging to issue-comment workflow; remove queue acknowledgement (5426a2eb)
+- TUI: remove unused imports to silence build warnings (ed6b4995)
+
 ## [0.2.109] - 2025-09-10
 
 - TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values (51422121)
