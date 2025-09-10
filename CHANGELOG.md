@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.116] - 2025-09-10
+
+- TUI: AI-driven custom spinner generator with live streaming, JSON schema, and preview. (d7728375)
+- Spinner: accept "name" in custom JSON; persist label; show labels in Overview; replace on save. (704286d3)
+- TUI: dim "Create your own…" until selected; use primary + bold on selection. (09685ea5)
+- TUI: fix Create Spinner spacing; avoid double blank lines; keep single spacer. (7fe209a0)
+- Core: add TextFormat and include text.format in requests. (d7728375)
+
 ## [0.2.115] - 2025-09-10
 
 - TUI/Status: keep spinner visible during transient stream errors; show 'Reconnecting' instead of clearing. (56d7784f)
