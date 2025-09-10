@@ -378,6 +378,7 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ShellToolCallParams;
 use crate::openai_tools::ToolsConfig;
+use crate::openai_tools::ToolsConfigParams;
 use crate::openai_tools::get_openai_tools;
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
@@ -1673,18 +1674,17 @@ async fn submission_loop(
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
-                let mut tools_config = ToolsConfig::new(
-                    &config.model_family,
+                let tools_config = ToolsConfig::new(&ToolsConfigParams {
+                    model_family: &config.model_family,
                     approval_policy,
-                    sandbox_policy.clone(),
-                    config.include_plan_tool,
-                    config.include_apply_patch_tool,
-                    config.tools_web_search_request,
-                    config.use_experimental_streamable_shell_tool,
-                    config.include_view_image_tool,
-                );
-                tools_config.web_search_allowed_domains =
-                    config.tools_web_search_allowed_domains.clone();
+                    sandbox_policy: sandbox_policy.clone(),
+                    include_plan_tool: config.include_plan_tool,
+                    include_apply_patch_tool: config.include_apply_patch_tool,
+                    include_web_search_request: config.tools_web_search_request,
+                    use_streamable_shell_tool: config
+                        .use_experimental_streamable_shell_tool,
+                    include_view_image_tool: config.include_view_image_tool,
+                });
 
                 sess = Some(Arc::new(Session {
                     client,
@@ -2160,13 +2160,9 @@ async fn run_turn(
     sub_id: String,
     input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
-    // Check if browser is enabled
-    let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
-    
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
-        browser_enabled,
     );
 
     let mut retries = 0;

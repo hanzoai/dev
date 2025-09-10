@@ -115,7 +115,6 @@ async fn run_llm_request(
     prompt.input = input;
     prompt.store = true;
     prompt.user_instructions = None;
-    prompt.environment_context = None;
     prompt.status_items = vec![];
     prompt.base_instructions_override = None;
     prompt.text_format = Some(text_format);
