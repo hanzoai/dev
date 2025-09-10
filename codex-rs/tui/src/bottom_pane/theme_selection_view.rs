@@ -2006,28 +2006,37 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     return;
                 }
                 if matches!(s.step.get(), CreateStep::Review) {
+                    // Header
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Theme » Create Custom",
-                        Style::default()
-                            .fg(theme.text_bright)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
                     )));
                     form_lines.push(Line::default());
-                    let primary_selected = s.action_idx == 0;
-                    let secondary_selected = s.action_idx == 1;
-                    let sel = |b: bool| {
-                        if b {
-                            Style::default()
-                                .fg(theme.primary)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(theme.text)
-                        }
+                    // Toggle line: Now showing <Name> [on|off]
+                    let name = s
+                        .proposed_name
+                        .borrow()
+                        .clone()
+                        .unwrap_or_else(|| "Custom".to_string());
+                    let onoff = if s.preview_on.get() { "on" } else { "off" };
+                    let toggle_style = if s.review_focus_is_toggle.get() {
+                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text)
                     };
+                    form_lines.push(Line::from(Span::styled(
+                        format!("Now showing {} [{}]", name, onoff),
+                        toggle_style,
+                    )));
+                    form_lines.push(Line::default());
+                    // Buttons (Save / Retry)
                     let mut spans: Vec<Span> = Vec::new();
-                    spans.push(Span::styled("[ Save ]", sel(primary_selected)));
+                    let save_sel = !s.review_focus_is_toggle.get() && s.action_idx == 0;
+                    let retry_sel = !s.review_focus_is_toggle.get() && s.action_idx == 1;
+                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    spans.push(Span::styled("[ Save ]", sel(save_sel)));
                     spans.push(Span::raw("  "));
-                    spans.push(Span::styled("[ Retry ]", sel(secondary_selected)));
+                    spans.push(Span::styled("[ Retry ]", sel(retry_sel)));
                     form_lines.push(Line::from(spans));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
