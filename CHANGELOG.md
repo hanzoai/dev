@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.109] - 2025-09-10
+
+- TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values (51422121)
+- Automation: issue comments include recent commit summaries; ignore placeholders and fall back to stock summary with commits/files (9915fa03, f62b7987)
+
 ## [0.2.108] - 2025-09-10
 
 - TUI: Add /theme Overview→Detail flow with live previews for Theme and Spinner selection. (535d0a9c)

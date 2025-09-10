@@ -1,12 +1,10 @@
-## @just-every/code v0.2.108
+## @just-every/code v0.2.109
 
-This release refines the theme/spinner experience in the TUI and clarifies exec output.
+This release improves spinner UX in the TUI and enhances automated issue comments.
 
 ### Changes
-- TUI: Add /theme Overview→Detail flow with live previews for Theme and Spinner selection.
-- TUI: Bundle full cli-spinners set and allow choosing your loading spinner; 'diamond' stays default.
-- TUI: Improve scrolling with anchored 9-row viewport; keep selector visible and dark-theme friendly.
-- Core: Split stdout/stderr in Exec output and add ERROR divider on failures for clarity.
+- TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values
+- Automation: issue comments include recent commit summaries; ignore placeholders and fall back to stock summary with commits/files
 
 ### Install
 ```
@@ -14,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.107...v0.2.108
+Compare: https://github.com/just-every/code/compare/v0.2.108...v0.2.109
