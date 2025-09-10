@@ -216,6 +216,12 @@ pub struct ThemeConfig {
     /// UI may display it in place of the generic "Custom" label.
     #[serde(default)]
     pub label: Option<String>,
+
+    /// Optional hint whether the custom theme targets a dark background.
+    /// When present and `name == Custom`, the UI can show "Dark - <label>"
+    /// or "Light - <label>" in lists.
+    #[serde(default)]
+    pub is_dark: Option<bool>,
 }
 
 impl Default for ThemeConfig {
@@ -224,6 +230,7 @@ impl Default for ThemeConfig {
             name: ThemeName::default(),
             colors: ThemeColors::default(),
             label: None,
+            is_dark: None,
         }
     }
 }
