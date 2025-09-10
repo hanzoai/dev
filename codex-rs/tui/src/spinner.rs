@@ -90,6 +90,7 @@ lazy_static! {
         idx
     };
     static ref CURRENT_INDEX: RwLock<usize> = RwLock::new(*DEFAULT_INDEX);
+    static ref CURRENT_NAME: RwLock<String> = RwLock::new(ALL_SPINNERS[*DEFAULT_INDEX].name.clone());
     static ref CUSTOM_SPINNERS: RwLock<Vec<Spinner>> = RwLock::new(Vec::new());
 }
 
@@ -98,14 +99,13 @@ pub fn init_spinner(name: &str) { switch_spinner(name); }
 pub fn switch_spinner(name: &str) {
     if ALL_SPINNERS.is_empty() { return; }
     let raw = name.trim();
-    // Try exact match first
+    // Update the canonical current name (custom or built‑in)
+    *CURRENT_NAME.write().unwrap() = raw.to_string();
+    // Keep CURRENT_INDEX aligned when the name is an all‑spinners entry (for fallbacks)
     let mut idx = ALL_SPINNERS.iter().position(|s| s.name == raw);
     if idx.is_none() {
-        // Fallback: case-insensitive match
         let needle = raw.to_ascii_lowercase();
-        idx = ALL_SPINNERS
-            .iter()
-            .position(|s| s.name.to_ascii_lowercase() == needle);
+        idx = ALL_SPINNERS.iter().position(|s| s.name.to_ascii_lowercase() == needle);
     }
     let idx = idx.unwrap_or(*DEFAULT_INDEX);
     *CURRENT_INDEX.write().unwrap() = idx;
@@ -113,6 +113,9 @@ pub fn switch_spinner(name: &str) {
 
 pub fn current_spinner() -> &'static Spinner {
     if ALL_SPINNERS.is_empty() { return &FALLBACK_SPINNER; }
+    // Resolve by current name first (supports custom), then fall back to ALL_SPINNERS by index
+    let name = CURRENT_NAME.read().unwrap().clone();
+    if let Some(s) = find_spinner_by_name(&name) { return s; }
     let idx = *CURRENT_INDEX.read().unwrap();
     let idx = idx.min(ALL_SPINNERS.len().saturating_sub(1));
     &ALL_SPINNERS[idx]
