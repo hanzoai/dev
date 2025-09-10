@@ -554,7 +554,6 @@ impl ThemeSelectionView {
                         "name": {"type": "string", "minLength": 1, "maxLength": 40},
                         "colors": {
                             "type": "object",
-                            "additionalProperties": false,
                             "properties": {
                                 "primary": {"type": "string"},
                                 "secondary": {"type": "string"},
@@ -577,9 +576,9 @@ impl ThemeSelectionView {
                                 "function": {"type": "string"},
                                 "spinner": {"type": "string"},
                                 "progress": {"type": "string"}
-                            }
-                        },
-                        "required": ["primary", "secondary", "background", "foreground", "border", "border_focused", "selection", "cursor", "success", "warning", "error", "info", "text", "text_dim", "text_bright", "keyword", "string", "comment", "function", "spinner", "progress"],
+                            },
+                            "additionalProperties": false
+                        }
                     },
                     "required": ["name", "colors"],
                     "additionalProperties": false
@@ -888,7 +887,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         let count = Self::get_theme_options().len();
                         if self.selected_theme_index >= count {
                             // Revert preview to the theme before entering Themes list for better legibility
-                            self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                            self.app_event_tx
+                                .send(AppEvent::PreviewTheme(self.revert_theme_on_back));
                             self.mode = Mode::CreateTheme(CreateThemeState {
                                 step: std::cell::Cell::new(CreateStep::Prompt),
                                 prompt: String::new(),
