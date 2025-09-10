@@ -700,7 +700,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             .send(AppEvent::UpdateSpinner("custom".to_string()));
                                         self.app_event_tx.send(
                                             AppEvent::InsertBackgroundEventEarly(
-                                                "✓ Custom spinner saved".to_string(),
+                                                "Custom spinner saved".to_string(),
                                             ),
                                         );
                                         go_overview = true;
@@ -1117,24 +1117,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         };
                         let preview = frames.get(idx).cloned().unwrap_or_default();
                         // Spacer above the preview row
-                        form_lines.push(Line::default());
                         // Compute layout similar to the list row: left rule | spinner | label | right rule
                         let label = "Preview";
                         let max_frame_len: u16 = preview.chars().count() as u16;
                         let border = Style::default().fg(crate::colors::border());
                         let fg = Style::default().fg(crate::colors::info());
-                        let text_len = (label.chars().count() as u16).saturating_add(3); // label + dots
-                        let x: u16 = max_frame_len.saturating_add(5);
-                        let left_rule = x.saturating_sub(max_frame_len);
-                        let right_rule = x.saturating_sub(text_len);
+                        let x: u16 = max_frame_len.saturating_add(8);
+                        let border_len = x.saturating_sub(max_frame_len);
                         let mut spans: Vec<Span> = Vec::new();
-                        spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                        spans.push(Span::styled("─".repeat(border_len as usize), border));
                         spans.push(Span::raw(" "));
                         spans.push(Span::styled(preview, fg));
                         spans.push(Span::raw(" "));
                         spans.push(Span::styled(format!("{}...", label), fg));
                         spans.push(Span::raw(" "));
-                        spans.push(Span::styled("─".repeat(right_rule as usize), border));
+                        spans.push(Span::styled("─".repeat(border_len as usize), border));
                         form_lines.push(Line::from(spans));
                         self.app_event_tx.send(AppEvent::ScheduleFrameIn(
                             std::time::Duration::from_millis(interval),
@@ -1346,7 +1343,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 // Use border-based alignment per spec
                 let spinner_len = frame.chars().count() as u16;
                 let text_len = (label.chars().count() as u16).saturating_add(3); // label + "..."
-                let x: u16 = max_frame_len.saturating_add(5);
+                let x: u16 = max_frame_len.saturating_add(8);
                 let left_rule = x.saturating_sub(spinner_len);
                 let right_rule = x.saturating_sub(text_len);
 
