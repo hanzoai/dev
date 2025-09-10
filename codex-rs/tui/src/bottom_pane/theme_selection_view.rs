@@ -702,6 +702,8 @@ struct CreateThemeState {
     thinking_current: std::cell::RefCell<String>,
     proposed_name: std::cell::RefCell<Option<String>>,
     proposed_colors: std::cell::RefCell<Option<codex_core::config_types::ThemeColors>>,
+    preview_on: std::cell::Cell<bool>,
+    review_focus_is_toggle: std::cell::Cell<bool>,
 }
 
 #[derive(Copy, Clone, PartialEq)]

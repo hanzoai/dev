@@ -466,6 +466,7 @@ pub fn set_custom_theme(
     codex_home: &Path,
     label: &str,
     colors: &ThemeColors,
+    set_active: bool,
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
     let mut doc = match std::fs::read_to_string(&config_path) {
@@ -474,8 +475,10 @@ pub fn set_custom_theme(
         Err(e) => return Err(e.into()),
     };
 
-    // Activate custom theme and persist label
-    doc["tui"]["theme"]["name"] = toml_edit::value("custom");
+    // Optionally activate custom theme and persist label
+    if set_active {
+        doc["tui"]["theme"]["name"] = toml_edit::value("custom");
+    }
     doc["tui"]["theme"]["label"] = toml_edit::value(label);
 
     // Ensure colors table exists and write provided keys
