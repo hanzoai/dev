@@ -1,10 +1,10 @@
-## @just-every/code v0.2.107
+## @just-every/code v0.2.109
 
-This release fixes a planning crash and improves runtime stability.
+This release improves spinner UX in the TUI and enhances automated issue comments.
 
 ### Changes
-- Core: Fix planning crash on UTF-8 boundary when previewing streamed text.
-- Stability: Use char-safe slicing for last 800 chars to prevent panics.
+- TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values
+- Automation: issue comments include recent commit summaries; ignore placeholders and fall back to stock summary with commits/files
 
 ### Install
 ```
@@ -12,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.106...v0.2.107
+Compare: https://github.com/just-every/code/compare/v0.2.108...v0.2.109

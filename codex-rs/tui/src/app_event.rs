@@ -91,6 +91,10 @@ pub(crate) enum AppEvent {
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),
+    /// Update the loading spinner style (with history event)
+    UpdateSpinner(String),
+    /// Preview loading spinner (no history event)
+    PreviewSpinner(String),
     /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
     CycleAccessMode,
     /// Bottom composer expanded (e.g., slash command popup opened)
