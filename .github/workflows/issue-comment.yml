@@ -143,8 +143,15 @@ jobs:
               const b = pull.head.ref || '';
               const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
               if (issue_number) {
-                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                try {
+                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
+                  const idLabel = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).find(n => typeof n === 'string' && n.startsWith('id/'));
+                  if (idLabel) slug = idLabel.slice(3).toLowerCase();
+                } catch {}
+                if (!slug) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                }
               }
             }
             if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
