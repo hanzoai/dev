@@ -3,6 +3,23 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.112] - 2025-09-10
+
+- TUI: group spinner list with dim headers and restore selector arrow for clearer navigation. (085fe5f3)
+- Repo: adopt code/<slug> label prefix with id/ fallback across workflows. (dff60022)
+- Triage: add allow/block/building/complete labels and use label as SSOT for slug in workflows. (17cc1dc6)
+
+## [0.2.111] - 2025-09-10
+
+- Automation: include issue body, recent comments, and commit links in context; expand directly in prompt (b3a1a65b)
+- Automation: pick last non-placeholder comment block to avoid stale summaries (e18f1cbd)
+
+## [0.2.110] - 2025-09-10
+
+- Automation: update issue comments — remove direct download links, add LLM template and user mentions; keep commit summary (546b0a4e)
+- Triage: defer user messaging to issue-comment workflow; remove queue acknowledgement (5426a2eb)
+- TUI: remove unused imports to silence build warnings (ed6b4995)
+
 ## [0.2.109] - 2025-09-10
 
 - TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values (51422121)

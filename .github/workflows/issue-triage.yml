@@ -460,7 +460,9 @@ jobs:
             gate_reason=$(printf "Rate: %s\nSafety: %s" "${reason_rate:-none}" "${reason_safety:-none}")
             printf '%s\n\n%s\n' \
               "Thanks @${ACTOR}! This issue was auto-reviewed." \
-              "For safety, the bot did not auto-apply changes. Details:\n${gate_reason}" \
+              "" \
+              "For safety, the bot did not auto-apply changes." \
+              "${gate_reason}" \
               > .github/auto/ISSUE_COMMENT.md
           fi
           echo "allow_agent=${allow_agent}" >> "$GITHUB_OUTPUT"
@@ -509,6 +511,36 @@ jobs:
         env:
           SUGGESTED_ID: ${{ steps.safety.outputs.suggested_id }}
 
+      - name: Apply code/<slug> label and remove ID marker comments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
+            const slug = `${{ steps.slug.outputs.slug }}`;
+            if (slug) {
+              try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [`code/${slug}`] }); } catch {}
+            }
+            // Remove any previous codex-id marker comments to keep issues tidy
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+              const markerRe = /<!--\s*codex-id:/i;
+              for (const c of comments) {
+                if ((c.body || '').match(markerRe) && c.user?.type?.toLowerCase().includes('bot')) {
+                  await github.rest.issues.deleteComment({ owner, repo, comment_id: c.id });
+                }
+              }
+            } catch {}
+
+      - name: Apply triage state label (allow/block)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
+            const allow = '${{ steps.gate.outputs.allow_agent }}' === 'true';
+            const mode = '${{ steps.gate.outputs.agent_mode }}';
+            let label = allow && mode === 'full' ? 'triage/allow' : (allow ? 'triage/allow' : 'triage/block');
+            try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] }); } catch {}
+
       - name: If no changes, post a helpful comment
         timeout-minutes: 5
         if: steps.gate.outputs.allow_agent != 'true' || steps.gate.outputs.agent_mode != 'full'
@@ -542,20 +574,5 @@ jobs:
             await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-code', client_payload: { issue_number, slug } });
             core.notice(`Queued issue-code for #${issue_number}`);
 
-      - name: Acknowledge queueing
-        if: steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
-          script: |
-            const owner = context.repo.owner; const repo = context.repo.repo; const issue_number = Number(process.env.ISSUE_NUMBER);
-            const slug = `${{ steps.slug.outputs.slug }}`;
-            const body = [
-              `Thanks @${context.actor}! I queued an implementation run.`,
-              '',
-              'I will open a PR shortly; once the preview build finishes, you can try it with:',
-              '```bash',
-              `code preview ${slug}`,
-              '```'
-            ].join('\n');
-            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+      # Removed the explicit triage acknowledgement comment to centralize
+      # all user-facing updates under the Issue Comment workflow.

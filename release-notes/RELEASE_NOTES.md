@@ -1,10 +1,11 @@
-## @just-every/code v0.2.109
+## @just-every/code v0.2.112
 
-This release improves spinner UX in the TUI and enhances automated issue comments.
+This release improves TUI spinner navigation and refines labels/triage workflows.
 
 ### Changes
-- TUI: improve spinner selection (exact/case-insensitive), center previews, restore overview values
-- Automation: issue comments include recent commit summaries; ignore placeholders and fall back to stock summary with commits/files
+- TUI: group spinner list with dim headers and restore selector arrow for clearer navigation
+- Repo: adopt code/<slug> label prefix with id/ fallback across workflows
+- Triage: add allow/block/building/complete labels and use label as SSOT for slug in workflows
 
 ### Install
 ```
@@ -12,4 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.108...v0.2.109
+Compare: https://github.com/just-every/code/compare/v0.2.111...v0.2.112
