@@ -969,7 +969,7 @@ impl App<'_> {
                     if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
                         // Prefer runtime custom colors; fall back to config on disk
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label() });
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
                         } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
@@ -1010,7 +1010,7 @@ impl App<'_> {
                     // Switch the theme immediately for preview (no history event)
                     if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
                         if let Some(colors) = crate::theme::custom_theme_colors() {
-                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label() });
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
                         } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
                             crate::theme::init_theme(&cfg.tui.theme);
                         } else {
