@@ -226,11 +226,10 @@ jobs:
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME";
-          PROMPT=$(cat <<'EOP'
+          PROMPT=$(cat <<EOP
           <task>
-          You are writing a friendly, user‑facing issue reply about a successful preview build.
-          Use the following template, but adapt all language to this specific change. Fix any spelling or grammar.
-          You MUST mention the original issue author (replace @user) at the start.
+          You are writing an enthusiastic, user‑facing issue reply about a successful preview build. Please do not assume the user has deep technical knowledge.
+          Use the following template, but adapt all language to this specific change. Be friendly and curious where appropriate.
           You MAY remove sections that repeat earlier replies.
 
           TEMPLATE (example):
@@ -252,8 +251,9 @@ jobs:
           ---
 
           REQUIREMENTS:
+          - Replace @user with the actual GitHub handle(s) of the person you are replying to (either the issue author and/or last commenter).
           - Replace <slug here> with the exact preview command from the context below.
-          - Do NOT include direct download links.
+          - In the changes made section, include links to the commit if possible.
           - Keep it brief, clear, and kind.
           </task>
           <context>
@@ -275,9 +275,15 @@ jobs:
           node - <<'JS'
           const fs = require('fs');
           const t = fs.readFileSync('.github/auto/AGENT_OUT.txt','utf8');
-          const m = t.match(/<comment>([\s\S]*?)<\/comment>/i);
-          if (m && m[1].trim()) {
-            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', m[1].trim() + '\n');
+          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
+          const PLACEHOLDER = '…final Markdown comment…';
+          let body = '';
+          if (all.length) {
+            const last = (all[all.length-1][1] || '').trim();
+            if (last && last !== PLACEHOLDER) body = last;
+          }
+          if (body) {
+            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
           JS
 
@@ -339,10 +345,11 @@ jobs:
                 '```bash',
                 `code preview ${slug}`,
                 '```',
-                commits.length ? '\n#### What changed in this build (recent commits)' : '',
-                commits.length ? commits.join('\n') : '',
                 '',
                 'Please let us know here if it works well or needs tweaks. Maintainers will review and, if merged, you’ll get an update here. Thanks again! ',
+                '',
+                commits.length ? 'Changes made:' : '',
+                commits.length ? commits.join('\n') : '',
                 ISSUE_MARK
               ].filter(Boolean).join('\n');
             }
