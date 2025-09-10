@@ -1618,7 +1618,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     let frame = diamond[((now_ms / 120) as usize) % diamond.len()].to_string();
                     form_lines.push(Line::from(vec![
                         Span::styled(frame, Style::default().fg(crate::colors::info())),
-                        Span::raw(" Generating spinner with AI…"),
+                        Span::styled(
+                            " Generating spinner with AI…",
+                            Style::default().fg(theme.text_bright),
+                        ),
                     ]));
                     // Latest message only
                     // Show the latest in‑progress line if present, otherwise last completed line
@@ -1652,13 +1655,51 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     return;
                 }
 
-                // After completion (review): show preview + Save/Retry
+                // After completion (review)
                 if matches!(s.step.get(), CreateStep::Review) {
+                    // Theme review layout (header + toggle + buttons)
+                    if let Mode::CreateTheme(ref st) = self.mode {
+                        form_lines.push(Line::from(Span::styled(
+                            "Overview » Change Theme » Create Custom",
+                            Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        )));
+                        form_lines.push(Line::default());
+                        let name = st
+                            .proposed_name
+                            .borrow()
+                            .clone()
+                            .unwrap_or_else(|| "Custom".to_string());
+                        let onoff = if st.preview_on.get() { "on" } else { "off" };
+                        let sel = st.review_focus_is_toggle.get();
+                        let style = if sel {
+                            Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        };
+                        form_lines.push(Line::from(Span::styled(
+                            format!("Now showing {} [{}]", name, onoff),
+                            style,
+                        )));
+                        form_lines.push(Line::default());
+                        let mut spans: Vec<Span> = Vec::new();
+                        // When toggle is focused, buttons are unselected
+                        let primary_selected = !st.review_focus_is_toggle.get() && s.action_idx == 0;
+                        let secondary_selected = !st.review_focus_is_toggle.get() && s.action_idx == 1;
+                        let selbtn = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                        spans.push(Span::styled("[ Save ]", selbtn(primary_selected)));
+                        spans.push(Span::raw("  "));
+                        spans.push(Span::styled("[ Retry ]", selbtn(secondary_selected)));
+                        form_lines.push(Line::from(spans));
+                        Paragraph::new(form_lines)
+                            .alignment(Alignment::Left)
+                            .wrap(ratatui::widgets::Wrap { trim: false })
+                            .render(body_area, buf);
+                        return;
+                    }
+                    // Spinner review layout (header + preview + buttons)
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Spinner » Create Custom",
-                        Style::default()
-                            .fg(theme.text_bright)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
                     )));
                     // Theme review header with preview toggle when in theme mode
                     if let Mode::CreateTheme(ref st) = self.mode {
@@ -1794,7 +1835,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     Style::default().fg(theme.keyword),
                 ));
                 let active = matches!(s.step.get(), CreateStep::Prompt);
-                desc_spans.push(Span::raw(s.prompt.clone()));
+                desc_spans.push(Span::styled(
+                    s.prompt.clone(),
+                    Style::default().fg(theme.text_bright),
+                ));
                 if active {
                     desc_spans.push(caret.clone());
                 }
@@ -1920,7 +1964,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     let frame = frames[((now_ms / 100) as usize) % frames.len()].to_string();
                     form_lines.push(Line::from(vec![
                         Span::styled(frame, Style::default().fg(crate::colors::info())),
-                        Span::raw(" Generating theme with AI…"),
+                        Span::styled(
+                            " Generating theme with AI…",
+                            Style::default().fg(theme.text_bright),
+                        ),
                     ]));
                     let cur = s.thinking_current.borrow();
                     let latest = if !cur.trim().is_empty() {
@@ -2026,7 +2073,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     Style::default().fg(theme.keyword),
                 ));
                 let active = matches!(s.step.get(), CreateStep::Prompt);
-                desc_spans.push(Span::raw(s.prompt.clone()));
+                desc_spans.push(Span::styled(
+                    s.prompt.clone(),
+                    Style::default().fg(theme.text_bright),
+                ));
                 if active {
                     desc_spans.push(Span::styled("▏", Style::default().fg(theme.info)));
                 }
