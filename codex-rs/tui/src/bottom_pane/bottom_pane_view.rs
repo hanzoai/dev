@@ -53,4 +53,10 @@ pub(crate) trait BottomPaneView<'a> {
     ) -> Option<ApprovalRequest> {
         Some(request)
     }
+
+    /// Handle pasted text while this view is active. Return whether a redraw
+    /// is needed. Default: ignore paste.
+    fn handle_paste(&mut self, _text: String) -> ConditionalUpdate {
+        ConditionalUpdate::NoRedraw
+    }
 }
