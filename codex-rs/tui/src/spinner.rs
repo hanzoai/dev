@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+// Keep JSON insertion order; no need for BTreeMap
 use std::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -52,10 +52,11 @@ lazy_static! {
                         }
                     }
                 } else {
-                    // Flat: each entry includes optional label/group
-                    let flat: BTreeMap<String, SpinnerJson> = serde_json::from_value(Value::Object(map)).unwrap_or_default();
-                    for (name, sj) in flat.into_iter() {
-                        vpush(&mut list, &name, sj, None);
+                    // Flat: each entry includes optional label/group; preserve JSON order
+                    for (name, val_entry) in map.into_iter() {
+                        if let Ok(sj) = serde_json::from_value::<SpinnerJson>(val_entry) {
+                            vpush(&mut list, &name, sj, None);
+                        }
                     }
                 }
             }
@@ -65,13 +66,22 @@ lazy_static! {
         if !list.iter().any(|s| s.name == "diamond") {
             list.push(Spinner { name: "diamond".to_string(), label: humanize("diamond"), group: derive_group("diamond").to_string(), interval_ms: 120, frames: vec!["◇".into(), "◆".into()] });
         }
-        // Stable sort by (group, name) for grouped browsing
-        list.sort_by(|a, b| match a.group.cmp(&b.group) { core::cmp::Ordering::Equal => a.name.cmp(&b.name), ord => ord });
+        // Preserve JSON order: no reordering here
         list
     };
     static ref CURRENT_INDEX: RwLock<usize> = RwLock::new(
         ALL_SPINNERS.iter().position(|s| s.name == "diamond").unwrap_or(0)
     );
+    static ref GLOBAL_MAX_FRAME_LEN: usize = {
+        let mut maxlen = 0usize;
+        for s in ALL_SPINNERS.iter() {
+            for f in &s.frames {
+                let l = f.chars().count();
+                if l > maxlen { maxlen = l; }
+            }
+        }
+        maxlen
+    };
 }
 
 pub fn init_spinner(name: &str) { switch_spinner(name); }
@@ -112,6 +122,7 @@ pub fn spinner_label_for(name: &str) -> String {
         .unwrap_or_else(|| humanize(name))
 }
 
+#[allow(dead_code)]
 pub fn spinner_group_for(name: &str) -> &'static str {
     if let Some(s) = find_spinner_by_name(name) { return &s.group; }
     derive_group(name)
@@ -177,3 +188,5 @@ fn vpush(out: &mut Vec<Spinner>, name: &str, sj: SpinnerJson, group_override: Op
     let group = group_override.unwrap_or_else(|| sj.group.clone().unwrap_or_else(|| derive_group(name).to_string()));
     out.push(Spinner { name: name.to_string(), label, group, interval_ms: sj.interval, frames: sj.frames });
 }
+
+pub fn global_max_frame_len() -> usize { *GLOBAL_MAX_FRAME_LEN }
