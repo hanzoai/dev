@@ -632,7 +632,17 @@ impl ThemeSelectionView {
                     }
                 }
 
-                let v: serde_json::Value = match serde_json::from_str(&out) { Ok(v) => v, Err(_) => { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: "invalid json".to_string(), _raw_snippet: out.chars().take(200).collect() }); return; } };
+                let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+                let v: serde_json::Value = match serde_json::from_str(&out) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                            error: "invalid json".to_string(),
+                            _raw_snippet: out.chars().take(200).collect(),
+                        });
+                        return;
+                    }
+                };
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Custom").trim().to_string();
                 let mut colors = codex_core::config_types::ThemeColors::default();
                 if let Some(map) = v.get("colors").and_then(|x| x.as_object()) {
@@ -704,6 +714,7 @@ struct CreateThemeState {
     proposed_colors: std::cell::RefCell<Option<codex_core::config_types::ThemeColors>>,
     preview_on: std::cell::Cell<bool>,
     review_focus_is_toggle: std::cell::Cell<bool>,
+    last_raw_output: std::cell::RefCell<Option<String>>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -903,6 +914,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 proposed_colors: std::cell::RefCell::new(None),
                                 preview_on: std::cell::Cell::new(true),
                                 review_focus_is_toggle: std::cell::Cell::new(true),
+                                last_raw_output: std::cell::RefCell::new(None),
                             });
                         } else {
                             // confirm_theme sets self.mode back to Overview
@@ -1794,7 +1806,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Ok(ProgressMsg::CompletedOk { .. }) => {}
-                            Ok(ProgressMsg::RawOutput(_)) => {}
+                            Ok(ProgressMsg::RawOutput(raw)) => {
+                                if let Mode::CreateTheme(ref sm) = self.mode {
+                                    sm.last_raw_output.replace(Some(raw));
+                                }
+                            }
                             Ok(ProgressMsg::CompletedErr { error, .. }) => {
                                 if let Mode::CreateTheme(ref sm) = self.mode {
                                     sm.is_loading.set(false);
@@ -1899,13 +1915,24 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         .add_modifier(Modifier::BOLD),
                 )));
                 form_lines.push(Line::default());
-                // If there was a recent error, show it once above description
+                // If there was a recent error, show it once above description (with raw output snippet)
                 if let Some(last) = s.thinking_lines.borrow().last().cloned() {
                     if last.starts_with("Error:") {
                         form_lines.push(Line::from(Span::styled(
                             last,
                             Style::default().fg(crate::colors::error()),
                         )));
+                        if let Some(raw) = s.last_raw_output.borrow().as_ref() {
+                            let snippet: String = raw.chars().take(400).collect();
+                            form_lines.push(Line::from(Span::styled(
+                                "Model output (first 400 chars):",
+                                Style::default().fg(theme.text_dim),
+                            )));
+                            form_lines.push(Line::from(Span::styled(
+                                snippet,
+                                Style::default().fg(theme.text),
+                            )));
+                        }
                         form_lines.push(Line::default());
                     }
                 }
