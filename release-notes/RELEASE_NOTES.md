@@ -1,11 +1,10 @@
-## @just-every/code v0.2.110
+## @just-every/code v0.2.111
 
-This release refines automated issue comments and tidies build output.
+This release improves automated issue comments with richer context and better selection.
 
 ### Changes
-- Automation: update issue comments — remove direct download links, add LLM template and user mentions; keep commit summary
-- Triage: defer user messaging to issue-comment workflow; remove queue acknowledgement
-- TUI: remove unused imports to silence build warnings
+- Automation: include issue body, recent comments, and commit links in context; expand directly in prompt
+- Automation: pick last non-placeholder comment block to avoid stale summaries
 
 ### Install
 ```
@@ -13,4 +12,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.109...v0.2.110
+Compare: https://github.com/just-every/code/compare/v0.2.110...v0.2.111
