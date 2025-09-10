@@ -514,6 +514,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 spans.push(Span::styled(if is_selected { "› " } else { "  " }.to_string(), Style::default().fg(if is_selected { theme.keyword } else { theme.text } )));
                 // left rule
                 spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                // single space between left border and spinner
+                spans.push(Span::raw(" "));
                 // spinner
                 spans.push(Span::styled(frame, fg));
                 spans.push(Span::raw(" "));
