@@ -782,11 +782,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
         match key_event {
-            KeyEvent {
-                code: KeyCode::Up,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::NONE, .. } => {
                 // In create form, Up navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
@@ -806,22 +802,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     };
                     s.step.set(new_step);
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
-                    let new_step = match s.step.get() {
-                        CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => {
-                            if s.action_idx > 0 {
-                                s.action_idx -= 1;
-                            }
-                            CreateStep::Action
-                        }
-                        CreateStep::Review => {
-                            if s.action_idx > 0 {
-                                s.action_idx -= 1;
-                            }
-                            CreateStep::Review
-                        }
-                    };
-                    s.step.set(new_step);
+                    match s.step.get() {
+                        CreateStep::Prompt => s.step.set(CreateStep::Action),
+                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } },
+                        CreateStep::Review => { s.review_focus_is_toggle.set(true); },
+                    }
                 } else {
                     match self.mode {
                         Mode::Overview => {
@@ -832,11 +817,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent {
-                code: KeyCode::Down,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers::NONE, .. } => {
                 // In create form, Down navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
@@ -856,22 +837,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     };
                     s.step.set(new_step);
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
-                    let new_step = match s.step.get() {
-                        CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => {
-                            if s.action_idx < 1 {
-                                s.action_idx += 1;
-                            }
-                            CreateStep::Action
-                        }
-                        CreateStep::Review => {
-                            if s.action_idx < 1 {
-                                s.action_idx += 1;
-                            }
-                            CreateStep::Review
-                        }
-                    };
-                    s.step.set(new_step);
+                    match s.step.get() {
+                        CreateStep::Prompt => s.step.set(CreateStep::Action),
+                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } },
+                        CreateStep::Review => { s.review_focus_is_toggle.set(false); },
+                    }
                 } else {
                     match &self.mode {
                         Mode::Overview => {
@@ -930,6 +900,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 thinking_current: std::cell::RefCell::new(String::new()),
                                 proposed_name: std::cell::RefCell::new(None),
                                 proposed_colors: std::cell::RefCell::new(None),
+                                preview_on: std::cell::Cell::new(true),
+                                review_focus_is_toggle: std::cell::Cell::new(true),
                             });
                         } else {
                             // confirm_theme sets self.mode back to Overview
@@ -1083,30 +1055,44 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 }
                             }
                             CreateStep::Review => {
-                                if s.action_idx == 0 {
+                                if s.review_focus_is_toggle.get() {
+                                    // Toggle preview on/off
+                                    let now_on = !s.preview_on.get();
+                                    s.preview_on.set(now_on);
+                                    if now_on {
+                                        // Reapply preview
+                                        if let (Some(name), Some(colors)) = (
+                                            s.proposed_name.borrow().clone(),
+                                            s.proposed_colors.borrow().clone(),
+                                        ) {
+                                            crate::theme::set_custom_theme_label(name.clone());
+                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors, label: Some(name) });
+                                        }
+                                    } else {
+                                        // Revert to previous theme
+                                        self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                    }
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                } else if s.action_idx == 0 {
                                     // Save
                                     if let (Some(name), Some(colors)) = (
                                         s.proposed_name.borrow().clone(),
                                         s.proposed_colors.borrow().clone(),
                                     ) {
                                         if let Ok(home) = codex_core::config::find_codex_home() {
-                                            let _ = codex_core::config::set_custom_theme(
-                                                &home, &name, &colors,
-                                            );
+                                            let _ = codex_core::config::set_custom_theme(&home, &name, &colors, s.preview_on.get());
                                         }
-                                        // Apply and record
                                         crate::theme::set_custom_theme_label(name.clone());
-                                        crate::theme::init_theme(
-                                            &codex_core::config_types::ThemeConfig {
-                                                name: ThemeName::Custom,
-                                                colors: colors.clone(),
-                                                label: Some(name.clone()),
-                                            },
-                                        );
-                                        self.revert_theme_on_back = ThemeName::Custom;
-                                        self.current_theme = ThemeName::Custom;
-                                        self.app_event_tx
-                                            .send(AppEvent::UpdateTheme(ThemeName::Custom));
+                                        if s.preview_on.get() {
+                                            // Keep preview and set active in UI if chosen
+                                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors: colors.clone(), label: Some(name.clone()) });
+                                            self.revert_theme_on_back = ThemeName::Custom;
+                                            self.current_theme = ThemeName::Custom;
+                                            self.app_event_tx.send(AppEvent::UpdateTheme(ThemeName::Custom));
+                                        } else {
+                                            // Saved but not active: revert to previous theme visually
+                                            self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                        }
                                         self.app_event_tx.send(
                                             AppEvent::InsertBackgroundEventEarly(
                                                 "Custom theme saved".to_string(),
@@ -1581,6 +1567,26 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                             .fg(theme.text_bright)
                             .add_modifier(Modifier::BOLD),
                     )));
+                    // Theme review header with preview toggle when in theme mode
+                    if let Mode::CreateTheme(ref st) = self.mode {
+                        let name = st
+                            .proposed_name
+                            .borrow()
+                            .clone()
+                            .unwrap_or_else(|| "Custom".to_string());
+                        let onoff = if st.preview_on.get() { "on" } else { "off" };
+                        let sel = st.review_focus_is_toggle.get();
+                        let style = if sel {
+                            Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        };
+                        form_lines.push(Line::from(Span::styled(
+                            format!("Now showing {} [{}]", name, onoff),
+                            style,
+                        )));
+                        form_lines.push(Line::default());
+                    }
                     // Blank line between title and preview row
                     form_lines.push(Line::default());
                     // Preview styled like selection rows: border rules + spinner + label
@@ -1626,8 +1632,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     form_lines.push(Line::default());
                     // Buttons row moved to bottom
                     let mut spans: Vec<Span> = Vec::new();
-                    let primary_selected = s.action_idx == 0;
-                    let secondary_selected = s.action_idx == 1;
+                    // In Theme review: allow focusing the toggle line; if focused there, do not style buttons as selected
+                    let primary_selected = if let Mode::CreateTheme(ref st) = self.mode {
+                        !st.review_focus_is_toggle.get() && s.action_idx == 0
+                    } else {
+                        s.action_idx == 0
+                    };
+                    let secondary_selected = if let Mode::CreateTheme(ref st) = self.mode {
+                        !st.review_focus_is_toggle.get() && s.action_idx == 1
+                    } else {
+                        s.action_idx == 1
+                    };
                     let sel = |b: bool| {
                         if b {
                             Style::default()
