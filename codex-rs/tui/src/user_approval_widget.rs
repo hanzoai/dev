@@ -180,7 +180,15 @@ impl UserApprovalWidget<'_> {
     /// captures input while visible, we don’t need to report whether the event
     /// was consumed—callers can assume it always is.
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent) {
-        if key.kind == KeyEventKind::Press {
+        // Prevent duplicate decisions if the key auto‑repeats while the modal
+        // is being torn down.
+        if self.done {
+            return;
+        }
+        // Accept both Press and Repeat to accommodate Windows terminals that
+        // may emit an initial Repeat for some keys (e.g. Enter) when keyboard
+        // enhancement flags are enabled.
+        if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             self.handle_select_key(key);
         }
     }
