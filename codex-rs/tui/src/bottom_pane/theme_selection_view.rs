@@ -28,7 +28,7 @@ pub(crate) struct ThemeSelectionView {
     current_theme: ThemeName,  // Currently displayed theme
     selected_theme_index: usize,
     // Spinner tab state
-    original_spinner: String,
+    _original_spinner: String,
     current_spinner: String,
     selected_spinner_index: usize,
     // UI mode/state
@@ -64,7 +64,7 @@ impl ThemeSelectionView {
             original_theme: current_theme,
             current_theme,
             selected_theme_index,
-            original_spinner: current_spinner_name.clone(),
+            _original_spinner: current_spinner_name.clone(),
             current_spinner: current_spinner_name.clone(),
             selected_spinner_index,
             mode: Mode::Overview,
@@ -461,8 +461,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 lines.push(Line::from(spans));
             }
         } else {
-            // Spinner: render a two-column view [Name | Preview] with the
-            // preview styled like the composer title (centered line with spinner and text).
+            // Spinner: render one centered preview row per spinner, matching the composer title
             use std::time::{SystemTime, UNIX_EPOCH};
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -478,51 +477,52 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             );
             let end = (start + visible).min(count);
 
-            // Compute column rects once
-            let left_w = (body_area.width as f32 * 0.35) as u16;
-            let right_w = body_area.width.saturating_sub(left_w);
-            for (row_idx, i) in (start..end).enumerate() {
-                let y = body_area.y + row_idx as u16;
+            let mut prev_group: Option<String> = None;
+            let mut y = body_area.y;
+            for i in start..end {
                 if y >= body_area.y + body_area.height { break; }
-
-                // Left column rect
-                let left_rect = Rect { x: body_area.x, y, width: left_w, height: 1 };
-                // Right column rect
-                let right_rect = Rect { x: body_area.x + left_w, y, width: right_w, height: 1 };
 
                 let name = names[i].clone();
                 let is_selected = i == self.selected_spinner_index;
-                let is_original = name == self.original_spinner;
                 let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                // Render left cell (selector + name + optional tag)
-                let mut left_spans = vec![Span::raw(" ")];
-                if is_selected { left_spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { left_spans.push(Span::raw("  ")); }
-                if is_selected {
-                    left_spans.push(Span::styled(name.clone(), Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
-                } else {
-                    left_spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
-                }
-                if is_original { left_spans.push(Span::styled(" (original)", Style::default().fg(theme.text_dim))); }
-                Paragraph::new(Line::from(left_spans)).alignment(Alignment::Left).render(left_rect, buf);
-
-                // Render right cell: centered preview with border-colored rules
-                let info = Style::default().fg(crate::colors::info());
+                // Compose centered preview like composer title: rules + spinner + name + ...
                 let border = Style::default().fg(crate::colors::border());
-                let content = format!("{} Thinking...", frame);
+                let fg = if is_selected { Style::default().fg(crate::colors::info()) } else { Style::default().fg(theme.text_dim) };
+                let label = crate::spinner::spinner_label_for(&name);
+                let content = format!("{} {}...", frame, label);
                 let content_len = content.chars().count() as u16 + 2; // spaces around
-                let total = right_rect.width;
+
+                // Optional group header row
+                let group = crate::spinner::spinner_group_for(&name).to_string();
+                if prev_group.as_deref() != Some(group.as_str()) {
+                    if y < body_area.y + body_area.height {
+                        let header_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
+                        let header = Line::from(Span::styled(group.clone(), Style::default().fg(crate::colors::text_dim()))).centered();
+                        Paragraph::new(header).render(header_rect, buf);
+                        y += 1;
+                    }
+                    prev_group = Some(group);
+                    if y >= body_area.y + body_area.height { break; }
+                }
+
+                let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
+                // Reserve 2 cols for selector arrow on the far left
+                let total = row_rect.width.saturating_sub(2);
                 let rule_total = total.saturating_sub(content_len);
                 let left_rule = rule_total / 2;
                 let right_rule = rule_total.saturating_sub(left_rule);
-                let mut right_spans: Vec<Span> = Vec::new();
-                right_spans.push(Span::styled("─".repeat(left_rule as usize), border));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(Span::styled(content, info));
-                right_spans.push(Span::raw(" "));
-                right_spans.push(Span::styled("─".repeat(right_rule as usize), border));
-                Paragraph::new(Line::from(right_spans)).alignment(Alignment::Left).render(right_rect, buf);
+                let mut spans: Vec<Span> = Vec::new();
+                // Selector arrow area
+                if is_selected { spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { spans.push(Span::raw("  ")); }
+                spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(content, fg));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled("─".repeat(right_rule as usize), border));
+                Paragraph::new(Line::from(spans)).alignment(Alignment::Left).render(row_rect, buf);
+                y += 1;
             }
 
             // Animate spinner previews while open

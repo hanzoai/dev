@@ -90,6 +90,15 @@ jobs:
             const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number: prNumber, per_page: 100 });
             const changed = files.map(f => `- ${f.status.padEnd(6)} ${f.filename}`).slice(0, 50);
 
+            // Issue author
+            let issueAuthor = '';
+            if (issueNumber) {
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                issueAuthor = iss.user?.login || '';
+              } catch {}
+            }
+
             // Collect latest commit subjects on the PR (brief)
             let commits = [];
             try {
@@ -105,6 +114,7 @@ jobs:
             core.setOutput('base', pr.base.ref || '');
             core.setOutput('changed', changed.join('\n'));
             core.setOutput('commits', commits.join('\n'));
+            core.setOutput('issue_author', issueAuthor);
 
       - name: Prepare context file
         id: ctx
@@ -115,11 +125,14 @@ jobs:
           BODY: ${{ steps.meta.outputs.body }}
           CHANGED: ${{ steps.meta.outputs.changed }}
           COMMITS: ${{ steps.meta.outputs.commits }}
+          ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
+          ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
         with:
           script: |
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
             const pr = Number(process.env.PR_NUMBER);
+            const issue_number = Number(process.env.ISSUE_NUMBER || 0);
             // resolve slug
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
             const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
@@ -130,8 +143,17 @@ jobs:
               const b = pull.head.ref || '';
               const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
               if (issue_number) {
-                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                try {
+                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
+                  const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                  const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                  const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                  if (codeLabel) slug = codeLabel.slice(5).toLowerCase(); else if (idLabel) slug = idLabel.slice(3).toLowerCase();
+                } catch {}
+                if (!slug) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                }
               }
             }
             if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
@@ -146,19 +168,10 @@ jobs:
               if (mm) { const n = parseInt(mm[1], 10); if (n > maxN) { maxN = n; tag = t; } }
             }
             const releaseBase = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
-            const dl = [
-              `- Linux x86_64 (.zst): ${releaseBase}/code-x86_64-unknown-linux-musl.zst`,
-              `- Linux x86_64 (.tar.gz): ${releaseBase}/code-x86_64-unknown-linux-musl.tar.gz`,
-              `- Linux aarch64 (.zst): ${releaseBase}/code-aarch64-unknown-linux-musl.zst`,
-              `- Linux aarch64 (.tar.gz): ${releaseBase}/code-aarch64-unknown-linux-musl.tar.gz`,
-              `- macOS x86_64 (.zst): ${releaseBase}/code-x86_64-apple-darwin.zst`,
-              `- macOS x86_64 (.tar.gz): ${releaseBase}/code-x86_64-apple-darwin.tar.gz`,
-              `- macOS arm64 (.zst): ${releaseBase}/code-aarch64-apple-darwin.zst`,
-              `- macOS arm64 (.tar.gz): ${releaseBase}/code-aarch64-apple-darwin.tar.gz`,
-              `- Windows x86_64 (.zip): ${releaseBase}/code-x86_64-pc-windows-msvc.exe.zip`,
-            ].join('\n');
             const lines = [];
             lines.push(`# PR #${pr}: ${process.env.TITLE || ''}`);
+            lines.push('');
+            lines.push(`PR: https://github.com/${owner}/${repo}/pull/${pr}`);
             lines.push('');
             if ((process.env.BODY || '').trim()) {
               lines.push('## PR body');
@@ -170,18 +183,47 @@ jobs:
               lines.push(process.env.CHANGED.trim());
               lines.push('');
             }
-            if ((process.env.COMMITS || '').trim()) {
-              lines.push('## What changed in this build (recent commits)');
-              lines.push(process.env.COMMITS.trim());
-              lines.push('');
+            // Commit subjects and links
+            try {
+              const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr, per_page: 100 });
+              const recent = commits.slice(-5);
+              if (recent.length) {
+                lines.push('## What changed in this build (recent commits)');
+                lines.push(recent.map(c => `- ${c.commit.message.split('\n')[0]}`).join('\n'));
+                lines.push('');
+                lines.push('## Commit links');
+                lines.push(recent.map(c => `- ${c.commit.message.split('\n')[0]} (${c.sha.substring(0,7)}): https://github.com/${owner}/${repo}/commit/${c.sha}`).join('\n'));
+                lines.push('');
+              }
+            } catch {}
+            // Issue body and recent comments for agent context
+            if (issue_number) {
+              try {
+                const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+                lines.push('## Issue #'+issue_number+' context');
+                lines.push('### Issue body');
+                lines.push((issue.body || '').trim());
+                lines.push('');
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+                if (comments.length) {
+                  lines.push('### Recent issue comments (newest first, up to 10)');
+                  const last = comments.slice(-10).reverse();
+                  for (const c of last) {
+                    const when = (c.created_at || '').replace('T',' ').replace('Z','');
+                    lines.push(`- [@${c.user?.login||'unknown'} at ${when}]`);
+                    const body = (c.body || '').trim();
+                    lines.push(body.length > 1200 ? body.slice(0,1200)+"\n…" : body);
+                    lines.push('');
+                  }
+                }
+              } catch {}
             }
             lines.push('## Preview command');
             lines.push('```bash');
             lines.push(`code preview ${slug}`);
             lines.push('```');
             lines.push('');
-            lines.push('## Direct downloads');
-            lines.push(dl);
+            lines.push(`Issue author: @${process.env.ISSUE_AUTHOR || ''}`);
             fs.mkdirSync('.github/auto', { recursive: true });
             fs.writeFileSync('.github/auto/ISSUE_PREVIEW_CONTEXT.md', lines.join('\n'));
 
@@ -222,16 +264,36 @@ jobs:
       - name: Generate comment with Code (read-only)
         id: gen
         continue-on-error: true
+        env:
+          ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME";
-          PROMPT=$(cat <<'EOP'
+          PROMPT=$(cat <<EOP
           <task>
-          Write a concise, friendly issue comment that:
-          - Explains what PR below does in 2–4 bullets (user-facing impact only).
-          - Tells the reporter how to run the preview (include the exact command block provided).
-          - Includes the direct download links section.
-          Keep it short and actionable. Do not include CI or maintainer-only details.
+          You are writing an enthusiastic, user‑facing issue reply about a successful preview build. Please do not assume the user has deep technical knowledge.
+          Use the following template, but adapt all language to this specific change. Be friendly and curious where appropriate.
+          You MAY remove sections that repeat earlier replies.
+
+          TEMPLATE (example):
+          ---
+          @user Thanks for the great feature request! Changing the title is an interesting personalization and ties in really well with our existing theme options. [Replace this sentence with specific feedback to the user and reference their idea. Always start by mentioning them.]
+
+          I’ve added the ability to edit the title from the /theme slash command, since that’s where the existing theme functionality lives. [Explain in simple, non‑technical language what changed.]
+
+          You can run this right now—can’t wait for you to try it! In your terminal, run: [Be excited but concise.]
+          ```
+          code preview <slug here>
+          ```
+          Then run /theme in the terminal to see the new option. [Explain how to try it once launched.]
+
+          Can’t wait for you to try changing your title! Please comment here if it’s working well or needs tweaks. Maintainers will review and, if merged into a release, you’ll get an update here. Thanks again! [Positive, personable close.]
+          ---
+
+          REQUIREMENTS:
+          - Replace @user with the actual GitHub handle(s) of the person you are replying to (either the issue author and/or last commenter).
+          - Replace <slug here> with the exact preview command from the context below.
+          - Keep it brief, clear, and kind.
           </task>
           <context>
           $(cat .github/auto/ISSUE_PREVIEW_CONTEXT.md)
@@ -252,9 +314,15 @@ jobs:
           node - <<'JS'
           const fs = require('fs');
           const t = fs.readFileSync('.github/auto/AGENT_OUT.txt','utf8');
-          const m = t.match(/<comment>([\s\S]*?)<\/comment>/i);
-          if (m && m[1].trim()) {
-            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', m[1].trim() + '\n');
+          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
+          const PLACEHOLDER = '…final Markdown comment…';
+          let body = '';
+          if (all.length) {
+            const last = (all[all.length-1][1] || '').trim();
+            if (last && last !== PLACEHOLDER) body = last;
+          }
+          if (body) {
+            fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
           JS
 
@@ -306,31 +374,23 @@ jobs:
                 const all = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr, per_page: 100 });
                 commits = all.slice(-5).map(c => `- ${c.commit.message.split('\n')[0]}`);
               } catch {}
+              // Synthesized fallback matching the template (no direct downloads)
+              const issueAuthor = `${{ steps.meta.outputs.issue_author }}` || '';
               body = [
                 ISSUE_MARK,
-                '### Preview Build',
+                `@${issueAuthor} Thanks for the great request — a preview is ready!`,
                 '',
-                'You can run this right now! In your terminal just use:',
+                'You can run it right now:',
                 '```bash',
                 `code preview ${slug}`,
                 '```',
-                'This will run the version of Code we\'ve created for this issue.',
                 '',
-                commits.length ? '#### What changed in this build (recent commits)' : '',
+                'Please let us know here if it works well or needs tweaks. Maintainers will review and, if merged, you’ll get an update here. Thanks again! ',
+                '',
+                commits.length ? 'Changes made:' : '',
                 commits.length ? commits.join('\n') : '',
-                commits.length ? '' : '',
-                'Direct downloads:',
-                `- Linux x86_64 (.zst): ${base}/code-x86_64-unknown-linux-musl.zst`,
-                `- Linux x86_64 (.tar.gz): ${base}/code-x86_64-unknown-linux-musl.tar.gz`,
-                `- Linux aarch64 (.zst): ${base}/code-aarch64-unknown-linux-musl.zst`,
-                `- Linux aarch64 (.tar.gz): ${base}/code-aarch64-unknown-linux-musl.tar.gz`,
-                `- macOS x86_64 (.zst): ${base}/code-x86_64-apple-darwin.zst`,
-                `- macOS x86_64 (.tar.gz): ${base}/code-x86_64-apple-darwin.tar.gz`,
-                `- macOS arm64 (.zst): ${base}/code-aarch64-apple-darwin.zst`,
-                `- macOS arm64 (.tar.gz): ${base}/code-aarch64-apple-darwin.tar.gz`,
-                `- Windows x86_64 (.zip): ${base}/code-x86_64-pc-windows-msvc.exe.zip`,
                 ISSUE_MARK
-              ].join('\n');
+              ].filter(Boolean).join('\n');
             }
             // Upsert by marker on the issue
             const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
