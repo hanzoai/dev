@@ -577,6 +577,12 @@ impl ThemeSelectionView {
                                 "spinner": {"type": "string"},
                                 "progress": {"type": "string"}
                             },
+                            "required": [
+                                "primary", "secondary", "background", "foreground", "border",
+                                "border_focused", "selection", "cursor", "success", "warning",
+                                "error", "info", "text", "text_dim", "text_bright", "keyword",
+                                "string", "comment", "function", "spinner", "progress"
+                            ],
                             "additionalProperties": false
                         }
                     },
