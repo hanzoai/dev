@@ -237,21 +237,196 @@ impl ThemeSelectionView {
         }
         self.mode = Mode::Overview;
     }
+
+    /// Spawn a background task that creates a custom spinner using the LLM with a JSON schema
+    fn kickoff_spinner_creation(&self, user_prompt: String, progress_tx: std::sync::mpsc::Sender<ProgressMsg>) {
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Failed to start runtime: {}", e))); return; }
+            };
+            let _ = rt.block_on(async move {
+                // Load current config (CLI-style) and construct a one-off ModelClient
+                let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                    Ok(c) => c,
+                    Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Config error: {}", e))); return; }
+                };
+                let auth_mgr = codex_core::AuthManager::shared(
+                    cfg.codex_home.clone(),
+                    codex_protocol::mcp_protocol::AuthMode::ApiKey,
+                    cfg.responses_originator_header.clone(),
+                );
+                let client = codex_core::ModelClient::new(
+                    std::sync::Arc::new(cfg.clone()),
+                    Some(auth_mgr),
+                    cfg.model_provider.clone(),
+                    cfg.model_reasoning_effort,
+                    cfg.model_reasoning_summary,
+                    cfg.model_text_verbosity,
+                    uuid::Uuid::new_v4(),
+                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                );
+
+                // Build developer guidance and input
+                let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 50 frames.\n- Each frame SHOULD be between 1 and 20 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Use characters that render well in typical monospaced terminals.\n".to_string();
+                let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
+                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: user_prompt }] });
+
+                // JSON schema for structured output
+                let schema = serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50–300)."},
+                        "frames": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 20},
+                            "minItems": 2,
+                            "maxItems": 50,
+                            "description": "Spinner frames; 2–50 strings, 1–20 characters each."
+                        }
+                    },
+                    "required": ["interval", "frames"],
+                    "additionalProperties": false
+                });
+                let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
+
+                let mut prompt = codex_core::Prompt::default();
+                prompt.input = input;
+                prompt.store = true;
+                prompt.text_format = Some(format);
+
+                // Stream and collect final JSON
+                use futures::StreamExt;
+                let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(connecting to model)".to_string()));
+                let mut stream = match client.stream(&prompt).await { Ok(s) => s, Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Request error: {}", e))); tracing::info!("spinner request error: {}", e); return; } };
+                let mut out = String::new();
+                let mut think_sum = String::new();
+                while let Some(ev) = stream.next().await {
+                    match ev {
+                        Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); }
+                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
+                        Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
+                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
+                        Ok(codex_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                            if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
+                                for c in content { if let codex_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
+                            }
+                            tracing::info!(target: "spinner", "LLM[item_done]");
+                        }
+                        Ok(codex_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
+                        Err(e) => { tracing::info!("LLM stream error: {}", e); }
+                        _ => {}
+                    }
+                }
+
+                let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+
+                // Parse JSON; on failure, attempt to salvage a top-level object and log raw output
+                let v: serde_json::Value = match serde_json::from_str(&out) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::info!(target: "spinner", "Strict JSON parse failed: {}", e);
+                        tracing::info!(target: "spinner", "Raw output: {}", out);
+                        fn extract_first_json_object(s: &str) -> Option<String> {
+                            let mut depth = 0usize;
+                            let mut in_str = false;
+                            let mut esc = false;
+                            let mut start: Option<usize> = None;
+                            for (i, ch) in s.char_indices() {
+                                if in_str {
+                                    if esc { esc = false; }
+                                    else if ch == '\\' { esc = true; }
+                                    else if ch == '"' { in_str = false; }
+                                    continue;
+                                }
+                                match ch {
+                                    '"' => in_str = true,
+                                    '{' => { if depth == 0 { start = Some(i); } depth += 1; },
+                                    '}' => { if depth > 0 { depth -= 1; if depth == 0 { let end = i + ch.len_utf8(); return start.map(|st| s[st..end].to_string()); } } },
+                                    _ => {}
+                                }
+                            }
+                            None
+                        }
+                        if let Some(obj) = extract_first_json_object(&out) {
+                            match serde_json::from_str::<serde_json::Value>(&obj) {
+                                Ok(v) => v,
+                                Err(e2) => { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e2), _raw_snippet: out.chars().take(200).collect::<String>() }); return; }
+                            }
+                        } else {
+                            let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e), _raw_snippet: out.chars().take(200).collect::<String>() }); return;
+                        }
+                    }
+                };
+                let interval = v.get("interval").and_then(|x| x.as_u64()).unwrap_or(120).clamp(50, 300);
+                let mut frames: Vec<String> = v
+                    .get("frames")
+                    .and_then(|x| x.as_array())
+                    .map(|arr| arr.iter().filter_map(|f| f.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+
+                // Enforce frame width limit (truncate to first 20 characters)
+                const MAX_CHARS: usize = 20;
+                frames = frames
+                    .into_iter()
+                    .map(|f| f.chars().take(MAX_CHARS).collect::<String>())
+                    .filter(|f| !f.is_empty())
+                    .collect();
+
+                // Enforce count 2–50
+                if frames.len() > 50 { frames.truncate(50); }
+                if frames.len() < 2 { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: "too few frames after validation".to_string(), _raw_snippet: out.chars().take(200).collect::<String>() }); return; }
+
+                // Normalize: left-pad frames to equal length if needed
+                let max_len = frames.iter().map(|f| f.chars().count()).max().unwrap_or(0);
+                let norm_frames: Vec<String> = frames
+                    .into_iter()
+                    .map(|f| {
+                        let cur = f.chars().count();
+                        if cur >= max_len { f } else { format!("{}{}", " ".repeat(max_len - cur), f) }
+                    })
+                    .collect();
+
+                // Persist + activate
+                let _ = progress_tx.send(ProgressMsg::CompletedOk { interval, frames: norm_frames });
+            });
+        });
+    }
 }
 
-#[derive(Clone, PartialEq)]
 enum Mode { Overview, Themes, Spinner, CreateSpinner(CreateState) }
 
-#[derive(Clone, PartialEq)]
 struct CreateState {
-    step: CreateStep,
-    interval: String,
-    frames: String,
-    action_idx: usize, // 0 = Save, 1 = Cancel
+    step: std::cell::Cell<CreateStep>,
+    /// Freeform prompt describing the desired spinner
+    prompt: String,
+    /// While true, we render a loading indicator and disable input
+    is_loading: std::cell::Cell<bool>,
+    action_idx: usize, // 0 = Create/Save, 1 = Cancel/Retry
+    /// Live stream messages from the background task
+    rx: Option<std::sync::mpsc::Receiver<ProgressMsg>>,
+    /// Accumulated thinking/output lines for live display (completed)
+    thinking_lines: std::cell::RefCell<Vec<String>>,
+    /// In‑progress line assembled from deltas
+    thinking_current: std::cell::RefCell<String>,
+    /// Parsed proposal waiting for review
+    proposed_interval: std::cell::Cell<Option<u64>>,
+    proposed_frames: std::cell::RefCell<Option<Vec<String>>>,
 }
 
-#[derive(Clone, PartialEq)]
-enum CreateStep { Interval, Frames, Action }
+#[derive(Copy, Clone, PartialEq)]
+enum CreateStep { Prompt, Action, Review }
+
+enum ProgressMsg {
+    ThinkingDelta(String),
+    OutputDelta(String),
+    RawOutput(String),
+    CompletedOk { interval: u64, frames: Vec<String> },
+    // `_raw_snippet` is captured for potential future display/debugging
+    CompletedErr { error: String, _raw_snippet: String },
+}
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     fn desired_height(&self, _width: u16) -> u16 {
@@ -285,13 +460,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             } => {
                 // In create form, Up navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    s.step = match s.step {
-                        CreateStep::Interval => CreateStep::Action,
-                        CreateStep::Frames => CreateStep::Interval,
-                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Action }
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Action },
+                        CreateStep::Review => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Review },
                     };
+                    s.step.set(new_step);
                 } else {
-                    match self.mode.clone() {
+                    match self.mode {
                         Mode::Overview => {
                             self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
                         }
@@ -306,13 +482,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             } => {
                 // In create form, Down navigates fields/buttons
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    s.step = match s.step {
-                        CreateStep::Interval => CreateStep::Frames,
-                        CreateStep::Frames => CreateStep::Action,
-                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Action }
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Action },
+                        CreateStep::Review => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Review },
                     };
+                    s.step.set(new_step);
                 } else {
-                    match &self.mode.clone() {
+                    match &self.mode {
                         Mode::Overview => {
                             self.overview_selected_index = (self.overview_selected_index + 1) % 2;
                         }
@@ -351,32 +528,75 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         // If tail row selected (Create your own…), open create form
                         let names = crate::spinner::spinner_names();
                         if self.selected_spinner_index >= names.len() {
-                            self.mode = Mode::CreateSpinner(CreateState { step: CreateStep::Interval, interval: String::from("120"), frames: String::new(), action_idx: 0 });
+                            self.mode = Mode::CreateSpinner(CreateState {
+                                step: std::cell::Cell::new(CreateStep::Prompt),
+                                prompt: String::new(),
+                                is_loading: std::cell::Cell::new(false),
+                                action_idx: 0,
+                                rx: None,
+                                thinking_lines: std::cell::RefCell::new(Vec::new()),
+                                thinking_current: std::cell::RefCell::new(String::new()),
+                                proposed_interval: std::cell::Cell::new(None),
+                                proposed_frames: std::cell::RefCell::new(None),
+                            });
                         } else {
                             self.confirm_spinner()
                         }
                     }
                     Mode::CreateSpinner(mut s) => {
                         let mut go_overview = false;
-                        match s.step {
-                            CreateStep::Interval => { s.step = CreateStep::Frames; }
-                            CreateStep::Frames => { s.step = CreateStep::Action; }
+                        match s.step.get() {
+                            // Enter from Prompt submits immediately
+                            CreateStep::Prompt => {
+                                if !s.is_loading.get() {
+                                    let user_prompt = s.prompt.clone();
+                                    s.is_loading.set(true);
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    let (txp, rxp) = std::sync::mpsc::channel::<ProgressMsg>();
+                                    s.rx = Some(rxp);
+                                    self.kickoff_spinner_creation(user_prompt, txp);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                            }
                             CreateStep::Action => {
+                                if s.action_idx == 0 && !s.is_loading.get() {
+                                    let user_prompt = s.prompt.clone();
+                                    s.is_loading.set(true);
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    let (txp, rxp) = std::sync::mpsc::channel::<ProgressMsg>();
+                                    s.rx = Some(rxp);
+                                    self.kickoff_spinner_creation(user_prompt, txp);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                } else { /* Cancel or already loading → return to overview */ go_overview = true; }
+                            }
+                            CreateStep::Review => {
                                 if s.action_idx == 0 {
-                                    let interval = s.interval.trim().parse::<u64>().unwrap_or(120);
-                                    let frames: Vec<String> = s.frames.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect();
-                                    if !frames.is_empty() {
+                                    // Save
+                                    if let (Some(interval), Some(frames)) = (s.proposed_interval.get(), s.proposed_frames.borrow().clone()) {
                                         if let Ok(home) = codex_core::config::find_codex_home() { let _ = codex_core::config::set_custom_spinner(&home, "custom", interval, &frames); }
                                         crate::spinner::add_custom_spinner("custom".to_string(), "Custom".to_string(), interval, frames);
                                         crate::spinner::switch_spinner("custom");
+                                        self.revert_spinner_on_back = "custom".to_string();
                                         self.current_spinner = "custom".to_string();
-                                        self.revert_spinner_on_back = self.current_spinner.clone();
+                                        self.app_event_tx.send(AppEvent::UpdateSpinner("custom".to_string()));
                                         self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("✓ Custom spinner saved".to_string()));
                                         go_overview = true;
-                                    } else {
-                                        self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("Provide at least one frame (comma-separated)".to_string()));
                                     }
-                                } else { /* Cancel → return to overview */ go_overview = true; }
+                                } else {
+                                    // Retry -> return to input (Prompt) without running
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    s.step.set(CreateStep::Prompt);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                }
                             }
                         }
                         if go_overview { self.mode = Mode::Overview; } else { self.mode = Mode::CreateSpinner(s); }
@@ -396,13 +616,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             }
             KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    match s.step { CreateStep::Interval => s.interval.push(c), CreateStep::Frames => s.frames.push(c), CreateStep::Action => {} }
+                    if s.is_loading.get() { return; }
+                    match s.step.get() { CreateStep::Prompt => s.prompt.push(c), CreateStep::Action | CreateStep::Review => {} }
                 }
             }
             KeyEvent { code: KeyCode::Backspace, .. } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    let tgt = match s.step { CreateStep::Interval => &mut s.interval, CreateStep::Frames => &mut s.frames, CreateStep::Action => { return; } };
-                    tgt.pop();
+                    if s.is_loading.get() { return; }
+                    match s.step.get() { CreateStep::Prompt => { s.prompt.pop(); }, CreateStep::Action | CreateStep::Review => { return; } }
                 }
             }
             _ => {}
@@ -560,52 +781,201 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             // Inline form for custom spinner with visible selection & caret
             let theme = crate::theme::current_theme();
             if let Mode::CreateSpinner(s) = &self.mode {
+                // Drain progress messages if streaming
+                if let Some(rx) = &s.rx {
+                    for _ in 0..100 { // limit per render to keep UI snappy
+                        match rx.try_recv() {
+                            Ok(ProgressMsg::ThinkingDelta(d)) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    let mut hist = sm.thinking_lines.borrow_mut();
+                                    cur.push_str(&d);
+                                    if let Some(pos) = cur.rfind('\n') {
+                                        // Split on last newline: commit completed portion, keep remainder
+                                        let (complete, remainder) = cur.split_at(pos);
+                                        if !complete.trim().is_empty() { hist.push(complete.trim().to_string()); }
+                                        *cur = remainder.trim_start_matches('\n').to_string();
+                                        let keep = 10usize;
+                                        let len = hist.len();
+                                        if len > keep { hist.drain(0..len-keep); }
+                                    }
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::OutputDelta(d)) => {
+                                // Treat assistant text deltas the same as thinking: append to current; on newline commit to history
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    let mut hist = sm.thinking_lines.borrow_mut();
+                                    cur.push_str(&d);
+                                    if let Some(pos) = cur.rfind('\n') {
+                                        let (complete, remainder) = cur.split_at(pos);
+                                        if !complete.trim().is_empty() { hist.push(complete.trim().to_string()); }
+                                        *cur = remainder.trim_start_matches('\n').to_string();
+                                        let keep = 10usize;
+                                        let len = hist.len();
+                                        if len > keep { hist.drain(0..len-keep); }
+                                    }
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::RawOutput(_raw)) => {}
+                            Ok(ProgressMsg::CompletedOk { interval, frames }) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    sm.is_loading.set(false);
+                                    sm.step.set(CreateStep::Review);
+                                    sm.proposed_interval.set(Some(interval));
+                                    sm.proposed_frames.replace(Some(frames));
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::CompletedErr { error, _raw_snippet: _ }) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    sm.is_loading.set(false); sm.step.set(CreateStep::Action);
+                                    sm.thinking_lines.borrow_mut().push(format!("Error: {}", error));
+                                    sm.thinking_current.borrow_mut().clear();
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                        }
+                    }
+                }
                 let mut form_lines = Vec::new();
+                // While loading: replace the entire content with spinner + latest message
+                if s.is_loading.get() {
+                    form_lines.push(Line::from(Span::styled(
+                        "Overview » Change Spinner » Create Custom",
+                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                    )));
+                    // One blank line between title and spinner line
+                    form_lines.push(Line::from(" "));
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                    let diamond = ["◇", "◆", "◇", "◆"]; let frame = diamond[((now_ms / 120) as usize) % diamond.len()].to_string();
+                    form_lines.push(Line::from(vec![Span::styled(frame, Style::default().fg(crate::colors::info())), Span::raw(" Generating spinner with AI…")]));
+                    // Latest message only
+                    // Show the latest in‑progress line if present, otherwise last completed line
+                    let cur = s.thinking_current.borrow();
+                    let latest = if !cur.trim().is_empty() {
+                        cur.trim().to_string()
+                    } else {
+                        s.thinking_lines
+                            .borrow()
+                            .iter()
+                            .rev()
+                            .find(|l| !l.trim().is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| "Waiting for model…".to_string())
+                    };
+                    let mut latest_render = latest.to_string();
+                    if !latest_render.ends_with('…') {
+                        latest_render.push_str(" …");
+                    }
+                    form_lines.push(Line::from(Span::styled(latest_render, Style::default().fg(theme.text_dim))));
+                    self.app_event_tx
+                        .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
+                    return;
+                }
+
+                // After completion (review): show preview + Save/Retry
+                if matches!(s.step.get(), CreateStep::Review) {
+                    form_lines.push(Line::from(Span::styled(
+                        "Overview » Change Spinner » Create Custom",
+                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                    )));
+                    form_lines.push(Line::from(" "));
+                    // Preview styled like selection rows: border rules + spinner + label
+                    if let (Some(interval), Some(frames)) = (s.proposed_interval.get(), s.proposed_frames.borrow().as_ref()) {
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                        let idx = if frames.is_empty() { 0 } else { ((now_ms / interval) as usize) % frames.len() };
+                        let preview = frames.get(idx).cloned().unwrap_or_default();
+                        form_lines.push(Line::from(" "));
+                        // Compute layout similar to the list row: left rule | spinner | label | right rule
+                        let label = "Preview";
+                        let max_frame_len: u16 = preview.chars().count() as u16;
+                        let border = Style::default().fg(crate::colors::border());
+                        let fg = Style::default().fg(crate::colors::info());
+                        let text_len = (label.chars().count() as u16).saturating_add(3); // label + dots
+                        let x: u16 = max_frame_len.saturating_add(5);
+                        let left_rule = x.saturating_sub(max_frame_len);
+                        let right_rule = x.saturating_sub(text_len);
+                        let mut spans: Vec<Span> = Vec::new();
+                        spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(preview, fg));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(format!("{}...", label), fg));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled("─".repeat(right_rule as usize), border));
+                        form_lines.push(Line::from(spans));
+                        self.app_event_tx
+                            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(interval)));
+                    }
+                    // Add spacing line between preview and buttons
+                    form_lines.push(Line::from(" "));
+                    // Buttons row moved to bottom
+                    let mut spans: Vec<Span> = Vec::new();
+                    let primary_selected = s.action_idx == 0;
+                    let secondary_selected = s.action_idx == 1;
+                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("[ Save ]", sel(primary_selected)));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("[ Retry ]", sel(secondary_selected)));
+                    form_lines.push(Line::from(spans));
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
+                    return;
+                }
+
+                // Default (idle): header, description input, border, and Generate/Cancel buttons
                 form_lines.push(Line::from(Span::styled(
                     "Overview » Change Spinner » Create Custom",
                     Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
                 )));
+                form_lines.push(Line::from(Span::styled(
+                    "Code can generate a custom spinner just for you!",
+                    Style::default().fg(theme.text)
+                )));
+                form_lines.push(Line::from(Span::styled(
+                    "What sort of spinner would you like? (e.g. bouncing dot party, rocket ship emoji blast off)",
+                    Style::default().fg(theme.text_dim)
+                )));
+                // Exactly one blank line above Description
                 form_lines.push(Line::from(" "));
-
                 let caret = Span::styled("▏", Style::default().fg(theme.info));
-                // Interval line
-                {
-                    let active = matches!(s.step, CreateStep::Interval);
-                    let mut spans: Vec<Span> = Vec::new();
-                    spans.push(Span::styled(if active { "› " } else { "  " }, Style::default().fg(theme.keyword)));
-                    spans.push(Span::styled("Interval (ms): ", Style::default().fg(theme.keyword)));
-                    if s.interval.is_empty() && active { spans.push(Span::styled("(e.g., 120)", Style::default().fg(theme.text_dim))); spans.push(caret.clone()); }
-                    else if active { spans.push(Span::raw(s.interval.clone())); spans.push(caret.clone()); }
-                    else { spans.push(Span::raw(s.interval.clone())); }
-                    form_lines.push(Line::from(spans));
-                }
-                // Frames line
-                {
-                    let active = matches!(s.step, CreateStep::Frames);
-                    let mut spans: Vec<Span> = Vec::new();
-                    spans.push(Span::styled(if active { "› " } else { "  " }, Style::default().fg(theme.keyword)));
-                    spans.push(Span::styled("Frames (comma-separated): ", Style::default().fg(theme.keyword)));
-                    if s.frames.is_empty() && active { spans.push(Span::styled("(e.g., ., .., …)", Style::default().fg(theme.text_dim))); spans.push(caret.clone()); }
-                    else if active { spans.push(Span::raw(s.frames.clone())); spans.push(caret.clone()); }
-                    else { spans.push(Span::raw(s.frames.clone())); }
-                    form_lines.push(Line::from(spans));
-                }
+                let mut desc_spans: Vec<Span> = Vec::new();
+                desc_spans.push(Span::styled("Description: ", Style::default().fg(theme.keyword)));
+                let active = matches!(s.step.get(), CreateStep::Prompt);
+                desc_spans.push(Span::raw(s.prompt.clone()));
+                if active { desc_spans.push(caret.clone()); }
+                form_lines.push(Line::from(desc_spans));
+                form_lines.push(Line::from(Span::styled("─".repeat((body_area.width.saturating_sub(4)) as usize), Style::default().fg(crate::colors::border()))));
+                // Buttons
+                let mut spans: Vec<Span> = Vec::new();
+                let on_actions = matches!(s.step.get(), CreateStep::Action);
+                let primary_selected = on_actions && s.action_idx == 0;
+                let secondary_selected = on_actions && s.action_idx == 1;
+                let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("[ Generate... ]", sel(primary_selected)));
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("[ Cancel ]", sel(secondary_selected)));
+                form_lines.push(Line::from(spans));
 
-                // Action buttons (Save / Cancel)
-                {
-                    let mut spans: Vec<Span> = Vec::new();
-                    let active = matches!(s.step, CreateStep::Action);
-                    let save_selected = active && s.action_idx == 0;
-                    let cancel_selected = active && s.action_idx == 1;
-                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled("[ Save ]", sel(save_selected)));
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled("[ Cancel ]", sel(cancel_selected)));
-                    form_lines.push(Line::from(spans));
-                }
-
-                Paragraph::new(form_lines).alignment(Alignment::Left).render(body_area, buf);
+                Paragraph::new(form_lines)
+                    .alignment(Alignment::Left)
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .render(body_area, buf);
             }
             return;
         } else {
