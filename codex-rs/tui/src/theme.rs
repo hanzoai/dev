@@ -7,6 +7,7 @@ use std::sync::RwLock;
 
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
+    static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -66,11 +67,25 @@ pub fn init_theme(config: &ThemeConfig) {
 
     let mut current = CURRENT_THEME.write().unwrap();
     *current = theme;
+    // Track custom theme label for UI display
+    if matches!(config.name, ThemeName::Custom) {
+        *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
+    }
 }
 
 /// Get the current theme
 pub fn current_theme() -> Theme {
     CURRENT_THEME.read().unwrap().clone()
+}
+
+/// Get the custom theme's display label, if any
+pub fn custom_theme_label() -> Option<String> {
+    CUSTOM_THEME_LABEL.read().unwrap().clone()
+}
+
+/// Set/update the custom theme's label at runtime
+pub fn set_custom_theme_label(label: String) {
+    *CUSTOM_THEME_LABEL.write().unwrap() = Some(label);
 }
 
 /// Switch to a different predefined theme
