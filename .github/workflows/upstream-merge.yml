@@ -225,6 +225,12 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Set shared Cargo env (CARGO_HOME, CARGO_TARGET_DIR)
+        if: steps.check_upstream.outputs.skip != 'true'
+        run: |
+          echo "CARGO_HOME=${RUNNER_TEMP}/cargo-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/codex-rs/target" >> "$GITHUB_ENV"
+
       - name: Cache ripgrep binary
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/cache@v4
@@ -295,27 +301,7 @@ jobs:
           echo 'SCCACHE_IDLE_TIMEOUT=1800' >> "$GITHUB_ENV"
           echo 'SCCACHE_CACHE_SIZE=5G' >> "$GITHUB_ENV"
 
-      # Belt-and-suspenders: explicit cache of the target directory keyed by toolchain + lockfile
-      - name: Cache cargo target (direct)
-        if: steps.check_upstream.outputs.skip != 'true'
-        uses: actions/cache@v4
-        with:
-          path: codex-rs/target
-          key: target-${{ runner.os }}-toolchain-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}-devfast
-          restore-keys: |
-            target-${{ runner.os }}-toolchain-1.89.0-
-
-      - name: Cache Cargo registry (CARGO_HOME in runner temp)
-        if: steps.check_upstream.outputs.skip != 'true'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ runner.temp }}/cargo-home/registry
-            ${{ runner.temp }}/cargo-home/git
-          key: cargo-home-${{ runner.os }}-toolchain-1.89.0-${{ hashFiles('codex-rs/Cargo.lock') }}
-          restore-keys: |
-            cargo-home-${{ runner.os }}-toolchain-1.89.0-
-            cargo-home-${{ runner.os }}-
+      # Remove redundant direct caches; Swatinem/rust-cache covers target and cargo dirs via CARGO_HOME
 
       - name: Setup Node.js
         if: steps.check_upstream.outputs.skip != 'true'

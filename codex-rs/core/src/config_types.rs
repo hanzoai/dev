@@ -138,6 +138,10 @@ pub struct Tui {
     /// Streaming/animation behavior for assistant/reasoning output
     #[serde(default)]
     pub stream: StreamConfig,
+
+    /// Loading spinner style selection
+    #[serde(default)]
+    pub spinner: SpinnerSelection,
 }
 
 /// Streaming behavior configuration for the TUI.
@@ -214,6 +218,24 @@ impl Default for ThemeConfig {
             name: ThemeName::default(),
             colors: ThemeColors::default(),
         }
+    }
+}
+
+/// Selected loading spinner style.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct SpinnerSelection {
+    /// Name of the spinner to use. Accepts one of the names from
+    /// sindresorhus/cli-spinners (kebab-case), or custom names supported
+    /// by Codex. Defaults to "diamond".
+    #[serde(default = "default_spinner_name")] 
+    pub name: String,
+}
+
+fn default_spinner_name() -> String { "diamond".to_string() }
+
+impl Default for SpinnerSelection {
+    fn default() -> Self {
+        Self { name: default_spinner_name() }
     }
 }
 

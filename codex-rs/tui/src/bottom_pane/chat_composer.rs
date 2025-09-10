@@ -1625,56 +1625,18 @@ impl WidgetRef for ChatComposer {
 
         if self.is_task_running {
             use std::time::{SystemTime, UNIX_EPOCH};
-
-            // Call this when a task starts; store it on self (e.g. self.task_seed)
-            fn make_task_seed() -> u64 {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as u64
-            }
-
-            // Mix bits so low bits aren't parity-biased
-            fn mix(mut x: u64) -> u64 {
-                x ^= x >> 30;
-                x = x.wrapping_mul(0xbf58476d1ce4e5b9);
-                x ^= x >> 27;
-                x = x.wrapping_mul(0x94d049bb133111eb);
-                x ^ (x >> 31)
-            }
-
-            // Generate a per-render seed; good enough for varied spinners
-            let seed = make_task_seed();
-            let r = (mix(seed) % 200) as u64;
-
-            // 1% ✨, 49.5% star, 49.5% diamond-family
-            let selected_spinner: &[char] = if r < 2 {
-                &['✨']
-            } else if r < 101 {
-                &['✧', '✦', '✧']
-            } else {
-                match r % 3 {
-                    0 => &['✶'],
-                    1 => &['◇'],
-                    _ => &['◆'],
-                }
-            };
-
-            let frame_idx = (SystemTime::now()
+            // Use selected spinner style
+            let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis()
-                / 150) as usize;
-
-            let spinner = selected_spinner[frame_idx % selected_spinner.len()];
+                .as_millis();
+            let def = crate::spinner::current_spinner();
+            let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
             // Create centered title with spinner and spaces
             let title_line = Line::from(vec![
                 Span::raw(" "), // Space before spinner
-                Span::styled(
-                    spinner.to_string(),
-                    Style::default().fg(crate::colors::info()),
-                ),
+                Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
                 Span::styled(
                     format!(" {}... ", self.status_message),
                     Style::default().fg(crate::colors::info()),
