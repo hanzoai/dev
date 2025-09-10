@@ -16,7 +16,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use codex_mcp_client::McpClient;
 use mcp_types::ClientCapabilities;
-use mcp_types::Implementation;
+use mcp_types::McpClientInfo;
 use mcp_types::Tool;
 
 use serde_json::json;
@@ -146,9 +146,9 @@ impl McpConnectionManager {
                                 // indicates this should be an empty object.
                                 elicitation: Some(json!({})),
                             },
-                            client_info: Implementation {
-                                name: "code-mcp-client".to_owned(),
-                                version: codex_version::version().to_owned(),
+                            client_info: McpClientInfo {
+                                name: "codex-mcp-client".to_owned(),
+                                version: env!("CARGO_PKG_VERSION").to_owned(),
                                 title: Some("Codex".into()),
                             },
                             protocol_version: mcp_types::MCP_SCHEMA_VERSION.to_owned(),
