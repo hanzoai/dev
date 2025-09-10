@@ -8,6 +8,7 @@ use std::sync::RwLock;
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
+    static ref CUSTOM_THEME_COLORS: RwLock<Option<codex_core::config_types::ThemeColors>> = RwLock::new(None);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -70,6 +71,7 @@ pub fn init_theme(config: &ThemeConfig) {
     // Track custom theme label for UI display
     if matches!(config.name, ThemeName::Custom) {
         *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
+        *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
     }
 }
 
@@ -86,6 +88,16 @@ pub fn custom_theme_label() -> Option<String> {
 /// Set/update the custom theme's label at runtime
 pub fn set_custom_theme_label(label: String) {
     *CUSTOM_THEME_LABEL.write().unwrap() = Some(label);
+}
+
+/// Set/update the custom theme's colors at runtime
+pub fn set_custom_theme_colors(colors: codex_core::config_types::ThemeColors) {
+    *CUSTOM_THEME_COLORS.write().unwrap() = Some(colors);
+}
+
+/// Return the custom theme colors, if known in this session
+pub fn custom_theme_colors() -> Option<codex_core::config_types::ThemeColors> {
+    CUSTOM_THEME_COLORS.read().unwrap().clone()
 }
 
 /// Switch to a different predefined theme

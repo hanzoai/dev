@@ -966,7 +966,18 @@ impl App<'_> {
                 }
                 AppEvent::UpdateTheme(new_theme) => {
                     // Switch the theme immediately
-                    crate::theme::switch_theme(new_theme);
+                    if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+                        // Prefer runtime custom colors; fall back to config on disk
+                        if let Some(colors) = crate::theme::custom_theme_colors() {
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label() });
+                        } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&cfg.tui.theme);
+                        } else {
+                            crate::theme::switch_theme(new_theme);
+                        }
+                    } else {
+                        crate::theme::switch_theme(new_theme);
+                    }
 
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
@@ -997,7 +1008,17 @@ impl App<'_> {
                 }
                 AppEvent::PreviewTheme(new_theme) => {
                     // Switch the theme immediately for preview (no history event)
-                    crate::theme::switch_theme(new_theme);
+                    if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+                        if let Some(colors) = crate::theme::custom_theme_colors() {
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label() });
+                        } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&cfg.tui.theme);
+                        } else {
+                            crate::theme::switch_theme(new_theme);
+                        }
+                    } else {
+                        crate::theme::switch_theme(new_theme);
+                    }
 
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
