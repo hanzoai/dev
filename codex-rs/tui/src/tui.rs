@@ -23,6 +23,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
+use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui_image::picker::Picker;
 
 /// A type alias for the terminal type used in this application
@@ -98,20 +99,23 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     let terminal_info = query_terminal_info();
 
     enable_raw_mode()?;
-    // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
-    // chat_composer.rs is using a keyboard event listener to enter for any modified keys
-    // to create a new line that require this.
-    // Some terminals (notably legacy Windows consoles) do not support
-    // keyboard enhancement flags. Attempt to enable them, but continue
-    // gracefully if unsupported.
-    let _ = execute!(
-        stdout(),
-        PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-        )
-    );
+    // Enable keyboard enhancement flags only when supported. On some Windows 10
+    // consoles/environments, attempting to push these flags can interfere with
+    // input delivery (reported as a freeze where keypresses don’t register).
+    // We already normalize key kinds when enhancement is unsupported elsewhere,
+    // so it’s safe to skip enabling here.
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
+        );
+    } else {
+        tracing::info!("Keyboard enhancement flags not supported; skipping enable.");
+    }
     set_panic_hook();
 
     // Clear screen with theme background color
