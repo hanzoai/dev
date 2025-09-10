@@ -451,7 +451,6 @@ enum SystemPlacement {
 }
 
 impl ChatWidget<'_> {
-
     /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
     /// creating multiple synthetic request buckets before the first provider turn.
     fn system_order_key(
@@ -464,26 +463,40 @@ impl ChatWidget<'_> {
             return Self::order_key_from_order_meta(om);
         }
 
-        // Derive a stable request bucket for system notices:
-        //  - If we've seen provider traffic, use that request.
-        //  - Otherwise, use a sticky synthetic req = 1 so multiple UI
-        //    notices remain grouped together until first turn arrives.
-        let req = if self.last_seen_request_index > 0 {
+        // Derive a stable request bucket for system notices when OrderMeta is absent.
+        // Default to the current provider request if known; else use a sticky
+        // pre‑turn synthetic req=1 to group UI confirmations before the first turn.
+        // If a user prompt for the next turn is already queued, attach new
+        // system notices to the upcoming request to avoid retroactive inserts.
+        let mut req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
         } else {
-            // Sticky synthetic request (1) until first OrderMeta arrives.
-            // Keep a cached value to avoid accidental drift if logic changes.
             if self.synthetic_system_req.is_none() {
                 self.synthetic_system_req = Some(1);
             }
             self.synthetic_system_req.unwrap_or(1)
         };
+        if order.is_none() && self.pending_user_prompts_for_next_turn > 0 {
+            req = req.saturating_add(1);
+        }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
         match placement {
-            SystemPlacement::EarlyInCurrent => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
-            SystemPlacement::EndOfCurrent => OrderKey { req, out: i32::MAX, seq: self.internal_seq },
-            SystemPlacement::PrePromptInCurrent => OrderKey { req, out: i32::MIN, seq: self.internal_seq },
+            SystemPlacement::EarlyInCurrent => OrderKey {
+                req,
+                out: i32::MIN + 2,
+                seq: self.internal_seq,
+            },
+            SystemPlacement::EndOfCurrent => OrderKey {
+                req,
+                out: i32::MAX,
+                seq: self.internal_seq,
+            },
+            SystemPlacement::PrePromptInCurrent => OrderKey {
+                req,
+                out: i32::MIN,
+                seq: self.internal_seq,
+            },
         }
     }
 
@@ -600,6 +613,56 @@ impl ChatWidget<'_> {
             }
         }
 
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        match last_in_req {
+            Some(last) => OrderKey {
+                req,
+                out: last.out,
+                seq: last.seq.saturating_add(1),
+            },
+            None => OrderKey {
+                req,
+                out: i32::MIN + 2,
+                seq: self.internal_seq,
+            },
+        }
+    }
+
+    /// Like near_time_key but never advances to the next request when a prompt is queued.
+    /// Use this for late, provider-origin items that lack OrderMeta (e.g., PlanUpdate)
+    /// so they remain attached to the current/last request instead of jumping forward.
+    fn near_time_key_current_req(
+        &mut self,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) -> OrderKey {
+        if let Some(om) = order {
+            return Self::order_key_from_order_meta(om);
+        }
+        let req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            if self.current_request_index < self.last_seen_request_index {
+                self.current_request_index = self.last_seen_request_index;
+            }
+            self.current_request_index = self.current_request_index.saturating_add(1);
+            self.current_request_index
+        };
+
+        let mut last_in_req: Option<OrderKey> = None;
+        for k in &self.cell_order_seq {
+            if k.req == req {
+                last_in_req = Some(match last_in_req {
+                    Some(prev) => {
+                        if *k > prev {
+                            *k
+                        } else {
+                            prev
+                        }
+                    }
+                    None => *k,
+                });
+            }
+        }
         self.internal_seq = self.internal_seq.saturating_add(1);
         match last_in_req {
             Some(last) => OrderKey {
@@ -1347,6 +1410,33 @@ impl ChatWidget<'_> {
     }
 
     fn on_error(&mut self, message: String) {
+        // Treat transient stream errors (which the core will retry) differently
+        // from fatal errors so the status spinner remains visible while we wait.
+        let lower = message.to_lowercase();
+        let is_transient = lower.contains("retrying")
+            || lower.contains("stream disconnected")
+            || lower.contains("stream error")
+            || lower.contains("stream closed")
+            || lower.contains("timeout")
+            || lower.contains("temporar");
+
+        if is_transient {
+            // Keep task running and surface a concise status in the input header.
+            self.bottom_pane.set_task_running(true);
+            self.bottom_pane.update_status_text(message.clone());
+            // Add a dim background event instead of a hard error cell to avoid
+            // alarming users during auto-retries.
+            let key = self.next_internal_key();
+            let _ = self.history_insert_with_key_global(
+                Box::new(history_cell::new_background_event(message)),
+                key,
+            );
+            // Do NOT clear running state or streams; the retry will resume them.
+            self.request_redraw();
+            return;
+        }
+
+        // Fatal error path: show an error cell and clear running state.
         let key = self.next_internal_key();
         let _ = self
             .history_insert_with_key_global(Box::new(history_cell::new_error_event(message)), key);
@@ -3342,8 +3432,11 @@ impl ChatWidget<'_> {
             }
             EventMsg::PlanUpdate(update) => {
                 // Insert plan updates at the time they occur. If the provider
-                // supplied OrderMeta, honor it. Otherwise, derive a near‑time key.
-                let key = self.near_time_key(event.order.as_ref());
+                // supplied OrderMeta, honor it. Otherwise, derive a key within
+                // the current (last-seen) request — do NOT advance to the next
+                // request when a prompt is already queued, since these belong
+                // to the in-flight turn.
+                let key = self.near_time_key_current_req(event.order.as_ref());
                 let _ = self.history_insert_with_key_global(
                     Box::new(history_cell::new_plan_update(update)),
                     key,
@@ -4609,7 +4702,7 @@ impl ChatWidget<'_> {
             codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro",
             codex_core::config_types::ThemeName::Custom => "Custom",
         };
-        let message = format!("✓ Theme changed to {}", theme_name);
+        let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
         self.push_system_cell(
             history_cell::new_background_event(message),
@@ -4634,7 +4727,7 @@ impl ChatWidget<'_> {
         }
 
         // Confirmation message (replaceable system notice)
-        let message = format!("✓ Spinner changed to {}", spinner_name);
+        let message = format!("Spinner changed to {}", spinner_name);
         let placement = self.ui_placement_for_now();
         self.push_system_cell(
             history_cell::new_background_event(message),
@@ -8493,7 +8586,14 @@ impl ChatWidget<'_> {
                         // No conflicts; create a merge commit and continue
                         let _ = Command::new("git")
                             .current_dir(&work_cwd)
-                            .args(["commit", "-m", &format!("merge {} into {} before finalize", default_branch, branch_name)])
+                            .args([
+                                "commit",
+                                "-m",
+                                &format!(
+                                    "merge {} into {} before finalize",
+                                    default_branch, branch_name
+                                ),
+                            ])
                             .output()
                             .await;
                     } else {
@@ -8509,7 +8609,9 @@ impl ChatWidget<'_> {
                             .map(|s| s.lines().any(|l| l.starts_with('U') || l.contains("UU ")))
                             .unwrap_or(false);
                         if has_conflicts {
-                            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                            use codex_core::protocol::BackgroundEventEvent;
+                            use codex_core::protocol::Event;
+                            use codex_core::protocol::EventMsg;
                             let _ = tx.send(AppEvent::CodexEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,

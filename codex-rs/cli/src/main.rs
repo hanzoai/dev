@@ -12,6 +12,8 @@ use codex_cli::login::run_login_with_api_key;
 use codex_cli::login::run_login_with_chatgpt;
 use codex_cli::login::run_logout;
 use codex_cli::proto;
+mod llm;
+use llm::{LlmCli, run_llm};
 use codex_common::CliConfigOverrides;
 use codex_exec::Cli as ExecCli;
 use codex_tui::Cli as TuiCli;
@@ -87,6 +89,9 @@ enum Subcommand {
 
     /// Download and run preview artifact by slug.
     Preview(PreviewArgs),
+
+    /// Side-channel LLM utilities (no TUI events).
+    Llm(LlmCli),
 }
 
 #[derive(Debug, Parser)]
@@ -254,6 +259,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         }
         Some(Subcommand::Preview(args)) => {
             preview_main(args).await?;
+        }
+        Some(Subcommand::Llm(mut llm_cli)) => {
+            prepend_config_flags(&mut llm_cli.config_overrides, cli.config_overrides);
+            run_llm(llm_cli).await?;
         }
     }
 

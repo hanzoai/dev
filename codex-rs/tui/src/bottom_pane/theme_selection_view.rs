@@ -158,11 +158,12 @@ impl ThemeSelectionView {
     fn move_selection_up(&mut self) {
         if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
-                if self.selected_theme_index > 0 {
-                    self.selected_theme_index -= 1;
-                    self.current_theme = options[self.selected_theme_index].0;
-                    self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
-                }
+            if self.selected_theme_index > 0 {
+                self.selected_theme_index -= 1;
+                self.current_theme = options[self.selected_theme_index].0;
+                self.app_event_tx
+                    .send(AppEvent::PreviewTheme(self.current_theme));
+            }
         } else {
             let names = crate::spinner::spinner_names();
             if self.selected_spinner_index > 0 {
@@ -187,19 +188,25 @@ impl ThemeSelectionView {
             }
         } else {
             let names = crate::spinner::spinner_names();
-            if self.selected_spinner_index + 1 < names.len() {
+            // Allow moving onto the extra pseudo-row (Create your own…)
+            if self.selected_spinner_index + 1 <= names.len() {
                 self.selected_spinner_index += 1;
-                if let Some(name) = names.get(self.selected_spinner_index) {
-                    self.current_spinner = name.clone();
-                    self.app_event_tx
-                        .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                if self.selected_spinner_index < names.len() {
+                    if let Some(name) = names.get(self.selected_spinner_index) {
+                        self.current_spinner = name.clone();
+                        self.app_event_tx
+                            .send(AppEvent::PreviewSpinner(self.current_spinner.clone()));
+                    }
+                } else {
+                    // On the pseudo-row: do not change current spinner preview
                 }
             }
         }
     }
 
     fn confirm_theme(&mut self) {
-        self.app_event_tx.send(AppEvent::UpdateTheme(self.current_theme));
+        self.app_event_tx
+            .send(AppEvent::UpdateTheme(self.current_theme));
         self.revert_theme_on_back = self.current_theme;
         self.mode = Mode::Overview;
     }
@@ -228,28 +235,275 @@ impl ThemeSelectionView {
                 }
             }
             Mode::Overview => {}
+            Mode::CreateSpinner(_) => {}
         }
         self.mode = Mode::Overview;
     }
+
+    /// Spawn a background task that creates a custom spinner using the LLM with a JSON schema
+    fn kickoff_spinner_creation(
+        &self,
+        user_prompt: String,
+        progress_tx: std::sync::mpsc::Sender<ProgressMsg>,
+    ) {
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tx.send(AppEvent::InsertBackgroundEventEarly(format!(
+                        "Failed to start runtime: {}",
+                        e
+                    )));
+                    return;
+                }
+            };
+            let _ = rt.block_on(async move {
+                // Load current config (CLI-style) and construct a one-off ModelClient
+                let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                    Ok(c) => c,
+                    Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Config error: {}", e))); return; }
+                };
+                let auth_mgr = codex_core::AuthManager::shared(
+                    cfg.codex_home.clone(),
+                    codex_protocol::mcp_protocol::AuthMode::ApiKey,
+                    cfg.responses_originator_header.clone(),
+                );
+                let client = codex_core::ModelClient::new(
+                    std::sync::Arc::new(cfg.clone()),
+                    Some(auth_mgr),
+                    cfg.model_provider.clone(),
+                    cfg.model_reasoning_effort,
+                    cfg.model_reasoning_summary,
+                    cfg.model_text_verbosity,
+                    uuid::Uuid::new_v4(),
+                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                );
+
+                // Build developer guidance and input
+                let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 50 frames.\n- Each frame SHOULD be between 1 and 20 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Use characters that render well in typical monospaced terminals.\n".to_string();
+                let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
+                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: user_prompt }] });
+
+                // JSON schema for structured output
+                let schema = serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Display name for the spinner (1 - 3 words, shown in the UI)."},
+                        "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50–300)."},
+                        "frames": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 20},
+                            "minItems": 2,
+                            "maxItems": 50,
+                            "description": "2–50 Spinner frames, 1–20 characters each (every frame should be the same length of characters)."
+                        }
+                    },
+                    "required": ["name", "interval", "frames"],
+                    "additionalProperties": false
+                });
+                let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
+
+                let mut prompt = codex_core::Prompt::default();
+                prompt.input = input;
+                prompt.store = true;
+                prompt.text_format = Some(format);
+
+                // Stream and collect final JSON
+                use futures::StreamExt;
+                let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(connecting to model)".to_string()));
+                let mut stream = match client.stream(&prompt).await { Ok(s) => s, Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Request error: {}", e))); tracing::info!("spinner request error: {}", e); return; } };
+                let mut out = String::new();
+                let mut think_sum = String::new();
+                while let Some(ev) = stream.next().await {
+                    match ev {
+                        Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); }
+                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
+                        Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
+                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
+                        Ok(codex_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                            if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
+                                for c in content { if let codex_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
+                            }
+                            tracing::info!(target: "spinner", "LLM[item_done]");
+                        }
+                        Ok(codex_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
+                        Err(e) => { tracing::info!("LLM stream error: {}", e); }
+                        _ => {}
+                    }
+                }
+
+                let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+
+                // Parse JSON; on failure, attempt to salvage a top-level object and log raw output
+                let v: serde_json::Value = match serde_json::from_str(&out) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::info!(target: "spinner", "Strict JSON parse failed: {}", e);
+                        tracing::info!(target: "spinner", "Raw output: {}", out);
+                        fn extract_first_json_object(s: &str) -> Option<String> {
+                            let mut depth = 0usize;
+                            let mut in_str = false;
+                            let mut esc = false;
+                            let mut start: Option<usize> = None;
+                            for (i, ch) in s.char_indices() {
+                                if in_str {
+                                    if esc { esc = false; }
+                                    else if ch == '\\' { esc = true; }
+                                    else if ch == '"' { in_str = false; }
+                                    continue;
+                                }
+                                match ch {
+                                    '"' => in_str = true,
+                                    '{' => { if depth == 0 { start = Some(i); } depth += 1; },
+                                    '}' => { if depth > 0 { depth -= 1; if depth == 0 { let end = i + ch.len_utf8(); return start.map(|st| s[st..end].to_string()); } } },
+                                    _ => {}
+                                }
+                            }
+                            None
+                        }
+                        if let Some(obj) = extract_first_json_object(&out) {
+                            match serde_json::from_str::<serde_json::Value>(&obj) {
+                                Ok(v) => v,
+                                Err(e2) => { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e2), _raw_snippet: out.chars().take(200).collect::<String>() }); return; }
+                            }
+                        } else {
+                            let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e), _raw_snippet: out.chars().take(200).collect::<String>() }); return;
+                        }
+                    }
+                };
+                let interval = v.get("interval").and_then(|x| x.as_u64()).unwrap_or(120).clamp(50, 300);
+                let display_name = v
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("Custom")
+                    .to_string();
+                let mut frames: Vec<String> = v
+                    .get("frames")
+                    .and_then(|x| x.as_array())
+                    .map(|arr| arr.iter().filter_map(|f| f.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+
+                // Enforce frame width limit (truncate to first 20 characters)
+                const MAX_CHARS: usize = 20;
+                frames = frames
+                    .into_iter()
+                    .map(|f| f.chars().take(MAX_CHARS).collect::<String>())
+                    .filter(|f| !f.is_empty())
+                    .collect();
+
+                // Enforce count 2–50
+                if frames.len() > 50 { frames.truncate(50); }
+                if frames.len() < 2 { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: "too few frames after validation".to_string(), _raw_snippet: out.chars().take(200).collect::<String>() }); return; }
+
+                // Normalize: left-pad frames to equal length if needed
+                let max_len = frames.iter().map(|f| f.chars().count()).max().unwrap_or(0);
+                let norm_frames: Vec<String> = frames
+                    .into_iter()
+                    .map(|f| {
+                        let cur = f.chars().count();
+                        if cur >= max_len { f } else { format!("{}{}", " ".repeat(max_len - cur), f) }
+                    })
+                    .collect();
+
+                // Persist + activate
+                let _ = progress_tx.send(ProgressMsg::CompletedOk { name: display_name, interval, frames: norm_frames });
+            });
+        });
+    }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-enum Mode { Overview, Themes, Spinner }
+enum Mode {
+    Overview,
+    Themes,
+    Spinner,
+    CreateSpinner(CreateState),
+}
+
+struct CreateState {
+    step: std::cell::Cell<CreateStep>,
+    /// Freeform prompt describing the desired spinner
+    prompt: String,
+    /// While true, we render a loading indicator and disable input
+    is_loading: std::cell::Cell<bool>,
+    action_idx: usize, // 0 = Create/Save, 1 = Cancel/Retry
+    /// Live stream messages from the background task
+    rx: Option<std::sync::mpsc::Receiver<ProgressMsg>>,
+    /// Accumulated thinking/output lines for live display (completed)
+    thinking_lines: std::cell::RefCell<Vec<String>>,
+    /// In‑progress line assembled from deltas
+    thinking_current: std::cell::RefCell<String>,
+    /// Parsed proposal waiting for review
+    proposed_interval: std::cell::Cell<Option<u64>>,
+    proposed_frames: std::cell::RefCell<Option<Vec<String>>>,
+    proposed_name: std::cell::RefCell<Option<String>>,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum CreateStep {
+    Prompt,
+    Action,
+    Review,
+}
+
+enum ProgressMsg {
+    ThinkingDelta(String),
+    OutputDelta(String),
+    RawOutput(String),
+    CompletedOk {
+        name: String,
+        interval: u64,
+        frames: Vec<String>,
+    },
+    // `_raw_snippet` is captured for potential future display/debugging
+    CompletedErr {
+        error: String,
+        _raw_snippet: String,
+    },
+}
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
+    fn handle_paste(&mut self, text: String) -> super::bottom_pane_view::ConditionalUpdate {
+        use super::bottom_pane_view::ConditionalUpdate;
+        if let Mode::CreateSpinner(ref mut s) = self.mode {
+            if s.is_loading.get() {
+                return ConditionalUpdate::NoRedraw;
+            }
+            if matches!(s.step.get(), CreateStep::Prompt) {
+                let paste = text.replace('\r', "\n");
+                // The description is a single-line prompt; replace newlines with spaces.
+                let paste = paste.replace('\n', " ");
+                s.prompt.push_str(&paste);
+                return ConditionalUpdate::NeedsRedraw;
+            }
+        }
+        ConditionalUpdate::NoRedraw
+    }
     fn desired_height(&self, _width: u16) -> u16 {
-        match self.mode {
+        match &self.mode {
             // Border (2) + inner padding (2) + 2 content rows = 6
             Mode::Overview => 6,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
                 let n = Self::get_theme_options().len() as u16;
-                4 + n.min(9)
+                // Border(2) + padding(2) + title(1)+space(1) + list
+                6 + n.min(9)
             }
             Mode::Spinner => {
-                let n = crate::spinner::spinner_names().len() as u16;
-                4 + n.min(9)
+                // +1 for the "Create your own…" pseudo-row
+                let n = (crate::spinner::spinner_names().len() as u16) + 1;
+                // Border(2) + padding(2) + title(1)+space(1) + list
+                6 + n.min(9)
             }
+            // Title + spacer + 2 fields + buttons + help = 6 content rows
+            // plus border(2) + padding(2) = 10; add 2 rows headroom for small terminals
+            Mode::CreateSpinner(_) => 12,
         }
     }
 
@@ -260,11 +514,32 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
-                    Mode::Overview => {
-                        self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
+                // In create form, Up navigates fields/buttons
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Review
+                        }
+                    };
+                    s.step.set(new_step);
+                } else {
+                    match self.mode {
+                        Mode::Overview => {
+                            self.overview_selected_index =
+                                self.overview_selected_index.saturating_sub(1) % 2;
+                        }
+                        _ => self.move_selection_up(),
                     }
-                    _ => self.move_selection_up(),
                 }
             }
             KeyEvent {
@@ -272,21 +547,51 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
-                    Mode::Overview => {
-                        self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                // In create form, Down navigates fields/buttons
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Review
+                        }
+                    };
+                    s.step.set(new_step);
+                } else {
+                    match &self.mode {
+                        Mode::Overview => {
+                            self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                        }
+                        _ => self.move_selection_down(),
                     }
-                    _ => self.move_selection_down(),
                 }
             }
-            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {}
-            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {}
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {}
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {}
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
-                match self.mode {
+                // Take ownership of mode to avoid borrowing self while we may assign to self.mode
+                let current_mode = std::mem::replace(&mut self.mode, Mode::Overview);
+                match current_mode {
                     Mode::Overview => {
                         if self.overview_selected_index == 0 {
                             self.revert_theme_on_back = self.current_theme;
@@ -295,23 +600,172 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         } else {
                             self.revert_spinner_on_back = self.current_spinner.clone();
                             self.mode = Mode::Spinner;
-                            self.app_event_tx
-                                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                            self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                                std::time::Duration::from_millis(120),
+                            ));
                             self.just_entered_spinner = true;
                         }
                     }
-                    Mode::Themes => self.confirm_theme(),
-                    Mode::Spinner => self.confirm_spinner(),
+                    Mode::Themes => {
+                        // confirm_theme sets self.mode back to Overview
+                        self.confirm_theme()
+                    }
+                    Mode::Spinner => {
+                        // If tail row selected (Create your own…), open create form
+                        let names = crate::spinner::spinner_names();
+                        if self.selected_spinner_index >= names.len() {
+                            self.mode = Mode::CreateSpinner(CreateState {
+                                step: std::cell::Cell::new(CreateStep::Prompt),
+                                prompt: String::new(),
+                                is_loading: std::cell::Cell::new(false),
+                                action_idx: 0,
+                                rx: None,
+                                thinking_lines: std::cell::RefCell::new(Vec::new()),
+                                thinking_current: std::cell::RefCell::new(String::new()),
+                                proposed_interval: std::cell::Cell::new(None),
+                                proposed_frames: std::cell::RefCell::new(None),
+                                proposed_name: std::cell::RefCell::new(None),
+                            });
+                        } else {
+                            self.confirm_spinner()
+                        }
+                    }
+                    Mode::CreateSpinner(mut s) => {
+                        let mut go_overview = false;
+                        match s.step.get() {
+                            // Enter from Prompt submits immediately
+                            CreateStep::Prompt => {
+                                if !s.is_loading.get() {
+                                    let user_prompt = s.prompt.clone();
+                                    s.is_loading.set(true);
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    let (txp, rxp) = std::sync::mpsc::channel::<ProgressMsg>();
+                                    s.rx = Some(rxp);
+                                    self.kickoff_spinner_creation(user_prompt, txp);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                            }
+                            CreateStep::Action => {
+                                if s.action_idx == 0 && !s.is_loading.get() {
+                                    let user_prompt = s.prompt.clone();
+                                    s.is_loading.set(true);
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    let (txp, rxp) = std::sync::mpsc::channel::<ProgressMsg>();
+                                    s.rx = Some(rxp);
+                                    self.kickoff_spinner_creation(user_prompt, txp);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                } else {
+                                    /* Cancel or already loading → return to overview */
+                                    go_overview = true;
+                                }
+                            }
+                            CreateStep::Review => {
+                                if s.action_idx == 0 {
+                                    // Save
+                                    if let (Some(interval), Some(frames)) = (
+                                        s.proposed_interval.get(),
+                                        s.proposed_frames.borrow().clone(),
+                                    ) {
+                                        let display_name = s
+                                            .proposed_name
+                                            .borrow()
+                                            .as_ref()
+                                            .cloned()
+                                            .unwrap_or_else(|| "Custom".to_string());
+                                        if let Ok(home) = codex_core::config::find_codex_home() {
+                                            let _ = codex_core::config::set_custom_spinner(
+                                                &home,
+                                                "custom",
+                                                &display_name,
+                                                interval,
+                                                &frames,
+                                            );
+                                        }
+                                        crate::spinner::add_custom_spinner(
+                                            "custom".to_string(),
+                                            display_name.clone(),
+                                            interval,
+                                            frames,
+                                        );
+                                        crate::spinner::switch_spinner("custom");
+                                        self.revert_spinner_on_back = "custom".to_string();
+                                        self.current_spinner = "custom".to_string();
+                                        self.app_event_tx
+                                            .send(AppEvent::UpdateSpinner("custom".to_string()));
+                                        self.app_event_tx.send(
+                                            AppEvent::InsertBackgroundEventEarly(
+                                                "Custom spinner saved".to_string(),
+                                            ),
+                                        );
+                                        go_overview = true;
+                                    }
+                                } else {
+                                    // Retry -> return to input (Prompt) without running
+                                    s.thinking_lines.borrow_mut().clear();
+                                    s.thinking_current.borrow_mut().clear();
+                                    s.proposed_interval.set(None);
+                                    s.proposed_frames.replace(None);
+                                    s.step.set(CreateStep::Prompt);
+                                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                                }
+                            }
+                        }
+                        if go_overview {
+                            self.mode = Mode::Overview;
+                        } else {
+                            self.mode = Mode::CreateSpinner(s);
+                        }
+                    }
                 }
             }
             KeyEvent {
                 code: KeyCode::Esc,
                 modifiers: KeyModifiers::NONE,
                 ..
+            } => match self.mode {
+                Mode::Overview => self.is_complete = true,
+                Mode::CreateSpinner(_) => {
+                    self.mode = Mode::Spinner;
+                }
+                _ => self.cancel_detail(),
+            },
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                ..
             } => {
-                match self.mode {
-                    Mode::Overview => self.is_complete = true,
-                    _ => self.cancel_detail(),
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => s.prompt.push(c),
+                        CreateStep::Action | CreateStep::Review => {}
+                    }
+                }
+            }
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => {
+                            s.prompt.pop();
+                        }
+                        CreateStep::Action | CreateStep::Review => {
+                            return;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -327,12 +781,22 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let theme = crate::theme::current_theme();
 
         // Use full width and draw an outer window styled like the Diff overlay
-        let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
+        let render_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height,
+        };
         Clear.render(render_area, buf);
 
         // Add one row of padding above the top border (clear + background)
         if render_area.y > 0 {
-            let pad = Rect { x: render_area.x, y: render_area.y - 1, width: render_area.width, height: 1 };
+            let pad = Rect {
+                x: render_area.x,
+                y: render_area.y - 1,
+                width: render_area.width,
+                height: 1,
+            };
             Clear.render(pad, buf);
             let pad_bg = Block::default().style(Style::default().bg(crate::colors::background()));
             pad_bg.render(pad, buf);
@@ -362,7 +826,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             .borders(Borders::ALL)
             .title(Line::from(title_spans))
             .style(Style::default().bg(crate::colors::background()))
-            .border_style(Style::default().fg(crate::colors::border()).bg(crate::colors::background()));
+            .border_style(
+                Style::default()
+                    .fg(crate::colors::border())
+                    .bg(crate::colors::background()),
+            );
         let inner = outer.inner(render_area);
         outer.render(render_area, buf);
 
@@ -390,9 +858,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .find(|(t, _, _)| *t == self.current_theme)
                 .map(|(_, name, _)| *name)
                 .unwrap_or("Theme");
-            let spinner_label = self.current_spinner.as_str();
-            let items = vec![("Change theme", theme_label), ("Change spinner", spinner_label)];
-            for (i, (k, v)) in items.iter().enumerate() {
+            // Row 0: Change theme
+            for (i, k, v, is_spinner) in [
+                (0usize, "Change theme", theme_label, false),
+                (1usize, "Change spinner", "", true),
+            ] {
                 let selected = i == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
                 if selected {
@@ -401,24 +871,41 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     spans.push(Span::raw("  "));
                 }
                 if selected {
-                    spans.push(Span::styled(*k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                    spans.push(Span::styled(
+                        k,
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 } else {
-                    spans.push(Span::styled(*k, Style::default().fg(theme.text)));
+                    spans.push(Span::styled(k, Style::default().fg(theme.text)));
                 }
                 spans.push(Span::raw(" — "));
-                spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
+                if is_spinner {
+                    let label = crate::spinner::spinner_label_for(&self.current_spinner);
+                    spans.push(Span::styled(label, Style::default().fg(theme.text_dim)));
+                } else {
+                    spans.push(Span::styled(v, Style::default().fg(theme.text_dim)));
+                }
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
+            // Header: Choose Theme
+            lines.push(Line::from(Span::styled(
+                "Choose Theme",
+                Style::default()
+                    .fg(theme.text_bright)
+                    .add_modifier(Modifier::BOLD),
+            )));
             // Compute anchored window: top until middle, then center; bottom shows end
             let count = options.len();
-            let visible = available_height.min(9).max(1);
+            let visible = available_height.saturating_sub(1).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_theme_index,
                 count,
                 visible,
             );
-            let end = (start + visible).min(count);
+            let end = (start + visible).min(count + 1); // +1 for "Create your own…"
             for i in start..end {
                 let (theme_enum, name, description) = &options[i];
                 let is_selected = i == self.selected_theme_index;
@@ -460,16 +947,296 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
                 lines.push(Line::from(spans));
             }
+        } else if matches!(self.mode, Mode::CreateSpinner(_)) {
+            // Inline form for custom spinner with visible selection & caret
+            let theme = crate::theme::current_theme();
+            if let Mode::CreateSpinner(s) = &self.mode {
+                // Drain progress messages if streaming
+                if let Some(rx) = &s.rx {
+                    for _ in 0..100 {
+                        // limit per render to keep UI snappy
+                        match rx.try_recv() {
+                            Ok(ProgressMsg::ThinkingDelta(d)) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    let mut hist = sm.thinking_lines.borrow_mut();
+                                    cur.push_str(&d);
+                                    if let Some(pos) = cur.rfind('\n') {
+                                        // Split on last newline: commit completed portion, keep remainder
+                                        let (complete, remainder) = cur.split_at(pos);
+                                        if !complete.trim().is_empty() {
+                                            hist.push(complete.trim().to_string());
+                                        }
+                                        *cur = remainder.trim_start_matches('\n').to_string();
+                                        let keep = 10usize;
+                                        let len = hist.len();
+                                        if len > keep {
+                                            hist.drain(0..len - keep);
+                                        }
+                                    }
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::OutputDelta(d)) => {
+                                // Treat assistant text deltas the same as thinking: append to current; on newline commit to history
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    let mut cur = sm.thinking_current.borrow_mut();
+                                    let mut hist = sm.thinking_lines.borrow_mut();
+                                    cur.push_str(&d);
+                                    if let Some(pos) = cur.rfind('\n') {
+                                        let (complete, remainder) = cur.split_at(pos);
+                                        if !complete.trim().is_empty() {
+                                            hist.push(complete.trim().to_string());
+                                        }
+                                        *cur = remainder.trim_start_matches('\n').to_string();
+                                        let keep = 10usize;
+                                        let len = hist.len();
+                                        if len > keep {
+                                            hist.drain(0..len - keep);
+                                        }
+                                    }
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::RawOutput(_raw)) => {}
+                            Ok(ProgressMsg::CompletedOk {
+                                name,
+                                interval,
+                                frames,
+                            }) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    sm.is_loading.set(false);
+                                    sm.step.set(CreateStep::Review);
+                                    sm.proposed_interval.set(Some(interval));
+                                    sm.proposed_frames.replace(Some(frames));
+                                    sm.proposed_name.replace(Some(name));
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Ok(ProgressMsg::CompletedErr {
+                                error,
+                                _raw_snippet: _,
+                            }) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    sm.is_loading.set(false);
+                                    sm.step.set(CreateStep::Action);
+                                    sm.thinking_lines
+                                        .borrow_mut()
+                                        .push(format!("Error: {}", error));
+                                    sm.thinking_current.borrow_mut().clear();
+                                }
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                        }
+                    }
+                }
+                let mut form_lines = Vec::new();
+                // While loading: replace the entire content with spinner + latest message
+                if s.is_loading.get() {
+                    form_lines.push(Line::from(Span::styled(
+                        "Overview » Change Spinner » Create Custom",
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    // One blank line between title and spinner line
+                    // Use an actually empty line to avoid wrap/spacing quirks
+                    // with a single-space line under ratatui wrapping.
+                    form_lines.push(Line::default());
+                    use std::time::SystemTime;
+                    use std::time::UNIX_EPOCH;
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let diamond = ["◇", "◆", "◇", "◆"];
+                    let frame = diamond[((now_ms / 120) as usize) % diamond.len()].to_string();
+                    form_lines.push(Line::from(vec![
+                        Span::styled(frame, Style::default().fg(crate::colors::info())),
+                        Span::raw(" Generating spinner with AI…"),
+                    ]));
+                    // Latest message only
+                    // Show the latest in‑progress line if present, otherwise last completed line
+                    let cur = s.thinking_current.borrow();
+                    let latest = if !cur.trim().is_empty() {
+                        cur.trim().to_string()
+                    } else {
+                        s.thinking_lines
+                            .borrow()
+                            .iter()
+                            .rev()
+                            .find(|l| !l.trim().is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| "Waiting for model…".to_string())
+                    };
+                    let mut latest_render = latest.to_string();
+                    if !latest_render.ends_with('…') {
+                        latest_render.push_str(" …");
+                    }
+                    form_lines.push(Line::from(Span::styled(
+                        latest_render,
+                        Style::default().fg(theme.text_dim),
+                    )));
+                    self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                        std::time::Duration::from_millis(120),
+                    ));
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
+                    return;
+                }
+
+                // After completion (review): show preview + Save/Retry
+                if matches!(s.step.get(), CreateStep::Review) {
+                    form_lines.push(Line::from(Span::styled(
+                        "Overview » Change Spinner » Create Custom",
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    // Blank line between title and preview row
+                    form_lines.push(Line::default());
+                    // Preview styled like selection rows: border rules + spinner + label
+                    if let (Some(interval), Some(frames)) = (
+                        s.proposed_interval.get(),
+                        s.proposed_frames.borrow().as_ref(),
+                    ) {
+                        use std::time::SystemTime;
+                        use std::time::UNIX_EPOCH;
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let idx = if frames.is_empty() {
+                            0
+                        } else {
+                            ((now_ms / interval) as usize) % frames.len()
+                        };
+                        let preview = frames.get(idx).cloned().unwrap_or_default();
+                        // Spacer above the preview row
+                        // Compute layout similar to the list row: left rule | spinner | label | right rule
+                        let label = "Preview";
+                        let max_frame_len: u16 = preview.chars().count() as u16;
+                        let border = Style::default().fg(crate::colors::border());
+                        let fg = Style::default().fg(crate::colors::info());
+                        let x: u16 = max_frame_len.saturating_add(8);
+                        let border_len = x.saturating_sub(max_frame_len);
+                        let mut spans: Vec<Span> = Vec::new();
+                        spans.push(Span::styled("─".repeat(border_len as usize), border));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(preview, fg));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(format!("{}...", label), fg));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled("─".repeat(border_len as usize), border));
+                        form_lines.push(Line::from(spans));
+                        self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                            std::time::Duration::from_millis(interval),
+                        ));
+                    }
+                    // Add spacing line between preview and buttons
+                    // Spacing between preview and buttons
+                    form_lines.push(Line::default());
+                    // Buttons row moved to bottom
+                    let mut spans: Vec<Span> = Vec::new();
+                    let primary_selected = s.action_idx == 0;
+                    let secondary_selected = s.action_idx == 1;
+                    let sel = |b: bool| {
+                        if b {
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        }
+                    };
+                    spans.push(Span::styled("[ Save ]", sel(primary_selected)));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled("[ Retry ]", sel(secondary_selected)));
+                    form_lines.push(Line::from(spans));
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
+                    return;
+                }
+
+                // Default (idle): header, description input, border, and Generate/Cancel buttons
+                form_lines.push(Line::from(Span::styled(
+                    "Overview » Change Spinner » Create Custom",
+                    Style::default()
+                        .fg(theme.text_bright)
+                        .add_modifier(Modifier::BOLD),
+                )));
+                // Blank line between title and content
+                form_lines.push(Line::default());
+                form_lines.push(Line::from(Span::styled(
+                    "Code can generate a custom spinner just for you!",
+                    Style::default().fg(theme.text),
+                )));
+                form_lines.push(Line::from(Span::styled(
+                    "What sort of spinner would you like? (e.g. bouncing dot party, cat eating a pizza)",
+                    Style::default().fg(theme.text_dim)
+                )));
+                // Exactly one blank line above Description
+                form_lines.push(Line::default());
+                let caret = Span::styled("▏", Style::default().fg(theme.info));
+                let mut desc_spans: Vec<Span> = Vec::new();
+                desc_spans.push(Span::styled(
+                    "Description: ",
+                    Style::default().fg(theme.keyword),
+                ));
+                let active = matches!(s.step.get(), CreateStep::Prompt);
+                desc_spans.push(Span::raw(s.prompt.clone()));
+                if active {
+                    desc_spans.push(caret.clone());
+                }
+                form_lines.push(Line::from(desc_spans));
+                form_lines.push(Line::from(Span::styled(
+                    "─".repeat((body_area.width.saturating_sub(4)) as usize),
+                    Style::default().fg(crate::colors::border()),
+                )));
+                // Buttons
+                let mut spans: Vec<Span> = Vec::new();
+                let on_actions = matches!(s.step.get(), CreateStep::Action);
+                let primary_selected = on_actions && s.action_idx == 0;
+                let secondary_selected = on_actions && s.action_idx == 1;
+                let sel = |b: bool| {
+                    if b {
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text)
+                    }
+                };
+                spans.push(Span::styled("[ Generate... ]", sel(primary_selected)));
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("[ Cancel ]", sel(secondary_selected)));
+                form_lines.push(Line::from(spans));
+
+                Paragraph::new(form_lines)
+                    .alignment(Alignment::Left)
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .render(body_area, buf);
+            }
+            return;
         } else {
             // Spinner: render one centered preview row per spinner, matching the composer title
-            use std::time::{SystemTime, UNIX_EPOCH};
+            use std::time::SystemTime;
+            use std::time::UNIX_EPOCH;
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
             let names = crate::spinner::spinner_names();
-            let count = names.len();
-            let visible = available_height.min(9).max(1);
+            // Include an extra pseudo-row for "Create your own…"
+            let count = names.len() + 1;
+            // Reserve two rows (header + spacer)
+            let visible = available_height.saturating_sub(2).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_spinner_index,
                 count,
@@ -477,57 +1244,140 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             );
             let end = (start + visible).min(count);
 
-            let mut prev_group: Option<String> = None;
-            let mut y = body_area.y;
-            for i in start..end {
-                if y >= body_area.y + body_area.height { break; }
+            // Compute fixed column widths globally so rows never jump when scrolling
+            let max_frame_len: u16 = crate::spinner::global_max_frame_len() as u16;
+            let mut max_label_len: u16 = 0;
+            for name in names.iter() {
+                let label = crate::spinner::spinner_label_for(name);
+                max_label_len = max_label_len.max(label.chars().count() as u16);
+            }
 
-                let name = names[i].clone();
-                let is_selected = i == self.selected_spinner_index;
-                let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
-                let frame = crate::spinner::frame_at_time(def, now_ms);
+            // Render header (left-aligned) and spacer row
+            let header_rect = Rect {
+                x: body_area.x,
+                y: body_area.y,
+                width: body_area.width,
+                height: 1,
+            };
+            let header = Line::from(Span::styled(
+                "Overview » Change Spinner",
+                Style::default()
+                    .fg(theme.text_bright)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            Paragraph::new(header)
+                .alignment(Alignment::Left)
+                .render(header_rect, buf);
+            if header_rect.y + 1 < body_area.y + body_area.height {
+                let spacer = Rect {
+                    x: body_area.x,
+                    y: body_area.y + 1,
+                    width: body_area.width,
+                    height: 1,
+                };
+                Paragraph::new(Line::default()).render(spacer, buf);
+            }
 
-                // Compose centered preview like composer title: rules + spinner + name + ...
-                let border = Style::default().fg(crate::colors::border());
-                let fg = if is_selected { Style::default().fg(crate::colors::info()) } else { Style::default().fg(theme.text_dim) };
-                let label = crate::spinner::spinner_label_for(&name);
-                let content = format!("{} {}...", frame, label);
-                let content_len = content.chars().count() as u16 + 2; // spaces around
-
-                // Optional group header row
-                let group = crate::spinner::spinner_group_for(&name).to_string();
-                if prev_group.as_deref() != Some(group.as_str()) {
-                    if y < body_area.y + body_area.height {
-                        let header_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
-                        let header = Line::from(Span::styled(group.clone(), Style::default().fg(crate::colors::text_dim()))).centered();
-                        Paragraph::new(header).render(header_rect, buf);
-                        y += 1;
-                    }
-                    prev_group = Some(group);
-                    if y >= body_area.y + body_area.height { break; }
+            for row_idx in 0..(end - start) {
+                let i = start + row_idx;
+                // rows start two below (header + spacer)
+                let y = body_area.y + 2 + row_idx as u16;
+                if y >= body_area.y + body_area.height {
+                    break;
                 }
 
-                let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
-                // Reserve 2 cols for selector arrow on the far left
-                let total = row_rect.width.saturating_sub(2);
-                let rule_total = total.saturating_sub(content_len);
-                let left_rule = rule_total / 2;
-                let right_rule = rule_total.saturating_sub(left_rule);
+                let row_rect = Rect {
+                    x: body_area.x,
+                    y,
+                    width: body_area.width,
+                    height: 1,
+                };
+                if i >= names.len() {
+                    let mut spans = Vec::new();
+                    let is_selected = i == self.selected_spinner_index;
+                    // selector chevron
+                    spans.push(Span::styled(
+                        if is_selected { "› " } else { "  " }.to_string(),
+                        Style::default().fg(if is_selected {
+                            theme.keyword
+                        } else {
+                            theme.text
+                        }),
+                    ));
+                    // label color: dim when not selected; primary + bold when selected
+                    let label_style = if is_selected {
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text_dim)
+                    };
+                    spans.push(Span::styled("Create your own…", label_style));
+                    Paragraph::new(Line::from(spans)).render(row_rect, buf);
+                    continue;
+                }
+                let name = &names[i];
+                let is_selected = i == self.selected_spinner_index;
+                let def = crate::spinner::find_spinner_by_name(name)
+                    .unwrap_or(crate::spinner::current_spinner());
+                let frame = crate::spinner::frame_at_time(def, now_ms);
+
+                // Aligned columns (centered block):
+                // selector (2) | left_rule | space | spinner (right‑aligned to max) | space | label (padded to max) | space | right_rule
+                let border = if is_selected {
+                    Style::default().fg(crate::colors::border())
+                } else {
+                    Style::default()
+                        .fg(theme.text_dim)
+                        .add_modifier(Modifier::DIM)
+                };
+                let fg = if is_selected {
+                    Style::default().fg(crate::colors::info())
+                } else {
+                    Style::default()
+                        .fg(theme.text_dim)
+                        .add_modifier(Modifier::DIM)
+                };
+                let label = crate::spinner::spinner_label_for(name);
+
+                // Use border-based alignment per spec
+                let spinner_len = frame.chars().count() as u16;
+                let text_len = (label.chars().count() as u16).saturating_add(3); // label + "..."
+                let x: u16 = max_frame_len.saturating_add(8);
+                let left_rule = x.saturating_sub(spinner_len);
+                let right_rule = x.saturating_sub(text_len);
+
                 let mut spans: Vec<Span> = Vec::new();
-                // Selector arrow area
-                if is_selected { spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { spans.push(Span::raw("  ")); }
+                // selector
+                spans.push(Span::styled(
+                    if is_selected { "› " } else { "  " }.to_string(),
+                    Style::default().fg(if is_selected {
+                        theme.keyword
+                    } else {
+                        theme.text
+                    }),
+                ));
+                // left rule
                 spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                // single space between left border and spinner
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(content, fg));
+                // spinner
+                spans.push(Span::styled(frame, fg));
                 spans.push(Span::raw(" "));
+                // label with dots
+                spans.push(Span::styled(format!("{}... ", label), fg));
+                // right rule (match left border logic: x - text_len)
                 spans.push(Span::styled("─".repeat(right_rule as usize), border));
-                Paragraph::new(Line::from(spans)).alignment(Alignment::Left).render(row_rect, buf);
-                y += 1;
+                Paragraph::new(Line::from(spans))
+                    .alignment(Alignment::Left)
+                    .render(row_rect, buf);
             }
 
             // Animate spinner previews while open
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
+                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
+                    100,
+                )));
 
             // Done rendering spinners
             return;

@@ -214,12 +214,16 @@ impl ModelClient {
 
         let input_with_instructions = prompt.get_formatted_input();
 
-        // Create text parameter with verbosity (not supported with ChatGPT auth)
-        let text = if auth_mode == Some(AuthMode::ChatGPT) {
+        // Create text parameter with verbosity and optional format.
+        // Historically not supported with ChatGPT auth, but allow it when a
+        // caller explicitly requests a `text.format` (side‑channel usage).
+        let want_format = prompt.text_format.as_ref();
+        let text = if auth_mode == Some(AuthMode::ChatGPT) && want_format.is_none() {
             None
         } else {
             Some(crate::client_common::Text {
                 verbosity: self.verbosity.into(),
+                format: prompt.text_format.clone(),
             })
         };
 
