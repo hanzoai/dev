@@ -314,14 +314,26 @@ jobs:
           node - <<'JS'
           const fs = require('fs');
           const t = fs.readFileSync('.github/auto/AGENT_OUT.txt','utf8');
+          // Extract the last <comment>...</comment> block strictly
           const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
           const PLACEHOLDER = '…final Markdown comment…';
           let body = '';
           if (all.length) {
-            const last = (all[all.length-1][1] || '').trim();
-            if (last && last !== PLACEHOLDER) body = last;
+            body = String(all[all.length-1][1] || '').trim();
           }
-          if (body) {
+          // Sanitize: drop any leaked thought markers or stray tags
+          const badMarkers = [
+            /^\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/m,
+            /\bCrafting the reply\b/i,
+            /\bSimplifying input adjustments\b/i,
+            /<\/?comment>/i,
+            /<task>|<context>|Output ONLY:/i
+          ];
+          // Remove timestamped thought lines
+          body = body.replace(/^\[[^\n]*?\]\s*codex\s*$/gmi, '').trim();
+          // If obviously wrong, force fallback
+          const looksBad = !body || body === PLACEHOLDER || badMarkers.some(rx => rx.test(body));
+          if (!looksBad) {
             fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
           JS
@@ -332,6 +344,7 @@ jobs:
           ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
           PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
         with:
+          github-token: ${{ secrets.CODE_GH_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
