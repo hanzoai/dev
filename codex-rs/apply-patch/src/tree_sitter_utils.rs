@@ -10,21 +10,44 @@ use crate::{EmbeddedApplyPatch};
 pub(crate) fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ()> {
     let _bytes = script.as_bytes();
     let mut i = 0usize;
-    while let Some(pos) = script[i..].find("apply_patch") {
-        let start = i + pos;
+    // Support both command spellings accepted by apply_patch tooling.
+    // We scan for the next occurrence of either token and treat the first one
+    // we find (closest to the current cursor) as the candidate.
+    const CMD1: &str = "apply_patch";
+    const CMD2: &str = "applypatch";
+    while i < script.len() {
+        // Find next match of either token from i
+        let p1 = script[i..].find(CMD1).map(|p| (p, CMD1.len()));
+        let p2 = script[i..].find(CMD2).map(|p| (p, CMD2.len()));
+        let (rel, cmd_len) = match (p1, p2) {
+            (Some(a), Some(b)) => if a.0 <= b.0 { a } else { b },
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => break,
+        };
+        let start = i + rel;
         // Ensure token boundary (start or whitespace/punct before, and space or '<' after)
-        let ok_before = start == 0 || script[..start].chars().rev().next().map(|c| c.is_whitespace() || ";|&".contains(c)).unwrap_or(true);
-        let after = script[start..].chars().skip("apply_patch".len()).next();
+        let ok_before = start == 0
+            || script[..start]
+                .chars()
+                .rev()
+                .next()
+                .map(|c| c.is_whitespace() || ";|&".contains(c))
+                .unwrap_or(true);
+        let after = script[start..].chars().skip(cmd_len).next();
         let ok_after = after.map(|c| c.is_whitespace() || c == '<').unwrap_or(false);
-        if !ok_before || !ok_after { i = start + "apply_patch".len(); continue; }
+        if !ok_before || !ok_after {
+            i = start + cmd_len;
+            continue;
+        }
 
         // Find heredoc op: << (allow spaces between)
-        let rest = &script[start + "apply_patch".len()..];
+        let rest = &script[start + cmd_len..];
         let mut j = 0usize;
         // Skip spaces
         while j < rest.len() && rest.as_bytes()[j].is_ascii_whitespace() { j += 1; }
         if j + 1 >= rest.len() || rest[j..].get(..2).unwrap_or("") != "<<" {
-            i = start + "apply_patch".len();
+            i = start + cmd_len;
             continue;
         }
         j += 2; // past <<
@@ -55,7 +78,7 @@ pub(crate) fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedA
         // Find end of header line (newline)
         let header_slice = &rest[after_delim_idx..];
         let Some(nl_rel) = header_slice.find('\n') else { break };
-        let header_end = start + "apply_patch".len() + after_delim_idx + nl_rel + 1; // pos after newline
+        let header_end = start + cmd_len + after_delim_idx + nl_rel + 1; // pos after newline
 
         // Search for terminator line equal to delim
         let mut scan = header_end;
