@@ -247,6 +247,9 @@ impl Default for SpinnerSelection {
 pub struct CustomSpinner {
     pub interval: u64,
     pub frames: Vec<String>,
+    /// Optional human-readable label to display in the UI
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 /// Configuration for syntax highlighting in Markdown code blocks.
