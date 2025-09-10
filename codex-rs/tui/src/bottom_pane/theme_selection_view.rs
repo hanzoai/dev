@@ -602,9 +602,32 @@ impl ThemeSelectionView {
                 let mut out = String::new();
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => { let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
-                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta)); }
+                        Ok(codex_core::ResponseEvent::Created) => {
+                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(created)".to_string()));
+                        }
+                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
+                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
+                        }
+                        Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
+                        }
+                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => {
+                            let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone()));
+                            out.push_str(&delta);
+                        }
+                        Ok(codex_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                            if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
+                                for c in content {
+                                    if let codex_protocol::models::ContentItem::OutputText { text } = c {
+                                        out.push_str(&text);
+                                    }
+                                }
+                            }
+                        }
                         Ok(codex_core::ResponseEvent::Completed { .. }) => break,
+                        Err(e) => {
+                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta(format!("(stream error: {})", e)));
+                        }
                         _ => {}
                     }
                 }
