@@ -1691,6 +1691,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 )));
                 // Exactly one blank line above Description
                 form_lines.push(Line::default());
+                // Show error above description if any
+                if let Some(last) = s.thinking_lines.borrow().last().cloned() {
+                    if last.starts_with("Error:") {
+                        form_lines.push(Line::from(Span::styled(
+                            last,
+                            Style::default().fg(crate::colors::error()),
+                        )));
+                        form_lines.push(Line::default());
+                    }
+                }
                 let caret = Span::styled("▏", Style::default().fg(theme.info));
                 let mut desc_spans: Vec<Span> = Vec::new();
                 desc_spans.push(Span::styled(
@@ -1889,6 +1899,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         .add_modifier(Modifier::BOLD),
                 )));
                 form_lines.push(Line::default());
+                // If there was a recent error, show it once above description
+                if let Some(last) = s.thinking_lines.borrow().last().cloned() {
+                    if last.starts_with("Error:") {
+                        form_lines.push(Line::from(Span::styled(
+                            last,
+                            Style::default().fg(crate::colors::error()),
+                        )));
+                        form_lines.push(Line::default());
+                    }
+                }
                 form_lines.push(Line::from(Span::styled(
                     "Code can generate a custom theme just for you!",
                     Style::default().fg(theme.text),
