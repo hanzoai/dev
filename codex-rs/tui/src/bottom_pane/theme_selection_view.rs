@@ -293,6 +293,7 @@ impl ThemeSelectionView {
                 let schema = serde_json::json!({
                     "type": "object",
                     "properties": {
+                        "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Display name for the spinner (shown in the UI)."},
                         "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50–300)."},
                         "frames": {
                             "type": "array",
@@ -376,6 +377,13 @@ impl ThemeSelectionView {
                     }
                 };
                 let interval = v.get("interval").and_then(|x| x.as_u64()).unwrap_or(120).clamp(50, 300);
+                let display_name = v
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("Custom")
+                    .to_string();
                 let mut frames: Vec<String> = v
                     .get("frames")
                     .and_then(|x| x.as_array())
@@ -405,7 +413,7 @@ impl ThemeSelectionView {
                     .collect();
 
                 // Persist + activate
-                let _ = progress_tx.send(ProgressMsg::CompletedOk { interval, frames: norm_frames });
+                let _ = progress_tx.send(ProgressMsg::CompletedOk { name: display_name, interval, frames: norm_frames });
             });
         });
     }
@@ -434,6 +442,7 @@ struct CreateState {
     /// Parsed proposal waiting for review
     proposed_interval: std::cell::Cell<Option<u64>>,
     proposed_frames: std::cell::RefCell<Option<Vec<String>>>,
+    proposed_name: std::cell::RefCell<Option<String>>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -447,7 +456,7 @@ enum ProgressMsg {
     ThinkingDelta(String),
     OutputDelta(String),
     RawOutput(String),
-    CompletedOk { interval: u64, frames: Vec<String> },
+    CompletedOk { name: String, interval: u64, frames: Vec<String> },
     // `_raw_snippet` is captured for potential future display/debugging
     CompletedErr { error: String, _raw_snippet: String },
 }
@@ -592,6 +601,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 thinking_current: std::cell::RefCell::new(String::new()),
                                 proposed_interval: std::cell::Cell::new(None),
                                 proposed_frames: std::cell::RefCell::new(None),
+                                proposed_name: std::cell::RefCell::new(None),
                             });
                         } else {
                             self.confirm_spinner()
@@ -639,17 +649,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         s.proposed_interval.get(),
                                         s.proposed_frames.borrow().clone(),
                                     ) {
+                                        let display_name = s
+                                            .proposed_name
+                                            .borrow()
+                                            .as_ref()
+                                            .cloned()
+                                            .unwrap_or_else(|| "Custom".to_string());
                                         if let Ok(home) = codex_core::config::find_codex_home() {
                                             let _ = codex_core::config::set_custom_spinner(
-                                                &home, "custom", interval, &frames,
+                                                &home, "custom", &display_name, interval, &frames,
                                             );
                                         }
-                                        crate::spinner::add_custom_spinner(
-                                            "custom".to_string(),
-                                            "Custom".to_string(),
-                                            interval,
-                                            frames,
-                                        );
+                                        crate::spinner::add_custom_spinner("custom".to_string(), display_name.clone(), interval, frames);
                                         crate::spinner::switch_spinner("custom");
                                         self.revert_spinner_on_back = "custom".to_string();
                                         self.current_spinner = "custom".to_string();
@@ -815,12 +826,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .find(|(t, _, _)| *t == self.current_theme)
                 .map(|(_, name, _)| *name)
                 .unwrap_or("Theme");
-            let spinner_label = self.current_spinner.as_str();
-            let items = vec![
-                ("Change theme", theme_label),
-                ("Change spinner", spinner_label),
-            ];
-            for (i, (k, v)) in items.iter().enumerate() {
+            // Row 0: Change theme
+            for (i, k, v, is_spinner) in [
+                (0usize, "Change theme", theme_label, false),
+                (1usize, "Change spinner", "", true),
+            ] {
                 let selected = i == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
                 if selected {
@@ -830,16 +840,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 }
                 if selected {
                     spans.push(Span::styled(
-                        *k,
+                        k,
                         Style::default()
                             .fg(theme.primary)
                             .add_modifier(Modifier::BOLD),
                     ));
                 } else {
-                    spans.push(Span::styled(*k, Style::default().fg(theme.text)));
+                    spans.push(Span::styled(k, Style::default().fg(theme.text)));
                 }
                 spans.push(Span::raw(" — "));
-                spans.push(Span::styled(*v, Style::default().fg(theme.text_dim)));
+                if is_spinner {
+                    let label = crate::spinner::spinner_label_for(&self.current_spinner);
+                    spans.push(Span::styled(label, Style::default().fg(theme.text_dim)));
+                } else {
+                    spans.push(Span::styled(v, Style::default().fg(theme.text_dim)));
+                }
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
@@ -952,12 +967,13 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Ok(ProgressMsg::RawOutput(_raw)) => {}
-                            Ok(ProgressMsg::CompletedOk { interval, frames }) => {
+                            Ok(ProgressMsg::CompletedOk { name, interval, frames }) => {
                                 if let Mode::CreateSpinner(ref sm) = self.mode {
                                     sm.is_loading.set(false);
                                     sm.step.set(CreateStep::Review);
                                     sm.proposed_interval.set(Some(interval));
                                     sm.proposed_frames.replace(Some(frames));
+                                    sm.proposed_name.replace(Some(name));
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }

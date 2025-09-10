@@ -426,10 +426,12 @@ pub fn set_tui_spinner_name(codex_home: &Path, spinner_name: &str) -> anyhow::Re
     Ok(())
 }
 
-/// Save or update a custom spinner under `[tui.spinner.custom.<name>]` and set it active.
+/// Save or update a custom spinner under `[tui.spinner.custom.<id>]` with a display `label`,
+/// and set it active by writing `[tui.spinner].name = <id>`.
 pub fn set_custom_spinner(
     codex_home: &Path,
-    name: &str,
+    id: &str,
+    label: &str,
     interval: u64,
     frames: &[String],
 ) -> anyhow::Result<()> {
@@ -440,14 +442,15 @@ pub fn set_custom_spinner(
         Err(e) => return Err(e.into()),
     };
     // Write custom spinner
-    let node = &mut doc["tui"]["spinner"]["custom"][name];
+    let node = &mut doc["tui"]["spinner"]["custom"][id];
     node["interval"] = toml_edit::value(interval as i64);
     let mut arr = toml_edit::Array::default();
     for s in frames { arr.push(s.as_str()); }
     node["frames"] = toml_edit::value(arr);
+    node["label"] = toml_edit::value(label);
 
     // Set as active
-    doc["tui"]["spinner"]["name"] = toml_edit::value(name);
+    doc["tui"]["spinner"]["name"] = toml_edit::value(id);
 
     std::fs::create_dir_all(codex_home)?;
     let tmp = NamedTempFile::new_in(codex_home)?;
