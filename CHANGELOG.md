@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.114] - 2025-09-10
+
+- TUI: honor custom spinner selection by name; treat as current. (a806d640)
+- TUI: show custom spinner immediately and return to Overview on save. (a806d640)
+
 ## [0.2.113] - 2025-09-10
 
 - TUI: improve Create Custom spinner UX with focused fields, keyboard navigation, and clear Save/Cancel flow; activating saved spinner immediately. (08a2f0ee)
