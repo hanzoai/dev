@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.113] - 2025-09-10
+
+- TUI: improve Create Custom spinner UX with focused fields, keyboard navigation, and clear Save/Cancel flow; activating saved spinner immediately. (08a2f0ee)
+- TUI: refine spinner list spacing and borders; dim non-selected rows for clearer focus. (a6009916, 7e865ac9)
+- Build: fix preview release slug resolution from code/<slug> with fallbacks. (722af737)
+
 ## [0.2.112] - 2025-09-10
 
 - TUI: group spinner list with dim headers and restore selector arrow for clearer navigation. (085fe5f3)
