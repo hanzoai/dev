@@ -1429,6 +1429,9 @@ impl State {
         Self {
             approved_commands: self.approved_commands.clone(),
             history: self.history.clone(),
+            // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
+            // do not reset provider ordering mid-session.
+            request_ordinal: self.request_ordinal,
             ..Default::default()
         }
     }
@@ -2188,6 +2191,7 @@ async fn run_turn(
                 Some(sess.user_shell.clone()),
             )),
             status_items, // Include status items with this request
+            text_format: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -2254,6 +2258,7 @@ async fn run_turn(
                                 base_instructions_override: Some(SUMMARIZATION_PROMPT.to_string()),
                                 environment_context: None,
                                 status_items: Vec::new(),
+                                text_format: None,
                             };
 
                             match drain_to_completed(sess, &sub_id, &compact_prompt).await {
@@ -2643,6 +2648,7 @@ async fn run_compact_agent(
             tools: Vec::new(),
             base_instructions_override: Some(compact_instructions.clone()),
             status_items, // Include status items with this request
+            text_format: None,
         };
 
         let attempt_result = drain_to_completed(&sess, &sub_id, &prompt).await;

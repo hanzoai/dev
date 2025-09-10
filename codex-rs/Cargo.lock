@@ -819,6 +819,7 @@ dependencies = [
  "codex-tui",
  "codex-version",
  "flate2",
+ "futures",
  "regex",
  "reqwest",
  "serde",
@@ -828,6 +829,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "which",
  "zip",
 ]
@@ -1115,6 +1117,7 @@ dependencies = [
  "color-eyre",
  "crossterm",
  "diffy",
+ "futures",
  "image 0.25.8",
  "insta",
  "lazy_static",

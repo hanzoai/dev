@@ -193,10 +193,48 @@ impl ChatComposer {
                 let animation_flag_clone = Arc::clone(&animation_flag);
                 let app_event_tx_clone = self.app_event_tx.clone();
 
+                // Drive redraws at the spinner's native cadence with a
+                // phase‑aligned, monotonic scheduler to minimize drift and
+                // reduce perceived frame skipping under load. We purposely
+                // avoid very small intervals to keep CPU impact low.
                 thread::spawn(move || {
+                    use std::time::Instant;
+                    // Default to ~120ms if spinner state is not yet initialized
+                    let default_ms: u64 = 120;
+                    // Clamp to a sane floor so we never busy loop if a custom spinner
+                    // has an extremely small interval configured.
+                    let min_ms: u64 = 60; // ~16 FPS upper bound for this thread
+
+                    // Determine the target period. If the user changes the spinner
+                    // while running, we'll still get correct visual output because
+                    // frames are time‑based at render; this cadence simply requests
+                    // redraws.
+                    let period_ms = crate::spinner::current_spinner()
+                        .interval_ms
+                        .max(min_ms)
+                        .max(1);
+                    let period = Duration::from_millis(period_ms); // fallback uses default below if needed
+
+                    let mut next = Instant::now()
+                        .checked_add(if period_ms == 0 { Duration::from_millis(default_ms) } else { period })
+                        .unwrap_or_else(Instant::now);
+
                     while animation_flag_clone.load(Ordering::Relaxed) {
-                        thread::sleep(Duration::from_millis(200)); // Slower animation
-                        app_event_tx_clone.send(crate::app_event::AppEvent::RequestRedraw);
+                        let now = Instant::now();
+                        if now < next {
+                            let sleep_dur = next - now;
+                            thread::sleep(sleep_dur);
+                        } else {
+                            // If we're late (system busy), request a redraw immediately.
+                            app_event_tx_clone.send(crate::app_event::AppEvent::RequestRedraw);
+                            // Step the schedule forward by whole periods to avoid
+                            // bursty catch‑up redraws.
+                            let mut target = next;
+                            while target <= now {
+                                if let Some(t) = target.checked_add(period) { target = t; } else { break; }
+                            }
+                            next = target;
+                        }
                     }
                 });
 
@@ -308,6 +346,17 @@ impl ChatComposer {
             || lower.contains("completion")
         {
             "Responding".to_string()
+        }
+        // Transient network/stream retry patterns → keep spinner visible with a
+        // clear reconnecting message so the user knows we are still working.
+        else if lower.contains("retrying")
+            || lower.contains("reconnecting")
+            || lower.contains("disconnected")
+            || lower.contains("stream error")
+            || lower.contains("stream closed")
+            || lower.contains("timeout")
+        {
+            "Reconnecting".to_string()
         }
         // File/code editing patterns
         else if lower.contains("editing")
