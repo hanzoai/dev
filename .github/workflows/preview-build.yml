@@ -282,8 +282,10 @@ jobs:
               if (issue_number) {
                 try {
                   const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
-                  const idLabel = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).find(n => typeof n === 'string' && n.startsWith('id/'));
-                  if (idLabel) slug = idLabel.slice(3).toLowerCase();
+                  const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                  const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                  const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                  if (codeLabel) slug = codeLabel.slice(5).toLowerCase(); else if (idLabel) slug = idLabel.slice(3).toLowerCase();
                 } catch {}
                 if (!slug) {
                   const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
