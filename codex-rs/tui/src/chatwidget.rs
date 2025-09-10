@@ -1410,6 +1410,33 @@ impl ChatWidget<'_> {
     }
 
     fn on_error(&mut self, message: String) {
+        // Treat transient stream errors (which the core will retry) differently
+        // from fatal errors so the status spinner remains visible while we wait.
+        let lower = message.to_lowercase();
+        let is_transient = lower.contains("retrying")
+            || lower.contains("stream disconnected")
+            || lower.contains("stream error")
+            || lower.contains("stream closed")
+            || lower.contains("timeout")
+            || lower.contains("temporar");
+
+        if is_transient {
+            // Keep task running and surface a concise status in the input header.
+            self.bottom_pane.set_task_running(true);
+            self.bottom_pane.update_status_text(message.clone());
+            // Add a dim background event instead of a hard error cell to avoid
+            // alarming users during auto-retries.
+            let key = self.next_internal_key();
+            let _ = self.history_insert_with_key_global(
+                Box::new(history_cell::new_background_event(message)),
+                key,
+            );
+            // Do NOT clear running state or streams; the retry will resume them.
+            self.request_redraw();
+            return;
+        }
+
+        // Fatal error path: show an error cell and clear running state.
         let key = self.next_internal_key();
         let _ = self
             .history_insert_with_key_global(Box::new(history_cell::new_error_event(message)), key);
