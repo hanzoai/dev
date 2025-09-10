@@ -158,11 +158,12 @@ impl ThemeSelectionView {
     fn move_selection_up(&mut self) {
         if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
-                if self.selected_theme_index > 0 {
-                    self.selected_theme_index -= 1;
-                    self.current_theme = options[self.selected_theme_index].0;
-                    self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
-                }
+            if self.selected_theme_index > 0 {
+                self.selected_theme_index -= 1;
+                self.current_theme = options[self.selected_theme_index].0;
+                self.app_event_tx
+                    .send(AppEvent::PreviewTheme(self.current_theme));
+            }
         } else {
             let names = crate::spinner::spinner_names();
             if self.selected_spinner_index > 0 {
@@ -204,7 +205,8 @@ impl ThemeSelectionView {
     }
 
     fn confirm_theme(&mut self) {
-        self.app_event_tx.send(AppEvent::UpdateTheme(self.current_theme));
+        self.app_event_tx
+            .send(AppEvent::UpdateTheme(self.current_theme));
         self.revert_theme_on_back = self.current_theme;
         self.mode = Mode::Overview;
     }
@@ -239,12 +241,25 @@ impl ThemeSelectionView {
     }
 
     /// Spawn a background task that creates a custom spinner using the LLM with a JSON schema
-    fn kickoff_spinner_creation(&self, user_prompt: String, progress_tx: std::sync::mpsc::Sender<ProgressMsg>) {
+    fn kickoff_spinner_creation(
+        &self,
+        user_prompt: String,
+        progress_tx: std::sync::mpsc::Sender<ProgressMsg>,
+    ) {
         let tx = self.app_event_tx.clone();
         std::thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(rt) => rt,
-                Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Failed to start runtime: {}", e))); return; }
+                Err(e) => {
+                    tx.send(AppEvent::InsertBackgroundEventEarly(format!(
+                        "Failed to start runtime: {}",
+                        e
+                    )));
+                    return;
+                }
             };
             let _ = rt.block_on(async move {
                 // Load current config (CLI-style) and construct a one-off ModelClient
@@ -396,7 +411,12 @@ impl ThemeSelectionView {
     }
 }
 
-enum Mode { Overview, Themes, Spinner, CreateSpinner(CreateState) }
+enum Mode {
+    Overview,
+    Themes,
+    Spinner,
+    CreateSpinner(CreateState),
+}
 
 struct CreateState {
     step: std::cell::Cell<CreateStep>,
@@ -417,7 +437,11 @@ struct CreateState {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-enum CreateStep { Prompt, Action, Review }
+enum CreateStep {
+    Prompt,
+    Action,
+    Review,
+}
 
 enum ProgressMsg {
     ThinkingDelta(String),
@@ -462,14 +486,25 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Action },
-                        CreateStep::Review => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Review },
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Review
+                        }
                     };
                     s.step.set(new_step);
                 } else {
                     match self.mode {
                         Mode::Overview => {
-                            self.overview_selected_index = self.overview_selected_index.saturating_sub(1) % 2;
+                            self.overview_selected_index =
+                                self.overview_selected_index.saturating_sub(1) % 2;
                         }
                         _ => self.move_selection_up(),
                     }
@@ -484,8 +519,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Action },
-                        CreateStep::Review => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Review },
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Review
+                        }
                     };
                     s.step.set(new_step);
                 } else {
@@ -497,8 +542,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. } => {}
-            KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {}
+            KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {}
+            KeyEvent {
+                code: KeyCode::Right,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {}
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
@@ -515,8 +568,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         } else {
                             self.revert_spinner_on_back = self.current_spinner.clone();
                             self.mode = Mode::Spinner;
-                            self.app_event_tx
-                                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                            self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                                std::time::Duration::from_millis(120),
+                            ));
                             self.just_entered_spinner = true;
                         }
                     }
@@ -573,19 +627,39 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     s.rx = Some(rxp);
                                     self.kickoff_spinner_creation(user_prompt, txp);
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
-                                } else { /* Cancel or already loading → return to overview */ go_overview = true; }
+                                } else {
+                                    /* Cancel or already loading → return to overview */
+                                    go_overview = true;
+                                }
                             }
                             CreateStep::Review => {
                                 if s.action_idx == 0 {
                                     // Save
-                                    if let (Some(interval), Some(frames)) = (s.proposed_interval.get(), s.proposed_frames.borrow().clone()) {
-                                        if let Ok(home) = codex_core::config::find_codex_home() { let _ = codex_core::config::set_custom_spinner(&home, "custom", interval, &frames); }
-                                        crate::spinner::add_custom_spinner("custom".to_string(), "Custom".to_string(), interval, frames);
+                                    if let (Some(interval), Some(frames)) = (
+                                        s.proposed_interval.get(),
+                                        s.proposed_frames.borrow().clone(),
+                                    ) {
+                                        if let Ok(home) = codex_core::config::find_codex_home() {
+                                            let _ = codex_core::config::set_custom_spinner(
+                                                &home, "custom", interval, &frames,
+                                            );
+                                        }
+                                        crate::spinner::add_custom_spinner(
+                                            "custom".to_string(),
+                                            "Custom".to_string(),
+                                            interval,
+                                            frames,
+                                        );
                                         crate::spinner::switch_spinner("custom");
                                         self.revert_spinner_on_back = "custom".to_string();
                                         self.current_spinner = "custom".to_string();
-                                        self.app_event_tx.send(AppEvent::UpdateSpinner("custom".to_string()));
-                                        self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("✓ Custom spinner saved".to_string()));
+                                        self.app_event_tx
+                                            .send(AppEvent::UpdateSpinner("custom".to_string()));
+                                        self.app_event_tx.send(
+                                            AppEvent::InsertBackgroundEventEarly(
+                                                "✓ Custom spinner saved".to_string(),
+                                            ),
+                                        );
                                         go_overview = true;
                                     }
                                 } else {
@@ -599,7 +673,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 }
                             }
                         }
-                        if go_overview { self.mode = Mode::Overview; } else { self.mode = Mode::CreateSpinner(s); }
+                        if go_overview {
+                            self.mode = Mode::Overview;
+                        } else {
+                            self.mode = Mode::CreateSpinner(s);
+                        }
                     }
                 }
             }
@@ -607,23 +685,44 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 code: KeyCode::Esc,
                 modifiers: KeyModifiers::NONE,
                 ..
+            } => match self.mode {
+                Mode::Overview => self.is_complete = true,
+                Mode::CreateSpinner(_) => {
+                    self.mode = Mode::Spinner;
+                }
+                _ => self.cancel_detail(),
+            },
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::NONE,
+                ..
             } => {
-                match self.mode {
-                    Mode::Overview => self.is_complete = true,
-                    Mode::CreateSpinner(_) => { self.mode = Mode::Spinner; }
-                    _ => self.cancel_detail(),
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => s.prompt.push(c),
+                        CreateStep::Action | CreateStep::Review => {}
+                    }
                 }
             }
-            KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    if s.is_loading.get() { return; }
-                    match s.step.get() { CreateStep::Prompt => s.prompt.push(c), CreateStep::Action | CreateStep::Review => {} }
-                }
-            }
-            KeyEvent { code: KeyCode::Backspace, .. } => {
-                if let Mode::CreateSpinner(ref mut s) = self.mode {
-                    if s.is_loading.get() { return; }
-                    match s.step.get() { CreateStep::Prompt => { s.prompt.pop(); }, CreateStep::Action | CreateStep::Review => { return; } }
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => {
+                            s.prompt.pop();
+                        }
+                        CreateStep::Action | CreateStep::Review => {
+                            return;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -639,12 +738,22 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let theme = crate::theme::current_theme();
 
         // Use full width and draw an outer window styled like the Diff overlay
-        let render_area = Rect { x: area.x, y: area.y, width: area.width, height: area.height };
+        let render_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height,
+        };
         Clear.render(render_area, buf);
 
         // Add one row of padding above the top border (clear + background)
         if render_area.y > 0 {
-            let pad = Rect { x: render_area.x, y: render_area.y - 1, width: render_area.width, height: 1 };
+            let pad = Rect {
+                x: render_area.x,
+                y: render_area.y - 1,
+                width: render_area.width,
+                height: 1,
+            };
             Clear.render(pad, buf);
             let pad_bg = Block::default().style(Style::default().bg(crate::colors::background()));
             pad_bg.render(pad, buf);
@@ -674,7 +783,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             .borders(Borders::ALL)
             .title(Line::from(title_spans))
             .style(Style::default().bg(crate::colors::background()))
-            .border_style(Style::default().fg(crate::colors::border()).bg(crate::colors::background()));
+            .border_style(
+                Style::default()
+                    .fg(crate::colors::border())
+                    .bg(crate::colors::background()),
+            );
         let inner = outer.inner(render_area);
         outer.render(render_area, buf);
 
@@ -703,7 +816,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 .map(|(_, name, _)| *name)
                 .unwrap_or("Theme");
             let spinner_label = self.current_spinner.as_str();
-            let items = vec![("Change theme", theme_label), ("Change spinner", spinner_label)];
+            let items = vec![
+                ("Change theme", theme_label),
+                ("Change spinner", spinner_label),
+            ];
             for (i, (k, v)) in items.iter().enumerate() {
                 let selected = i == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
@@ -713,7 +829,12 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     spans.push(Span::raw("  "));
                 }
                 if selected {
-                    spans.push(Span::styled(*k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                    spans.push(Span::styled(
+                        *k,
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 } else {
                     spans.push(Span::styled(*k, Style::default().fg(theme.text)));
                 }
@@ -725,7 +846,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             // Header: Choose Theme
             lines.push(Line::from(Span::styled(
                 "Choose Theme",
-                Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.text_bright)
+                    .add_modifier(Modifier::BOLD),
             )));
             // Compute anchored window: top until middle, then center; bottom shows end
             let count = options.len();
@@ -783,7 +906,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             if let Mode::CreateSpinner(s) = &self.mode {
                 // Drain progress messages if streaming
                 if let Some(rx) = &s.rx {
-                    for _ in 0..100 { // limit per render to keep UI snappy
+                    for _ in 0..100 {
+                        // limit per render to keep UI snappy
                         match rx.try_recv() {
                             Ok(ProgressMsg::ThinkingDelta(d)) => {
                                 if let Mode::CreateSpinner(ref sm) = self.mode {
@@ -793,11 +917,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     if let Some(pos) = cur.rfind('\n') {
                                         // Split on last newline: commit completed portion, keep remainder
                                         let (complete, remainder) = cur.split_at(pos);
-                                        if !complete.trim().is_empty() { hist.push(complete.trim().to_string()); }
+                                        if !complete.trim().is_empty() {
+                                            hist.push(complete.trim().to_string());
+                                        }
                                         *cur = remainder.trim_start_matches('\n').to_string();
                                         let keep = 10usize;
                                         let len = hist.len();
-                                        if len > keep { hist.drain(0..len-keep); }
+                                        if len > keep {
+                                            hist.drain(0..len - keep);
+                                        }
                                     }
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -810,11 +938,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     cur.push_str(&d);
                                     if let Some(pos) = cur.rfind('\n') {
                                         let (complete, remainder) = cur.split_at(pos);
-                                        if !complete.trim().is_empty() { hist.push(complete.trim().to_string()); }
+                                        if !complete.trim().is_empty() {
+                                            hist.push(complete.trim().to_string());
+                                        }
                                         *cur = remainder.trim_start_matches('\n').to_string();
                                         let keep = 10usize;
                                         let len = hist.len();
-                                        if len > keep { hist.drain(0..len-keep); }
+                                        if len > keep {
+                                            hist.drain(0..len - keep);
+                                        }
                                     }
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -829,10 +961,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
-                            Ok(ProgressMsg::CompletedErr { error, _raw_snippet: _ }) => {
+                            Ok(ProgressMsg::CompletedErr {
+                                error,
+                                _raw_snippet: _,
+                            }) => {
                                 if let Mode::CreateSpinner(ref sm) = self.mode {
-                                    sm.is_loading.set(false); sm.step.set(CreateStep::Action);
-                                    sm.thinking_lines.borrow_mut().push(format!("Error: {}", error));
+                                    sm.is_loading.set(false);
+                                    sm.step.set(CreateStep::Action);
+                                    sm.thinking_lines
+                                        .borrow_mut()
+                                        .push(format!("Error: {}", error));
                                     sm.thinking_current.borrow_mut().clear();
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -847,14 +985,26 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if s.is_loading.get() {
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Spinner » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     // One blank line between title and spinner line
-                    form_lines.push(Line::from(" "));
-                    use std::time::{SystemTime, UNIX_EPOCH};
-                    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                    let diamond = ["◇", "◆", "◇", "◆"]; let frame = diamond[((now_ms / 120) as usize) % diamond.len()].to_string();
-                    form_lines.push(Line::from(vec![Span::styled(frame, Style::default().fg(crate::colors::info())), Span::raw(" Generating spinner with AI…")]));
+                    // Use an actually empty line to avoid wrap/spacing quirks
+                    // with a single-space line under ratatui wrapping.
+                    form_lines.push(Line::default());
+                    use std::time::SystemTime;
+                    use std::time::UNIX_EPOCH;
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let diamond = ["◇", "◆", "◇", "◆"];
+                    let frame = diamond[((now_ms / 120) as usize) % diamond.len()].to_string();
+                    form_lines.push(Line::from(vec![
+                        Span::styled(frame, Style::default().fg(crate::colors::info())),
+                        Span::raw(" Generating spinner with AI…"),
+                    ]));
                     // Latest message only
                     // Show the latest in‑progress line if present, otherwise last completed line
                     let cur = s.thinking_current.borrow();
@@ -873,9 +1023,13 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     if !latest_render.ends_with('…') {
                         latest_render.push_str(" …");
                     }
-                    form_lines.push(Line::from(Span::styled(latest_render, Style::default().fg(theme.text_dim))));
-                    self.app_event_tx
-                        .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(120)));
+                    form_lines.push(Line::from(Span::styled(
+                        latest_render,
+                        Style::default().fg(theme.text_dim),
+                    )));
+                    self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                        std::time::Duration::from_millis(120),
+                    ));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
                         .wrap(ratatui::widgets::Wrap { trim: false })
@@ -887,16 +1041,31 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if matches!(s.step.get(), CreateStep::Review) {
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Spinner » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
-                    form_lines.push(Line::from(" "));
+                    // Blank line between title and preview row
+                    form_lines.push(Line::default());
                     // Preview styled like selection rows: border rules + spinner + label
-                    if let (Some(interval), Some(frames)) = (s.proposed_interval.get(), s.proposed_frames.borrow().as_ref()) {
-                        use std::time::{SystemTime, UNIX_EPOCH};
-                        let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                        let idx = if frames.is_empty() { 0 } else { ((now_ms / interval) as usize) % frames.len() };
+                    if let (Some(interval), Some(frames)) = (
+                        s.proposed_interval.get(),
+                        s.proposed_frames.borrow().as_ref(),
+                    ) {
+                        use std::time::SystemTime;
+                        use std::time::UNIX_EPOCH;
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let idx = if frames.is_empty() {
+                            0
+                        } else {
+                            ((now_ms / interval) as usize) % frames.len()
+                        };
                         let preview = frames.get(idx).cloned().unwrap_or_default();
-                        form_lines.push(Line::from(" "));
+                        // Spacer above the preview row
+                        form_lines.push(Line::default());
                         // Compute layout similar to the list row: left rule | spinner | label | right rule
                         let label = "Preview";
                         let max_frame_len: u16 = preview.chars().count() as u16;
@@ -915,17 +1084,26 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         spans.push(Span::raw(" "));
                         spans.push(Span::styled("─".repeat(right_rule as usize), border));
                         form_lines.push(Line::from(spans));
-                        self.app_event_tx
-                            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(interval)));
+                        self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                            std::time::Duration::from_millis(interval),
+                        ));
                     }
                     // Add spacing line between preview and buttons
-                    form_lines.push(Line::from(" "));
+                    // Spacing between preview and buttons
+                    form_lines.push(Line::default());
                     // Buttons row moved to bottom
                     let mut spans: Vec<Span> = Vec::new();
                     let primary_selected = s.action_idx == 0;
                     let secondary_selected = s.action_idx == 1;
-                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
-                    spans.push(Span::raw("  "));
+                    let sel = |b: bool| {
+                        if b {
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        }
+                    };
                     spans.push(Span::styled("[ Save ]", sel(primary_selected)));
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled("[ Retry ]", sel(secondary_selected)));
@@ -940,33 +1118,52 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 // Default (idle): header, description input, border, and Generate/Cancel buttons
                 form_lines.push(Line::from(Span::styled(
                     "Overview » Change Spinner » Create Custom",
-                    Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.text_bright)
+                        .add_modifier(Modifier::BOLD),
                 )));
+                // Blank line between title and content
+                form_lines.push(Line::default());
                 form_lines.push(Line::from(Span::styled(
                     "Code can generate a custom spinner just for you!",
-                    Style::default().fg(theme.text)
+                    Style::default().fg(theme.text),
                 )));
                 form_lines.push(Line::from(Span::styled(
                     "What sort of spinner would you like? (e.g. bouncing dot party, rocket ship emoji blast off)",
                     Style::default().fg(theme.text_dim)
                 )));
                 // Exactly one blank line above Description
-                form_lines.push(Line::from(" "));
+                form_lines.push(Line::default());
                 let caret = Span::styled("▏", Style::default().fg(theme.info));
                 let mut desc_spans: Vec<Span> = Vec::new();
-                desc_spans.push(Span::styled("Description: ", Style::default().fg(theme.keyword)));
+                desc_spans.push(Span::styled(
+                    "Description: ",
+                    Style::default().fg(theme.keyword),
+                ));
                 let active = matches!(s.step.get(), CreateStep::Prompt);
                 desc_spans.push(Span::raw(s.prompt.clone()));
-                if active { desc_spans.push(caret.clone()); }
+                if active {
+                    desc_spans.push(caret.clone());
+                }
                 form_lines.push(Line::from(desc_spans));
-                form_lines.push(Line::from(Span::styled("─".repeat((body_area.width.saturating_sub(4)) as usize), Style::default().fg(crate::colors::border()))));
+                form_lines.push(Line::from(Span::styled(
+                    "─".repeat((body_area.width.saturating_sub(4)) as usize),
+                    Style::default().fg(crate::colors::border()),
+                )));
                 // Buttons
                 let mut spans: Vec<Span> = Vec::new();
                 let on_actions = matches!(s.step.get(), CreateStep::Action);
                 let primary_selected = on_actions && s.action_idx == 0;
                 let secondary_selected = on_actions && s.action_idx == 1;
-                let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
-                spans.push(Span::raw("  "));
+                let sel = |b: bool| {
+                    if b {
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text)
+                    }
+                };
                 spans.push(Span::styled("[ Generate... ]", sel(primary_selected)));
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled("[ Cancel ]", sel(secondary_selected)));
@@ -980,7 +1177,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             return;
         } else {
             // Spinner: render one centered preview row per spinner, matching the composer title
-            use std::time::{SystemTime, UNIX_EPOCH};
+            use std::time::SystemTime;
+            use std::time::UNIX_EPOCH;
             let now_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -1006,41 +1204,87 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             }
 
             // Render header (left-aligned) and spacer row
-            let header_rect = Rect { x: body_area.x, y: body_area.y, width: body_area.width, height: 1 };
+            let header_rect = Rect {
+                x: body_area.x,
+                y: body_area.y,
+                width: body_area.width,
+                height: 1,
+            };
             let header = Line::from(Span::styled(
                 "Overview » Change Spinner",
-                Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.text_bright)
+                    .add_modifier(Modifier::BOLD),
             ));
-            Paragraph::new(header).alignment(Alignment::Left).render(header_rect, buf);
+            Paragraph::new(header)
+                .alignment(Alignment::Left)
+                .render(header_rect, buf);
             if header_rect.y + 1 < body_area.y + body_area.height {
-                let spacer = Rect { x: body_area.x, y: body_area.y + 1, width: body_area.width, height: 1 };
-                Paragraph::new(Line::from(" ")).render(spacer, buf);
+                let spacer = Rect {
+                    x: body_area.x,
+                    y: body_area.y + 1,
+                    width: body_area.width,
+                    height: 1,
+                };
+                Paragraph::new(Line::default()).render(spacer, buf);
             }
 
             for row_idx in 0..(end - start) {
                 let i = start + row_idx;
                 // rows start two below (header + spacer)
                 let y = body_area.y + 2 + row_idx as u16;
-                if y >= body_area.y + body_area.height { break; }
+                if y >= body_area.y + body_area.height {
+                    break;
+                }
 
-                let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
+                let row_rect = Rect {
+                    x: body_area.x,
+                    y,
+                    width: body_area.width,
+                    height: 1,
+                };
                 if i >= names.len() {
                     let mut spans = Vec::new();
                     let is_selected = i == self.selected_spinner_index;
-                    spans.push(Span::styled(if is_selected { "› " } else { "  " }.to_string(), Style::default().fg(if is_selected { theme.keyword } else { theme.text } )));
-                    spans.push(Span::styled("Create your own…", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)));
+                    spans.push(Span::styled(
+                        if is_selected { "› " } else { "  " }.to_string(),
+                        Style::default().fg(if is_selected {
+                            theme.keyword
+                        } else {
+                            theme.text
+                        }),
+                    ));
+                    spans.push(Span::styled(
+                        "Create your own…",
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                     Paragraph::new(Line::from(spans)).render(row_rect, buf);
                     continue;
                 }
                 let name = &names[i];
                 let is_selected = i == self.selected_spinner_index;
-                let def = crate::spinner::find_spinner_by_name(name).unwrap_or(crate::spinner::current_spinner());
+                let def = crate::spinner::find_spinner_by_name(name)
+                    .unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
                 // Aligned columns (centered block):
                 // selector (2) | left_rule | space | spinner (right‑aligned to max) | space | label (padded to max) | space | right_rule
-                let border = if is_selected { Style::default().fg(crate::colors::border()) } else { Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM) };
-                let fg = if is_selected { Style::default().fg(crate::colors::info()) } else { Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM) };
+                let border = if is_selected {
+                    Style::default().fg(crate::colors::border())
+                } else {
+                    Style::default()
+                        .fg(theme.text_dim)
+                        .add_modifier(Modifier::DIM)
+                };
+                let fg = if is_selected {
+                    Style::default().fg(crate::colors::info())
+                } else {
+                    Style::default()
+                        .fg(theme.text_dim)
+                        .add_modifier(Modifier::DIM)
+                };
                 let label = crate::spinner::spinner_label_for(name);
 
                 // Use border-based alignment per spec
@@ -1052,7 +1296,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
                 let mut spans: Vec<Span> = Vec::new();
                 // selector
-                spans.push(Span::styled(if is_selected { "› " } else { "  " }.to_string(), Style::default().fg(if is_selected { theme.keyword } else { theme.text } )));
+                spans.push(Span::styled(
+                    if is_selected { "› " } else { "  " }.to_string(),
+                    Style::default().fg(if is_selected {
+                        theme.keyword
+                    } else {
+                        theme.text
+                    }),
+                ));
                 // left rule
                 spans.push(Span::styled("─".repeat(left_rule as usize), border));
                 // single space between left border and spinner
@@ -1064,12 +1315,16 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 spans.push(Span::styled(format!("{}...", label), fg));
                 // right rule (match left border logic: x - text_len)
                 spans.push(Span::styled("─".repeat(right_rule as usize), border));
-                Paragraph::new(Line::from(spans)).alignment(Alignment::Left).render(row_rect, buf);
+                Paragraph::new(Line::from(spans))
+                    .alignment(Alignment::Left)
+                    .render(row_rect, buf);
             }
 
             // Animate spinner previews while open
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
+                .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
+                    100,
+                )));
 
             // Done rendering spinners
             return;
