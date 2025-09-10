@@ -279,18 +279,11 @@ jobs:
           Then run /theme in the terminal to see the new option. [Explain how to try it once launched.]
 
           Can’t wait for you to try changing your title! Please comment here if it’s working well or needs tweaks. Maintainers will review and, if merged into a release, you’ll get an update here. Thanks again! [Positive, personable close.]
-
-          Changes made:
-          - Added title customization [Summarize notable change(s).]
-
-          Commits:
-          - [Link to any commits]
           ---
 
           REQUIREMENTS:
           - Replace @user with the actual GitHub handle(s) of the person you are replying to (either the issue author and/or last commenter).
           - Replace <slug here> with the exact preview command from the context below.
-          - In the changes made section, include links to the commit if possible.
           - Keep it brief, clear, and kind.
           </task>
           <context>
