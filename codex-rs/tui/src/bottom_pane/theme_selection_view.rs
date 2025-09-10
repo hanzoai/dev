@@ -826,8 +826,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
     }
     fn desired_height(&self, _width: u16) -> u16 {
         match &self.mode {
-            // Border (2) + inner padding (2) + 2 content rows = 6
-            Mode::Overview => 6,
+            // Border (2) + inner padding (2) + 4 content rows = 8
+            Mode::Overview => 8,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
                 let n = (Self::get_theme_options().len() as u16) + 1; // +1 for "Generate your own…"
@@ -888,7 +888,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     match self.mode {
                         Mode::Overview => {
                             self.overview_selected_index =
-                                self.overview_selected_index.saturating_sub(1) % 2;
+                                self.overview_selected_index.saturating_sub(1) % 3;
                         }
                         _ => self.move_selection_up(),
                     }
@@ -932,7 +932,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else {
                     match &self.mode {
                         Mode::Overview => {
-                            self.overview_selected_index = (self.overview_selected_index + 1) % 2;
+                            self.overview_selected_index = (self.overview_selected_index + 1) % 3;
                         }
                         _ => self.move_selection_down(),
                     }
@@ -957,17 +957,25 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 let current_mode = std::mem::replace(&mut self.mode, Mode::Overview);
                 match current_mode {
                     Mode::Overview => {
-                        if self.overview_selected_index == 0 {
-                            self.revert_theme_on_back = self.current_theme;
-                            self.mode = Mode::Themes;
-                            self.just_entered_themes = true;
-                        } else {
-                            self.revert_spinner_on_back = self.current_spinner.clone();
-                            self.mode = Mode::Spinner;
-                            self.app_event_tx.send(AppEvent::ScheduleFrameIn(
-                                std::time::Duration::from_millis(120),
-                            ));
-                            self.just_entered_spinner = true;
+                        match self.overview_selected_index {
+                            0 => {
+                                self.revert_theme_on_back = self.current_theme;
+                                self.mode = Mode::Themes;
+                                self.just_entered_themes = true;
+                            }
+                            1 => {
+                                self.revert_spinner_on_back = self.current_spinner.clone();
+                                self.mode = Mode::Spinner;
+                                self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                                    std::time::Duration::from_millis(120),
+                                ));
+                                self.just_entered_spinner = true;
+                            }
+                            _ => {
+                                // Close button
+                                self.is_complete = true;
+                                self.mode = Mode::Overview;
+                            }
                         }
                     }
                     Mode::Themes => {
@@ -1422,7 +1430,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     .map(|(_, name, _)| (*name).to_string())
                     .unwrap_or_else(|| "Theme".to_string())
             };
-            // Row 0: Change theme
+            // Row 0: Change Theme
             // Row 0: Theme
             {
                 let selected = 0 == self.overview_selected_index;
@@ -1432,7 +1440,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else {
                     spans.push(Span::raw("  "));
                 }
-                let k = "Change theme";
+                let k = "Change Theme";
                 if selected {
                     spans.push(Span::styled(
                         k,
@@ -1459,7 +1467,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else {
                     spans.push(Span::raw("  "));
                 }
-                let k = "Change spinner";
+                let k = "Change Spinner";
                 if selected {
                     spans.push(Span::styled(
                         k,
@@ -1473,6 +1481,30 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 spans.push(Span::raw(" — "));
                 let label = crate::spinner::spinner_label_for(&self.current_spinner);
                 spans.push(Span::styled(label, Style::default().fg(theme.text_dim)));
+                lines.push(Line::from(spans));
+                // Spacer line before the Close button
+                lines.push(Line::default());
+            }
+            // Row 2: Close button on its own line
+            {
+                let selected = 2 == self.overview_selected_index;
+                let mut spans = vec![Span::raw(" ")];
+                // Indicate selection with the same chevron prefix used above
+                if selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
+                let sel = |b: bool| {
+                    if b {
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text)
+                    }
+                };
+                spans.push(Span::styled("[ Close ]", sel(selected)));
                 lines.push(Line::from(spans));
             }
         } else if matches!(self.mode, Mode::Themes) {
