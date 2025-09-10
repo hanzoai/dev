@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.115] - 2025-09-10
+
+- TUI/Status: keep spinner visible during transient stream errors; show 'Reconnecting' instead of clearing. (56d7784f)
+- TUI/Status: treat retry/disconnect errors as background notices rather than fatal failures. (56d7784f)
+
 ## [0.2.114] - 2025-09-10
 
 - TUI: honor custom spinner selection by name; treat as current. (a806d640)

@@ -1,11 +1,11 @@
-## @just-every/code v0.2.114
+## @just-every/code v0.2.115
 
-This release refines custom spinner behavior and UX in the TUI.
+Improves TUI status resilience during transient connection issues.
 
 ### Changes
 
-- TUI: honor custom spinner selection by name; treat as current.
-- TUI: show custom spinner immediately and return to Overview on save.
+- TUI/Status: keep spinner visible; show 'Reconnecting' on transient errors.
+- TUI/Status: treat retry/disconnect errors as background notices, not fatal.
 
 ### Install
 
@@ -14,5 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.113...v0.2.114
-
+Compare: https://github.com/just-every/code/compare/v0.2.114...v0.2.115
