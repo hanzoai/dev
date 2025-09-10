@@ -185,7 +185,8 @@ impl ThemeSelectionView {
                 self.selected_theme_index += 1;
                 if self.selected_theme_index < options.len() {
                     self.current_theme = options[self.selected_theme_index].0;
-                    self.app_event_tx.send(AppEvent::PreviewTheme(self.current_theme));
+                    self.app_event_tx
+                        .send(AppEvent::PreviewTheme(self.current_theme));
                 }
             }
         } else {
@@ -431,38 +432,91 @@ impl ThemeSelectionView {
         // Capture a compact example of the current theme as guidance
         fn color_to_hex(c: ratatui::style::Color) -> Option<String> {
             match c {
-                ratatui::style::Color::Rgb(r, g, b) => Some(format!("#{:02X}{:02X}{:02X}", r, g, b)),
+                ratatui::style::Color::Rgb(r, g, b) => {
+                    Some(format!("#{:02X}{:02X}{:02X}", r, g, b))
+                }
                 _ => None,
             }
         }
         let cur = crate::theme::current_theme();
         let mut example = serde_json::json!({"name": "Current", "colors": {}});
-        if let Some(v) = color_to_hex(cur.primary) { example["colors"]["primary"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.secondary) { example["colors"]["secondary"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.background) { example["colors"]["background"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.foreground) { example["colors"]["foreground"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.border) { example["colors"]["border"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.border_focused) { example["colors"]["border_focused"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.selection) { example["colors"]["selection"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.cursor) { example["colors"]["cursor"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.success) { example["colors"]["success"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.warning) { example["colors"]["warning"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.error) { example["colors"]["error"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.info) { example["colors"]["info"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.text) { example["colors"]["text"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.text_dim) { example["colors"]["text_dim"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.text_bright) { example["colors"]["text_bright"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.keyword) { example["colors"]["keyword"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.string) { example["colors"]["string"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.comment) { example["colors"]["comment"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.function) { example["colors"]["function"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.spinner) { example["colors"]["spinner"] = serde_json::Value::String(v); }
-        if let Some(v) = color_to_hex(cur.progress) { example["colors"]["progress"] = serde_json::Value::String(v); }
+        if let Some(v) = color_to_hex(cur.primary) {
+            example["colors"]["primary"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.secondary) {
+            example["colors"]["secondary"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.background) {
+            example["colors"]["background"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.foreground) {
+            example["colors"]["foreground"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.border) {
+            example["colors"]["border"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.border_focused) {
+            example["colors"]["border_focused"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.selection) {
+            example["colors"]["selection"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.cursor) {
+            example["colors"]["cursor"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.success) {
+            example["colors"]["success"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.warning) {
+            example["colors"]["warning"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.error) {
+            example["colors"]["error"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.info) {
+            example["colors"]["info"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.text) {
+            example["colors"]["text"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.text_dim) {
+            example["colors"]["text_dim"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.text_bright) {
+            example["colors"]["text_bright"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.keyword) {
+            example["colors"]["keyword"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.string) {
+            example["colors"]["string"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.comment) {
+            example["colors"]["comment"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.function) {
+            example["colors"]["function"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.spinner) {
+            example["colors"]["spinner"] = serde_json::Value::String(v);
+        }
+        if let Some(v) = color_to_hex(cur.progress) {
+            example["colors"]["progress"] = serde_json::Value::String(v);
+        }
 
         std::thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(rt) => rt,
-                Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Failed to start runtime: {}", e))); return; }
+                Err(e) => {
+                    tx.send(AppEvent::InsertBackgroundEventEarly(format!(
+                        "Failed to start runtime: {}",
+                        e
+                    )));
+                    return;
+                }
             };
             let _ = rt.block_on(async move {
                 let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
@@ -524,7 +578,8 @@ impl ThemeSelectionView {
                                 "spinner": {"type": "string"},
                                 "progress": {"type": "string"}
                             }
-                        }
+                        },
+                        "required": ["primary", "secondary", "background", "foreground", "border", "border_focused", "selection", "cursor", "success", "warning", "error", "info", "text", "text_dim", "text_bright", "keyword", "string", "comment", "function", "spinner", "progress"],
                     },
                     "required": ["name", "colors"],
                     "additionalProperties": false
@@ -723,8 +778,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Action },
-                        CreateStep::Review => { if s.action_idx > 0 { s.action_idx -= 1; } CreateStep::Review },
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Review
+                        }
                     };
                     s.step.set(new_step);
                 } else {
@@ -763,8 +828,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     let new_step = match s.step.get() {
                         CreateStep::Prompt => CreateStep::Action,
-                        CreateStep::Action => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Action },
-                        CreateStep::Review => { if s.action_idx < 1 { s.action_idx += 1; } CreateStep::Review },
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Review
+                        }
                     };
                     s.step.set(new_step);
                 } else {
@@ -812,6 +887,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         // If tail row selected (Create your own…), open create form
                         let count = Self::get_theme_options().len();
                         if self.selected_theme_index >= count {
+                            // Revert preview to the theme before entering Themes list for better legibility
+                            self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
                             self.mode = Mode::CreateTheme(CreateThemeState {
                                 step: std::cell::Cell::new(CreateStep::Prompt),
                                 prompt: String::new(),
@@ -982,15 +1059,28 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         s.proposed_colors.borrow().clone(),
                                     ) {
                                         if let Ok(home) = codex_core::config::find_codex_home() {
-                                            let _ = codex_core::config::set_custom_theme(&home, &name, &colors);
+                                            let _ = codex_core::config::set_custom_theme(
+                                                &home, &name, &colors,
+                                            );
                                         }
                                         // Apply and record
                                         crate::theme::set_custom_theme_label(name.clone());
-                                        crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors: colors.clone(), label: Some(name.clone()) });
+                                        crate::theme::init_theme(
+                                            &codex_core::config_types::ThemeConfig {
+                                                name: ThemeName::Custom,
+                                                colors: colors.clone(),
+                                                label: Some(name.clone()),
+                                            },
+                                        );
                                         self.revert_theme_on_back = ThemeName::Custom;
                                         self.current_theme = ThemeName::Custom;
-                                        self.app_event_tx.send(AppEvent::UpdateTheme(ThemeName::Custom));
-                                        self.app_event_tx.send(AppEvent::InsertBackgroundEventEarly("Custom theme saved".to_string()));
+                                        self.app_event_tx
+                                            .send(AppEvent::UpdateTheme(ThemeName::Custom));
+                                        self.app_event_tx.send(
+                                            AppEvent::InsertBackgroundEventEarly(
+                                                "Custom theme saved".to_string(),
+                                            ),
+                                        );
                                         go_overview = true;
                                     }
                                 } else {
@@ -1002,7 +1092,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     s.step.set(CreateStep::Prompt);
                                     self.app_event_tx.send(AppEvent::RequestRedraw);
                                     // Revert to previous theme while editing
-                                    self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                                    self.app_event_tx
+                                        .send(AppEvent::PreviewTheme(self.revert_theme_on_back));
                                 }
                             }
                         }
@@ -1025,7 +1116,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 }
                 Mode::CreateTheme(_) => {
                     // Revert preview to prior theme
-                    self.app_event_tx.send(AppEvent::PreviewTheme(self.revert_theme_on_back));
+                    self.app_event_tx
+                        .send(AppEvent::PreviewTheme(self.revert_theme_on_back));
                     self.mode = Mode::Themes;
                 }
                 _ => self.cancel_detail(),
@@ -1162,20 +1254,49 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             {
                 let selected = 0 == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
-                if selected { spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { spans.push(Span::raw("  ")); }
+                if selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
                 let k = "Change theme";
-                if selected { spans.push(Span::styled(k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD))); } else { spans.push(Span::styled(k, Style::default().fg(theme.text))); }
+                if selected {
+                    spans.push(Span::styled(
+                        k,
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled(k, Style::default().fg(theme.text)));
+                }
                 spans.push(Span::raw(" — "));
-                spans.push(Span::styled(theme_label_owned, Style::default().fg(theme.text_dim)));
+                spans.push(Span::styled(
+                    theme_label_owned,
+                    Style::default().fg(theme.text_dim),
+                ));
                 lines.push(Line::from(spans));
             }
             // Row 1: Spinner
             {
                 let selected = 1 == self.overview_selected_index;
                 let mut spans = vec![Span::raw(" ")];
-                if selected { spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { spans.push(Span::raw("  ")); }
+                if selected {
+                    spans.push(Span::styled("› ", Style::default().fg(theme.keyword)));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
                 let k = "Change spinner";
-                if selected { spans.push(Span::styled(k, Style::default().fg(theme.primary).add_modifier(Modifier::BOLD))); } else { spans.push(Span::styled(k, Style::default().fg(theme.text))); }
+                if selected {
+                    spans.push(Span::styled(
+                        k,
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled(k, Style::default().fg(theme.text)));
+                }
                 spans.push(Span::raw(" — "));
                 let label = crate::spinner::spinner_label_for(&self.current_spinner);
                 spans.push(Span::styled(label, Style::default().fg(theme.text_dim)));
@@ -1190,17 +1311,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     .add_modifier(Modifier::BOLD),
             )));
             // Compute anchored window: top until middle, then center; bottom shows end
-            let count = options.len();
+            let count = options.len() + 1; // include pseudo-row for Create your own…
             let visible = available_height.saturating_sub(1).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_theme_index,
                 count,
                 visible,
             );
-            let end = (start + visible).min(count + 1); // +1 for "Create your own…"
+            let end = (start + visible).min(count);
             for i in start..end {
                 let is_selected = i == self.selected_theme_index;
-                if i >= count {
+                if i >= options.len() {
                     // Pseudo-row: Create your own…
                     let mut spans = vec![Span::raw(" ")];
                     if is_selected {
@@ -1209,7 +1330,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         spans.push(Span::raw("  "));
                     }
                     let label_style = if is_selected {
-                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme.text_dim)
                     };
@@ -1547,9 +1670,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     cur.push_str(&d);
                                     if let Some(pos) = cur.rfind('\n') {
                                         let (complete, remainder) = cur.split_at(pos);
-                                        if !complete.trim().is_empty() { hist.push(complete.trim().to_string()); }
+                                        if !complete.trim().is_empty() {
+                                            hist.push(complete.trim().to_string());
+                                        }
                                         *cur = remainder.trim_start_matches('\n').to_string();
-                                        let keep = 10usize; let len = hist.len(); if len > keep { hist.drain(0..len - keep); }
+                                        let keep = 10usize;
+                                        let len = hist.len();
+                                        if len > keep {
+                                            hist.drain(0..len - keep);
+                                        }
                                     }
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
@@ -1561,13 +1690,21 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     sm.proposed_name.replace(Some(name.clone()));
                                     sm.proposed_colors.replace(Some(colors.clone()));
                                     crate::theme::set_custom_theme_label(name.clone());
-                                    crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: ThemeName::Custom, colors: colors.clone(), label: Some(name) });
+                                    crate::theme::init_theme(
+                                        &codex_core::config_types::ThemeConfig {
+                                            name: ThemeName::Custom,
+                                            colors: colors.clone(),
+                                            label: Some(name),
+                                        },
+                                    );
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Ok(ProgressMsg::CompletedOk { .. }) => {}
                             Ok(ProgressMsg::RawOutput(_)) => {}
-                            Ok(ProgressMsg::CompletedErr { .. }) => { self.app_event_tx.send(AppEvent::RequestRedraw); }
+                            Ok(ProgressMsg::CompletedErr { .. }) => {
+                                self.app_event_tx.send(AppEvent::RequestRedraw);
+                            }
                             Err(std::sync::mpsc::TryRecvError::Empty) => break,
                             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
                         }
@@ -1577,62 +1714,135 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 if s.is_loading.get() {
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Theme » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     form_lines.push(Line::default());
-                    use std::time::{SystemTime, UNIX_EPOCH};
-                    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                    let frames = ["◌", "◔", "◑", "◕", "●", "◕", "◑", "◔"]; let frame = frames[((now_ms / 100) as usize) % frames.len()].to_string();
-                    form_lines.push(Line::from(vec![Span::styled(frame, Style::default().fg(crate::colors::info())), Span::raw(" Generating theme with AI…")]));
+                    use std::time::SystemTime;
+                    use std::time::UNIX_EPOCH;
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let frames = ["◌", "◔", "◑", "◕", "●", "◕", "◑", "◔"];
+                    let frame = frames[((now_ms / 100) as usize) % frames.len()].to_string();
+                    form_lines.push(Line::from(vec![
+                        Span::styled(frame, Style::default().fg(crate::colors::info())),
+                        Span::raw(" Generating theme with AI…"),
+                    ]));
                     let cur = s.thinking_current.borrow();
-                    let latest = if !cur.trim().is_empty() { cur.trim().to_string() } else { s.thinking_lines.borrow().iter().rev().find(|l| !l.trim().is_empty()).cloned().unwrap_or_else(|| "Waiting for model…".to_string()) };
-                    let mut latest_render = latest.to_string(); if !latest_render.ends_with('…') { latest_render.push_str(" …"); }
-                    form_lines.push(Line::from(Span::styled(latest_render, Style::default().fg(theme.text_dim))));
-                    self.app_event_tx.send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(100)));
-                    Paragraph::new(form_lines).alignment(Alignment::Left).wrap(ratatui::widgets::Wrap { trim: false }).render(body_area, buf);
+                    let latest = if !cur.trim().is_empty() {
+                        cur.trim().to_string()
+                    } else {
+                        s.thinking_lines
+                            .borrow()
+                            .iter()
+                            .rev()
+                            .find(|l| !l.trim().is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| "Waiting for model…".to_string())
+                    };
+                    let mut latest_render = latest.to_string();
+                    if !latest_render.ends_with('…') {
+                        latest_render.push_str(" …");
+                    }
+                    form_lines.push(Line::from(Span::styled(
+                        latest_render,
+                        Style::default().fg(theme.text_dim),
+                    )));
+                    self.app_event_tx.send(AppEvent::ScheduleFrameIn(
+                        std::time::Duration::from_millis(100),
+                    ));
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
                     return;
                 }
                 if matches!(s.step.get(), CreateStep::Review) {
                     form_lines.push(Line::from(Span::styled(
                         "Overview » Change Theme » Create Custom",
-                        Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(theme.text_bright)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     form_lines.push(Line::default());
-                    let primary_selected = s.action_idx == 0; let secondary_selected = s.action_idx == 1;
-                    let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                    let primary_selected = s.action_idx == 0;
+                    let secondary_selected = s.action_idx == 1;
+                    let sel = |b: bool| {
+                        if b {
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.text)
+                        }
+                    };
                     let mut spans: Vec<Span> = Vec::new();
                     spans.push(Span::styled("[ Save ]", sel(primary_selected)));
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled("[ Retry ]", sel(secondary_selected)));
                     form_lines.push(Line::from(spans));
-                    Paragraph::new(form_lines).alignment(Alignment::Left).wrap(ratatui::widgets::Wrap { trim: false }).render(body_area, buf);
+                    Paragraph::new(form_lines)
+                        .alignment(Alignment::Left)
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .render(body_area, buf);
                     return;
                 }
                 // Idle form
                 form_lines.push(Line::from(Span::styled(
                     "Overview » Change Theme » Create Custom",
-                    Style::default().fg(theme.text_bright).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.text_bright)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 form_lines.push(Line::default());
-                form_lines.push(Line::from(Span::styled("Code can generate a custom theme just for you!", Style::default().fg(theme.text))));
-                form_lines.push(Line::from(Span::styled("What should it look like? (e.g. OLED dark with cyan + violet accents)", Style::default().fg(theme.text_dim))));
+                form_lines.push(Line::from(Span::styled(
+                    "Code can generate a custom theme just for you!",
+                    Style::default().fg(theme.text),
+                )));
+                form_lines.push(Line::from(Span::styled(
+                    "What should it look like? (e.g. OLED dark with cyan + violet accents)",
+                    Style::default().fg(theme.text_dim),
+                )));
                 form_lines.push(Line::default());
                 let mut desc_spans: Vec<Span> = Vec::new();
-                desc_spans.push(Span::styled("Description: ", Style::default().fg(theme.keyword)));
+                desc_spans.push(Span::styled(
+                    "Description: ",
+                    Style::default().fg(theme.keyword),
+                ));
                 let active = matches!(s.step.get(), CreateStep::Prompt);
                 desc_spans.push(Span::raw(s.prompt.clone()));
-                if active { desc_spans.push(Span::styled("▏", Style::default().fg(theme.info))); }
+                if active {
+                    desc_spans.push(Span::styled("▏", Style::default().fg(theme.info)));
+                }
                 form_lines.push(Line::from(desc_spans));
-                form_lines.push(Line::from(Span::styled("─".repeat((body_area.width.saturating_sub(4)) as usize), Style::default().fg(crate::colors::border()))));
+                form_lines.push(Line::from(Span::styled(
+                    "─".repeat((body_area.width.saturating_sub(4)) as usize),
+                    Style::default().fg(crate::colors::border()),
+                )));
                 let mut spans: Vec<Span> = Vec::new();
                 let on_actions = matches!(s.step.get(), CreateStep::Action);
-                let primary_selected = on_actions && s.action_idx == 0; let secondary_selected = on_actions && s.action_idx == 1;
-                let sel = |b: bool| if b { Style::default().fg(theme.primary).add_modifier(Modifier::BOLD) } else { Style::default().fg(theme.text) };
+                let primary_selected = on_actions && s.action_idx == 0;
+                let secondary_selected = on_actions && s.action_idx == 1;
+                let sel = |b: bool| {
+                    if b {
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.text)
+                    }
+                };
                 spans.push(Span::styled("[ Generate... ]", sel(primary_selected)));
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled("[ Cancel ]", sel(secondary_selected)));
                 form_lines.push(Line::from(spans));
-                Paragraph::new(form_lines).alignment(Alignment::Left).wrap(ratatui::widgets::Wrap { trim: false }).render(body_area, buf);
+                Paragraph::new(form_lines)
+                    .alignment(Alignment::Left)
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .render(body_area, buf);
                 return;
             }
         } else {
