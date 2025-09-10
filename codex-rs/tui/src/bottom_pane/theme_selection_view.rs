@@ -12,8 +12,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::{Table, Row, Cell};
-use ratatui::layout::{Constraint, Layout};
+// Table-based approach was replaced by manual two-column layout; keep imports minimal
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
