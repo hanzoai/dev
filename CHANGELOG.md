@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.117] - 2025-09-10
+
+- TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt. (a48ad2a1)
+- TUI/Spinner: balance Create preview spacing; adjust border width and message text. (998d3db9)
+
 ## [0.2.116] - 2025-09-10
 
 - TUI: AI-driven custom spinner generator with live streaming, JSON schema, and preview. (d7728375)

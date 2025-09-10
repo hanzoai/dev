@@ -1,14 +1,11 @@
-## @just-every/code v0.2.116
+## @just-every/code v0.2.117
 
-This release introduces an AI-driven custom spinner generator, improves selection affordance, and polishes spacing in the Create Spinner view.
+This release improves paste handling in the TUI and refines the Create Spinner preview for clearer visuals.
 
 ### Changes
 
-- TUI: AI-driven custom spinner generator with live streaming, JSON schema, and preview.
-- Spinner: accept "name" in custom JSON; persist label; show labels in Overview; replace on save.
-- TUI: dim "Create your own…" until selected; use primary + bold on selection.
-- TUI: fix Create Spinner spacing; avoid double blank lines; keep single spacer.
-- Core: add TextFormat and include text.format in requests.
+- TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt.
+- TUI/Spinner: balance Create preview spacing; adjust border width and message text.
 
 ### Install
 
@@ -17,5 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.115...v0.2.116
+Compare: https://github.com/just-every/code/compare/v0.2.116...v0.2.117
 
