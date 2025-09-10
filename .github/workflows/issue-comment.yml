@@ -314,26 +314,21 @@ jobs:
           node - <<'JS'
           const fs = require('fs');
           const t = fs.readFileSync('.github/auto/AGENT_OUT.txt','utf8');
-          // Extract the last <comment>...</comment> block strictly
-          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
+          // Extract comment by: find the LAST opening <comment>, then the FIRST closing </comment> after it.
+          // This avoids earlier stray tags in reasoning blocks.
           const PLACEHOLDER = '…final Markdown comment…';
+          const lower = t.toLowerCase();
+          const openTag = '<comment>';
+          const closeTag = '</comment>';
+          const openIdx = lower.lastIndexOf(openTag);
           let body = '';
-          if (all.length) {
-            body = String(all[all.length-1][1] || '').trim();
+          if (openIdx !== -1) {
+            const closeIdx = lower.indexOf(closeTag, openIdx + openTag.length);
+            if (closeIdx !== -1) {
+              body = t.slice(openIdx + openTag.length, closeIdx).trim();
+            }
           }
-          // Sanitize: drop any leaked thought markers or stray tags
-          const badMarkers = [
-            /^\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/m,
-            /\bCrafting the reply\b/i,
-            /\bSimplifying input adjustments\b/i,
-            /<\/?comment>/i,
-            /<task>|<context>|Output ONLY:/i
-          ];
-          // Remove timestamped thought lines
-          body = body.replace(/^\[[^\n]*?\]\s*codex\s*$/gmi, '').trim();
-          // If obviously wrong, force fallback
-          const looksBad = !body || body === PLACEHOLDER || badMarkers.some(rx => rx.test(body));
-          if (!looksBad) {
+          if (body && body !== PLACEHOLDER) {
             fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
           JS
