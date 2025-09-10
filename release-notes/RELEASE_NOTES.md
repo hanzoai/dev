@@ -1,11 +1,11 @@
-## @just-every/code v0.2.112
+## @just-every/code v0.2.113
 
-This release improves TUI spinner navigation and refines labels/triage workflows.
+This release polishes the TUI spinner experience and fixes preview build slug resolution.
 
 ### Changes
-- TUI: group spinner list with dim headers and restore selector arrow for clearer navigation
-- Repo: adopt code/<slug> label prefix with id/ fallback across workflows
-- Triage: add allow/block/building/complete labels and use label as SSOT for slug in workflows
+- TUI: improve Create Custom spinner UX with focused fields, keyboard navigation, and clear Save/Cancel flow; activating saved spinner immediately
+- TUI: refine spinner list spacing and borders; dim non-selected rows for clearer focus
+- Build: fix preview release slug resolution from code/<slug> with fallbacks
 
 ### Install
 ```
@@ -13,4 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.111...v0.2.112
+Compare: https://github.com/just-every/code/compare/v0.2.112...v0.2.113
