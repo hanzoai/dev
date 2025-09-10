@@ -236,12 +236,18 @@ impl BottomPane<'_> {
     }
 
     pub fn handle_paste(&mut self, pasted: String) {
-        if self.active_view.is_none() {
-            let needs_redraw = self.composer.handle_paste(pasted);
-            if needs_redraw {
-                // Large pastes may arrive as bursts; coalesce paints
-                self.request_redraw();
+        if let Some(ref mut view) = self.active_view {
+            use crate::bottom_pane::bottom_pane_view::ConditionalUpdate;
+            match view.handle_paste(pasted) {
+                ConditionalUpdate::NeedsRedraw => self.request_redraw(),
+                ConditionalUpdate::NoRedraw => {}
             }
+            return;
+        }
+        let needs_redraw = self.composer.handle_paste(pasted);
+        if needs_redraw {
+            // Large pastes may arrive as bursts; coalesce paints
+            self.request_redraw();
         }
     }
 
