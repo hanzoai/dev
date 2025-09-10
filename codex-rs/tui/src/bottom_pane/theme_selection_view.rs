@@ -293,17 +293,17 @@ impl ThemeSelectionView {
                 let schema = serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Display name for the spinner (shown in the UI)."},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Display name for the spinner (1 - 3 words, shown in the UI)."},
                         "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50–300)."},
                         "frames": {
                             "type": "array",
                             "items": {"type": "string", "minLength": 1, "maxLength": 20},
                             "minItems": 2,
                             "maxItems": 50,
-                            "description": "Spinner frames; 2–50 strings, 1–20 characters each."
+                            "description": "2–50 Spinner frames, 1–20 characters each (every frame should be the same length of characters)."
                         }
                     },
-                    "required": ["interval", "frames"],
+                    "required": ["name", "interval", "frames"],
                     "additionalProperties": false
                 });
                 let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
@@ -456,12 +456,35 @@ enum ProgressMsg {
     ThinkingDelta(String),
     OutputDelta(String),
     RawOutput(String),
-    CompletedOk { name: String, interval: u64, frames: Vec<String> },
+    CompletedOk {
+        name: String,
+        interval: u64,
+        frames: Vec<String>,
+    },
     // `_raw_snippet` is captured for potential future display/debugging
-    CompletedErr { error: String, _raw_snippet: String },
+    CompletedErr {
+        error: String,
+        _raw_snippet: String,
+    },
 }
 
 impl<'a> BottomPaneView<'a> for ThemeSelectionView {
+    fn handle_paste(&mut self, text: String) -> super::bottom_pane_view::ConditionalUpdate {
+        use super::bottom_pane_view::ConditionalUpdate;
+        if let Mode::CreateSpinner(ref mut s) = self.mode {
+            if s.is_loading.get() {
+                return ConditionalUpdate::NoRedraw;
+            }
+            if matches!(s.step.get(), CreateStep::Prompt) {
+                let paste = text.replace('\r', "\n");
+                // The description is a single-line prompt; replace newlines with spaces.
+                let paste = paste.replace('\n', " ");
+                s.prompt.push_str(&paste);
+                return ConditionalUpdate::NeedsRedraw;
+            }
+        }
+        ConditionalUpdate::NoRedraw
+    }
     fn desired_height(&self, _width: u16) -> u16 {
         match &self.mode {
             // Border (2) + inner padding (2) + 2 content rows = 6
@@ -657,10 +680,19 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             .unwrap_or_else(|| "Custom".to_string());
                                         if let Ok(home) = codex_core::config::find_codex_home() {
                                             let _ = codex_core::config::set_custom_spinner(
-                                                &home, "custom", &display_name, interval, &frames,
+                                                &home,
+                                                "custom",
+                                                &display_name,
+                                                interval,
+                                                &frames,
                                             );
                                         }
-                                        crate::spinner::add_custom_spinner("custom".to_string(), display_name.clone(), interval, frames);
+                                        crate::spinner::add_custom_spinner(
+                                            "custom".to_string(),
+                                            display_name.clone(),
+                                            interval,
+                                            frames,
+                                        );
                                         crate::spinner::switch_spinner("custom");
                                         self.revert_spinner_on_back = "custom".to_string();
                                         self.current_spinner = "custom".to_string();
@@ -967,7 +999,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
                             Ok(ProgressMsg::RawOutput(_raw)) => {}
-                            Ok(ProgressMsg::CompletedOk { name, interval, frames }) => {
+                            Ok(ProgressMsg::CompletedOk {
+                                name,
+                                interval,
+                                frames,
+                            }) => {
                                 if let Mode::CreateSpinner(ref sm) = self.mode {
                                     sm.is_loading.set(false);
                                     sm.step.set(CreateStep::Review);
@@ -1145,7 +1181,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     Style::default().fg(theme.text),
                 )));
                 form_lines.push(Line::from(Span::styled(
-                    "What sort of spinner would you like? (e.g. bouncing dot party, rocket ship emoji blast off)",
+                    "What sort of spinner would you like? (e.g. bouncing dot party, cat eating a pizza)",
                     Style::default().fg(theme.text_dim)
                 )));
                 // Exactly one blank line above Description
@@ -1265,11 +1301,17 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     // selector chevron
                     spans.push(Span::styled(
                         if is_selected { "› " } else { "  " }.to_string(),
-                        Style::default().fg(if is_selected { theme.keyword } else { theme.text }),
+                        Style::default().fg(if is_selected {
+                            theme.keyword
+                        } else {
+                            theme.text
+                        }),
                     ));
                     // label color: dim when not selected; primary + bold when selected
                     let label_style = if is_selected {
-                        Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme.text_dim)
                     };
