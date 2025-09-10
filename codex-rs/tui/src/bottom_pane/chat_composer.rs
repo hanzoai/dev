@@ -347,6 +347,17 @@ impl ChatComposer {
         {
             "Responding".to_string()
         }
+        // Transient network/stream retry patterns → keep spinner visible with a
+        // clear reconnecting message so the user knows we are still working.
+        else if lower.contains("retrying")
+            || lower.contains("reconnecting")
+            || lower.contains("disconnected")
+            || lower.contains("stream error")
+            || lower.contains("stream closed")
+            || lower.contains("timeout")
+        {
+            "Reconnecting".to_string()
+        }
         // File/code editing patterns
         else if lower.contains("editing")
             || lower.contains("writing")
