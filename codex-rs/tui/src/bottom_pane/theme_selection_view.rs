@@ -1135,6 +1135,14 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         CreateStep::Prompt => s.prompt.push(c),
                         CreateStep::Action | CreateStep::Review => {}
                     }
+                } else if let Mode::CreateTheme(ref mut s) = self.mode {
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => s.prompt.push(c),
+                        CreateStep::Action | CreateStep::Review => {}
+                    }
                 }
             }
             KeyEvent {
@@ -1142,6 +1150,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 ..
             } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    if s.is_loading.get() {
+                        return;
+                    }
+                    match s.step.get() {
+                        CreateStep::Prompt => {
+                            s.prompt.pop();
+                        }
+                        CreateStep::Action | CreateStep::Review => {
+                            return;
+                        }
+                    }
+                } else if let Mode::CreateTheme(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
                     }
