@@ -12,8 +12,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::{Table, Row, Cell};
-use ratatui::layout::{Constraint, Layout};
+// Cleanup: remove unused imports to satisfy warning-as-error policy
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 
