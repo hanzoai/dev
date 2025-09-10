@@ -57,7 +57,12 @@ impl Default for Theme {
 /// Initialize the global theme from configuration
 pub fn init_theme(config: &ThemeConfig) {
     let mut theme = get_predefined_theme(config.name);
-    apply_custom_colors(&mut theme, &config.colors);
+    // Important: Only apply color overrides for the Custom theme.
+    // Built-in themes should render exactly as defined so that switching away
+    // from Custom does not keep stale custom overrides from config.
+    if matches!(config.name, ThemeName::Custom) {
+        apply_custom_colors(&mut theme, &config.colors);
+    }
 
     // On some terminals (notably macOS Terminal.app with certain profiles),
     // truecolor escape sequences may render incorrectly. Detect such cases
