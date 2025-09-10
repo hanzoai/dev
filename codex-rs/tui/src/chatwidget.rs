@@ -464,20 +464,22 @@ impl ChatWidget<'_> {
             return Self::order_key_from_order_meta(om);
         }
 
-        // Derive a stable request bucket for system notices:
-        //  - If we've seen provider traffic, use that request.
-        //  - Otherwise, use a sticky synthetic req = 1 so multiple UI
-        //    notices remain grouped together until first turn arrives.
-        let req = if self.last_seen_request_index > 0 {
+        // Derive a stable request bucket for system notices when OrderMeta is absent.
+        // Default to the current provider request if known; else use a sticky
+        // pre‑turn synthetic req=1 to group UI confirmations before the first turn.
+        // If a user prompt for the next turn is already queued, attach new
+        // system notices to the upcoming request to avoid retroactive inserts.
+        let mut req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
         } else {
-            // Sticky synthetic request (1) until first OrderMeta arrives.
-            // Keep a cached value to avoid accidental drift if logic changes.
             if self.synthetic_system_req.is_none() {
                 self.synthetic_system_req = Some(1);
             }
             self.synthetic_system_req.unwrap_or(1)
         };
+        if order.is_none() && self.pending_user_prompts_for_next_turn > 0 {
+            req = req.saturating_add(1);
+        }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
         match placement {
@@ -612,6 +614,44 @@ impl ChatWidget<'_> {
                 out: i32::MIN + 2,
                 seq: self.internal_seq,
             },
+        }
+    }
+
+    /// Like near_time_key but never advances to the next request when a prompt is queued.
+    /// Use this for late, provider-origin items that lack OrderMeta (e.g., PlanUpdate)
+    /// so they remain attached to the current/last request instead of jumping forward.
+    fn near_time_key_current_req(
+        &mut self,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) -> OrderKey {
+        if let Some(om) = order {
+            return Self::order_key_from_order_meta(om);
+        }
+        let req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            if self.current_request_index < self.last_seen_request_index {
+                self.current_request_index = self.last_seen_request_index;
+            }
+            self.current_request_index = self.current_request_index.saturating_add(1);
+            self.current_request_index
+        };
+
+        let mut last_in_req: Option<OrderKey> = None;
+        for k in &self.cell_order_seq {
+            if k.req == req {
+                last_in_req = Some(match last_in_req {
+                    Some(prev) => {
+                        if *k > prev { *k } else { prev }
+                    }
+                    None => *k,
+                });
+            }
+        }
+        self.internal_seq = self.internal_seq.saturating_add(1);
+        match last_in_req {
+            Some(last) => OrderKey { req, out: last.out, seq: last.seq.saturating_add(1) },
+            None => OrderKey { req, out: i32::MIN + 2, seq: self.internal_seq },
         }
     }
 
@@ -3342,8 +3382,11 @@ impl ChatWidget<'_> {
             }
             EventMsg::PlanUpdate(update) => {
                 // Insert plan updates at the time they occur. If the provider
-                // supplied OrderMeta, honor it. Otherwise, derive a near‑time key.
-                let key = self.near_time_key(event.order.as_ref());
+                // supplied OrderMeta, honor it. Otherwise, derive a key within
+                // the current (last-seen) request — do NOT advance to the next
+                // request when a prompt is already queued, since these belong
+                // to the in-flight turn.
+                let key = self.near_time_key_current_req(event.order.as_ref());
                 let _ = self.history_insert_with_key_global(
                     Box::new(history_cell::new_plan_update(update)),
                     key,

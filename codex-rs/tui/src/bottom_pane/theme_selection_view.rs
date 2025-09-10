@@ -477,52 +477,51 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             );
             let end = (start + visible).min(count);
 
-            let mut prev_group: Option<String> = None;
-            let mut y = body_area.y;
-            for i in start..end {
+            // Compute fixed column widths globally so rows never jump when scrolling
+            let max_frame_len: u16 = crate::spinner::global_max_frame_len() as u16;
+            let mut max_label_len: u16 = 0;
+            for name in names.iter() {
+                let label = crate::spinner::spinner_label_for(name);
+                max_label_len = max_label_len.max(label.chars().count() as u16);
+            }
+
+            for row_idx in 0..(end - start) {
+                let i = start + row_idx;
+                let y = body_area.y + row_idx as u16;
                 if y >= body_area.y + body_area.height { break; }
 
-                let name = names[i].clone();
+                let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
+                let name = &names[i];
                 let is_selected = i == self.selected_spinner_index;
-                let def = crate::spinner::find_spinner_by_name(&name).unwrap_or(crate::spinner::current_spinner());
+                let def = crate::spinner::find_spinner_by_name(name).unwrap_or(crate::spinner::current_spinner());
                 let frame = crate::spinner::frame_at_time(def, now_ms);
 
-                // Compose centered preview like composer title: rules + spinner + name + ...
-                let border = Style::default().fg(crate::colors::border());
-                let fg = if is_selected { Style::default().fg(crate::colors::info()) } else { Style::default().fg(theme.text_dim) };
-                let label = crate::spinner::spinner_label_for(&name);
-                let content = format!("{} {}...", frame, label);
-                let content_len = content.chars().count() as u16 + 2; // spaces around
+                // Aligned columns (centered block):
+                // selector (2) | left_rule | space | spinner (right‑aligned to max) | space | label (padded to max) | space | right_rule
+                let border = if is_selected { Style::default().fg(crate::colors::border()) } else { Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM) };
+                let fg = if is_selected { Style::default().fg(crate::colors::info()) } else { Style::default().fg(theme.text_dim).add_modifier(Modifier::DIM) };
+                let label = crate::spinner::spinner_label_for(name);
 
-                // Optional group header row
-                let group = crate::spinner::spinner_group_for(&name).to_string();
-                if prev_group.as_deref() != Some(group.as_str()) {
-                    if y < body_area.y + body_area.height {
-                        let header_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
-                        let header = Line::from(Span::styled(group.clone(), Style::default().fg(crate::colors::text_dim()))).centered();
-                        Paragraph::new(header).render(header_rect, buf);
-                        y += 1;
-                    }
-                    prev_group = Some(group);
-                    if y >= body_area.y + body_area.height { break; }
-                }
+                // Use border-based alignment per spec
+                let spinner_len = frame.chars().count() as u16;
+                let text_len = (label.chars().count() as u16).saturating_add(3); // label + "..."
+                let x: u16 = max_frame_len.saturating_add(5);
+                let left_rule = x.saturating_sub(spinner_len);
+                let right_rule = x.saturating_sub(text_len);
 
-                let row_rect = Rect { x: body_area.x, y, width: body_area.width, height: 1 };
-                // Reserve 2 cols for selector arrow on the far left
-                let total = row_rect.width.saturating_sub(2);
-                let rule_total = total.saturating_sub(content_len);
-                let left_rule = rule_total / 2;
-                let right_rule = rule_total.saturating_sub(left_rule);
                 let mut spans: Vec<Span> = Vec::new();
-                // Selector arrow area
-                if is_selected { spans.push(Span::styled("› ", Style::default().fg(theme.keyword))); } else { spans.push(Span::raw("  ")); }
+                // selector
+                spans.push(Span::styled(if is_selected { "› " } else { "  " }.to_string(), Style::default().fg(if is_selected { theme.keyword } else { theme.text } )));
+                // left rule
                 spans.push(Span::styled("─".repeat(left_rule as usize), border));
+                // spinner
+                spans.push(Span::styled(frame, fg));
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(content, fg));
-                spans.push(Span::raw(" "));
+                // label with dots
+                spans.push(Span::styled(format!("{}...", label), fg));
+                // right rule (match left border logic: x - text_len)
                 spans.push(Span::styled("─".repeat(right_rule as usize), border));
                 Paragraph::new(Line::from(spans)).alignment(Alignment::Left).render(row_rect, buf);
-                y += 1;
             }
 
             // Animate spinner previews while open
