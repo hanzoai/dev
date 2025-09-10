@@ -79,7 +79,7 @@ impl ThemeSelectionView {
     }
 
     fn get_theme_options() -> Vec<(ThemeName, &'static str, &'static str)> {
-        vec![
+        let mut v = vec![
             // Light themes (at top)
             (
                 ThemeName::LightPhoton,
@@ -152,7 +152,12 @@ impl ThemeSelectionView {
                 "Dark - Zen Garden",
                 "Calm and peaceful",
             ),
-        ]
+        ];
+        // Append custom theme if available
+        if crate::theme::custom_theme_label().is_some() {
+            v.push((ThemeName::Custom, "Custom", "Your saved custom theme"));
+        }
+        v
     }
 
     fn move_selection_up(&mut self) {
@@ -972,8 +977,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         }
                     }
                     Mode::Spinner => {
-                        // If tail row selected (Generate your own…), open create form
+                        // If tail row selected (Create your own…), open create form
                         let names = crate::spinner::spinner_names();
+                        // Defensive: if selection somehow points to pseudo-row, clamp to current spinner index
+                        if self.selected_spinner_index > names.len() { self.selected_spinner_index = names.len().saturating_sub(1); }
                         if self.selected_spinner_index >= names.len() {
                             self.mode = Mode::CreateSpinner(CreateState {
                                 step: std::cell::Cell::new(CreateStep::Prompt),
