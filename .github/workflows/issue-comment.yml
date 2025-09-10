@@ -300,6 +300,12 @@ jobs:
                 if (mm) { const n = parseInt(mm[1], 10); if (n > maxN) { maxN = n; tag = t; } }
               }
               const base = `https://github.com/${owner}/${repo}/releases/download/${tag}`;
+              // Pull a short commit summary for this PR
+              let commits = [];
+              try {
+                const all = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number: pr, per_page: 100 });
+                commits = all.slice(-5).map(c => `- ${c.commit.message.split('\n')[0]}`);
+              } catch {}
               body = [
                 ISSUE_MARK,
                 '### Preview Build',
@@ -310,6 +316,9 @@ jobs:
                 '```',
                 'This will run the version of Code we\'ve created for this issue.',
                 '',
+                commits.length ? '#### What changed in this build (recent commits)' : '',
+                commits.length ? commits.join('\n') : '',
+                commits.length ? '' : '',
                 'Direct downloads:',
                 `- Linux x86_64 (.zst): ${base}/code-x86_64-unknown-linux-musl.zst`,
                 `- Linux x86_64 (.tar.gz): ${base}/code-x86_64-unknown-linux-musl.tar.gz`,
