@@ -273,6 +273,8 @@ jobs:
             const ISSUE_MARK = '<!-- preview-build:issue -->';
             let body = '';
             try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
+            const PLACEHOLDER = '…final Markdown comment…';
+            if (body && body.includes(PLACEHOLDER)) { body = ''; }
             if (!body) {
               // derive slug + latest tag
               const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
