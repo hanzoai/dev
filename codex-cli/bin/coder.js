@@ -126,11 +126,13 @@ const getCacheDir = (version) => {
 };
 
 const getCachedBinaryPath = (version) => {
-  const isWin = nodePlatform() === "win32";
-  const ext = isWin ? ".exe" : "";
+  // targetTriple already includes the proper extension on Windows ("...msvc.exe").
+  // Do not append another suffix; just use the exact targetTriple-derived name.
   const cacheDir = getCacheDir(version);
-  return path.join(cacheDir, `code-${targetTriple}${ext}`);
+  return path.join(cacheDir, `code-${targetTriple}`);
 };
+
+let lastBootstrapError = null;
 
 const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
   const req = httpsGet(url, (res) => {
@@ -199,7 +201,7 @@ const tryBootstrapBinary = async () => {
         try {
           const pkgJson = req.resolve(`${name}/package.json`);
           const pkgDir = path.dirname(pkgJson);
-          const src = path.join(pkgDir, "bin", `code-${targetTriple}${platform === "win32" ? ".exe" : ""}`);
+          const src = path.join(pkgDir, "bin", `code-${targetTriple}`);
           if (existsSync(src)) {
             // Always ensure cache has the binary; on Unix mirror into node_modules
             copyFileSync(src, cachePath);
@@ -223,9 +225,17 @@ const tryBootstrapBinary = async () => {
     return httpsDownload(url, tmp)
       .then(() => {
         if (isWin) {
+          // Extract zip with robust fallbacks and use a safe temp dir, then move to cache
           try {
-            const ps = `powershell -NoProfile -NonInteractive -Command "Expand-Archive -Path '${tmp}' -DestinationPath '${binDir}' -Force"`;
-            execSync(ps, { stdio: "ignore" });
+            const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\\Windows';
+            const psFull = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+            const unzipDest = getCacheDir(version); // extract directly to cache location
+            const psCmd = `Expand-Archive -Path '${tmp}' -DestinationPath '${unzipDest}' -Force`;
+            let ok = false;
+            try { execSync(`"${psFull}" -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {}
+            if (!ok) { try { execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+            if (!ok) { try { execSync(`pwsh -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+            if (!ok) { execSync(`tar -xf "${tmp}" -C "${unzipDest}"`, { stdio: 'ignore', shell: true }); }
           } catch (e) {
             throw new Error(`failed to unzip: ${e.message}`);
           } finally { try { unlinkSync(tmp); } catch {} }
@@ -240,12 +250,10 @@ const tryBootstrapBinary = async () => {
             try { unlinkSync(tmp); } catch {}
           }
         }
-        // On Windows, prefer cache and avoid leaving the executable in node_modules
+        // On Windows, the file was extracted directly into the cache dir
         if (platform === "win32") {
-          try {
-            copyFileSync(binaryPath, cachePath);
-          } catch {}
-          try { unlinkSync(binaryPath); } catch {}
+          // Ensure the expected filename exists in cache; Expand-Archive extracts exact name
+          // No action required here; validation occurs below against cachePath
         } else {
           try { copyFileSync(binaryPath, cachePath); } catch {}
         }
@@ -255,7 +263,7 @@ const tryBootstrapBinary = async () => {
         if (platform !== "win32") try { chmodSync(binaryPath, 0o755); } catch {}
         return true;
       })
-      .catch((_e) => false);
+      .catch((e) => { lastBootstrapError = e; return false; });
   } catch {
     return false;
   }
@@ -301,6 +309,10 @@ if (existsSync(binaryPath)) {
   }
 } else {
   console.error(`Binary not found: ${binaryPath}`);
+  if (lastBootstrapError) {
+    const msg = (lastBootstrapError && (lastBootstrapError.message || String(lastBootstrapError))) || 'unknown bootstrap error';
+    console.error(`Bootstrap error: ${msg}`);
+  }
   console.error(`Please try reinstalling the package:`);
   console.error(`  npm uninstall -g @just-every/code`);
   console.error(`  npm install -g @just-every/code`);
