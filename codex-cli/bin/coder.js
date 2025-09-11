@@ -225,9 +225,17 @@ const tryBootstrapBinary = async () => {
     return httpsDownload(url, tmp)
       .then(() => {
         if (isWin) {
+          // Extract zip with robust fallbacks and use a safe temp dir, then move to cache
           try {
-            const ps = `powershell -NoProfile -NonInteractive -Command "Expand-Archive -Path '${tmp}' -DestinationPath '${binDir}' -Force"`;
-            execSync(ps, { stdio: "ignore" });
+            const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\\Windows';
+            const psFull = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+            const unzipDest = getCacheDir(version); // extract directly to cache location
+            const psCmd = `Expand-Archive -Path '${tmp}' -DestinationPath '${unzipDest}' -Force`;
+            let ok = false;
+            try { execSync(`"${psFull}" -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {}
+            if (!ok) { try { execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+            if (!ok) { try { execSync(`pwsh -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+            if (!ok) { execSync(`tar -xf "${tmp}" -C "${unzipDest}"`, { stdio: 'ignore', shell: true }); }
           } catch (e) {
             throw new Error(`failed to unzip: ${e.message}`);
           } finally { try { unlinkSync(tmp); } catch {} }
@@ -242,12 +250,10 @@ const tryBootstrapBinary = async () => {
             try { unlinkSync(tmp); } catch {}
           }
         }
-        // On Windows, prefer cache and avoid leaving the executable in node_modules
+        // On Windows, the file was extracted directly into the cache dir
         if (platform === "win32") {
-          try {
-            copyFileSync(binaryPath, cachePath);
-          } catch {}
-          try { unlinkSync(binaryPath); } catch {}
+          // Ensure the expected filename exists in cache; Expand-Archive extracts exact name
+          // No action required here; validation occurs below against cachePath
         } else {
           try { copyFileSync(binaryPath, cachePath); } catch {}
         }
