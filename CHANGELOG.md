@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.119] - 2025-09-11
+
+- CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher. (faa712d3)
+- Installer: on Windows, install binary to %LocalAppData%\just-every\code\<version>; avoid leaving a copy in node_modules. (faa712d3)
+- Launcher: prefer running from cache; mirror into node_modules only on Unix for smoother upgrades. (faa712d3)
+
 ## [0.2.118] - 2025-09-11
 
 - TUI/Theme: add AI-powered custom theme creation with live preview, named themes, and save without switching. (a59fba92, eb8ca975, abafe432, 4d9335a3)
