@@ -1,14 +1,12 @@
-## @just-every/code v0.2.118
+## @just-every/code v0.2.119
 
-This release introduces AI-powered custom themes with a full creation flow, along with reliability and UX improvements across the TUI.
+This patch fixes Windows global upgrade failures and improves installer/launcher behavior for reliable upgrades.
 
 ### Changes
 
-- TUI/Theme: add AI-powered custom theme creation with live preview, named themes, and save without switching.
-- Theme Create: stream reasoning/output for live UI; salvage first JSON object; show clear errors with raw output for debugging.
-- Theme Persist: apply custom colors only when using Custom; clear colors/label when switching to built-ins.
-- TUI: improve readability and input — high-contrast loading/input text; accept Shift-modified characters.
-- TUI: capitalize Overview labels; adjust "[ Close ]" spacing and navigation/height.
+- CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher.
+- Installer: on Windows, install binary to %LocalAppData%\just-every\code\<version>; avoid leaving a copy in node_modules.
+- Launcher: prefer running from cache; mirror into node_modules only on Unix for smoother upgrades.
 
 ### Install
 
@@ -17,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.117...v0.2.118
+Compare: https://github.com/just-every/code/compare/v0.2.118...v0.2.119
