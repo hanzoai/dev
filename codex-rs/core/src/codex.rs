@@ -80,9 +80,9 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                         .map(|m| m.essence_str().to_owned())
                         .unwrap_or_else(|| "application/octet-stream".to_string());
                     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                        content_items.push(ContentItem::InputImage {
-                            image_url: format!("data:{mime};base64,{encoded}"),
-                        });
+                    content_items.push(ContentItem::InputImage {
+                        image_url: format!("data:{mime};base64,{encoded}"),
+                    });
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -378,7 +378,6 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ShellToolCallParams;
 use crate::openai_tools::ToolsConfig;
-use crate::openai_tools::ToolsConfigParams;
 use crate::openai_tools::get_openai_tools;
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
@@ -413,7 +412,6 @@ use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
 use crate::protocol::TurnDiffEvent;
 use crate::rollout::RolloutRecorder;
-use codex_protocol::mcp_protocol::ConversationId;
 use crate::safety::SafetyCheck;
 use crate::safety::assess_command_safety;
 use crate::safety::assess_safety_for_untrusted_command;
@@ -1595,7 +1593,7 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                ConversationId(session_id),
+                                codex_protocol::mcp_protocol::ConversationId(session_id),
                                 user_instructions.clone(),
                             ),
                         )
@@ -1674,17 +1672,18 @@ async fn submission_loop(
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
-                let tools_config = ToolsConfig::new(&ToolsConfigParams {
-                    model_family: &config.model_family,
+                let mut tools_config = ToolsConfig::new(
+                    &config.model_family,
                     approval_policy,
-                    sandbox_policy: sandbox_policy.clone(),
-                    include_plan_tool: config.include_plan_tool,
-                    include_apply_patch_tool: config.include_apply_patch_tool,
-                    include_web_search_request: config.tools_web_search_request,
-                    use_streamable_shell_tool: config
-                        .use_experimental_streamable_shell_tool,
-                    include_view_image_tool: config.include_view_image_tool,
-                });
+                    sandbox_policy.clone(),
+                    config.include_plan_tool,
+                    config.include_apply_patch_tool,
+                    config.tools_web_search_request,
+                    config.use_experimental_streamable_shell_tool,
+                    config.include_view_image_tool,
+                );
+                tools_config.web_search_allowed_domains =
+                    config.tools_web_search_allowed_domains.clone();
 
                 sess = Some(Arc::new(Session {
                     client,
@@ -2160,9 +2159,13 @@ async fn run_turn(
     sub_id: String,
     input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
+    // Check if browser is enabled
+    let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
+    
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
+        browser_enabled,
     );
 
     let mut retries = 0;
