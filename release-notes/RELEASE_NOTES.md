@@ -1,11 +1,12 @@
-## @just-every/code v0.2.117
+## @just-every/code v0.2.119
 
-This release improves paste handling in the TUI and refines the Create Spinner preview for clearer visuals.
+This patch fixes Windows global upgrade failures and improves installer/launcher behavior for reliable upgrades.
 
 ### Changes
 
-- TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt.
-- TUI/Spinner: balance Create preview spacing; adjust border width and message text.
+- CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher.
+- Installer: on Windows, install binary to %LocalAppData%\just-every\code\<version>; avoid leaving a copy in node_modules.
+- Launcher: prefer running from cache; mirror into node_modules only on Unix for smoother upgrades.
 
 ### Install
 
@@ -14,5 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.116...v0.2.117
-
+Compare: https://github.com/just-every/code/compare/v0.2.118...v0.2.119

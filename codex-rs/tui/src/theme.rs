@@ -7,6 +7,9 @@ use std::sync::RwLock;
 
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
+    static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
+    static ref CUSTOM_THEME_COLORS: RwLock<Option<codex_core::config_types::ThemeColors>> = RwLock::new(None);
+    static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
 }
 
 /// Represents a complete theme with all colors resolved
@@ -55,7 +58,12 @@ impl Default for Theme {
 /// Initialize the global theme from configuration
 pub fn init_theme(config: &ThemeConfig) {
     let mut theme = get_predefined_theme(config.name);
-    apply_custom_colors(&mut theme, &config.colors);
+    // Important: Only apply color overrides for the Custom theme.
+    // Built-in themes should render exactly as defined so that switching away
+    // from Custom does not keep stale custom overrides from config.
+    if matches!(config.name, ThemeName::Custom) {
+        apply_custom_colors(&mut theme, &config.colors);
+    }
 
     // On some terminals (notably macOS Terminal.app with certain profiles),
     // truecolor escape sequences may render incorrectly. Detect such cases
@@ -66,11 +74,45 @@ pub fn init_theme(config: &ThemeConfig) {
 
     let mut current = CURRENT_THEME.write().unwrap();
     *current = theme;
+    // Track custom theme label for UI display
+    if matches!(config.name, ThemeName::Custom) {
+        *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
+        *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
+        *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
+    }
 }
 
 /// Get the current theme
 pub fn current_theme() -> Theme {
     CURRENT_THEME.read().unwrap().clone()
+}
+
+/// Get the custom theme's display label, if any
+pub fn custom_theme_label() -> Option<String> {
+    CUSTOM_THEME_LABEL.read().unwrap().clone()
+}
+
+/// Set/update the custom theme's label at runtime
+pub fn set_custom_theme_label(label: String) {
+    *CUSTOM_THEME_LABEL.write().unwrap() = Some(label);
+}
+
+/// Set/update the custom theme's colors at runtime
+pub fn set_custom_theme_colors(colors: codex_core::config_types::ThemeColors) {
+    *CUSTOM_THEME_COLORS.write().unwrap() = Some(colors);
+}
+
+/// Return the custom theme colors, if known in this session
+pub fn custom_theme_colors() -> Option<codex_core::config_types::ThemeColors> {
+    CUSTOM_THEME_COLORS.read().unwrap().clone()
+}
+
+pub fn set_custom_theme_is_dark(is_dark: Option<bool>) {
+    *CUSTOM_THEME_IS_DARK.write().unwrap() = is_dark;
+}
+
+pub fn custom_theme_is_dark() -> Option<bool> {
+    CUSTOM_THEME_IS_DARK.read().unwrap().clone()
 }
 
 /// Switch to a different predefined theme
