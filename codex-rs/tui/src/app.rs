@@ -101,6 +101,13 @@ pub(crate) struct App<'a> {
     /// profile defaults until all cells are explicitly painted.
     clear_on_first_frame: bool,
 
+    /// Track last known terminal size. If it changes (true resize or a
+    /// tab switch that altered the viewport), perform a full clear on the next
+    /// draw to avoid ghost cells from the previous size. This is cheap and
+    /// happens rarely, but fixes Windows/macOS terminals that don't fully
+    /// repaint after focus/size changes until a manual resize occurs.
+    last_frame_size: Option<ratatui::prelude::Size>,
+
     // Double‑Esc timing for backtrack/edit‑previous
     last_esc_time: Option<Instant>,
 
@@ -284,6 +291,7 @@ impl App<'_> {
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
+            last_frame_size: None,
             last_esc_time: None,
             timing_enabled: enable_perf,
             timing: TimingStats::default(),
@@ -338,6 +346,10 @@ impl App<'_> {
         // Insert an event to trigger the first render.
         let app_event_tx = self.app_event_tx.clone();
         app_event_tx.send(AppEvent::RequestRedraw);
+        // Some Windows/macOS terminals report an initial size that stabilizes
+        // shortly after entering the alt screen. Schedule one follow‑up frame
+        // to catch any late size change without polling.
+        app_event_tx.send(AppEvent::ScheduleFrameIn(Duration::from_millis(120)));
 
         'main: loop {
             let event = match self.next_event_priority() { Some(e) => e, None => break 'main };
@@ -966,7 +978,18 @@ impl App<'_> {
                 }
                 AppEvent::UpdateTheme(new_theme) => {
                     // Switch the theme immediately
-                    crate::theme::switch_theme(new_theme);
+                    if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+                        // Prefer runtime custom colors; fall back to config on disk
+                        if let Some(colors) = crate::theme::custom_theme_colors() {
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
+                        } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&cfg.tui.theme);
+                        } else {
+                            crate::theme::switch_theme(new_theme);
+                        }
+                    } else {
+                        crate::theme::switch_theme(new_theme);
+                    }
 
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
@@ -997,7 +1020,17 @@ impl App<'_> {
                 }
                 AppEvent::PreviewTheme(new_theme) => {
                     // Switch the theme immediately for preview (no history event)
-                    crate::theme::switch_theme(new_theme);
+                    if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+                        if let Some(colors) = crate::theme::custom_theme_colors() {
+                            crate::theme::init_theme(&codex_core::config_types::ThemeConfig { name: new_theme, colors, label: crate::theme::custom_theme_label(), is_dark: crate::theme::custom_theme_is_dark() });
+                        } else if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                            crate::theme::init_theme(&cfg.tui.theme);
+                        } else {
+                            crate::theme::switch_theme(new_theme);
+                        }
+                    } else {
+                        crate::theme::switch_theme(new_theme);
+                    }
 
                     // Clear terminal with new theme colors
                     let theme_bg = crate::colors::background();
@@ -1254,14 +1287,28 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
+        // Hard clear on the very first frame (and while onboarding) to ensure a
+        // clean background across terminals that don't respect our color attrs
+        // during EnterAlternateScreen.
         if self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. }) {
             terminal.clear()?;
             self.clear_on_first_frame = false;
         }
 
-        // Terminal resize handling - simplified version since private fields aren't accessible
-        // The terminal will handle resize events internally
-        let _screen_size = terminal.size()?;
+        // If the terminal area changed (actual resize or tab switch that altered
+        // viewport), force a full clear once to prevent ghost artifacts. Some
+        // terminals on Windows/macOS do not reliably deliver Resize events on
+        // focus switches; querying the size each frame is cheap and lets us
+        // detect the change without extra event wiring.
+        let screen_size = terminal.size()?;
+        if self
+            .last_frame_size
+            .map(|prev| prev != screen_size)
+            .unwrap_or(false)
+        {
+            terminal.clear()?;
+        }
+        self.last_frame_size = Some(screen_size);
 
         terminal.draw(|frame| {
             match &mut self.app_state {

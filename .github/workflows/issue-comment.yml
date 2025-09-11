@@ -314,14 +314,21 @@ jobs:
           node - <<'JS'
           const fs = require('fs');
           const t = fs.readFileSync('.github/auto/AGENT_OUT.txt','utf8');
-          const all = [...t.matchAll(/<comment>([\s\S]*?)<\/comment>/gi)];
+          // Extract comment by: find the LAST opening <comment>, then the FIRST closing </comment> after it.
+          // This avoids earlier stray tags in reasoning blocks.
           const PLACEHOLDER = '…final Markdown comment…';
+          const lower = t.toLowerCase();
+          const openTag = '<comment>';
+          const closeTag = '</comment>';
+          const openIdx = lower.lastIndexOf(openTag);
           let body = '';
-          if (all.length) {
-            const last = (all[all.length-1][1] || '').trim();
-            if (last && last !== PLACEHOLDER) body = last;
+          if (openIdx !== -1) {
+            const closeIdx = lower.indexOf(closeTag, openIdx + openTag.length);
+            if (closeIdx !== -1) {
+              body = t.slice(openIdx + openTag.length, closeIdx).trim();
+            }
           }
-          if (body) {
+          if (body && body !== PLACEHOLDER) {
             fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           }
           JS
@@ -332,6 +339,7 @@ jobs:
           ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
           PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
         with:
+          github-token: ${{ secrets.CODE_GH_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             const owner = context.repo.owner; const repo = context.repo.repo;
