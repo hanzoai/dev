@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.120] - 2025-09-11
+
+- CLI/Install: harden Windows and WSL install paths to avoid misplacement. (9faf876c)
+- CLI/Install: improve file locking to reduce conflicts during upgrade. (9faf876c)
+
 ## [0.2.119] - 2025-09-11
 
 - CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher. (faa712d3)
