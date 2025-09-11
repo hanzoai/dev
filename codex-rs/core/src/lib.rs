@@ -37,7 +37,7 @@ pub mod git_worktree;
 mod image_comparison;
 mod is_safe_command;
 pub mod landlock;
-mod mcp_connection_manager;
+pub mod mcp_connection_manager;
 mod mcp_tool_call;
 mod message_history;
 mod model_provider_info;
