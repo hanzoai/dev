@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.121] - 2025-09-11
+
+- CLI: make coder.js pure ESM; replace internal require() with fs ESM APIs. (a5da604e)
+- CLI: avoid require in isWSL() to prevent CJS issues under ESM. (a5da604e)
+
 ## [0.2.120] - 2025-09-11
 
 - CLI/Install: harden Windows and WSL install paths to avoid misplacement. (9faf876c)
