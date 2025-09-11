@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Non-functional change to trigger release workflow
 
-import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync, unlinkSync, statSync, openSync, closeSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, createWriteStream, chmodSync, readFileSync, readSync, writeFileSync, unlinkSync, statSync, openSync, closeSync, copyFileSync, fsyncSync, renameSync, realpathSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { get } from 'https';
-import { platform, arch } from 'os';
+import { platform, arch, tmpdir } from 'os';
 import { execSync } from 'child_process';
 import { createRequire } from 'module';
 
@@ -52,6 +52,56 @@ function getCachedBinaryPath(version, targetTriple, isWindows) {
   const ext = isWindows ? '.exe' : '';
   const cacheDir = getCacheDir(version);
   return join(cacheDir, `code-${targetTriple}${ext}`);
+}
+
+function isWSL() {
+  if (platform() !== 'linux') return false;
+  try {
+    const ver = readFileSync('/proc/version', 'utf8').toLowerCase();
+    return ver.includes('microsoft') || !!process.env.WSL_DISTRO_NAME;
+  } catch { return false; }
+}
+
+function isPathOnWindowsFs(p) {
+  try {
+    const mounts = readFileSync('/proc/mounts', 'utf8').split(/\n/).filter(Boolean);
+    let best = { mount: '/', type: 'unknown', len: 1 };
+    for (const line of mounts) {
+      const parts = line.split(' ');
+      if (parts.length < 3) continue;
+      const mnt = parts[1];
+      const typ = parts[2];
+      if (p.startsWith(mnt) && mnt.length > best.len) best = { mount: mnt, type: typ, len: mnt.length };
+    }
+    return best.type === 'drvfs' || best.type === 'cifs';
+  } catch { return false; }
+}
+
+async function writeCacheAtomic(srcPath, cachePath) {
+  try {
+    if (existsSync(cachePath)) {
+      const ok = validateDownloadedBinary(cachePath).ok;
+      if (ok) return;
+    }
+  } catch {}
+  const dir = dirname(cachePath);
+  if (!existsSync(dir)) { try { mkdirSync(dir, { recursive: true }); } catch {} }
+  const tmp = cachePath + '.tmp-' + Math.random().toString(36).slice(2, 8);
+  copyFileSync(srcPath, tmp);
+  try { const fd = openSync(tmp, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } } catch {}
+  // Retry with exponential backoff up to ~1.6s total
+  const delays = [100, 200, 400, 800, 1200, 1600];
+  for (let i = 0; i < delays.length; i++) {
+    try {
+      if (existsSync(cachePath)) { try { unlinkSync(cachePath); } catch {} }
+      renameSync(tmp, cachePath);
+      return;
+    } catch {
+      await new Promise(r => setTimeout(r, delays[i]));
+    }
+  }
+  if (existsSync(cachePath)) { try { unlinkSync(cachePath); } catch {} }
+  renameSync(tmp, cachePath);
 }
 
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
@@ -238,8 +288,11 @@ async function main() {
       if (existsSync(cachePath)) {
         const valid = validateDownloadedBinary(cachePath);
         if (valid.ok) {
-          if (!isWindows) {
-            // Mirror into local bin for Unix-like platforms
+          // Avoid mirroring into node_modules on Windows or WSL-on-NTFS.
+          const wsl = isWSL();
+          const binDirReal = (() => { try { return realpathSync(binDir); } catch { return binDir; } })();
+          const mirrorToLocal = !(isWindows || (wsl && isPathOnWindowsFs(binDirReal)));
+          if (mirrorToLocal) {
             copyFileSync(cachePath, localPath);
             try { chmodSync(localPath, 0o755); } catch {}
           }
@@ -281,10 +334,13 @@ async function main() {
         if (!existsSync(src)) {
           throw new Error(`platform package missing binary: ${platformPkg.name}`);
         }
-        // Populate cache first (canonical location)
-        copyFileSync(src, cachePath);
-        if (!isWindows) {
-          // Mirror into local bin for Unix-like platforms only
+        // Populate cache first (canonical location) atomically
+        await writeCacheAtomic(src, cachePath);
+        // Mirror into local bin only on Unix-like filesystems (not Windows/WSL-on-NTFS)
+        const wsl = isWSL();
+        const binDirReal = (() => { try { return realpathSync(binDir); } catch { return binDir; } })();
+        const mirrorToLocal = !(isWindows || (wsl && isPathOnWindowsFs(binDirReal)));
+        if (mirrorToLocal) {
           copyFileSync(cachePath, localPath);
           try { chmodSync(localPath, 0o755); } catch {}
         }
@@ -299,6 +355,15 @@ async function main() {
     // - Windows: .zip
     // - macOS/Linux: prefer .zst if `zstd` CLI is available; otherwise use .tar.gz
     const isWin = isWindows;
+    const isWSL = (() => {
+      if (platform() !== 'linux') return false;
+      try {
+        const ver = readFileSync('/proc/version', 'utf8').toLowerCase();
+        return ver.includes('microsoft') || !!process.env.WSL_DISTRO_NAME;
+      } catch { return false; }
+    })();
+    const binDirReal = (() => { try { return realpathSync(binDir); } catch { return binDir; } })();
+    const mirrorToLocal = !(isWin || (isWSL && isPathOnWindowsFs(binDirReal)));
     let useZst = false;
     if (!isWin) {
       try {
@@ -313,24 +378,57 @@ async function main() {
 
     console.log(`Downloading ${archiveName}...`);
     try {
-      const tmpPath = join(binDir, `.${archiveName}.part`);
+      const needsIsolation = isWin || (!isWin && !mirrorToLocal); // Windows or WSL-on-NTFS
+      let safeTempDir = needsIsolation ? join(tmpdir(), 'just-every', 'code', version) : binDir;
+      // Ensure staging dir exists; if tmp fails (permissions/space), fall back to user cache.
+      if (needsIsolation) {
+        try {
+          if (!existsSync(safeTempDir)) mkdirSync(safeTempDir, { recursive: true });
+        } catch {
+          try {
+            safeTempDir = getCacheDir(version);
+            if (!existsSync(safeTempDir)) mkdirSync(safeTempDir, { recursive: true });
+          } catch {}
+        }
+      }
+      const tmpPath = join(needsIsolation ? safeTempDir : binDir, `.${archiveName}.part`);
       await downloadBinary(downloadUrl, tmpPath);
 
       if (isWin) {
-        // Unzip the single-file archive using PowerShell (built-in)
+        // Unzip to a temp directory, then move into the per-user cache.
+        const unzipDest = safeTempDir;
         try {
-          const psCmd = `powershell -NoProfile -NonInteractive -Command "Expand-Archive -Path '${tmpPath}' -DestinationPath '${binDir}' -Force"`;
-          execSync(psCmd, { stdio: 'ignore' });
+          const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+          const psFull = join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+          const psCmd = `Expand-Archive -Path '${tmpPath}' -DestinationPath '${unzipDest}' -Force`;
+          let ok = false;
+          // Attempt full-path powershell.exe
+          try { execSync(`"${psFull}" -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {}
+          // Fallback to powershell in PATH
+          if (!ok) { try { execSync(`powershell -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+          // Fallback to pwsh (PowerShell 7)
+          if (!ok) { try { execSync(`pwsh -NoProfile -NonInteractive -Command "${psCmd}"`, { stdio: 'ignore' }); ok = true; } catch {} }
+          // Final fallback: bsdtar can extract .zip
+          if (!ok) { execSync(`tar -xf "${tmpPath}" -C "${unzipDest}"`, { stdio: 'ignore', shell: true }); }
         } catch (e) {
           throw new Error(`failed to unzip archive: ${e.message}`);
         } finally {
           try { unlinkSync(tmpPath); } catch {}
         }
+        // Move the extracted file from temp to cache; do not leave a copy in node_modules
+        try {
+          const extractedPath = join(unzipDest, binaryName);
+          await writeCacheAtomic(extractedPath, cachePath);
+          try { unlinkSync(extractedPath); } catch {}
+        } catch (e) {
+          throw new Error(`failed to move binary to cache: ${e.message}`);
+        }
       } else {
         if (useZst) {
           // Decompress .zst via system zstd
           try {
-            execSync(`zstd -d '${tmpPath}' -o '${localPath}'`, { stdio: 'ignore', shell: true });
+            const outPath = mirrorToLocal ? localPath : join(safeTempDir, binaryName);
+            execSync(`zstd -d '${tmpPath}' -o '${outPath}'`, { stdio: 'ignore', shell: true });
           } catch (e) {
             try { unlinkSync(tmpPath); } catch {}
             throw new Error(`failed to decompress .zst (need zstd CLI): ${e.message}`);
@@ -339,44 +437,42 @@ async function main() {
         } else {
           // Extract .tar.gz using system tar
           try {
-            execSync(`tar -xzf '${tmpPath}' -C '${binDir}'`, { stdio: 'ignore', shell: true });
+            const dest = mirrorToLocal ? binDir : safeTempDir;
+            execSync(`tar -xzf '${tmpPath}' -C '${dest}'`, { stdio: 'ignore', shell: true });
           } catch (e) {
             try { unlinkSync(tmpPath); } catch {}
             throw new Error(`failed to extract .tar.gz: ${e.message}`);
           }
           try { unlinkSync(tmpPath); } catch {}
         }
-      }
-
-      // Validate header to avoid corrupt binaries causing spawn EFTYPE/ENOEXEC
-      // On Windows, archive extraction writes to binDir; move the result to cache
-      // and remove the copy from node_modules to avoid future locks. On Unix,
-      // we keep a copy in binDir and also ensure cache is populated.
-      if (isWindows) {
-        try {
-          // Ensure the extracted file is at localPath; then move it to cachePath
-          copyFileSync(localPath, cachePath);
-          try { unlinkSync(localPath); } catch {}
-        } catch (e) {
-          throw new Error(`failed to move binary to cache: ${e.message}`);
+        if (!mirrorToLocal) {
+          try {
+            const extractedPath = join(safeTempDir, binaryName);
+            await writeCacheAtomic(extractedPath, cachePath);
+            try { unlinkSync(extractedPath); } catch {}
+          } catch (e) {
+            throw new Error(`failed to move binary to cache: ${e.message}`);
+          }
         }
       }
 
-      const valid = validateDownloadedBinary(isWindows ? cachePath : localPath);
+      // Validate header to avoid corrupt binaries causing spawn EFTYPE/ENOEXEC
+
+      const valid = validateDownloadedBinary(isWin ? cachePath : (mirrorToLocal ? localPath : cachePath));
       if (!valid.ok) {
-        try { isWindows ? unlinkSync(cachePath) : unlinkSync(localPath); } catch {}
+        try { (isWin || !mirrorToLocal) ? unlinkSync(cachePath) : unlinkSync(localPath); } catch {}
         throw new Error(`invalid binary (${valid.reason})`);
       }
 
       // Make executable on Unix-like systems
-      if (!isWindows) {
+      if (!isWin && mirrorToLocal) {
         chmodSync(localPath, 0o755);
       }
       
-      console.log(`✓ Installed ${binaryName}${isWindows ? ' (cached)' : ''}`);
+      console.log(`✓ Installed ${binaryName}${(isWin || !mirrorToLocal) ? ' (cached)' : ''}`);
       // Ensure persistent cache holds the binary (already true for Windows path)
-      if (!isWindows) {
-        try { copyFileSync(localPath, cachePath); } catch {}
+      if (!isWin && mirrorToLocal) {
+        try { await writeCacheAtomic(localPath, cachePath); } catch {}
       }
     } catch (error) {
       console.error(`✗ Failed to install ${binaryName}: ${error.message}`);
