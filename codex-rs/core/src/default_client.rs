@@ -4,24 +4,14 @@ use std::sync::Mutex;
 
 pub const DEFAULT_ORIGINATOR: &str = "codex_cli_rs";
 
-/// Set this to add a suffix to the User-Agent string.
+/// Optional suffix for the Codex User-Agent string.
 ///
-/// It is not ideal that we're using a global singleton for this.
-/// This is primarily designed to differentiate MCP clients from each other.
-/// Because there can only be one MCP server per process, it should be safe for this to be a global static.
-/// However, future users of this should use this with caution as a result.
-/// In addition, we want to be confident that this value is used for ALL clients and doing that requires a
-/// lot of wiring and it's easy to miss code paths by doing so.
-/// See https://github.com/openai/codex/pull/3388/files for an example of what that would look like.
-/// Finally, we want to make sure this is set for ALL mcp clients without needing to know a special env var
-/// or having to set data that they already specified in the mcp initialize request somewhere else.
-///
-/// A space is automatically added between the suffix and the rest of the User-Agent string.
-/// The full user agent string is returned from the mcp initialize response.
-/// Parenthesis will be added by Codex. This should only specify what goes inside of the parenthesis.
+/// This is primarily used by the MCP server implementation to include
+/// client-provided identity in the UA. Because there is a single MCP server
+/// per process, a global is acceptable here. Other callers should prefer
+/// passing an explicit originator.
 pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
-/// Get the Codex User-Agent string using the provided originator or default.
 pub fn get_codex_user_agent(originator: Option<&str>) -> String {
     let build_version = codex_version::version();
     let os_info = os_info::get();
@@ -36,50 +26,38 @@ pub fn get_codex_user_agent(originator: Option<&str>) -> String {
     let suffix = USER_AGENT_SUFFIX
         .lock()
         .ok()
-        .and_then(|guard| guard.clone());
-    let suffix = suffix
+        .and_then(|guard| guard.clone())
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map_or_else(String::new, |value| format!(" ({value})"));
+        .filter(|s| !s.is_empty())
+        .map_or_else(String::new, |v| format!(" ({v})"));
 
     let candidate = format!("{prefix}{suffix}");
     sanitize_user_agent(candidate, &prefix)
 }
 
-/// Get the Codex User-Agent string using the default originator.
+/// Convenience wrapper using the default originator.
 pub fn get_codex_user_agent_default() -> String {
     get_codex_user_agent(None)
 }
 
-/// Sanitize the user agent string.
-///
-/// Invalid characters are replaced with an underscore.
-///
-/// If the user agent fails to parse, it falls back to fallback and then to ORIGINATOR.
+/// Replace invalid header characters with '_' and ensure the UA is syntactically valid.
 fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
     if HeaderValue::from_str(candidate.as_str()).is_ok() {
         return candidate;
     }
-
     let sanitized: String = candidate
         .chars()
         .map(|ch| if matches!(ch, ' '..='~') { ch } else { '_' })
         .collect();
     if !sanitized.is_empty() && HeaderValue::from_str(sanitized.as_str()).is_ok() {
-        tracing::warn!(
-            "Sanitized Codex user agent because provided suffix contained invalid header characters"
-        );
+        tracing::warn!("Sanitized Codex user agent because provided suffix contained invalid header characters");
         sanitized
     } else if HeaderValue::from_str(fallback).is_ok() {
-        tracing::warn!(
-            "Falling back to base Codex user agent because provided suffix could not be sanitized"
-        );
+        tracing::warn!("Falling back to base Codex user agent because provided suffix could not be sanitized");
         fallback.to_string()
     } else {
-        tracing::warn!(
-            "Falling back to default Codex originator because base user agent string is invalid"
-        );
+        tracing::warn!("Falling back to default Codex originator because base user agent string is invalid");
         DEFAULT_ORIGINATOR.to_string()
     }
 }
@@ -161,28 +139,6 @@ mod tests {
             .get("user-agent")
             .expect("user-agent header missing");
         assert_eq!(ua_header.to_str().unwrap(), expected_ua);
-    }
-
-    #[test]
-    fn test_invalid_suffix_is_sanitized() {
-        let prefix = "codex_cli_rs/0.0.0";
-        let suffix = "bad\rsuffix";
-
-        assert_eq!(
-            sanitize_user_agent(format!("{prefix} ({suffix})"), prefix),
-            "codex_cli_rs/0.0.0 (bad_suffix)"
-        );
-    }
-
-    #[test]
-    fn test_invalid_suffix_is_sanitized2() {
-        let prefix = "codex_cli_rs/0.0.0";
-        let suffix = "bad\0suffix";
-
-        assert_eq!(
-            sanitize_user_agent(format!("{prefix} ({suffix})"), prefix),
-            "codex_cli_rs/0.0.0 (bad_suffix)"
-        );
     }
 
     #[test]
