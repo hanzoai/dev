@@ -339,6 +339,12 @@ impl ModelClient {
                 }
                 Ok(res) => {
                     let status = res.status();
+                    // Capture x-request-id up-front in case we consume the response body later.
+                    let x_request_id = res
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
 
                     // Pull out Retry‑After header if present.
                     let retry_after_secs = res
@@ -353,6 +359,9 @@ impl ModelClient {
                         }
                     }
 
+                    // Read the response body once for diagnostics across error branches.
+                    let body_text = res.text().await.unwrap_or_default();
+
                     // The OpenAI Responses endpoint returns structured JSON bodies even for 4xx/5xx
                     // errors. When we bubble early with only the HTTP status the caller sees an opaque
                     // "unexpected status 400 Bad Request" which makes debugging nearly impossible.
@@ -364,8 +373,6 @@ impl ModelClient {
                         || status == StatusCode::UNAUTHORIZED
                         || status.is_server_error())
                     {
-                        // Surface the error body to callers. Use `unwrap_or_default` per Clippy.
-                        let body = res.text().await.unwrap_or_default();
                         // Log error response
                         if let Ok(logger) = self.debug_logger.lock() {
                             let _ = logger.append_response_event(
@@ -373,16 +380,16 @@ impl ModelClient {
                                 "error",
                                 &serde_json::json!({
                                     "status": status.as_u16(),
-                                    "body": body
+                                    "body": body_text
                                 }),
                             );
                             let _ = logger.end_request_log(&request_id);
                         }
-                        return Err(CodexErr::UnexpectedStatus(status, body));
+                        return Err(CodexErr::UnexpectedStatus(status, body_text));
                     }
 
                     if status == StatusCode::TOO_MANY_REQUESTS {
-                        let body = res.json::<ErrorResponse>().await.ok();
+                        let body = serde_json::from_str::<ErrorResponse>(&body_text).ok();
                         if let Some(ErrorResponse { error }) = body {
                             if error.r#type.as_deref() == Some("usage_limit_reached") {
                                 // Prefer the plan_type provided in the error message if present
@@ -403,8 +410,47 @@ impl ModelClient {
                     }
 
                     if attempt > max_retries {
-                        if status == StatusCode::INTERNAL_SERVER_ERROR {
-                            return Err(CodexErr::InternalServerError);
+                        // On final attempt, surface rich diagnostics for server errors.
+                        // On final attempt, surface rich diagnostics for server errors.
+                        if status.is_server_error() {
+                            let (message, body_excerpt) = match serde_json::from_str::<ErrorResponse>(&body_text) {
+                                Ok(ErrorResponse { error }) => {
+                                    let msg = error.message.unwrap_or_else(|| "server error".to_string());
+                                    (msg, None)
+                                }
+                                Err(_) => {
+                                    let mut excerpt = body_text;
+                                    const MAX: usize = 600;
+                                    if excerpt.len() > MAX { excerpt.truncate(MAX); }
+                                    ("server error".to_string(), if excerpt.is_empty() { None } else { Some(excerpt) })
+                                }
+                            };
+
+                            // Build a single-line, actionable message for the UI and logs.
+                            let mut msg = format!("server error {status}: {message}");
+                            if let Some(id) = &x_request_id {
+                                msg.push_str(&format!(" (request-id: {id})"));
+                            }
+                            if let Some(excerpt) = &body_excerpt {
+                                msg.push_str(&format!(" | body: {excerpt}"));
+                            }
+
+                            // Log detailed context to the debug logger and close the request log.
+                            if let Ok(logger) = self.debug_logger.lock() {
+                                let _ = logger.append_response_event(
+                                    &request_id,
+                                    "server_error_on_retry_limit",
+                                    &serde_json::json!({
+                                        "status": status.as_u16(),
+                                        "x_request_id": x_request_id,
+                                        "message": message,
+                                        "body_excerpt": body_excerpt,
+                                    }),
+                                );
+                                let _ = logger.end_request_log(&request_id);
+                            }
+
+                            return Err(CodexErr::ServerError(msg));
                         }
 
                         return Err(CodexErr::RetryLimit(status));
