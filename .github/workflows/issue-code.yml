@@ -317,6 +317,7 @@ jobs:
         env:
           PAT: ${{ secrets.CODE_GH_PAT }}
         with:
+          github-token: ${{ env.PAT || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             function readOrDefault(p, d){ try { const t = fs.readFileSync(p,'utf8').trim(); return t || d; } catch { return d; } }
@@ -335,10 +336,41 @@ jobs:
             }
             // Attempt create; if exists, reuse
             const params = { owner, repo, title, head, base, body };
-            let r = await github.request('POST /repos/{owner}/{repo}/pulls', params).catch(e => e.response || { status: 0, data: {} });
-            if (r.status === 201) { core.setOutput('number', String(r.data.number)); return; }
+            let r = await github.request('POST /repos/{owner}/{repo}/pulls', params).catch(e => e.response || { status: 0, data: e && e.response && e.response.data || { message: String(e) } });
+            if (r && r.status === 201 && r.data && r.data.number) {
+              core.notice(`PR created: #${r.data.number}`);
+              core.setOutput('number', String(r.data.number));
+              return;
+            }
+            // If create failed (e.g. already exists), try to find existing open PR for this head
             const list = await github.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}` });
-            if (list.data && list.data.length) { core.setOutput('number', String(list.data[0].number)); }
+            if (list.data && list.data.length) {
+              const num = String(list.data[0].number);
+              core.notice(`PR already exists: #${num}`);
+              core.setOutput('number', num);
+              return;
+            }
+            // Hard fail so the pipeline surfaces the problem clearly
+            core.setFailed(`Failed to open PR for head '${head}' → status=${(r && r.status) || 'n/a'}; body=${JSON.stringify((r && r.data) || {})}`);
+
+      - name: Dispatch Preview Build (backup)
+        if: steps.open_pr.outputs.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const head = `issue-${{ steps.meta.outputs.issue_number }}`;
+            try {
+              // Manually kick Preview Build on the PR branch (redundant with PR opened event, but harmless)
+              await github.request('POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches', {
+                owner, repo,
+                workflow_id: 'preview-build.yml',
+                ref: head
+              });
+              core.notice(`Dispatched Preview Build for ${head}`);
+            } catch (e) {
+              core.warning(`Preview Build dispatch failed (non-fatal): ${e?.response?.status || ''}`);
+            }
 
       - name: Assign issue to bot
         uses: actions/github-script@v7

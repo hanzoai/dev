@@ -3,6 +3,20 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.119] - 2025-09-11
+
+- CLI/Windows: fix global upgrade failures (EBUSY/EPERM) by caching the native binary per-user and preferring the cached launcher. (faa712d3)
+- Installer: on Windows, install binary to %LocalAppData%\just-every\code\<version>; avoid leaving a copy in node_modules. (faa712d3)
+- Launcher: prefer running from cache; mirror into node_modules only on Unix for smoother upgrades. (faa712d3)
+
+## [0.2.118] - 2025-09-11
+
+- TUI/Theme: add AI-powered custom theme creation with live preview, named themes, and save without switching. (a59fba92, eb8ca975, abafe432, 4d9335a3)
+- Theme Create: stream reasoning/output for live UI; salvage first JSON object; show clear errors with raw output for debugging. (53cc6f7b, 353c4ffc, 85287b9e, e49ecb1a)
+- Theme Persist: apply custom colors only when using Custom; clear colors/label when switching to built-ins. (69e6cc16)
+- TUI: improve readability and input — high-contrast loading/input text; accept Shift-modified characters. (1f6ca898, fe918517)
+- TUI: capitalize Overview labels; adjust "[ Close ]" spacing and navigation/height. (b7269b44)
+
 ## [0.2.117] - 2025-09-10
 
 - TUI: route terminal paste to active bottom-pane views; enable paste into Create Spinner prompt. (a48ad2a1)

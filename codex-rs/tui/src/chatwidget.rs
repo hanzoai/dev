@@ -4685,22 +4685,34 @@ impl ChatWidget<'_> {
         // Add confirmation message to history (replaceable system notice)
         let theme_name = match new_theme {
             // Light themes
-            codex_core::config_types::ThemeName::LightPhoton => "Light - Photon",
-            codex_core::config_types::ThemeName::LightPrismRainbow => "Light - Prism Rainbow",
-            codex_core::config_types::ThemeName::LightVividTriad => "Light - Vivid Triad",
-            codex_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain",
-            codex_core::config_types::ThemeName::LightSandbar => "Light - Sandbar",
-            codex_core::config_types::ThemeName::LightGlacier => "Light - Glacier",
+            codex_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
+            codex_core::config_types::ThemeName::LightPrismRainbow => "Light - Prism Rainbow".to_string(),
+            codex_core::config_types::ThemeName::LightVividTriad => "Light - Vivid Triad".to_string(),
+            codex_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
+            codex_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
+            codex_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
             // Dark themes
-            codex_core::config_types::ThemeName::DarkCarbonNight => "Dark - Carbon Night",
-            codex_core::config_types::ThemeName::DarkShinobiDusk => "Dark - Shinobi Dusk",
-            codex_core::config_types::ThemeName::DarkOledBlackPro => "Dark - OLED Black Pro",
-            codex_core::config_types::ThemeName::DarkAmberTerminal => "Dark - Amber Terminal",
-            codex_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux",
-            codex_core::config_types::ThemeName::DarkCharcoalRainbow => "Dark - Charcoal Rainbow",
-            codex_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden",
-            codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro",
-            codex_core::config_types::ThemeName::Custom => "Custom",
+            codex_core::config_types::ThemeName::DarkCarbonNight => "Dark - Carbon Night".to_string(),
+            codex_core::config_types::ThemeName::DarkShinobiDusk => "Dark - Shinobi Dusk".to_string(),
+            codex_core::config_types::ThemeName::DarkOledBlackPro => "Dark - OLED Black Pro".to_string(),
+            codex_core::config_types::ThemeName::DarkAmberTerminal => "Dark - Amber Terminal".to_string(),
+            codex_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
+            codex_core::config_types::ThemeName::DarkCharcoalRainbow => "Dark - Charcoal Rainbow".to_string(),
+            codex_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
+            codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro".to_string(),
+            codex_core::config_types::ThemeName::Custom => {
+                // Use saved custom name and is_dark to show a friendly label
+                let mut label = crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
+                // Sanitize leading Light/Dark if present
+                for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
+                    if label.starts_with(pref) { label = label[pref.len()..].trim().to_string(); break; }
+                }
+                if crate::theme::custom_theme_is_dark().unwrap_or(false) {
+                    format!("Dark - {}", label)
+                } else {
+                    format!("Light - {}", label)
+                }
+            }
         };
         let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
