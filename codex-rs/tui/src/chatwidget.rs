@@ -7479,6 +7479,7 @@ impl ChatWidget<'_> {
                             } else {
                                 Some(env.clone())
                             },
+                            startup_timeout_ms: None,
                         };
                         match codex_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {

@@ -37,7 +37,7 @@ const MCP_TOOL_NAME_DELIMITER: &str = "__";
 const MAX_TOOL_NAME_LENGTH: usize = 64;
 
 /// Timeout for the `tools/list` request.
-const LIST_TOOLS_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Map that holds a startup error for every MCP server that could **not** be
 /// spawned successfully.
@@ -83,7 +83,7 @@ struct ToolInfo {
 
 /// A thin wrapper around a set of running [`McpClient`] instances.
 #[derive(Default)]
-pub(crate) struct McpConnectionManager {
+pub struct McpConnectionManager {
     /// Server-name -> client instance.
     ///
     /// The server name originates from the keys of the `mcp_servers` map in
@@ -115,6 +115,10 @@ impl McpConnectionManager {
         let mut join_set = JoinSet::new();
         let mut errors = ClientStartErrors::new();
 
+        // Keep a lookup of per-server startup timeouts so we can also apply it to
+        // the initial `tools/list` step below.
+        let mut per_server_timeout: HashMap<String, Duration> = HashMap::new();
+
         for (server_name, cfg) in mcp_servers {
             // Validate server name before spawning
             if !is_valid_mcp_server_name(&server_name) {
@@ -126,8 +130,14 @@ impl McpConnectionManager {
                 continue;
             }
 
+            let timeout = cfg
+                .startup_timeout_ms
+                .map(Duration::from_millis)
+                .unwrap_or(DEFAULT_STARTUP_TIMEOUT);
+            per_server_timeout.insert(server_name.clone(), timeout);
+
             join_set.spawn(async move {
-                let McpServerConfig { command, args, env } = cfg;
+                let McpServerConfig { command, args, env, .. } = cfg;
                 let client_res = McpClient::new_stdio_client(
                     command.into(),
                     args.into_iter().map(OsString::from).collect(),
@@ -158,7 +168,7 @@ impl McpConnectionManager {
                             protocol_version: mcp_types::MCP_SCHEMA_VERSION.to_owned(),
                         };
                         let initialize_notification_params = None;
-                        let timeout = Some(Duration::from_secs(10));
+                        let timeout = Some(timeout);
                         match client
                             .initialize(params, initialize_notification_params, timeout)
                             .await
@@ -188,7 +198,16 @@ impl McpConnectionManager {
             }
         }
 
-        let all_tools = list_all_tools(&clients).await?;
+        // Query tools from each server. Do not fail the entire manager if a
+        // server fails to list tools within its startup timeout; instead,
+        // record the error and continue.
+        let (all_tools, list_errors) = list_all_tools(&clients, &per_server_timeout).await;
+
+        // Remove clients that failed to list tools so they are not used later.
+        for (server_name, err) in list_errors {
+            errors.insert(server_name.clone(), err);
+            clients.remove(&server_name);
+        }
 
         let tools = qualify_tools(all_tools);
 
@@ -235,7 +254,8 @@ impl McpConnectionManager {
 /// contains **all** tools. Each key is the fully-qualified name for the tool.
 async fn list_all_tools(
     clients: &HashMap<String, std::sync::Arc<McpClient>>,
-) -> Result<Vec<ToolInfo>> {
+    timeouts: &HashMap<String, Duration>,
+) -> (Vec<ToolInfo>, HashMap<String, anyhow::Error>) {
     let mut join_set = JoinSet::new();
 
     // Spawn one task per server so we can query them concurrently. This
@@ -244,27 +264,40 @@ async fn list_all_tools(
     for (server_name, client) in clients {
         let server_name_cloned = server_name.clone();
         let client_clone = client.clone();
+        let timeout = timeouts
+            .get(server_name)
+            .copied()
+            .unwrap_or(DEFAULT_STARTUP_TIMEOUT);
         join_set.spawn(async move {
             let res = client_clone
-                .list_tools(None, Some(LIST_TOOLS_TIMEOUT))
+                .list_tools(None, Some(timeout))
                 .await;
             (server_name_cloned, res)
         });
     }
 
     let mut aggregated: Vec<ToolInfo> = Vec::with_capacity(join_set.len());
+    let mut errors: HashMap<String, anyhow::Error> = HashMap::new();
 
     while let Some(join_res) = join_set.join_next().await {
-        let (server_name, list_result) = join_res?;
-        let list_result = list_result?;
-
-        for tool in list_result.tools {
-            let tool_info = ToolInfo {
-                server_name: server_name.clone(),
-                tool_name: tool.name.clone(),
-                tool,
-            };
-            aggregated.push(tool_info);
+        match join_res {
+            Ok((server_name, Ok(list_result))) => {
+                for tool in list_result.tools {
+                    let tool_info = ToolInfo {
+                        server_name: server_name.clone(),
+                        tool_name: tool.name.clone(),
+                        tool,
+                    };
+                    aggregated.push(tool_info);
+                }
+            }
+            Ok((server_name, Err(e))) => {
+                errors.insert(server_name, e);
+            }
+            Err(e) => {
+                // JoinError – associate with an unknown server; log and continue.
+                warn!("failed to join list_tools task: {e:#}");
+            }
         }
     }
 
@@ -274,7 +307,7 @@ async fn list_all_tools(
         clients.len()
     );
 
-    Ok(aggregated)
+    (aggregated, errors)
 }
 
 fn is_valid_mcp_server_name(server_name: &str) -> bool {
