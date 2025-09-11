@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.122] - 2025-09-11
+
+- Agents: expand context to include fork enhancements for richer prompts. (7961c09a)
+- Core: add generic guards to improve stability during upstream merges. (7961c09a)
+
 ## [0.2.121] - 2025-09-11
 
 - CLI: make coder.js pure ESM; replace internal require() with fs ESM APIs. (a5da604e)
