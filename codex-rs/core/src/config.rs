@@ -663,7 +663,15 @@ pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
                             .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
                             .collect()
                     });
-                out.push((name.to_string(), McpServerConfig { command, args, env }));
+                let startup_timeout_ms = t
+                    .get("startup_timeout_ms")
+                    .and_then(|v| v.as_integer())
+                    .map(|i| i as u64);
+
+                out.push((
+                    name.to_string(),
+                    McpServerConfig { command, args, env, startup_timeout_ms },
+                ));
             }
         }
         out
@@ -730,6 +738,9 @@ pub fn add_mcp_server(
             it.insert(&k, toml_edit::Value::from(v));
         }
         server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
+    }
+    if let Some(ms) = cfg.startup_timeout_ms {
+        server_tbl.insert("startup_timeout_ms", TomlItem::Value(toml_edit::Value::from(ms as i64)));
     }
 
     // Write into enabled table

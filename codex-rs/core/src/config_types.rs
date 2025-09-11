@@ -66,6 +66,12 @@ pub struct McpServerConfig {
 
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
+
+    /// Optional per-server startup timeout in milliseconds.
+    /// Applies to both the initial `initialize` handshake and the first
+    /// `tools/list` request during startup. If unset, defaults to 10_000ms.
+    #[serde(default)]
+    pub startup_timeout_ms: Option<u64>,
 }
 
 #[derive(Deserialize, Debug, Copy, Clone, PartialEq)]
