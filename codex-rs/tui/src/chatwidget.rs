@@ -451,6 +451,69 @@ enum SystemPlacement {
 }
 
 impl ChatWidget<'_> {
+    /// Export history and ordering state so the UI can swap sessions (e.g., /branch)
+    /// without losing visible conversation. This drains the current widget's history.
+    pub(crate) fn export_history_for_session_swap(
+        &mut self,
+    ) -> (
+        Vec<Box<dyn HistoryCell>>,
+        Vec<(u64, i32, u64)>,
+        Vec<Option<String>>,
+        u64,
+        u64,
+        u64,
+    ) {
+        let history = std::mem::take(&mut self.history_cells);
+        let order_ok = std::mem::take(&mut self.cell_order_seq);
+        let order: Vec<(u64, i32, u64)> =
+            order_ok.into_iter().map(|o| (o.req, o.out, o.seq)).collect();
+        let order_dbg = std::mem::take(&mut self.cell_order_dbg);
+        (
+            history,
+            order,
+            order_dbg,
+            self.last_seen_request_index,
+            self.current_request_index,
+            self.internal_seq,
+        )
+    }
+
+    /// Import prior history and ordering metadata into a fresh widget.
+    pub(crate) fn import_history_for_session_swap(
+        &mut self,
+        state: (
+            Vec<Box<dyn HistoryCell>>,
+            Vec<(u64, i32, u64)>,
+            Vec<Option<String>>,
+            u64,
+            u64,
+            u64,
+        ),
+    ) {
+        let (
+            history,
+            order,
+            order_dbg,
+            last_seen_req,
+            current_req,
+            internal_seq,
+        ) = state;
+
+        // Replace any starter cells (welcome, etc.) with the carried history
+        self.history_cells = history;
+        self.cell_order_seq = order
+            .into_iter()
+            .map(|(req, out, seq)| OrderKey { req, out, seq })
+            .collect();
+        self.cell_order_dbg = order_dbg;
+        self.last_seen_request_index = last_seen_req;
+        self.current_request_index = current_req;
+        self.internal_seq = internal_seq;
+        self.welcome_shown = true; // avoid duplicating prelude items later
+        self.bottom_pane.set_has_chat_history(true);
+        self.invalidate_height_cache();
+        self.request_redraw();
+    }
     /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
     /// creating multiple synthetic request buckets before the first provider turn.
     fn system_order_key(
@@ -7416,6 +7479,7 @@ impl ChatWidget<'_> {
                             } else {
                                 Some(env.clone())
                             },
+                            startup_timeout_ms: None,
                         };
                         match codex_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {
@@ -8468,10 +8532,13 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             use tokio::process::Command;
-            // Resolve repo root and current branch name
-            let git_root = match codex_core::git_worktree::get_git_root_from(&work_cwd).await {
-                Ok(p) => p,
-                Err(e) => {
+            // Resolve the MAIN repository root (not the linked worktree root).
+            // Using git_common_dir avoids attempting to checkout the default branch
+            // inside the temporary worktree, which can fail with
+            // "already checked out in worktree" errors.
+            let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd) {
+                Some(p) => p,
+                None => {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
@@ -8479,7 +8546,7 @@ impl ChatWidget<'_> {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!("`/branch finalize` — not a git repo: {}", e),
+                            message: "`/branch finalize` — not a git repo".to_string(),
                         }),
                         order: None,
                     }));

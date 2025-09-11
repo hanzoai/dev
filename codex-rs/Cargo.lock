@@ -1048,6 +1048,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-mcp-smoke"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "codex-core",
+ "tokio",
+]
+
+[[package]]
+name = "codex-mcp-test-server"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codex-ollama"
 version = "0.0.0"
 dependencies = [
