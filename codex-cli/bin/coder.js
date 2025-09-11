@@ -126,10 +126,10 @@ const getCacheDir = (version) => {
 };
 
 const getCachedBinaryPath = (version) => {
-  const isWin = nodePlatform() === "win32";
-  const ext = isWin ? ".exe" : "";
+  // targetTriple already includes the proper extension on Windows ("...msvc.exe").
+  // Do not append another suffix; just use the exact targetTriple-derived name.
   const cacheDir = getCacheDir(version);
-  return path.join(cacheDir, `code-${targetTriple}${ext}`);
+  return path.join(cacheDir, `code-${targetTriple}`);
 };
 
 let lastBootstrapError = null;
@@ -201,7 +201,7 @@ const tryBootstrapBinary = async () => {
         try {
           const pkgJson = req.resolve(`${name}/package.json`);
           const pkgDir = path.dirname(pkgJson);
-          const src = path.join(pkgDir, "bin", `code-${targetTriple}${platform === "win32" ? ".exe" : ""}`);
+          const src = path.join(pkgDir, "bin", `code-${targetTriple}`);
           if (existsSync(src)) {
             // Always ensure cache has the binary; on Unix mirror into node_modules
             copyFileSync(src, cachePath);
