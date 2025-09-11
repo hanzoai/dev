@@ -61,9 +61,12 @@ async fn main() -> Result<()> {
             elicitation: None,
         },
         client_info: Implementation {
-            name: "code-mcp-client".to_owned(),
-            version: codex_version::version().to_owned(),
-            title: Some("Code".to_string()),
+            name: "codex-mcp-client".to_owned(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            title: Some("Codex".to_string()),
+            // This field is used by Codex when it is an MCP server: it should
+            // not be used when Codex is an MCP client.
+            user_agent: None,
         },
         protocol_version: MCP_SCHEMA_VERSION.to_owned(),
     };

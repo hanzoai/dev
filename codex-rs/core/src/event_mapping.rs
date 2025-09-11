@@ -2,9 +2,7 @@ use crate::protocol::AgentMessageEvent;
 use crate::protocol::AgentReasoningEvent;
 use crate::protocol::AgentReasoningRawContentEvent;
 use crate::protocol::EventMsg;
-use crate::protocol::InputMessageKind;
-use crate::protocol::UserMessageEvent;
-use crate::protocol::WebSearchEndEvent;
+use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
@@ -14,6 +12,7 @@ use codex_protocol::models::WebSearchAction;
 /// Convert a `ResponseItem` into zero or more `EventMsg` values that the UI can render.
 ///
 /// When `show_raw_agent_reasoning` is false, raw reasoning content events are omitted.
+#[allow(dead_code)]
 pub(crate) fn map_response_item_to_event_messages(
     item: &ResponseItem,
     show_raw_agent_reasoning: bool,
@@ -25,31 +24,20 @@ pub(crate) fn map_response_item_to_event_messages(
                 return Vec::new();
             }
 
-            let events: Vec<EventMsg> = content
-                .iter()
-                .filter_map(|content_item| match content_item {
+            let mut events: Vec<EventMsg> = Vec::new();
+
+            for content_item in content.iter() {
+                match content_item {
+                    ContentItem::InputText { .. } => {}
+                    ContentItem::InputImage { .. } => {}
                     ContentItem::OutputText { text } => {
-                        Some(EventMsg::AgentMessage(AgentMessageEvent {
+                        events.push(EventMsg::AgentMessage(AgentMessageEvent {
                             message: text.clone(),
-                        }))
+                        }));
                     }
-                    ContentItem::InputText { text } => {
-                        let trimmed = text.trim_start();
-                        let kind = if trimmed.starts_with("<environment_context>") {
-                            Some(InputMessageKind::EnvironmentContext)
-                        } else if trimmed.starts_with("<user_instructions>") {
-                            Some(InputMessageKind::UserInstructions)
-                        } else {
-                            Some(InputMessageKind::Plain)
-                        };
-                        Some(EventMsg::UserMessage(UserMessageEvent {
-                            message: text.clone(),
-                            kind,
-                        }))
-                    }
-                    _ => None,
-                })
-                .collect();
+                }
+            }
+
             events
         }
 
@@ -79,9 +67,9 @@ pub(crate) fn map_response_item_to_event_messages(
         ResponseItem::WebSearchCall { id, action, .. } => match action {
             WebSearchAction::Search { query } => {
                 let call_id = id.clone().unwrap_or_else(|| "".to_string());
-                vec![EventMsg::WebSearchEnd(WebSearchEndEvent {
+                vec![EventMsg::WebSearchComplete(WebSearchCompleteEvent {
                     call_id,
-                    query: query.clone(),
+                    query: Some(query.clone()),
                 })]
             }
             WebSearchAction::Other => Vec::new(),
@@ -94,5 +82,40 @@ pub(crate) fn map_response_item_to_event_messages(
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::Other => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_response_item_to_event_messages;
+    use crate::protocol::EventMsg;
+    use codex_protocol::models::ContentItem;
+    use codex_protocol::models::ResponseItem;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn maps_user_message_with_text_and_two_images() {
+        let img1 = "https://example.com/one.png".to_string();
+        let img2 = "https://example.com/two.jpg".to_string();
+
+        let item = ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![
+                ContentItem::InputText {
+                    text: "Hello world".to_string(),
+                },
+                ContentItem::InputImage {
+                    image_url: img1.clone(),
+                },
+                ContentItem::InputImage {
+                    image_url: img2.clone(),
+                },
+            ],
+        };
+
+        let events = map_response_item_to_event_messages(&item, false);
+        // No UI event is emitted for raw user input in this fork
+        assert!(events.is_empty());
     }
 }
