@@ -132,6 +132,8 @@ const getCachedBinaryPath = (version) => {
   return path.join(cacheDir, `code-${targetTriple}${ext}`);
 };
 
+let lastBootstrapError = null;
+
 const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
   const req = httpsGet(url, (res) => {
     const status = res.statusCode || 0;
@@ -255,7 +257,7 @@ const tryBootstrapBinary = async () => {
         if (platform !== "win32") try { chmodSync(binaryPath, 0o755); } catch {}
         return true;
       })
-      .catch((_e) => false);
+      .catch((e) => { lastBootstrapError = e; return false; });
   } catch {
     return false;
   }
@@ -301,6 +303,10 @@ if (existsSync(binaryPath)) {
   }
 } else {
   console.error(`Binary not found: ${binaryPath}`);
+  if (lastBootstrapError) {
+    const msg = (lastBootstrapError && (lastBootstrapError.message || String(lastBootstrapError))) || 'unknown bootstrap error';
+    console.error(`Bootstrap error: ${msg}`);
+  }
   console.error(`Please try reinstalling the package:`);
   console.error(`  npm uninstall -g @just-every/code`);
   console.error(`  npm install -g @just-every/code`);
