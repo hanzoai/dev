@@ -14,17 +14,14 @@ def main() -> int:
 Run this after the GitHub Release has been created and use
 `--release-version` to specify the version to release.
 
-Optionally pass `--tmp` to control the temporary staging directory that will be
-forwarded to stage_release.sh.
+Optionally pass `--tmp` to control the temporary staging directory used by
+release CI to build the npm package.
 """
     )
     parser.add_argument(
         "--release-version", required=True, help="Version to release, e.g., 0.3.0"
     )
-    parser.add_argument(
-        "--tmp",
-        help="Optional path to stage the npm package; forwarded to stage_release.sh",
-    )
+    parser.add_argument("--tmp", help="Optional path to stage the npm package")
     args = parser.parse_args()
     version = args.release_version
 
@@ -49,19 +46,11 @@ forwarded to stage_release.sh.
 
     print(f"should `git checkout {sha}`")
 
-    current_dir = Path(__file__).parent.resolve()
-    cmd = [
-        str(current_dir / "stage_release.sh"),
-        "--version",
-        version,
-        "--workflow-url",
-        workflow["url"],
-    ]
-    if args.tmp:
-        cmd.extend(["--tmp", args.tmp])
-
-    stage_release = subprocess.run(cmd)
-    stage_release.check_returncode()
+    # The release pipeline is handled by GitHub Actions (release.yml). This
+    # helper now only locates the rust-release workflow run for the given
+    # version and prints the checkout hint. Staging and npm publish are driven
+    # by CI.
+    print("Release staging is handled by release.yml; no local staging step.")
 
     return 0
 
