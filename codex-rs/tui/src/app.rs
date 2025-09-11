@@ -883,6 +883,14 @@ impl App<'_> {
                     }
                 }
                 AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
+                    // Preserve current chat history and ordering before swapping sessions
+                    let carried = match &mut self.app_state {
+                        AppState::Chat { widget } => {
+                            Some(widget.export_history_for_session_swap())
+                        }
+                        _ => None,
+                    };
+
                     // Rebuild the chat widget bound to a new cwd, preserving
                     // current configuration and terminal properties.
                     let mut cfg = self.config.clone();
@@ -896,11 +904,15 @@ impl App<'_> {
                         self.terminal_info.clone(),
                         self.show_order_overlay,
                     );
+                    // Adopt prior history so the conversation remains visible.
+                    if let Some(state) = carried {
+                        new_widget.import_history_for_session_swap(state);
+                    }
                     new_widget.enable_perf(self.timing_enabled);
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
 
                     // Surface a BackgroundEvent so the user can see the effective cwd
-                    // in the new session before any prompt runs.
+                    // in the new session.
                     {
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                         let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
