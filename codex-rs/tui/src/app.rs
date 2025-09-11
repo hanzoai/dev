@@ -101,6 +101,13 @@ pub(crate) struct App<'a> {
     /// profile defaults until all cells are explicitly painted.
     clear_on_first_frame: bool,
 
+    /// Track last known terminal size. If it changes (true resize or a
+    /// tab switch that altered the viewport), perform a full clear on the next
+    /// draw to avoid ghost cells from the previous size. This is cheap and
+    /// happens rarely, but fixes Windows/macOS terminals that don't fully
+    /// repaint after focus/size changes until a manual resize occurs.
+    last_frame_size: Option<ratatui::prelude::Size>,
+
     // Double‑Esc timing for backtrack/edit‑previous
     last_esc_time: Option<Instant>,
 
@@ -284,6 +291,7 @@ impl App<'_> {
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
+            last_frame_size: None,
             last_esc_time: None,
             timing_enabled: enable_perf,
             timing: TimingStats::default(),
@@ -338,6 +346,10 @@ impl App<'_> {
         // Insert an event to trigger the first render.
         let app_event_tx = self.app_event_tx.clone();
         app_event_tx.send(AppEvent::RequestRedraw);
+        // Some Windows/macOS terminals report an initial size that stabilizes
+        // shortly after entering the alt screen. Schedule one follow‑up frame
+        // to catch any late size change without polling.
+        app_event_tx.send(AppEvent::ScheduleFrameIn(Duration::from_millis(120)));
 
         'main: loop {
             let event = match self.next_event_priority() { Some(e) => e, None => break 'main };
@@ -1275,14 +1287,28 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
+        // Hard clear on the very first frame (and while onboarding) to ensure a
+        // clean background across terminals that don't respect our color attrs
+        // during EnterAlternateScreen.
         if self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. }) {
             terminal.clear()?;
             self.clear_on_first_frame = false;
         }
 
-        // Terminal resize handling - simplified version since private fields aren't accessible
-        // The terminal will handle resize events internally
-        let _screen_size = terminal.size()?;
+        // If the terminal area changed (actual resize or tab switch that altered
+        // viewport), force a full clear once to prevent ghost artifacts. Some
+        // terminals on Windows/macOS do not reliably deliver Resize events on
+        // focus switches; querying the size each frame is cheap and lets us
+        // detect the change without extra event wiring.
+        let screen_size = terminal.size()?;
+        if self
+            .last_frame_size
+            .map(|prev| prev != screen_size)
+            .unwrap_or(false)
+        {
+            terminal.clear()?;
+        }
+        self.last_frame_size = Some(screen_size);
 
         terminal.draw(|frame| {
             match &mut self.app_state {
