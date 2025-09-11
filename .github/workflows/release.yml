@@ -138,11 +138,11 @@ jobs:
 
       - name: List artifacts
         run: |
+          echo "Current directory contents:"
           ls -la
-          for dir in dev-*/; do
-            echo "Contents of $dir:"
-            ls -la "$dir"
-          done
+          echo ""
+          echo "Looking for artifact directories:"
+          find . -maxdepth 2 -type f -name "*.tar.gz" -o -name "*.zip" | head -20
 
       - name: Prepare npm package
         run: |
