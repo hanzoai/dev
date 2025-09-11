@@ -518,6 +518,13 @@ jobs:
             echo '- Make granular decisions commit-by-commit or by bucket; do not blanket-drop upstream changes without review.';
             echo '- Preserve our added functionality in core: model-driven browser tools, agent tools, screenshot handling, and version/UA semantics.';
             echo '';
+            echo 'Fork Enhancements (initial, not exhaustive)';
+            if [ -f docs/fork-enhancements.md ]; then
+              sed -n '1,200p' docs/fork-enhancements.md;
+            else
+              echo '- (fork overview file missing)';
+            fi
+            echo '';
             echo 'Artifacts';
             echo '- .github/auto/COMMITS.json: upstream commits not in default (sha, title, files, stats).';
             echo '- .github/auto/DELETED_ON_DEFAULT.txt: crates/paths removed on our default; avoid re-introducing.';
@@ -544,10 +551,10 @@ jobs:
              - Default: adopt upstream outside prefer_ours_globs. In protected areas (prefer_ours_globs), keep ours unless you identify a clearly beneficial, compatible upstream change.
              - For files matching prefer_theirs_globs, lean towards upstream unless it breaks our build or documented behavior.
              - Explicit invariants to preserve in this fork (must not regress):
-               • openai_tools::get_openai_tools must continue to register our browser_* tools (at least browser_open + browser_status when disabled; full set when enabled) and our agent_* tools.
-               • run_turn must not drop the browser gating that controls when browser tools are advertised; if upstream refactors, adapt but keep the behavior.
-               • Screenshot handling: do not remove queuing of pending screenshots across turns unless you also update callers to preserve UX; prefer keeping our pending queue + TUI updates.
-               • Version handling: keep codex_version::version() usage for UA/build and ensure get_codex_user_agent_default() remains the single point used by MCP server where appropriate.
+               • Tool families: any custom handlers with names starting with `browser_` or `agent_`, and `web_fetch` if present, must have corresponding tool schemas exposed by openai_tools (verify.sh enforces handler↔tool parity generically).
+               • Exposure gating: do not drop the browser gating logic that controls when browser tools are advertised (adapt to upstream refactors without removing the behavior).
+               • Screenshot UX: do not change screenshot queuing semantics across turns unless you update both producer/consumer paths to preserve UX; prefer preserving our pending queue + TUI updates.
+               • Version/UA: keep codex_version::version() usage for UA/build and keep get_codex_user_agent_default() for MCP server user agent.
              - Do NOT blanket-delete new crates or reintroduced paths. Surface noteworthy cases in MERGE_REPORT.md and make a reasoned choice.
              - For any path listed in purge_globs or perma_removed_paths, ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). Use repo context and the provided artifacts to make sensible, minimal decisions. Prefer preserving our local UX/branding and workflows; adopt upstream when it improves correctness, security, or compatibility. Record notable decisions in MERGE_REPORT.md.

@@ -49,28 +49,36 @@ fi
 guards_log=.github/auto/VERIFY_guards.log
 : > "$guards_log"
 
-# Guard A: openai_tools must include browser and agent tool registration (schemas)
-if ! rg -n "name:\s*\"browser_open\"" codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
-  echo "[guards] missing browser_open tool schema in openai_tools.rs" | tee -a "$guards_log"
-  status_guards="fail"
-fi
-if ! rg -n "name:\s*\"agent_run\"" codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
-  echo "[guards] missing agent_run tool schema in openai_tools.rs" | tee -a "$guards_log"
-  status_guards="fail"
-fi
-# Guard B: get_openai_tools should push web_fetch or web_search per fork policy
-if ! rg -n "web_fetch\"|WebSearch" codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
-  echo "[guards] neither web_fetch nor web_search tools found in openai_tools.rs" | tee -a "$guards_log"
+# Guard A: Handlers-to-tools parity for our custom families (browser_*, agent_*, web_fetch)
+# Extract handler names from handle_function_call and tool names from openai_tools in a quote-agnostic way
+handlers=$(rg -n '^[[:space:]]*"[a-z_][a-z0-9_]+"[[:space:]]*=>' codex-rs/core/src/codex.rs | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
+tools_defined=$( {
+  rg -n 'name:[[:space:]]*"[^"]+"' codex-rs/core/src/openai_tools.rs || true;
+  rg -n 'name:[[:space:]]*"[^"]+"' codex-rs/core/src/agent_tool.rs || true;
+} | sed -E 's/.*"([^"]+)".*/\1/' | sort -u )
+
+need_check=$(printf "%s\n" "$handlers" | grep -E '^(browser_|agent_|web_fetch$)' || true)
+while IFS= read -r h; do
+  [ -n "$h" ] || continue
+  if ! printf "%s\n" "$tools_defined" | grep -qx "$h"; then
+    printf "[guards] handler '%s' present in codex.rs but missing tool schema in openai_tools.rs\n" "$h" | tee -a "$guards_log"
+    status_guards="fail"
+  fi
+done <<< "$need_check"
+
+# Guard B: Get-openai-tools should reference at least one browser_* tool to expose family
+if ! rg -n 'browser_' codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
+  printf "[guards] no 'browser_' tool references found in openai_tools.rs - tool family likely dropped\n" | tee -a "$guards_log"
   status_guards="fail"
 fi
 # Guard C: default_client should reference codex_version::version for UA
-if ! rg -n "codex_version::version\(\)" codex-rs/core/src/default_client.rs >/dev/null 2>&1; then
-  echo "[guards] codex_version::version() not referenced in core/default_client.rs" | tee -a "$guards_log"
+if ! rg -n 'codex_version::version' codex-rs/core/src/default_client.rs >/dev/null 2>&1; then
+  printf "[guards] codex_version::version not referenced in core/default_client.rs\n" | tee -a "$guards_log"
   status_guards="fail"
 fi
 
 # Summarize guards
-echo "guards=${status_guards}" >> .github/auto/VERIFY_guards.log
+echo "guards=${status_guards}" >> "$guards_log"
 
 rc=0
 if [[ "$status_build" != ok || "$status_api" != ok || "$status_guards" != ok ]]; then
