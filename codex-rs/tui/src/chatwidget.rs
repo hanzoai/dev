@@ -773,8 +773,12 @@ impl ChatWidget<'_> {
     /// Returns true if any agents are actively running (Pending or Running), or we're about to start them.
     /// Agents in terminal states (Completed/Failed) do not keep the spinner visible.
     fn agents_are_actively_running(&self) -> bool {
-        if self.agents_ready_to_start { return true; }
-        self.active_agents.iter().any(|a| matches!(a.status, AgentStatus::Pending | AgentStatus::Running))
+        if self.agents_ready_to_start {
+            return true;
+        }
+        self.active_agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Pending | AgentStatus::Running))
     }
 
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
@@ -5761,7 +5765,8 @@ impl ChatWidget<'_> {
             id,
             Self::debug_fmt_order_key(key)
         );
-        let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+        let cell =
+            history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
         let _ = self.history_insert_with_key_global(Box::new(cell), key);
         if let Some(ref want) = id {
             self.stream_state
@@ -8957,7 +8962,11 @@ mod tests {
                     stderr: String::new(),
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: None, sequence_number: Some(1) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: None,
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "call-x".into(),
@@ -8970,7 +8979,11 @@ mod tests {
                     parsed_cmd: vec![],
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: None, sequence_number: Some(2) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: None,
+                sequence_number: Some(2),
+            }),
         });
         let dump = chat.test_dump_history_text();
         assert!(
@@ -8991,7 +9004,11 @@ mod tests {
                     message: "hello".into(),
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: Some(0), sequence_number: Some(1) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "ans-1".into(),
@@ -9001,7 +9018,11 @@ mod tests {
                     delta: " world".into(),
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: Some(0), sequence_number: Some(2) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(2),
+            }),
         });
         assert_eq!(chat.last_assistant_message.as_deref(), Some("hello"));
         // Late delta should be ignored; closed set contains the id
@@ -9023,7 +9044,11 @@ mod tests {
                     text: "think".into(),
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: Some(0), sequence_number: Some(1) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "r-1".into(),
@@ -9033,7 +9058,11 @@ mod tests {
                     delta: " harder".into(),
                 },
             ),
-            order: Some(codex_core::protocol::OrderMeta { request_ordinal: 1, output_index: Some(0), sequence_number: Some(2) }),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(2),
+            }),
         });
         assert!(
             chat.stream_state
@@ -9046,8 +9075,16 @@ mod tests {
     async fn spinner_stays_while_any_agent_running() {
         let mut chat = make_widget();
         // Start a task → spinner should turn on
-        chat.handle_codex_event(Event { id: "t1".into(), event_seq: 0, msg: EventMsg::TaskStarted, order: None });
-        assert!(chat.bottom_pane.is_task_running(), "spinner should be on after TaskStarted");
+        chat.handle_codex_event(Event {
+            id: "t1".into(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should be on after TaskStarted"
+        );
 
         // Agent update with one running agent → still on
         let ev = AgentStatusUpdateEvent {
@@ -9063,16 +9100,32 @@ mod tests {
             context: None,
             task: None,
         };
-        chat.handle_codex_event(Event { id: "t1".into(), event_seq: 1, msg: EventMsg::AgentStatusUpdate(ev), order: None });
-        assert!(chat.bottom_pane.is_task_running(), "spinner should remain while agent is running");
+        chat.handle_codex_event(Event {
+            id: "t1".into(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(ev),
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should remain while agent is running"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn spinner_hides_after_agents_complete_and_task_complete() {
         let mut chat = make_widget();
         // Start a task → spinner on
-        chat.handle_codex_event(Event { id: "t2".into(), event_seq: 0, msg: EventMsg::TaskStarted, order: None });
-        assert!(chat.bottom_pane.is_task_running(), "spinner should be on after TaskStarted");
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should be on after TaskStarted"
+        );
 
         // Agents: now both are completed/failed → do not count as active
         let ev_done = AgentStatusUpdateEvent {
@@ -9099,10 +9152,22 @@ mod tests {
             context: None,
             task: None,
         };
-        chat.handle_codex_event(Event { id: "t2".into(), event_seq: 1, msg: EventMsg::AgentStatusUpdate(ev_done), order: None });
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(ev_done),
+            order: None,
+        });
 
         // TaskComplete → spinner should hide if nothing else is running
-        chat.handle_codex_event(Event { id: "t2".into(), event_seq: 2, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }), order: None });
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 2,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
         assert!(
             !chat.bottom_pane.is_task_running(),
             "spinner should hide after all agents are terminal and TaskComplete processed"
