@@ -71,10 +71,7 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                 content_items.push(ContentItem::InputText { text });
             }
             InputItem::Image { image_url } => {
-                content_items.push(ContentItem::InputImage {
-                    image_url,
-                    detail: None,
-                });
+                content_items.push(ContentItem::InputImage { image_url });
             }
             InputItem::LocalImage { path } => match std::fs::read(&path) {
                 Ok(bytes) => {
@@ -85,7 +82,6 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
                     content_items.push(ContentItem::InputImage {
                         image_url: format!("data:{mime};base64,{encoded}"),
-                        detail: None,
                     });
                 }
                 Err(err) => {
@@ -119,7 +115,6 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                         tracing::info!("Created ephemeral image data URL with mime: {}", mime);
                         content_items.push(ContentItem::InputImage {
                             image_url: format!("data:{mime};base64,{encoded}"),
-                            detail: Some("high".to_string()),
                         });
                     }
                     Err(err) => {
@@ -274,7 +269,6 @@ reasoning: {:?}"#,
                             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
                             screenshot_content = Some(ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                                detail: Some("high".to_string()),
                             });
                             include_screenshot = true;
                             ""
@@ -1596,7 +1590,13 @@ async fn submission_loop(
                 let rollout_recorder = match rollout_recorder {
                     Some(rec) => Some(rec),
                     None => {
-                        match RolloutRecorder::new(&config, session_id, user_instructions.clone())
+                        match RolloutRecorder::new(
+                            &config,
+                            crate::rollout::recorder::RolloutRecorderParams::new(
+                                codex_protocol::mcp_protocol::ConversationId(session_id),
+                                user_instructions.clone(),
+                            ),
+                        )
                             .await
                         {
                             Ok(r) => Some(r),
@@ -5721,7 +5721,6 @@ fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
                             ContentItem::InputText { text: metadata },
                             ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                                detail: Some("high".to_string()),
                             },
                         ],
                     }

@@ -46,7 +46,7 @@ pub struct Prompt {
 
     /// A list of key-value pairs that will be added as a developer message
     /// for the model to use
-    pub environment_context: Option<EnvironmentContext>,
+    pub(crate) environment_context: Option<EnvironmentContext>,
 
     /// Tools available to the model, including additional tools sourced from
     /// external MCP servers.

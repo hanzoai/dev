@@ -1,71 +1,101 @@
-/// Returns true if the provided text contains an unclosed fenced code block
-/// (opened by ``` or ~~~, closed by a matching fence on its own line).
-pub fn is_inside_unclosed_fence(s: &str) -> bool {
+// Returns true if the provided source appears to be inside an unclosed
+// fenced code block using triple backticks. The check is tolerant of
+// leading whitespace before fences and optional language identifiers
+// on the opening fence line.
+pub fn is_inside_unclosed_fence(source: &str) -> bool {
     let mut open = false;
-    for line in s.lines() {
-        let t = line.trim_start();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            if !open {
-                open = true;
-            } else {
-                // closing fence on same pattern toggles off
-                open = false;
-            }
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            // Toggle fence state on each fence line.
+            open = !open;
         }
     }
     open
 }
 
-/// Remove fenced code blocks that contain no content (whitespace-only) to avoid
-/// streaming empty code blocks like ```lang\n``` or ```\n```.
-pub fn strip_empty_fenced_code_blocks(s: &str) -> String {
-    // Only remove complete fenced blocks that contain no non-whitespace content.
-    // Leave all other content unchanged to avoid affecting partial streams.
-    let lines: Vec<&str> = s.lines().collect();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0usize;
-    while i < lines.len() {
-        let line = lines[i];
-        let trimmed_start = line.trim_start();
-        let fence_token = if trimmed_start.starts_with("```") {
-            "```"
-        } else if trimmed_start.starts_with("~~~") {
-            "~~~"
-        } else {
-            ""
-        };
-        if !fence_token.is_empty() {
-            // Find a matching closing fence on its own line.
-            let mut j = i + 1;
-            let mut has_content = false;
-            let mut found_close = false;
-            while j < lines.len() {
-                let l = lines[j];
-                if l.trim() == fence_token {
-                    found_close = true;
+// Remove empty fenced code blocks (```lang ... ``` with only whitespace or
+// blank lines inside). Preserves a single blank line in place so that
+// subsequent headings or content start on a new line, matching the
+// expectations of the streaming renderer.
+pub fn strip_empty_fenced_code_blocks(source: &str) -> String {
+    // Fast path: if there's no fence, return as-is.
+    if !source.contains("```") {
+        return source.to_string();
+    }
+
+    let mut out = String::with_capacity(source.len());
+    let mut lines = source.lines();
+    let mut pending_blank = false;
+
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            // Capture possible language; then scan forward until closing fence.
+            let mut inner = Vec::new();
+            let mut closed = false;
+            while let Some(l) = lines.next() {
+                if l.trim_start().starts_with("```") {
+                    closed = true;
                     break;
                 }
-                if !l.trim().is_empty() {
-                    has_content = true;
-                }
-                j += 1;
+                inner.push(l);
             }
-            if found_close && !has_content {
-                // Drop i..=j and insert at most a single blank separator line.
-                if !out.ends_with('\n') {
+
+            if closed {
+                // Determine if inner content is effectively empty (only whitespace).
+                let empty = inner.iter().all(|l| l.trim().is_empty());
+                if empty {
+                    // Replace the entire empty block with a single blank separator.
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    // Ensure exactly one blank line separation.
+                    if !out.ends_with("\n\n") {
+                        out.push('\n');
+                    }
+                    // Do not emit the original fences.
+                    continue;
+                } else {
+                    // Not empty: re-emit the original block faithfully.
+                    out.push_str(line);
                     out.push('\n');
+                    for l in inner {
+                        out.push_str(l);
+                        out.push('\n');
+                    }
+                    out.push_str("```");
+                    out.push('\n');
+                    continue;
                 }
-                i = j + 1;
+            } else {
+                // Unclosed fence: re-emit what we consumed (opening line only)
+                // and let the caller's is_inside_unclosed_fence handle holdback.
+                out.push_str(line);
+                out.push('\n');
                 continue;
             }
-            // Not an empty fenced block; emit as-is.
-            out.push_str(line);
-            out.push('\n');
-            i += 1;
-        } else {
-            out.push_str(line);
-            out.push('\n');
-            i += 1;
+        }
+
+        // Normal line passthrough.
+        if pending_blank {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            pending_blank = false;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    // Preserve exact trailing newline behavior of input.
+    match source.chars().last() {
+        Some('\n') => {}
+        _ => {
+            // We added '\n' after each line; trim one if input didn't end with newline.
+            if out.ends_with('\n') {
+                out.pop();
+            }
         }
     }
     out
