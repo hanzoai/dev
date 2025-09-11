@@ -20,11 +20,7 @@ const { platform, arch } = process;
 const isWSL = () => {
   if (platform !== "linux") return false;
   try {
-    const os = require("os");
-    const rel = os.release().toLowerCase();
-    if (rel.includes("microsoft")) return true;
-    const fs = require("fs");
-    const txt = fs.readFileSync("/proc/version", "utf8").toLowerCase();
+    const txt = readFileSync("/proc/version", "utf8").toLowerCase();
     return txt.includes("microsoft");
   } catch {
     return false;
@@ -82,7 +78,7 @@ let binaryPath = path.join(__dirname, "..", "bin", `code-${targetTriple}`);
 let legacyBinaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
 
 // --- Bootstrap helper (runs if the binary is missing, e.g. Bun blocked postinstall) ---
-import { existsSync, chmodSync, statSync, openSync, readSync, closeSync, mkdirSync, copyFileSync, readFileSync, unlinkSync } from "fs";
+import { existsSync, chmodSync, statSync, openSync, readSync, closeSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, createWriteStream } from "fs";
 
 const validateBinary = (p) => {
   try {
@@ -146,7 +142,7 @@ const httpsDownload = (url, dest) => new Promise((resolve, reject) => {
     if (status !== 200) {
       return reject(new Error(`HTTP ${status}`));
     }
-    const out = require("fs").createWriteStream(dest);
+    const out = createWriteStream(dest);
     res.pipe(out);
     out.on("finish", () => out.close(resolve));
     out.on("error", (e) => {
