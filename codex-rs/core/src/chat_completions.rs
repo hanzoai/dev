@@ -164,11 +164,10 @@ pub(crate) async fn stream_chat_completions(
                             ContentItem::InputText { text } | ContentItem::OutputText { text } => {
                                 parts.push(json!({ "type": "text", "text": text }));
                             }
-                            ContentItem::InputImage { image_url, detail } => {
+                            ContentItem::InputImage { image_url } => {
                                 parts.push(json!({
                                     "type": "image_url",
-                                    "image_url": { "url": image_url },
-                                    "detail": detail.clone().unwrap_or_else(|| "auto".to_string())
+                                    "image_url": { "url": image_url }
                                 }));
                             }
                         }

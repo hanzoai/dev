@@ -254,9 +254,17 @@ fi
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
 
+# Determine exec binary name based on workspace (support forks)
+EXEC_BIN="codex-exec"
+# Detect legacy bin name used in some forks
+if grep -q '^name\s*=\s*"code-exec"' ./exec/Cargo.toml 2>/dev/null; then
+  EXEC_BIN="code-exec"
+fi
+
 # Build with or without --locked based on lockfile validity
 # Keep stderr and stdout separate so downstream tools can capture both streams.
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin code-exec
+echo "Using exec bin: ${EXEC_BIN}"
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin "${EXEC_BIN}"
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -295,7 +303,11 @@ if [ $? -eq 0 ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
       ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-cli --bin code -- -C link-arg=-Wl,-no_uuid || true
       ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-tui --bin code-tui -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid || true
+      if [ "$EXEC_BIN" = "codex-exec" ]; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin codex-exec -- -C link-arg=-Wl,-no_uuid || true
+      else
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid || true
+      fi
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)

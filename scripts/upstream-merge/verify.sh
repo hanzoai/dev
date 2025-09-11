@@ -23,6 +23,12 @@ status_guards="ok"
 
 # Use the same environment as the job (including sccache) for consistency
 export KEEP_ENV=1
+# If running outside a fully-provisioned GitHub Actions runner, sccache's GHA backend
+# can fail to start. In that case, disable sccache to allow local verification.
+if [[ -z "${ACTIONS_CACHE_URL:-}" || -z "${ACTIONS_RUNTIME_TOKEN:-}" ]]; then
+  export SCCACHE_DISABLE=1
+  unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER SCCACHE SCCACHE_BIN
+fi
 if ! ./build-fast.sh 2>&1 | tee .github/auto/VERIFY_build-fast.log; then
   status_build="fail"
 fi

@@ -1,16 +1,65 @@
+use reqwest::header::HeaderValue;
+use std::sync::LazyLock;
+use std::sync::Mutex;
+
 pub const DEFAULT_ORIGINATOR: &str = "codex_cli_rs";
+
+/// Optional suffix for the Codex User-Agent string.
+///
+/// This is primarily used by the MCP server implementation to include
+/// client-provided identity in the UA. Because there is a single MCP server
+/// per process, a global is acceptable here. Other callers should prefer
+/// passing an explicit originator.
+pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 pub fn get_codex_user_agent(originator: Option<&str>) -> String {
     let build_version = codex_version::version();
     let os_info = os_info::get();
-    format!(
+    let prefix = format!(
         "{}/{build_version} ({} {}; {}) {}",
         originator.unwrap_or(DEFAULT_ORIGINATOR),
         os_info.os_type(),
         os_info.version(),
         os_info.architecture().unwrap_or("unknown"),
         crate::terminal::user_agent()
-    )
+    );
+    let suffix = USER_AGENT_SUFFIX
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map_or_else(String::new, |v| format!(" ({v})"));
+
+    let candidate = format!("{prefix}{suffix}");
+    sanitize_user_agent(candidate, &prefix)
+}
+
+/// Convenience wrapper using the default originator.
+pub fn get_codex_user_agent_default() -> String {
+    get_codex_user_agent(None)
+}
+
+/// Replace invalid header characters with '_' and ensure the UA is syntactically valid.
+fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
+    if HeaderValue::from_str(candidate.as_str()).is_ok() {
+        return candidate;
+    }
+    let sanitized: String = candidate
+        .chars()
+        .map(|ch| if matches!(ch, ' '..='~') { ch } else { '_' })
+        .collect();
+    if !sanitized.is_empty() && HeaderValue::from_str(sanitized.as_str()).is_ok() {
+        tracing::warn!("Sanitized Codex user agent because provided suffix contained invalid header characters");
+        sanitized
+    } else if HeaderValue::from_str(fallback).is_ok() {
+        tracing::warn!("Falling back to base Codex user agent because provided suffix could not be sanitized");
+        fallback.to_string()
+    } else {
+        tracing::warn!("Falling back to default Codex originator because base user agent string is invalid");
+        DEFAULT_ORIGINATOR.to_string()
+    }
 }
 
 /// Create a reqwest client with default `originator` and `User-Agent` headers set.
