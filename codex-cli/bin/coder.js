@@ -177,9 +177,12 @@ const tryBootstrapBinary = async () => {
     if (existsSync(cachePath)) {
       const v = validateBinary(cachePath);
       if (v.ok) {
-        copyFileSync(cachePath, binaryPath);
-        if (platform !== "win32") chmodSync(binaryPath, 0o755);
-        return existsSync(binaryPath);
+        // Prefer running directly from cache; mirror into node_modules on Unix
+        if (platform !== "win32") {
+          copyFileSync(cachePath, binaryPath);
+          try { chmodSync(binaryPath, 0o755); } catch {}
+        }
+        return true;
       }
     }
 
@@ -202,11 +205,13 @@ const tryBootstrapBinary = async () => {
           const pkgDir = path.dirname(pkgJson);
           const src = path.join(pkgDir, "bin", `code-${targetTriple}${platform === "win32" ? ".exe" : ""}`);
           if (existsSync(src)) {
-            copyFileSync(src, binaryPath);
-            if (platform !== "win32") chmodSync(binaryPath, 0o755);
-            // refresh cache
-            try { copyFileSync(binaryPath, cachePath); } catch {}
-            return existsSync(binaryPath);
+            // Always ensure cache has the binary; on Unix mirror into node_modules
+            copyFileSync(src, cachePath);
+            if (platform !== "win32") {
+              copyFileSync(cachePath, binaryPath);
+              try { chmodSync(binaryPath, 0o755); } catch {}
+            }
+            return true;
           }
         } catch { /* ignore and fall back */ }
       }
@@ -239,10 +244,19 @@ const tryBootstrapBinary = async () => {
             try { unlinkSync(tmp); } catch {}
           }
         }
-        const v = validateBinary(binaryPath);
+        // On Windows, prefer cache and avoid leaving the executable in node_modules
+        if (platform === "win32") {
+          try {
+            copyFileSync(binaryPath, cachePath);
+          } catch {}
+          try { unlinkSync(binaryPath); } catch {}
+        } else {
+          try { copyFileSync(binaryPath, cachePath); } catch {}
+        }
+
+        const v = validateBinary(platform === "win32" ? cachePath : binaryPath);
         if (!v.ok) throw new Error(`invalid binary (${v.reason})`);
-        if (platform !== "win32") chmodSync(binaryPath, 0o755);
-        try { copyFileSync(binaryPath, cachePath); } catch {}
+        if (platform !== "win32") try { chmodSync(binaryPath, 0o755); } catch {}
         return true;
       })
       .catch((_e) => false);
@@ -262,9 +276,19 @@ if (!existsSync(binaryPath) && !existsSync(legacyBinaryPath)) {
   }
 }
 
-// Fall back to legacy name if primary is still missing
-if (!existsSync(binaryPath) && existsSync(legacyBinaryPath)) {
-  binaryPath = legacyBinaryPath;
+// Prefer cached binary when available
+try {
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  const version = pkg.version;
+  const cached = getCachedBinaryPath(version);
+  const v = existsSync(cached) ? validateBinary(cached) : { ok: false };
+  if (v.ok) {
+    binaryPath = cached;
+  } else if (!existsSync(binaryPath) && existsSync(legacyBinaryPath)) {
+    binaryPath = legacyBinaryPath;
+  }
+} catch {
+  // ignore
 }
 
 // Check if binary exists and try to fix permissions if needed

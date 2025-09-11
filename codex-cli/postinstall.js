@@ -227,30 +227,23 @@ async function main() {
     const localPath = join(binDir, binaryName);
     const cachePath = getCachedBinaryPath(version, targetTriple, isWindows);
     
-    // Skip if already exists and has correct permissions
-    if (existsSync(localPath)) {
-      // Always try to fix permissions on Unix-like systems
-      if (!isWindows) {
-        try {
-          chmodSync(localPath, 0o755);
-          console.log(`✓ ${binaryName} already exists (permissions fixed)`);
-        } catch (e) {
-          console.log(`✓ ${binaryName} already exists`);
-        }
-      } else {
-        console.log(`✓ ${binaryName} already exists`);
-      }
-      continue;
-    }
+    // On Windows we avoid placing the executable inside node_modules to prevent
+    // EBUSY/EPERM during global upgrades when the binary is in use.
+    // We treat the user cache path as the canonical home of the native binary.
+    // For macOS/Linux we keep previous behavior and also place a copy in binDir
+    // for convenience.
 
     // Fast path: if a valid cached binary exists for this version+triple, reuse it.
     try {
       if (existsSync(cachePath)) {
         const valid = validateDownloadedBinary(cachePath);
         if (valid.ok) {
-          copyFileSync(cachePath, localPath);
-          if (!isWindows) chmodSync(localPath, 0o755);
-          console.log(`✓ Installed ${binaryName} from user cache`);
+          if (!isWindows) {
+            // Mirror into local bin for Unix-like platforms
+            copyFileSync(cachePath, localPath);
+            try { chmodSync(localPath, 0o755); } catch {}
+          }
+          console.log(`✓ ${binaryName} ready from user cache`);
           continue; // next binary
         }
       }
@@ -288,15 +281,14 @@ async function main() {
         if (!existsSync(src)) {
           throw new Error(`platform package missing binary: ${platformPkg.name}`);
         }
-        copyFileSync(src, localPath);
-        if (!isWindows) chmodSync(localPath, 0o755);
-        console.log(`✓ Installed ${binaryName} from ${platformPkg.name}`);
-        // Populate cache for future npx runs
-        try {
-          if (!existsSync(cachePath)) {
-            copyFileSync(localPath, cachePath);
-          }
-        } catch {}
+        // Populate cache first (canonical location)
+        copyFileSync(src, cachePath);
+        if (!isWindows) {
+          // Mirror into local bin for Unix-like platforms only
+          copyFileSync(cachePath, localPath);
+          try { chmodSync(localPath, 0o755); } catch {}
+        }
+        console.log(`✓ Installed ${binaryName} from ${platformPkg.name} (cached)`);
         continue; // next binary
       } catch (e) {
         console.warn(`⚠ Failed platform package install (${e.message}), falling back to GitHub download`);
@@ -357,9 +349,22 @@ async function main() {
       }
 
       // Validate header to avoid corrupt binaries causing spawn EFTYPE/ENOEXEC
-      const valid = validateDownloadedBinary(localPath);
+      // On Windows, archive extraction writes to binDir; move the result to cache
+      // and remove the copy from node_modules to avoid future locks. On Unix,
+      // we keep a copy in binDir and also ensure cache is populated.
+      if (isWindows) {
+        try {
+          // Ensure the extracted file is at localPath; then move it to cachePath
+          copyFileSync(localPath, cachePath);
+          try { unlinkSync(localPath); } catch {}
+        } catch (e) {
+          throw new Error(`failed to move binary to cache: ${e.message}`);
+        }
+      }
+
+      const valid = validateDownloadedBinary(isWindows ? cachePath : localPath);
       if (!valid.ok) {
-        try { unlinkSync(localPath); } catch {}
+        try { isWindows ? unlinkSync(cachePath) : unlinkSync(localPath); } catch {}
         throw new Error(`invalid binary (${valid.reason})`);
       }
 
@@ -368,11 +373,11 @@ async function main() {
         chmodSync(localPath, 0o755);
       }
       
-      console.log(`✓ Installed ${binaryName}`);
-      // Save into persistent cache for future fast installs
-      try {
-        copyFileSync(localPath, cachePath);
-      } catch {}
+      console.log(`✓ Installed ${binaryName}${isWindows ? ' (cached)' : ''}`);
+      // Ensure persistent cache holds the binary (already true for Windows path)
+      if (!isWindows) {
+        try { copyFileSync(localPath, cachePath); } catch {}
+      }
     } catch (error) {
       console.error(`✗ Failed to install ${binaryName}: ${error.message}`);
       console.error(`  Downloaded from: ${downloadUrl}`);
@@ -384,13 +389,12 @@ async function main() {
   const mainBinary = `code-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
   
-  if (existsSync(mainBinaryPath)) {
+  if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, targetTriple, platform() === 'win32'))) {
     try {
-      const stats = statSync(mainBinaryPath);
-      if (!stats.size) {
-        throw new Error('binary is empty (download likely failed)');
-      }
-      const valid = validateDownloadedBinary(mainBinaryPath);
+      const probePath = existsSync(mainBinaryPath) ? mainBinaryPath : getCachedBinaryPath(version, targetTriple, platform() === 'win32');
+      const stats = statSync(probePath);
+      if (!stats.size) throw new Error('binary is empty (download likely failed)');
+      const valid = validateDownloadedBinary(probePath);
       if (!valid.ok) {
         console.warn(`⚠ Main code binary appears invalid: ${valid.reason}`);
         console.warn('  Try reinstalling or check your network/proxy settings.');
