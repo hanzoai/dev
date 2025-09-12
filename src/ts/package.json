@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - Hanzo AI developer tools",
   "bin": {
@@ -47,10 +47,10 @@
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@hanzo/dev-darwin-arm64": "0.1.0",
-    "@hanzo/dev-darwin-x64": "0.1.0",
-    "@hanzo/dev-linux-x64": "0.1.0",
-    "@hanzo/dev-linux-arm64": "0.1.0",
-    "@hanzo/dev-win32-x64": "0.1.0"
+    "@hanzo/dev-darwin-arm64": "3.0.0",
+    "@hanzo/dev-darwin-x64": "3.0.0",
+    "@hanzo/dev-linux-x64": "3.0.0",
+    "@hanzo/dev-linux-arm64": "3.0.0",
+    "@hanzo/dev-win32-x64": "3.0.0"
   }
 }
