@@ -293,9 +293,16 @@ impl ThemeSelectionView {
                     Ok(c) => c,
                     Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Config error: {}", e))); return; }
                 };
+                // Use the same auth preference as the active Codex session.
+                // When logged in with ChatGPT, prefer ChatGPT auth; otherwise fall back to API key.
+                let preferred_auth = if cfg.using_chatgpt_auth {
+                    codex_protocol::mcp_protocol::AuthMode::ChatGPT
+                } else {
+                    codex_protocol::mcp_protocol::AuthMode::ApiKey
+                };
                 let auth_mgr = codex_core::AuthManager::shared(
                     cfg.codex_home.clone(),
-                    codex_protocol::mcp_protocol::AuthMode::ApiKey,
+                    preferred_auth,
                     cfg.responses_originator_header.clone(),
                 );
                 let client = codex_core::ModelClient::new(
