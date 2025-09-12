@@ -127,7 +127,7 @@ pub enum HistoryPersistence {
 }
 
 /// Collection of settings that are specific to the TUI.
-#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Tui {
     /// Theme configuration for the TUI
     #[serde(default)]
@@ -155,6 +155,24 @@ pub struct Tui {
     /// with Ctrl+T. Defaults to true.
     #[serde(default = "default_true")]
     pub alternate_screen: bool,
+}
+
+// Important: Provide a manual Default so that when no config file exists and we
+// construct `Config` via `unwrap_or_default()`, we still honor the intended
+// default of `alternate_screen = true`. Deriving `Default` would set booleans to
+// `false`, which caused fresh installs (or a temporary CODEX_HOME) to start in
+// standard-terminal mode until the user pressed Ctrl+T.
+impl Default for Tui {
+    fn default() -> Self {
+        Self {
+            theme: ThemeConfig::default(),
+            highlight: HighlightConfig::default(),
+            show_reasoning: false,
+            stream: StreamConfig::default(),
+            spinner: SpinnerSelection::default(),
+            alternate_screen: true,
+        }
+    }
 }
 
 /// Streaming behavior configuration for the TUI.
