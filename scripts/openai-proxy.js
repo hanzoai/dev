@@ -51,6 +51,8 @@ const ALLOWED = ['/v1/chat/completions', '/v1/responses'];
 //   IDEMPOTENCY_KEY=auto  -> Add an Idempotency-Key header per request (uuid)
 //   LOG_ERROR_BODY=1      -> Log non-2xx response body (truncated)
 //   LOG_ERROR_BODY_BYTES=1024 -> Max bytes to log from error body
+//   STRICT_HEADERS=1      -> Rebuild upstream headers from a minimal allowlist
+//   RESPONSES_BETA="responses=experimental"|"responses=v1" (override beta header)
 const EXIT_ON_5XX = process.env.EXIT_ON_5XX === '1' || false;
 const READY_FILE = process.env.READY_FILE || '';
 const LOG_DEST = (process.env.LOG_DEST || 'stdout').toLowerCase();
@@ -61,6 +63,8 @@ const STRIP_SESSION_ID = process.env.STRIP_SESSION_ID === '1' || false;
 const IDEMPOTENCY_KEY = (process.env.IDEMPOTENCY_KEY || '').toLowerCase();
 const LOG_ERROR_BODY = process.env.LOG_ERROR_BODY === '1' || false;
 const LOG_ERROR_BODY_BYTES = Number(process.env.LOG_ERROR_BODY_BYTES || 2048);
+const STRICT_HEADERS = process.env.STRICT_HEADERS === '1' || false;
+const RESPONSES_BETA = process.env.RESPONSES_BETA || 'responses=experimental';
 
 function outWrite(s) {
   if (LOG_DEST === 'stderr') process.stderr.write(s + '\n');
@@ -108,22 +112,35 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     const body = Buffer.concat(chunks);
     const up = new URL(req.url, UPSTREAM);
-    const incoming = { ...req.headers };
-    if (!incoming['content-type']) incoming['content-type'] = 'application/json';
-    if (!incoming['accept']) incoming['accept'] = 'text/event-stream';
-    if (NO_GZIP) incoming['accept-encoding'] = 'identity';
-    incoming['authorization'] = `Bearer ${API_KEY}`; // replace with real key
-    if (up.pathname.startsWith('/v1/responses')) {
-      if (!incoming['openai-beta']) incoming['openai-beta'] = 'responses=experimental';
+    let incoming;
+    if (STRICT_HEADERS) {
+      incoming = {};
+      incoming['authorization'] = `Bearer ${API_KEY}`;
+      incoming['content-type'] = 'application/json';
+      incoming['accept'] = 'text/event-stream';
+      if (NO_GZIP) incoming['accept-encoding'] = 'identity';
+      if (up.pathname.startsWith('/v1/responses')) incoming['openai-beta'] = RESPONSES_BETA;
+      incoming['user-agent'] = 'code-proxy/1.0';
+      incoming['originator'] = 'codex_cli_rs';
+      if (IDEMPOTENCY_KEY === 'auto') incoming['idempotency-key'] = crypto.randomUUID();
+    } else {
+      incoming = { ...req.headers };
+      if (!incoming['content-type']) incoming['content-type'] = 'application/json';
+      if (!incoming['accept']) incoming['accept'] = 'text/event-stream';
+      if (NO_GZIP) incoming['accept-encoding'] = 'identity';
+      incoming['authorization'] = `Bearer ${API_KEY}`; // replace with real key
+      if (up.pathname.startsWith('/v1/responses')) {
+        if (!incoming['openai-beta']) incoming['openai-beta'] = RESPONSES_BETA;
+      }
+      if (!incoming['originator']) incoming['originator'] = 'codex_cli_rs';
+      if (STRIP_SESSION_ID && 'session_id' in incoming) delete incoming['session_id'];
+      if (IDEMPOTENCY_KEY === 'auto') incoming['idempotency-key'] = crypto.randomUUID();
     }
-    if (!incoming['originator']) incoming['originator'] = 'codex_cli_rs';
-    if (STRIP_SESSION_ID && 'session_id' in incoming) delete incoming['session_id'];
     delete incoming['host']; incoming['host'] = up.host;
     incoming['connection'] = FORCE_CLOSE ? 'close' : 'keep-alive';
     if (incoming['content-length']) incoming['content-length'] = String(body.length);
     delete incoming['proxy-connection'];
     delete incoming['proxy-authorization'];
-    if (IDEMPOTENCY_KEY === 'auto') incoming['idempotency-key'] = crypto.randomUUID();
 
     log({ level: 'info', rid, phase: 'request', method: req.method, url: up.toString(), headers: redactHeaders(incoming), body_bytes: body.length });
 
