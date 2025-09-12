@@ -388,6 +388,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
+          mkdir -p .github/auto
           cat > .github/auto/openai-proxy.js <<'JS'
           const http = require('http');
           const https = require('https');
@@ -425,18 +426,6 @@ jobs:
           JS
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           for i in {1..30}; do if nc -z 127.0.0.1 5058; then break; else sleep 0.2; fi; done || true
-
-      - name: Configure Code to use Chat Completions fallback
-        if: env.OPENAI_API_KEY != ''
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'TOML'
-          [model_providers.openai_chat]
-          name = "OpenAI (Chat)"
-          base_url = "http://127.0.0.1:5058/v1"
-          wire_api = "chat"
-          TOML
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -714,7 +703,7 @@ jobs:
           # Run Code in fully automated exec mode against the repo root.
           # Note: the working-directory flag is `--cd` on the `exec` subcommand.
           OPENAI_BASE_URL="http://127.0.0.1:5058/v1" \
-          ./.code-bin/code exec -c model_provider=openai_chat --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
+          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
 

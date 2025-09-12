@@ -240,16 +240,6 @@ jobs:
           # Wait briefly for readiness
           for i in {1..30}; do if nc -z 127.0.0.1 5057; then break; else sleep 0.2; fi; done || true
 
-      - name: Configure Code to use Chat Completions fallback
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'TOML'
-          [model_providers.openai_chat]
-          name = "OpenAI (Chat)"
-          base_url = "http://127.0.0.1:5057/v1"
-          wire_api = "chat"
-          TOML
 
       - name: Run Code agent (workspace-write)
         id: run_agent
@@ -289,7 +279,7 @@ jobs:
               GIT_TERMINAL_PROMPT="0" \
               GIT_ASKPASS="/bin/false" \
               npx -y @just-every/code@latest \
-              exec -c model_provider=openai_chat \
+              exec \
               -s workspace-write \
               -c sandbox_workspace_write.network_access=true \
               --cd "$GITHUB_WORKSPACE" \
