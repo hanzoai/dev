@@ -16,6 +16,8 @@ use crossterm::event::PushKeyboardEnhancementFlags;
 use crossterm::style::SetColors;
 use crossterm::style::{Color as CtColor, SetBackgroundColor, SetForegroundColor};
 use crossterm::style::Print;
+use crossterm::style::ResetColor;
+use crossterm::cursor::MoveToNextLine;
 use crossterm::terminal::Clear;
 use crossterm::terminal::ClearType;
 use ratatui::Terminal;
@@ -238,6 +240,13 @@ fn set_panic_hook() {
 pub fn restore() -> Result<()> {
     // Pop may fail on platforms that didn't support the push; ignore errors.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    // Belt-and-suspenders: on terminals that do not maintain a clean stack,
+    // explicitly set enhancement flags to empty, then pop again. This avoids
+    // leaving kitty/xterm enhanced keyboard protocols active after exit.
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    }
     execute!(stdout(), DisableBracketedPaste)?;
     // Best‑effort: disable focus change notifications if supported.
     let _ = execute!(stdout(), DisableFocusChange);
@@ -245,8 +254,65 @@ pub fn restore() -> Result<()> {
     disable_raw_mode()?;
     // Leave alternate screen mode
     execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    // Reset colors and move to a fresh line so the shell prompt doesn't
+    // overlap any residual UI.
+    execute!(stdout(), ResetColor, MoveToNextLine(1))?;
     Ok(())
 }
+
+/// Leave only the alternate screen, keeping raw mode and input configuration intact.
+/// This is used for the Ctrl+T "standard terminal" mode so users can scroll
+/// and select text in the host terminal.
+pub fn leave_alt_screen_only() -> Result<()> {
+    // Best effort: disable mouse capture so selection/scroll works naturally.
+    let _ = execute!(stdout(), DisableMouseCapture);
+    // Also disable bracketed paste and focus tracking to avoid escape sequences
+    // being echoed into the normal buffer by some terminals.
+    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), DisableFocusChange);
+    // Pop keyboard enhancement flags so keys like Enter/Arrows don't emit
+    // enhanced escape sequences (e.g., kitty/xterm modifyOtherKeys) into the buffer.
+    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    }
+    execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    Ok(())
+}
+
+/// Re-enter the alternate screen without reinitializing global state.
+/// Restores title and colors and performs a full clear to ensure a clean frame.
+pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui::style::Color) -> Result<()> {
+    // Re-enable enhanced keyboard and focus/paste signaling for full TUI fidelity.
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
+        );
+    }
+    if should_enable_focus_change() {
+        let _ = execute!(stdout(), EnableFocusChange);
+    }
+    let _ = execute!(stdout(), EnableBracketedPaste);
+    execute!(
+        stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        SetColors(crossterm::style::Colors::new(theme_fg.into(), theme_bg.into())),
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        crossterm::terminal::SetTitle("Code"),
+        crossterm::terminal::EnableLineWrap
+    )?;
+    Ok(())
+}
+
+/// Clear the current screen (normal buffer) with the theme background and reset cursor.
+// Removed: clear_screen_with_theme — we no longer hard-clear the normal buffer in terminal mode.
 
 /// Determine whether to enable xterm focus change tracking for the current
 /// environment. We default to enabling on modern terminals, but disable for

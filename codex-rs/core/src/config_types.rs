@@ -148,6 +148,13 @@ pub struct Tui {
     /// Loading spinner style selection
     #[serde(default)]
     pub spinner: SpinnerSelection,
+
+    /// Whether to use the terminal's Alternate Screen (full-screen) mode.
+    /// When false, Codex renders nothing and leaves the standard terminal
+    /// buffer visible; users can toggle back to Alternate Screen at runtime
+    /// with Ctrl+T. Defaults to true.
+    #[serde(default = "default_true")]
+    pub alternate_screen: bool,
 }
 
 /// Streaming behavior configuration for the TUI.

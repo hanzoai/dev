@@ -80,8 +80,13 @@ pub enum CodexErr {
     )]
     UsageNotIncluded,
 
-    #[error("We're currently experiencing high demand, which may cause temporary errors.")]
-    InternalServerError,
+    /// Final (non‑retryable by our policy) HTTP 5xx from the model provider.
+    ///
+    /// We intentionally embed a preformatted message string so the UI and
+    /// logs surface actionable context (status, request-id, body excerpt)
+    /// without having to plumb additional fields everywhere.
+    #[error("{0}")]
+    ServerError(String),
 
     /// Retry limit exceeded.
     #[error("exceeded retry limit, last status: {0}")]
