@@ -3,6 +3,59 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.133] - 2025-09-12
+
+- Release/Homebrew: compute `sha256` from local artifacts; add retry/backoff when fetching remote bottles; avoid failing during CDN propagation. (fd38d777b)
+- CI/Triage: remove OpenAI proxy and Rust/Code caches; call API directly in safety screen to simplify and speed up runs. (7a28af813)
+- Dev: add `scripts/openai-proxy.js` for local testing with SSE‑safe header handling; mirrors CI proxy behavior. (7e9203c22)
+
+## [0.2.132] - 2025-09-12
+
+- CI/Upstream‑merge: verbose OpenAI proxy with streaming‑safe pass‑through and rich JSON logs; upload/tail logs for diagnosis. (43e6afe2d)
+- CI/Resilience: add chat‑completions fallback provider; keep Responses API as default; prevent concurrency cancellation on upstream‑merge. (3d4687f1b, e27f320e6)
+- CI/Quality gate: fail job on server/proxy errors seen in agent logs to avoid silent successes. (62695b1e5)
+
+## [0.2.131] - 2025-09-12
+
+- Core/HTTP: set explicit `Host` header from target URL to fix TLS SNI failures when using HTTP(S)_PROXY with Responses streaming. (6ad9cb283)
+- Exec/Workflows: exit non‑zero on agent Error events so CI fails fast on real stream failures. (fec6aa0f0)
+- Proxy: harden TLS forwarding (servername, Host reset, hop‑by‑hop header cleanup). (fec6aa0f0)
+
+## [0.2.130] - 2025-09-12
+
+- Core/Client errors: surface rich server context on final retry (HTTP status, request‑id, body excerpt) instead of generic 500s; improve UI diagnostics. (6be233187)
+- Upstream sync: include `SetDefaultModel` JSON‑RPC and `reasoning_effort` in `NewConversationResponse`. (35bc0cd43, 9bbeb7536)
+
+## [0.2.129] - 2025-09-12
+
+- TUI/Spinner: hide spinner after agents complete; refine gating logic. (08bdfc46e)
+- TUI/Theme: allow Left/Right to mirror Up/Down; enable Save/Retry navigation via arrows in review forms. (2994466b7)
+
+## [0.2.128] - 2025-09-11
+
+- Upstream: onboarding experience, usage‑limit CTA polish, MCP docs, sandbox timeout improvements, and lint updates. (8453915e0, 44587c244, 8f7b22b65, 027944c64, bec51f6c0, 66967500b)
+
+## [0.2.127] - 2025-09-11
+
+- MCP: honor per‑server `startup_timeout_ms`; make `tools/list` failures non‑fatal; add test MCP server and smoke harness to validate slow/fast cases. (f69ea8b52)
+
+## [0.2.126] - 2025-09-11
+
+- TUI/Branch: preserve chat history when switching with `/branch`; finalize at repo root to avoid checkout errors. (0ae8848bd)
+
+## [0.2.125] - 2025-09-11
+
+- Windows CLI: stop appending a second `.exe` in cache/platform paths; use exact target triple. (a674e40e5)
+
+## [0.2.124] - 2025-09-11
+
+- Windows bootstrap: robust unzip in runtime bootstrap (PowerShell full‑path, `pwsh`, `tar` fallback); extract to user cache. (1a31d2e1a)
+
+## [0.2.123] - 2025-09-11
+
+- Upstream merge: reconcile with `openai/codex@main` while restoring fork features and keeping local CLI/TUI improvements. (742ddc152, a0de41bac)
+- Windows bootstrap: always print bootstrap error; remove debug gate. (74785d58b)
+
 ## [0.2.122] - 2025-09-11
 
 - Agents: expand context to include fork enhancements for richer prompts. (7961c09a)
