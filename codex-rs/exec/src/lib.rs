@@ -280,6 +280,8 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
             }
         }
     }
-
+    // If any fatal Error events occurred, exit non‑zero so CI fails fast.
+    let exit_code = event_processor.exit_code();
+    if exit_code != 0 { std::process::exit(exit_code); }
     Ok(())
 }
