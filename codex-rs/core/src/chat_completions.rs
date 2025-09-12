@@ -458,14 +458,24 @@ async fn process_chat_sse<S>(
                 return;
             }
             Ok(None) => {
-                // Stream closed gracefully – emit Completed with dummy id.
+                // Stream closed by server without an explicit end marker – log for diagnostics
+                tracing::debug!("chat SSE stream closed without [DONE] marker");
+                if let Ok(logger) = debug_logger.lock() {
+                    let _ = logger.append_response_event(
+                        &request_id,
+                        "stream_closed_without_done",
+                        &serde_json::json!({
+                            "assistant_len": assistant_text.len(),
+                            "reasoning_len": reasoning_text.len(),
+                        }),
+                    );
+                }
                 let _ = tx_event
                     .send(Ok(ResponseEvent::Completed {
                         response_id: String::new(),
                         token_usage: None,
                     }))
                     .await;
-                // Mark the request log as complete
                 if let Ok(logger) = debug_logger.lock() {
                     let _ = logger.end_request_log(&request_id);
                 }
@@ -525,7 +535,24 @@ async fn process_chat_sse<S>(
         // Parse JSON chunk
         let chunk: serde_json::Value = match serde_json::from_str(&sse.data) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                // Surface parse errors to logs and debug logger for diagnostics, then skip
+                let mut excerpt = sse.data.clone();
+                const MAX: usize = 600;
+                if excerpt.len() > MAX { excerpt.truncate(MAX); }
+                tracing::debug!("chat SSE parse error: {} | data: {}", e, excerpt);
+                if let Ok(logger) = debug_logger.lock() {
+                    let _ = logger.append_response_event(
+                        &request_id,
+                        "sse_parse_error",
+                        &serde_json::json!({
+                            "error": e.to_string(),
+                            "data_excerpt": excerpt,
+                        }),
+                    );
+                }
+                continue;
+            }
         };
         trace!("chat_completions received SSE chunk: {chunk:?}");
 

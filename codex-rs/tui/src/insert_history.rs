@@ -4,7 +4,7 @@ use std::io::Write;
 
 use crate::tui;
 use crossterm::Command;
-use crossterm::cursor::{MoveTo, MoveToNextLine};
+use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::Color as CColor;
 use crossterm::style::Colors;
@@ -13,7 +13,7 @@ use crossterm::style::SetAttribute;
 use crossterm::style::SetBackgroundColor;
 use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
-use crossterm::terminal::{Clear, ClearType};
+// No terminal clears in terminal-mode insertion; preserve user's theme.
 use ratatui::layout::Size;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -47,7 +47,9 @@ pub fn insert_history_lines_to_writer<B, W>(
 
     // Pre-wrap lines using word-aware wrapping so terminal scrollback sees the same
     // formatting as the TUI. This avoids character-level hard wrapping by the terminal.
-    let wrapped = word_wrap_lines(&lines, area.width.max(1));
+    // Wrap to the full content width of the viewport in standard mode.
+    let content_width = area.width.max(1);
+    let wrapped = word_wrap_lines(&lines, content_width);
     let wrapped_lines = wrapped.len() as u16;
     let cursor_top = if area.bottom() < screen_size.height {
         // If the viewport is not at the bottom of the screen, scroll it down to make room.
@@ -95,14 +97,7 @@ pub fn insert_history_lines_to_writer<B, W>(
     // └──────────────────────────────┘
     queue!(writer, SetScrollRegion(1..area.top())).ok();
 
-    // Set theme colors for the newlines and any unstyled content
-    let theme_fg = crate::colors::text();
-    let theme_bg = crate::colors::background();
-    queue!(
-        writer,
-        SetColors(Colors::new(theme_fg.into(), theme_bg.into()))
-    )
-    .ok();
+    // Do not force theme colors in terminal mode; let native terminal theme show.
 
     // NB: we are using MoveTo instead of set_cursor_position here to avoid messing with the
     // terminal's last_known_cursor_position, which hopefully will still be accurate after we
@@ -110,10 +105,12 @@ pub fn insert_history_lines_to_writer<B, W>(
     queue!(writer, MoveTo(0, cursor_top)).ok();
 
     for line in wrapped {
-        queue!(writer, MoveToNextLine(1)).ok();
-        queue!(writer, Clear(ClearType::UntilNewLine)).ok(); // Clear to end of line with current bg
+        // Emit a real newline so terminals reliably scroll when at the bottom
+        // of the scroll region. Some terminals do not scroll on CSI E
+        // (MoveToNextLine); LF is the most portable.
+        queue!(writer, Print("\r\n")).ok();
         write_spans(writer, line.iter()).ok();
-        queue!(writer, Clear(ClearType::UntilNewLine)).ok(); // Clear remainder of line after content
+        // Avoid Clear(EOL) painting solid backgrounds over terminal theme.
     }
 
     queue!(writer, ResetScrollRegion).ok();
@@ -123,6 +120,73 @@ pub fn insert_history_lines_to_writer<B, W>(
         queue!(writer, MoveTo(cursor_pos.x, cursor_pos.y)).ok();
     }
 
+    writer.flush().ok();
+}
+
+/// Variant of `insert_history_lines` that reserves `reserved_bottom_rows` at the
+/// bottom of the screen for a live UI (e.g., the input composer) and inserts
+/// history lines into the scrollback above that region.
+#[allow(dead_code)]
+pub(crate) fn insert_history_lines_above(terminal: &mut tui::Tui, reserved_bottom_rows: u16, lines: Vec<Line>) {
+    let mut out = std::io::stdout();
+    insert_history_lines_to_writer_above(terminal, &mut out, reserved_bottom_rows, lines);
+}
+
+#[allow(dead_code)]
+pub fn insert_history_lines_to_writer_above<B, W>(
+    terminal: &mut ratatui::Terminal<B>,
+    writer: &mut W,
+    reserved_bottom_rows: u16,
+    lines: Vec<Line>,
+) where
+    B: ratatui::backend::Backend,
+    W: Write,
+{
+    if lines.is_empty() { return; }
+    let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
+    let cursor_pos = terminal.get_cursor_position().ok();
+
+    // Compute the bottom of the reserved region; ensure at least 1 visible row remains
+    let screen_h = screen_size.height.max(1);
+    let reserved = reserved_bottom_rows.min(screen_h.saturating_sub(1));
+    let region_bottom = screen_h.saturating_sub(reserved).max(1);
+
+    // Pre-wrap to avoid terminal hard-wrap artifacts
+    let content_width = screen_size.width.max(1);
+    let wrapped = word_wrap_lines(&lines, content_width);
+
+    if region_bottom <= 1 {
+        // Degenerate case (startup or unknown size): fall back to simple
+        // line-by-line prints that let the terminal naturally scroll. This is
+        // safe before the first bottom-pane draw and avoids a 1-line scroll
+        // region that would overwrite the same line repeatedly.
+        for line in word_wrap_lines(&lines, screen_size.width.max(1)) {
+            write_spans(writer, line.iter()).ok();
+            queue!(writer, Print("\r\n")).ok();
+        }
+        writer.flush().ok();
+        return;
+    }
+
+    // Limit scroll region to rows [1 .. region_bottom] so the bottom reserved rows are untouched
+    queue!(writer, SetScrollRegion(1..region_bottom)).ok();
+    // Place cursor at the last line of the scroll region
+    queue!(writer, MoveTo(0, region_bottom.saturating_sub(1))).ok();
+
+    // Do not force theme colors in terminal mode; let native terminal theme show.
+
+    for line in wrapped {
+        // Ensure we're at the bottom row of the scroll region; printing a newline
+        // while at the bottom margin scrolls the region by one.
+        write_spans(writer, line.iter()).ok();
+        // Newline scrolls the region up by one when at the bottom margin.
+        queue!(writer, Print("\r\n")).ok();
+    }
+
+    queue!(writer, ResetScrollRegion).ok();
+    if let Some(cursor_pos) = cursor_pos {
+        queue!(writer, MoveTo(cursor_pos.x, cursor_pos.y)).ok();
+    }
     writer.flush().ok();
 }
 
