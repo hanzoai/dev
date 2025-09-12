@@ -1,16 +1,19 @@
-## @just-every/code v0.2.137
+## @just-every/code v0.2.138
 
-This release updates the Responses proxy defaults for better reliability and adds a developer script to probe the API.
+This release improves spinner creation reliability by honoring session auth and avoiding unnecessary retries.
 
 ### Changes
-- Dev: add `scripts/test-responses.js` to probe Responses API with ChatGPT/API key auth; includes schema/tools/store tests.
-- Proxy: default Responses v1; fail-fast on 5xx; add STRICT_HEADERS and RESPONSES_BETA override.
+
+- TUI/Spinner: honor active auth (ChatGPT vs API key) for custom spinner generation to avoid 401s.
+- Auth: prevent background AuthManager resets and align request shape with harness to stop retry loops.
+- Stability: reduce spinner‑creation failures by matching session auth preferences.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.136...v0.2.137
+Compare: https://github.com/just-every/code/compare/v0.2.137...v0.2.138
 
