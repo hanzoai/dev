@@ -1,11 +1,12 @@
-## @just-every/code v0.2.122
+## @just-every/code v0.2.140
 
-Update expanding agent context and improving stability.
+This release contains CI improvements with no user-facing changes.
 
 ### Changes
 
-- Agents: expand context to include fork enhancements for richer prompts.
-- Core: add generic guards to improve stability during upstream merges.
+- No user-facing changes; maintenance-only release with CI cache prewarming and policy hardening.
+- CI: prewarm Rust build cache via ./build-fast.sh to speed upstream-merge and issue-code agents.
+- CI: align cache home with enforced CARGO_HOME and enable cache-on-failure for more reliable runs.
 
 ### Install
 
@@ -14,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.121...v0.2.122
+Compare: https://github.com/just-every/code/compare/v0.2.139...v0.2.140
