@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.139] - 2025-09-12
+
+- TUI/Spinner: set generation reasoning effort to Medium to improve quality and avoid earlier Minimal/Low issues. (beee09fc)
+- Stability: scope change to spinner-generation JSON-schema turn only; main turns remain unchanged. (beee09fc)
+
 ## [0.2.138] - 2025-09-12
 
 - TUI/Spinner: honor active auth (ChatGPT vs API key) for custom spinner generation to avoid 401s. (e3f313b7)
