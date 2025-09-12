@@ -1386,6 +1386,7 @@ dependencies = [
  "shlex",
  "strum_macros 0.27.2",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "toml 0.9.5",

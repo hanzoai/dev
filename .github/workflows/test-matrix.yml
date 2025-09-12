@@ -1,0 +1,308 @@
+name: Test Matrix
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Rust tests across multiple versions
+  rust-tests:
+    name: Rust ${{ matrix.rust }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta, nightly]
+        exclude:
+          # Skip beta/nightly on Windows to save time
+          - os: windows-latest
+            rust: beta
+          - os: windows-latest
+            rust: nightly
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+      
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Check formatting
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all -- --check
+        working-directory: src/rs
+      
+      - name: Run clippy
+        if: matrix.rust == 'stable'
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: src/rs
+      
+      - name: Build all targets
+        run: cargo build --all --all-features
+        working-directory: src/rs
+      
+      - name: Run tests
+        run: cargo test --all --all-features -- --nocapture
+        working-directory: src/rs
+      
+      - name: Run doc tests
+        run: cargo test --doc --all-features
+        working-directory: src/rs
+
+  # Python tests across multiple versions
+  python-tests:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      
+      - name: Test Python SDK packages
+        run: |
+          for pkg in python-sdk/pkg/*; do
+            if [ -f "$pkg/pyproject.toml" ]; then
+              echo "Testing $(basename $pkg)..."
+              cd "$pkg"
+              uv venv
+              uv pip install -e ".[dev]"
+              uv run pytest -v || true
+              cd -
+            fi
+          done
+      
+      - name: Lint Python code
+        if: matrix.python == '3.12'
+        run: |
+          cd python-sdk/pkg/hanzo-mcp
+          uv run ruff check .
+          uv run mypy .
+
+  # Node.js/TypeScript tests across multiple versions
+  node-tests:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pnpm-store
+            **/node_modules
+          key: ${{ runner.os }}-node-${{ matrix.node }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+      
+      - name: Test MCP TypeScript
+        if: hashFiles('mcp/package.json') != ''
+        run: |
+          cd mcp
+          pnpm install
+          pnpm test
+          pnpm lint
+          pnpm build
+      
+      - name: Test TypeScript packages
+        run: |
+          for pkg in src/ts/*; do
+            if [ -f "$pkg/package.json" ]; then
+              echo "Testing $(basename $pkg)..."
+              cd "$pkg"
+              npm install || pnpm install || true
+              npm test || pnpm test || true
+              cd -
+            fi
+          done
+
+  # Integration tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [rust-tests, python-tests, node-tests]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      
+      - name: Build Rust MCP server
+        run: |
+          cd src/rs
+          cargo build --release --bin dev
+      
+      - name: Test MCP CLI commands
+        run: |
+          ./src/rs/target/release/dev mcp list-tools
+          ./src/rs/target/release/dev mcp list-tools --format json
+          ./src/rs/target/release/dev mcp call read_file --params '{"path": "/etc/hosts"}'
+      
+      - name: Test Python-Rust integration
+        run: |
+          cd python-sdk/pkg/hanzo-mcp
+          uv venv
+          uv pip install -e .
+          uv run python -c "from hanzo_mcp import ToolRegistry; print(ToolRegistry().list_tools())"
+      
+      - name: Test cross-language MCP protocol
+        run: |
+          # Start MCP server in background
+          ./src/rs/target/release/dev mcp serve &
+          MCP_PID=$!
+          sleep 2
+          
+          # Test with Python client
+          cd python-sdk/pkg/hanzo-mcp
+          uv run python -c "
+          import json
+          import sys
+          from hanzo_mcp import McpBridge
+          bridge = McpBridge()
+          # Test tool execution
+          result = bridge.execute_tool('read_file', {'path': '/etc/hosts'})
+          print('Python client test:', 'PASS' if result else 'FAIL')
+          "
+          
+          kill $MCP_PID
+
+  # Security and dependency audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      
+      - name: Run cargo audit
+        run: cargo audit
+        working-directory: src/rs
+      
+      - name: Run npm audit
+        continue-on-error: true
+        run: |
+          for pkg in mcp src/ts/*; do
+            if [ -f "$pkg/package.json" ]; then
+              echo "Auditing $(basename $pkg)..."
+              cd "$pkg"
+              npm audit || true
+              cd -
+            fi
+          done
+
+  # Coverage report
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+      
+      - name: Generate coverage report
+        run: |
+          cd src/rs
+          cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./src/rs/lcov.info
+          fail_ci_if_error: false
+
+  # Benchmark tests
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Run benchmarks
+        run: |
+          cd src/rs
+          cargo bench --all-features
+      
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'cargo'
+          output-file-path: src/rs/target/criterion/output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true

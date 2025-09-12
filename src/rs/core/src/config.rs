@@ -1124,6 +1124,7 @@ exclude_slash_tmp = true
                 network_access: false,
                 exclude_tmpdir_env_var: true,
                 exclude_slash_tmp: true,
+                allow_git_writes: false,
             },
             sandbox_workspace_write_cfg.derive_sandbox_policy(sandbox_mode_override)
         );

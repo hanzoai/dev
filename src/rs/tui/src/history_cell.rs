@@ -4270,6 +4270,7 @@ pub(crate) fn new_session_info(
     let SessionConfiguredEvent {
         model,
         session_id: _,
+        reasoning_effort: _,
         history_log_id: _,
         history_entry_count: _,
     } = event;

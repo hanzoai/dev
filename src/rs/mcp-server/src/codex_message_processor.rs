@@ -236,7 +236,7 @@ impl CodexMessageProcessor {
                 let response = NewConversationResponse {
                     conversation_id: ConversationId(conversation_id),
                     model: session_configured.model,
-                    reasoning_effort: session_configured.reasoning_effort,
+                    reasoning_effort: map_reasoning_effort_to_wire(session_configured.reasoning_effort),
                 };
                 self.outgoing.send_response(request_id, response).await;
             }

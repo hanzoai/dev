@@ -1170,6 +1170,7 @@ mod tests {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
+            allow_git_writes: false,
         };
         let tool = super::create_shell_tool_for_sandbox(&sandbox_policy);
         let OpenAiTool::Function(ResponsesApiTool {

@@ -17,7 +17,6 @@ members = [
     "mcp-types",
     "protocol",
     "ollama",
-    "protocol",
     "protocol-ts",
     "tui",
 ]

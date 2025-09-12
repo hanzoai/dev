@@ -23,6 +23,7 @@ use tracing_subscriber::EnvFilter;
 mod codex_message_processor;
 mod tool_config;
 mod tool_runner;
+mod tool_handlers;
 mod error_code;
 mod exec_approval;
 mod json_to_toml;
@@ -147,5 +148,57 @@ pub async fn run_main(
     // the processor and then to the stdout task.
     let _ = tokio::join!(stdin_reader_handle, processor_handle, stdout_writer_handle);
 
+    Ok(())
+}
+
+/// List available MCP tools
+pub async fn list_tools(category: Option<String>, format: String) -> IoResult<()> {
+    use crate::tool_handlers::unified::ToolRegistry;
+    
+    let registry = ToolRegistry::new();
+    let tools = if let Some(cat) = category {
+        registry.tools.values()
+            .filter(|t| t.category == cat)
+            .cloned()
+            .collect()
+    } else {
+        registry.list_tools()
+    };
+    
+    match format.as_str() {
+        "json" => {
+            println!("{}", serde_json::to_string_pretty(&tools).unwrap());
+        }
+        "text" | _ => {
+            for tool in tools {
+                println!("{}:", tool.name);
+                println!("  Category: {}", tool.category);
+                println!("  Description: {}", tool.description);
+                println!();
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Execute a specific MCP tool
+pub async fn call_tool(tool: String, params: String) -> IoResult<()> {
+    use crate::tool_handlers::unified::ToolRegistry;
+    
+    let registry = ToolRegistry::new();
+    let params: serde_json::Value = serde_json::from_str(&params)
+        .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, format!("Invalid JSON params: {}", e)))?;
+    
+    match registry.execute(&tool, params).await {
+        Ok(result) => {
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+        Err(e) => {
+            eprintln!("Tool execution failed: {}", e);
+            return Err(std::io::Error::new(ErrorKind::Other, e.to_string()));
+        }
+    }
+    
     Ok(())
 }

@@ -58,7 +58,7 @@ enum Subcommand {
     Logout(LogoutCommand),
 
     /// Experimental: run Hanzo Dev as an MCP server.
-    Mcp,
+    Mcp(McpCommand),
 
     /// Run the Protocol stream via stdin/stdout
     #[clap(visible_alias = "p")]
@@ -84,6 +84,42 @@ enum Subcommand {
 
     /// Diagnose PATH, binary collisions, and versions.
     Doctor,
+}
+
+#[derive(Debug, Parser)]
+struct McpCommand {
+    #[clap(skip)]
+    config_overrides: CliConfigOverrides,
+
+    #[command(subcommand)]
+    action: Option<McpSubcommand>,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum McpSubcommand {
+    /// Start the MCP server
+    Serve,
+    
+    /// List all available MCP tools
+    ListTools {
+        /// Filter by category
+        #[arg(long)]
+        category: Option<String>,
+        
+        /// Output format (json, text)
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+    
+    /// Execute a specific tool
+    Call {
+        /// Tool name
+        tool: String,
+        
+        /// Parameters as JSON
+        #[arg(long)]
+        params: String,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -174,8 +210,19 @@ async fn cli_main(dev_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> 
             prepend_config_flags(&mut exec_cli.config_overrides, cli.config_overrides);
             dev_exec::run_main(exec_cli, dev_linux_sandbox_exe).await?;
         }
-        Some(Subcommand::Mcp) => {
-            dev_mcp_server::run_main(dev_linux_sandbox_exe, cli.config_overrides).await?;
+        Some(Subcommand::Mcp(mut mcp_cli)) => {
+            prepend_config_flags(&mut mcp_cli.config_overrides, cli.config_overrides);
+            match mcp_cli.action {
+                None | Some(McpSubcommand::Serve) => {
+                    dev_mcp_server::run_main(dev_linux_sandbox_exe, mcp_cli.config_overrides).await?;
+                }
+                Some(McpSubcommand::ListTools { category, format }) => {
+                    dev_mcp_server::list_tools(category, format).await?;
+                }
+                Some(McpSubcommand::Call { tool, params }) => {
+                    dev_mcp_server::call_tool(tool, params).await?;
+                }
+            }
         }
         Some(Subcommand::Login(mut login_cli)) => {
             prepend_config_flags(&mut login_cli.config_overrides, cli.config_overrides);
