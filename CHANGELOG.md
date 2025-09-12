@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.140] - 2025-09-12
+
+- No user-facing changes; maintenance-only release with CI cache prewarming and policy hardening. (1df29a6f, 6f956990, fa505fb7)
+- CI: prewarm Rust build cache via ./build-fast.sh to speed upstream-merge and issue-code agents. (6f956990, fa505fb7)
+- CI: align cache home with enforced CARGO_HOME and enable cache-on-failure for more reliable runs. (1df29a6f)
+
 ## [0.2.139] - 2025-09-12
 
 - TUI/Spinner: set generation reasoning effort to Medium to improve quality and avoid earlier Minimal/Low issues. (beee09fc)
