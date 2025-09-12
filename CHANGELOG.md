@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.141] - 2025-09-12
+
+- Exec: allow suppressing per‑turn diff output via `CODE_SUPPRESS_TURN_DIFF` to reduce noise. (ad1baf1f)
+- CI: speed up issue‑code jobs with cached ripgrep/jq and add guards for protected paths and PR runtime. (ad1baf1f)
+
 ## [0.2.140] - 2025-09-12
 
 - No user-facing changes; maintenance-only release with CI cache prewarming and policy hardening. (1df29a6f, 6f956990, fa505fb7)
