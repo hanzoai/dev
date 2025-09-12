@@ -527,13 +527,12 @@ jobs:
             try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] }); } catch {}
 
       - name: Queue issue-comment (comment mode)
-        if: steps.safety.outputs.decision != 'block' && (steps.gate.outputs.allow_agent != 'true' || steps.gate.outputs.agent_mode != 'full')
+        if: steps.safety.outputs.decision == 'comment_only'
         uses: actions/github-script@v7
         with:
           script: |
             const owner = context.repo.owner; const repo = context.repo.repo;
             const issue_number = Number(process.env.ISSUE_NUMBER);
-            const slug = `${{ steps.slug.outputs.slug }}`;
             const decision = '${{ steps.safety.outputs.decision }}';
             const rr = `${{ steps.rate_limit.outputs.reason }}` || '';
             const rs = `${{ steps.safety.outputs.reason }}` || '';
@@ -542,7 +541,7 @@ jobs:
             if (rr) lines.push(`Rate: ${rr}`);
             if (rs) lines.push(`Safety: ${rs}`);
             const contextText = lines.join('\n');
-            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-comment', client_payload: { type: 'comment', issue_number, slug, context: contextText } });
+            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-comment', client_payload: { type: 'comment', issue_number, context: contextText } });
             core.notice(`Queued issue-comment for #${issue_number} (comment mode)`);
 
       - name: Queue implementation (issue-code workflow)
