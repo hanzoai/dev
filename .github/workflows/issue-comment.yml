@@ -271,17 +271,6 @@ jobs:
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
-      - name: Configure Code to use Chat Completions fallback
-        if: env.OPENAI_API_KEY != ''
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'TOML'
-          [model_providers.openai_chat]
-          name = "OpenAI (Chat)"
-          base_url = "http://127.0.0.1:5056/v1"
-          wire_api = "chat"
-          TOML
 
       - name: Generate comment with Code (read-only)
         id: gen
@@ -329,7 +318,7 @@ jobs:
           set +e
           { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
               OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:5056/v1" \
-              npx -y @just-every/code@latest exec -c model_provider=openai_chat -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
+              npx -y @just-every/code@latest exec -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
             2>&1 | tee .github/auto/AGENT_OUT.txt
           true
           set -e

@@ -442,18 +442,6 @@ jobs:
           # Wait briefly for readiness
           for i in {1..30}; do if nc -z 127.0.0.1 5055; then break; else sleep 0.2; fi; done || true
 
-      - name: Configure Code to use Chat Completions fallback
-        if: steps.check_upstream.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'TOML'
-          # CI-local provider that forces the classic Chat Completions wire API via the proxy.
-          [model_providers.openai_chat]
-          name = "OpenAI (Chat)"
-          base_url = "http://127.0.0.1:5055/v1"
-          wire_api = "chat"
-          TOML
 
       - name: Print proxy startup log tail
         if: steps.check_upstream.outputs.skip != 'true'
@@ -694,7 +682,6 @@ jobs:
             npm_config_cache="$SAFE_HOME/.npm" \
             npx -y @just-every/code@latest \
             exec \
-            -c model_provider=openai_chat \
             -s workspace-write \
             -c sandbox_workspace_write.allow_git_writes=true \
             -c sandbox_workspace_write.network_access=true \
