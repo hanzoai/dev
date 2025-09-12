@@ -309,7 +309,7 @@ impl ThemeSelectionView {
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     cfg.model_provider.clone(),
-                    cfg.model_reasoning_effort,
+                    codex_core::config_types::ReasoningEffort::Medium,
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
