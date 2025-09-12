@@ -295,7 +295,19 @@ fn run_ratatui_app(
         prev_hook(info);
     }));
     let (mut terminal, terminal_info) = tui::init(&config)?;
-    terminal.clear()?;
+    if config.tui.alternate_screen {
+        terminal.clear()?;
+    } else {
+        // Start in standard terminal mode: leave alt screen and DO NOT clear
+        // the normal buffer. We want prior shell history to remain intact and
+        // new chat output to append inline into scrollback. Ensure line wrap is
+        // enabled and cursor is left where the shell put it.
+        let _ = tui::leave_alt_screen_only();
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::terminal::EnableLineWrap
+        );
+    }
 
     // Show update banner in terminal history (instead of stderr) so it is visible
     // within the TUI scrollback. Building spans keeps styling consistent.

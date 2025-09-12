@@ -133,7 +133,8 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         .map(|lock| lock.is_some())
         .unwrap_or(false);
     let has_active_agents = !chat.active_agents.is_empty() || chat.agents_ready_to_start;
-    let hud_present = has_browser_screenshot || has_active_agents;
+    // In standard terminal mode, suppress HUD entirely.
+    let hud_present = if chat.standard_terminal_mode { false } else { has_browser_screenshot || has_active_agents };
 
     let bottom_desired = chat.bottom_pane.desired_height(area.width);
     let font_cell = chat.measured_font_size();
@@ -161,5 +162,13 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         Some(target)
     };
 
-    hm.begin_frame(area, hud_present, bottom_desired, font_cell, hud_target)
+    hm.begin_frame(
+        area,
+        hud_present,
+        bottom_desired,
+        font_cell,
+        hud_target,
+        // Disable status bar when in standard terminal mode
+        !chat.standard_terminal_mode,
+    )
 }

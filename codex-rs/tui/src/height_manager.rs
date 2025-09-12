@@ -116,6 +116,8 @@ impl HeightManager {
         // Optional target height for HUD computed by caller (e.g., stacked/collapsed layout).
         // When None, a default aspect-based calculation is used.
         hud_target_override: Option<u16>,
+        // When false, do not reserve rows for the status bar.
+        status_enabled: bool,
     ) -> Vec<Rect> {
         #[cfg(debug_assertions)]
         {
@@ -128,8 +130,8 @@ impl HeightManager {
             self.last_area = Some(area);
         }
 
-        // Status bar height is fixed at 3.
-        let status_h = 3u16;
+        // Status bar height is fixed at 3 when enabled.
+        let status_h = if status_enabled { 3u16 } else { 0u16 };
 
         // Cap the bottom pane to a percentage of screen height, with a minimum of 5 rows.
         let percent_cap: u16 = ((area.height as u32).saturating_mul(self.cfg.bottom_percent_cap as u32) / 100) as u16;
