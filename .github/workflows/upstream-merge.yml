@@ -384,7 +384,16 @@ jobs:
                 if (!incoming['openai-beta']) incoming['openai-beta'] = 'responses=experimental';
               }
               if (!incoming['originator']) incoming['originator'] = 'codex_cli_rs';
+              // Normalize hop-by-hop and target-specific headers for upstream
+              // Ensure TLS SNI/Host align with the upstream authority
+              delete incoming['host'];
+              incoming['host'] = up.host; // includes port when present
               incoming['connection'] = 'keep-alive';
+              // Normalize content-length to actual buffered body size when present
+              if (incoming['content-length']) incoming['content-length'] = String(body.length);
+              // Remove proxy-specific headers that should never reach upstream
+              delete incoming['proxy-connection'];
+              delete incoming['proxy-authorization'];
 
               log({ level: 'info', rid, phase: 'request', method: req.method, url: up.toString(), headers: redactHeaders(incoming), body_bytes: body.length });
 
@@ -395,6 +404,12 @@ jobs:
                 path: up.pathname + up.search,
                 method: req.method,
                 headers: incoming,
+                // Ensure correct SNI for TLS handshake
+                servername: up.hostname,
+                // Reuse connections for streaming stability
+                agent: (up.protocol === 'https:'
+                  ? new https.Agent({ keepAlive: true, maxSockets: 64, servername: up.hostname })
+                  : new http.Agent({ keepAlive: true, maxSockets: 64 }))
               };
 
               const upstream = (up.protocol === 'https:' ? https : http).request(opts, (upr) => {
