@@ -652,25 +652,4 @@ fn map_ask_for_approval_from_wire(a: codex_protocol::protocol::AskForApproval) -
     }
 }
 
-fn map_ask_for_approval_to_wire(a: core_protocol::AskForApproval) -> codex_protocol::protocol::AskForApproval {
-    match a {
-        core_protocol::AskForApproval::UnlessTrusted => codex_protocol::protocol::AskForApproval::UnlessTrusted,
-        core_protocol::AskForApproval::OnFailure => codex_protocol::protocol::AskForApproval::OnFailure,
-        core_protocol::AskForApproval::OnRequest => codex_protocol::protocol::AskForApproval::OnRequest,
-        core_protocol::AskForApproval::Never => codex_protocol::protocol::AskForApproval::Never,
-    }
-}
-
-fn map_reasoning_effort_to_wire(
-    e: codex_core::config_types::ReasoningEffort,
-) -> codex_protocol::config_types::ReasoningEffort {
-    use codex_core::config_types::ReasoningEffort as CoreRE;
-    use codex_protocol::config_types::ReasoningEffort as WireRE;
-    match e {
-        CoreRE::Minimal => WireRE::Minimal,
-        CoreRE::Low => WireRE::Low,
-        CoreRE::Medium => WireRE::Medium,
-        CoreRE::High => WireRE::High,
-        CoreRE::None => WireRE::Medium,
-    }
-}
+// Unused legacy mappers removed to avoid warnings.
