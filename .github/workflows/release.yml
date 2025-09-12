@@ -382,6 +382,62 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Start local OpenAI proxy for release (hardened)
+        if: env.OPENAI_API_KEY != ''
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          cat > .github/auto/openai-proxy.js <<'JS'
+          const http = require('http');
+          const https = require('https');
+          const crypto = require('crypto');
+          const { URL } = require('url');
+          const PORT = process.env.PORT || 5058;
+          const API_KEY = process.env.OPENAI_API_KEY || '';
+          const UPSTREAM = new URL(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
+          const ALLOWED = ['/v1/chat/completions','/v1/responses'];
+          if (!API_KEY) { process.exit(0); }
+          function log(ev){ try{ console.log(JSON.stringify({ ts:new Date().toISOString(), ...ev })); }catch{} }
+          const server = http.createServer((req, res) => {
+            const rid = crypto.randomUUID();
+            if (!ALLOWED.some(p => req.url.startsWith(p))) { res.writeHead(403,{'content-type':'application/json'}); res.end(JSON.stringify({error:'blocked', path:req.url})); return; }
+            const chunks=[]; let size=0; req.on('data', c=>{chunks.push(c); size+=c.length; if (size>2*1024*1024) req.destroy();});
+            req.on('end', ()=>{
+              const body = Buffer.concat(chunks);
+              const up = new URL(req.url, UPSTREAM);
+              const headers = { ...req.headers };
+              if (!headers['content-type']) headers['content-type']='application/json';
+              if (!headers['accept']) headers['accept']='text/event-stream';
+              headers['authorization'] = `Bearer ${API_KEY}`;
+              if (up.pathname.startsWith('/v1/responses') && !headers['openai-beta']) headers['openai-beta']='responses=experimental';
+              delete headers['host']; headers['host']=up.host;
+              if (headers['content-length']) headers['content-length']=String(body.length);
+              const opts = { protocol: up.protocol, hostname: up.hostname, port: up.port || (up.protocol==='https:'?443:80), path: up.pathname+up.search, method: req.method, headers,
+                servername: up.hostname, agent:(up.protocol==='https:'? new https.Agent({keepAlive:true, maxSockets:64, servername: up.hostname}) : new http.Agent({keepAlive:true, maxSockets:64})) };
+              const fw = (up.protocol==='https:'?https:http).request(opts, r=>{ res.writeHead(r.statusCode||500, r.headers); r.pipe(res); });
+              fw.on('error', e=>{ log({ level:'error', rid, phase:'upstream_error', err:String(e) }); res.writeHead(502,{'content-type':'application/json'}); res.end(JSON.stringify({ error:'upstream', message: String(e.message||e) })); });
+              fw.end(body);
+            });
+          });
+          server.headersTimeout=650000; server.keepAliveTimeout=650000;
+          server.listen(PORT,'127.0.0.1',()=>{ log({ level:'info', msg:'proxy listening', addr:'127.0.0.1', port: PORT }); });
+          JS
+          node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+          for i in {1..30}; do if nc -z 127.0.0.1 5058; then break; else sleep 0.2; fi; done || true
+
+      - name: Configure Code to use Chat Completions fallback
+        if: env.OPENAI_API_KEY != ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.codex"
+          cat > "$HOME/.codex/config.toml" <<'TOML'
+          [model_providers.openai_chat]
+          name = "OpenAI (Chat)"
+          base_url = "http://127.0.0.1:5058/v1"
+          wire_api = "chat"
+          TOML
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -657,9 +713,19 @@ jobs:
 
           # Run Code in fully automated exec mode against the repo root.
           # Note: the working-directory flag is `--cd` on the `exec` subcommand.
-          ./.code-bin/code exec --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt || {
+          OPENAI_BASE_URL="http://127.0.0.1:5058/v1" \
+          ./.code-bin/code exec -c model_provider=openai_chat --cd "$GITHUB_WORKSPACE" --full-auto --skip-git-repo-check < release-notes/prompt.expanded.txt | tee .github/auto/RELEASE_AGENT_OUT.txt || {
             echo "Code exec returned non-zero; continuing to check for outputs..." >&2
           }
+
+          # Assert no fatal streaming/server errors if proxy in use
+          if [ -s .github/auto/RELEASE_AGENT_OUT.txt ]; then
+            if rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/RELEASE_AGENT_OUT.txt >/dev/null 2>&1; then
+              echo "Agent reported a fatal error (stream/server). Failing job." >&2
+              rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/RELEASE_AGENT_OUT.txt || true
+              exit 1
+            fi
+          fi
 
           # Post-process: scrub upstream contributors from the Thanks section (e.g., usernames ending with -oai)
           if [ -s release-notes/RELEASE_NOTES.md ]; then
