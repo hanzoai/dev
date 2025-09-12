@@ -303,6 +303,13 @@ jobs:
                 'Output must strictly match the JSON schema provided via text.format.'
               ].join(' ');
 
+              function mask(s) {
+                if (!s) return '';
+                const t = String(s);
+                if (t.length <= 8) return '<len='+t.length+"/>";
+                return t.slice(0,3) + '…' + t.slice(-4) + ` <len=${t.length}>`;
+              }
+
               async function callResponses(model) {
                 const input = [
                   {
@@ -346,13 +353,25 @@ jobs:
                   parallel_tool_calls: false
                 };
 
-                return fetch(base + '/responses', {
+                const url = base + '/responses';
+                const headers = {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Authorization': `Bearer ${apiKey}`,
+                  'OpenAI-Beta': 'responses=v1',
+                  'originator': 'codex_ci_triage',
+                  'version': '0.0.0'
+                };
+                // Minimal debug context (no secrets)
+                try {
+                  core.notice(`Safety: calling ${model} at /responses (payload bytes=${Buffer.from(JSON.stringify(payload)).length})`);
+                  const keyInfo = apiKey ? `present (${mask(apiKey)})` : 'missing';
+                  core.notice(`Safety: OPENAI_API_KEY=${keyInfo}`);
+                } catch {}
+
+                return fetch(url, {
                   method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                    'OpenAI-Beta': 'responses=v1'
-                  },
+                  headers,
                   body: JSON.stringify(payload)
                 });
               }
@@ -364,9 +383,14 @@ jobs:
                 res = await callResponses('gpt-4o-mini');
               }
               if (!res.ok) {
+                let body = '';
+                try { body = await res.text(); } catch {}
+                const rid = res.headers.get('x-request-id') || '-';
+                const excerpt = body && body.length > 800 ? body.slice(0,800) + '…' : body;
                 core.setOutput('decision', 'comment_only');
-                core.setOutput('reason', `Safety API error: ${res.status} ${res.statusText}`);
-                core.notice(`Safety: comment_only (API ${res.status} ${res.statusText})`);
+                core.setOutput('reason', `Safety API error: ${res.status} ${res.statusText} (request-id: ${rid})`);
+                core.notice(`Safety: comment_only (API ${res.status} ${res.statusText}; request-id: ${rid})`);
+                if (excerpt) core.notice(`Safety: error body: ${excerpt}`);
               } else {
                 const data = await res.json();
                 let json = {};
