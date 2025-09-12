@@ -6222,6 +6222,50 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
 
     lines.push(Line::from(""));
 
+    // 🔐 Authentication
+    lines.push(Line::from(vec!["🔐 ".into(), "Authentication".bold()]));
+    {
+        use codex_login::{AuthMode, CodexAuth, OPENAI_API_KEY_ENV_VAR, try_read_auth_json};
+
+        // Determine effective auth mode the core would choose
+        let auth_result = CodexAuth::from_codex_home(
+            &config.codex_home,
+            AuthMode::ChatGPT,
+            &config.responses_originator_header,
+        );
+
+        match auth_result {
+            Ok(Some(auth)) => match auth.mode {
+                AuthMode::ApiKey => {
+                    // Prefer suffix from auth.json; fall back to env var if needed
+                    let suffix = try_read_auth_json(&codex_login::get_auth_file(&config.codex_home))
+                        .ok()
+                        .and_then(|a| a.openai_api_key)
+                        .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
+                        .map(|k| {
+                            let n = k.len().saturating_sub(4);
+                            k[n..].to_string()
+                        })
+                        .unwrap_or_else(|| "????".to_string());
+                    lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
+                }
+                AuthMode::ChatGPT => {
+                    let account_id = auth
+                        .get_account_id()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    lines.push(Line::from(format!(
+                        "  • Method: ChatGPT account (account_id: {account_id})"
+                    )));
+                }
+            },
+            _ => {
+                lines.push(Line::from("  • Method: unauthenticated"));
+            }
+        }
+    }
+
+    lines.push(Line::from(""));
+
     // 📊 Token Usage
     lines.push(Line::from(vec!["📊 ".into(), "Token Usage".bold()]));
     // Input: <input> [+ <cached> cached]

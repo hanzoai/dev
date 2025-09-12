@@ -171,15 +171,14 @@ async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
     let branch = get_git_branch(&sess.cwd).unwrap_or_else(|| "unknown".to_string());
     let reasoning_effort = sess.client.get_reasoning_effort();
 
-    // Build current system status
+    // Build current system status (UI-only; not persisted)
     let mut current_status = format!(
         r#"== System Status ==
-[automatic message added by system]
+ [automatic message added by system]
 
-cwd: {}
-branch: {}
-reasoning: {:?}"#,
-        cwd, branch, reasoning_effort
+ cwd: {cwd}
+ branch: {branch}
+ reasoning: {reasoning_effort:?}"#
     );
 
     // Prepare browser context + optional screenshot

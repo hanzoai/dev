@@ -43,9 +43,24 @@ const ALLOWED = ['/v1/chat/completions', '/v1/responses'];
 //   EXIT_ON_5XX=1       -> Exit process non‑zero if a 5xx response head is seen
 //   READY_FILE=path      -> Touch this file when the server is listening
 //   LOG_DEST=stdout|stderr (default stdout)
+// Debug toggles:
+//   DISABLE_KEEPALIVE=1  -> Do not reuse upstream connections
+//   FORCE_CLOSE=1         -> Send 'Connection: close' to upstream
+//   NO_GZIP=1             -> Set 'accept-encoding: identity'
+//   STRIP_SESSION_ID=1    -> Remove 'session_id' from upstream request headers
+//   IDEMPOTENCY_KEY=auto  -> Add an Idempotency-Key header per request (uuid)
+//   LOG_ERROR_BODY=1      -> Log non-2xx response body (truncated)
+//   LOG_ERROR_BODY_BYTES=1024 -> Max bytes to log from error body
 const EXIT_ON_5XX = process.env.EXIT_ON_5XX === '1' || false;
 const READY_FILE = process.env.READY_FILE || '';
 const LOG_DEST = (process.env.LOG_DEST || 'stdout').toLowerCase();
+const DISABLE_KEEPALIVE = process.env.DISABLE_KEEPALIVE === '1' || false;
+const FORCE_CLOSE = process.env.FORCE_CLOSE === '1' || false;
+const NO_GZIP = process.env.NO_GZIP === '1' || false;
+const STRIP_SESSION_ID = process.env.STRIP_SESSION_ID === '1' || false;
+const IDEMPOTENCY_KEY = (process.env.IDEMPOTENCY_KEY || '').toLowerCase();
+const LOG_ERROR_BODY = process.env.LOG_ERROR_BODY === '1' || false;
+const LOG_ERROR_BODY_BYTES = Number(process.env.LOG_ERROR_BODY_BYTES || 2048);
 
 function outWrite(s) {
   if (LOG_DEST === 'stderr') process.stderr.write(s + '\n');
@@ -96,16 +111,19 @@ const server = http.createServer((req, res) => {
     const incoming = { ...req.headers };
     if (!incoming['content-type']) incoming['content-type'] = 'application/json';
     if (!incoming['accept']) incoming['accept'] = 'text/event-stream';
+    if (NO_GZIP) incoming['accept-encoding'] = 'identity';
     incoming['authorization'] = `Bearer ${API_KEY}`; // replace with real key
     if (up.pathname.startsWith('/v1/responses')) {
       if (!incoming['openai-beta']) incoming['openai-beta'] = 'responses=experimental';
     }
     if (!incoming['originator']) incoming['originator'] = 'codex_cli_rs';
+    if (STRIP_SESSION_ID && 'session_id' in incoming) delete incoming['session_id'];
     delete incoming['host']; incoming['host'] = up.host;
-    incoming['connection'] = 'keep-alive';
+    incoming['connection'] = FORCE_CLOSE ? 'close' : 'keep-alive';
     if (incoming['content-length']) incoming['content-length'] = String(body.length);
     delete incoming['proxy-connection'];
     delete incoming['proxy-authorization'];
+    if (IDEMPOTENCY_KEY === 'auto') incoming['idempotency-key'] = crypto.randomUUID();
 
     log({ level: 'info', rid, phase: 'request', method: req.method, url: up.toString(), headers: redactHeaders(incoming), body_bytes: body.length });
 
@@ -118,8 +136,8 @@ const server = http.createServer((req, res) => {
       headers: incoming,
       servername: up.hostname,
       agent: (up.protocol === 'https:'
-        ? new https.Agent({ keepAlive: true, maxSockets: 64, servername: up.hostname })
-        : new http.Agent({ keepAlive: true, maxSockets: 64 }))
+        ? new https.Agent({ keepAlive: !DISABLE_KEEPALIVE, maxSockets: 64, servername: up.hostname })
+        : new http.Agent({ keepAlive: !DISABLE_KEEPALIVE, maxSockets: 64 }))
     };
 
     const upstream = (up.protocol === 'https:' ? https : http).request(opts, (upr) => {
@@ -131,8 +149,16 @@ const server = http.createServer((req, res) => {
         upr.on('end', () => { try { process.exitCode = 2; } catch {} });
       }
       let total = 0;
-      upr.on('data', (chunk) => { total += chunk.length; });
-      upr.on('end', () => { log({ level: 'info', rid, phase: 'response_end', status: upr.statusCode, bytes: total, request_id: resHeaders['x-request-id'] || null }); });
+      const chunks = [];
+      upr.on('data', (chunk) => { total += chunk.length; if (LOG_ERROR_BODY && upr.statusCode && upr.statusCode >= 400) { if (chunks.length < 32 && total <= LOG_ERROR_BODY_BYTES) chunks.push(chunk); } });
+      upr.on('end', () => {
+        if (LOG_ERROR_BODY && upr.statusCode && upr.statusCode >= 400) {
+          let bodyStr = '';
+          try { bodyStr = Buffer.concat(chunks).toString('utf8'); } catch {}
+          log({ level: 'error', rid, phase: 'response_error_body', status: upr.statusCode, body: bodyStr.slice(0, LOG_ERROR_BODY_BYTES) });
+        }
+        log({ level: 'info', rid, phase: 'response_end', status: upr.statusCode, bytes: total, request_id: resHeaders['x-request-id'] || null });
+      });
       upr.on('error', (e) => { log({ level: 'error', rid, phase: 'response_error', err: String(e) }); });
       upr.pipe(res);
     });
