@@ -844,6 +844,9 @@ pub struct SessionConfiguredEvent {
     /// Tell the client what model is being queried.
     pub model: String,
 
+    /// The reasoning effort level for this session.
+    pub reasoning_effort: ReasoningEffortConfig,
+
     /// Identifier of the history log file (inode on Unix, 0 otherwise).
     pub history_log_id: u64,
 

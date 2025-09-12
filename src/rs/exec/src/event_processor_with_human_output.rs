@@ -509,6 +509,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 let SessionConfiguredEvent {
                     session_id,
                     model,
+                    reasoning_effort: _,
                     history_log_id: _,
                     history_entry_count: _,
                 } = session_configured_event;
@@ -516,7 +517,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 ts_println!(
                     self,
                     "{} {}",
-                    "codex session".style(self.magenta).style(self.bold),
+                    "hanzo dev session".style(self.magenta).style(self.bold),
                     session_id.to_string().style(self.dimmed)
                 );
 

@@ -156,6 +156,7 @@ pub struct NewConversationParams {
 pub struct NewConversationResponse {
     pub conversation_id: ConversationId,
     pub model: String,
+    pub reasoning_effort: ReasoningEffort,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]

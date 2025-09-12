@@ -94,7 +94,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Yes, allow Codex to work in this folder without asking for approval",
+                "Yes, allow Hanzo Dev to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -105,7 +105,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Allow Codex to work in this folder without asking for approval",
+                "Allow Hanzo Dev to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,

@@ -259,6 +259,7 @@ mod tests {
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id: Uuid::new_v4(),
                 model: "gpt-4o".to_string(),
+                reasoning_effort: dev_protocol::config_types::ReasoningEffort::Medium,
                 history_log_id: 1,
                 history_entry_count: 1000,
             }),
@@ -288,6 +289,7 @@ mod tests {
         let session_configured_event = SessionConfiguredEvent {
             session_id: Uuid::new_v4(),
             model: "gpt-4o".to_string(),
+            reasoning_effort: dev_protocol::config_types::ReasoningEffort::Medium,
             history_log_id: 1,
             history_entry_count: 1000,
         };
