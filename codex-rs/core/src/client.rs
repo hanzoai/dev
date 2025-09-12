@@ -30,6 +30,7 @@ use crate::client_common::ResponseStream;
 use crate::client_common::ResponsesApiRequest;
 use crate::client_common::create_reasoning_param_for_request;
 use crate::config::Config;
+use crate::openai_model_info::get_model_info;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
@@ -117,6 +118,12 @@ impl ModelClient {
     #[allow(dead_code)]
     pub fn get_text_verbosity(&self) -> TextVerbosityConfig {
         self.verbosity
+    }
+
+    pub fn get_auto_compact_token_limit(&self) -> Option<i64> {
+        self.config.model_auto_compact_token_limit.or_else(|| {
+            get_model_info(&self.config.model_family).and_then(|info| info.auto_compact_token_limit)
+        })
     }
 
     /// Dispatches to either the Responses or Chat implementation depending on
