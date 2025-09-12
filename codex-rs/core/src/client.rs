@@ -647,7 +647,21 @@ async fn process_sse<S>(
         let event: SseEvent = match serde_json::from_str(&sse.data) {
             Ok(event) => event,
             Err(e) => {
-                debug!("Failed to parse SSE event: {e}, data: {}", &sse.data);
+                // Log parse error with data excerpt, and record it in the debug logger as well.
+                let mut excerpt = sse.data.clone();
+                const MAX: usize = 600;
+                if excerpt.len() > MAX { excerpt.truncate(MAX); }
+                debug!("Failed to parse SSE event: {e}, data: {excerpt}");
+                if let Ok(logger) = debug_logger.lock() {
+                    let _ = logger.append_response_event(
+                        &request_id,
+                        "sse_parse_error",
+                        &serde_json::json!({
+                            "error": e.to_string(),
+                            "data_excerpt": excerpt,
+                        }),
+                    );
+                }
                 continue;
             }
         };
