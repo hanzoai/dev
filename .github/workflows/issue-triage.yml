@@ -345,7 +345,7 @@ jobs:
                           id: { type: 'string', description: '2–4 lowercase words a–z0–9 joined by single dashes (repo-unique if possible).', pattern: '^[a-z0-9]+(?:-[a-z0-9]+){1,3}$' }
                         },
                         additionalProperties: false,
-                        required: ['decision', 'reason']
+                        required: ['decision', 'reason', 'id']
                       }
                     }
                   },
@@ -365,8 +365,6 @@ jobs:
                 // Minimal debug context (no secrets)
                 try {
                   core.notice(`Safety: calling ${model} at /responses (payload bytes=${Buffer.from(JSON.stringify(payload)).length})`);
-                  const keyInfo = apiKey ? `present (${mask(apiKey)})` : 'missing';
-                  core.notice(`Safety: OPENAI_API_KEY=${keyInfo}`);
                 } catch {}
 
                 return fetch(url, {
