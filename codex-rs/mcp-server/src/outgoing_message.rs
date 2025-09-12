@@ -125,6 +125,7 @@ impl OutgoingMessageSender {
         .await;
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn send_server_notification(&self, notification: ServerNotification) {
         let _ = self
             .sender
@@ -148,6 +149,7 @@ pub(crate) enum OutgoingMessage {
     Notification(OutgoingNotification),
     /// AppServerNotification is specific to the case where this is run as an
     /// "app server" as opposed to an MCP server.
+    #[allow(dead_code)]
     AppServerNotification(ServerNotification),
     Response(OutgoingResponse),
     Error(OutgoingError),
