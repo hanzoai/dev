@@ -693,6 +693,30 @@ jobs:
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
 
+      - name: Assert agent success (fail on streaming/errors)
+        if: steps.check_upstream.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo "Checking agent output for fatal errors..."
+          if rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/AGENT_STDOUT.txt >/dev/null 2>&1; then
+            echo "Agent reported a fatal error (stream/server). Failing job." >&2
+            rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/AGENT_STDOUT.txt || true
+            exit 1
+          fi
+          # Also flag 5xx responses from the proxy logs if present
+          if [ -s .github/auto/openai-proxy.log ]; then
+            if rg -n '"phase":"response_head".*"status":5\\d\\d' .github/auto/openai-proxy.log >/dev/null 2>&1; then
+              echo "Proxy observed 5xx from upstream during agent run. Failing job." >&2
+              rg -n '"phase":"response_head".*"status":5\\d\\d' .github/auto/openai-proxy.log | tail -n 5 || true
+              exit 1
+            fi
+            if rg -n '"phase":"upstream_error"' .github/auto/openai-proxy.log >/dev/null 2>&1; then
+              echo "Proxy upstream_error entries found. Failing job." >&2
+              rg -n '"phase":"upstream_error"' .github/auto/openai-proxy.log | tail -n 10 || true
+              exit 1
+            fi
+          fi
+
       - name: Upload artifact - openai-proxy.log
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
