@@ -27,6 +27,10 @@ jobs:
     name: Implement changes and open PR
     runs-on: ubuntu-latest
     env:
+      # Consistent Cargo/rustup homes for caching across all workflows
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
       PROTECTED_GLOBS: |
         .github/**
