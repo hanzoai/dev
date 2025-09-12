@@ -9,7 +9,7 @@
 // - Scrubs sensitive headers from logs; logs are structured JSON
 // - Reuses connections and sets generous timeouts for SSE
 //
-// Usage:
+// Usage (local):
 //   # 1) Export your real API key for the proxy process
 //   export OPENAI_API_KEY="sk-..."
 //   # 2) Start the proxy (default port 5055)
@@ -34,10 +34,23 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const PORT = process.env.PORT || 5055;
+const PORT = Number(process.env.PORT || 5055);
 const API_KEY = process.env.OPENAI_API_KEY || '';
 const UPSTREAM = new URL(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
 const ALLOWED = ['/v1/chat/completions', '/v1/responses'];
+
+// CI options:
+//   EXIT_ON_5XX=1       -> Exit process non‑zero if a 5xx response head is seen
+//   READY_FILE=path      -> Touch this file when the server is listening
+//   LOG_DEST=stdout|stderr (default stdout)
+const EXIT_ON_5XX = process.env.EXIT_ON_5XX === '1' || false;
+const READY_FILE = process.env.READY_FILE || '';
+const LOG_DEST = (process.env.LOG_DEST || 'stdout').toLowerCase();
+
+function outWrite(s) {
+  if (LOG_DEST === 'stderr') process.stderr.write(s + '\n');
+  else process.stdout.write(s + '\n');
+}
 
 if (!API_KEY) {
   console.error('[fatal] OPENAI_API_KEY missing');
@@ -58,7 +71,7 @@ function redactHeaders(h) {
 }
 
 function log(ev) {
-  try { console.log(JSON.stringify({ ts: new Date().toISOString(), ...ev })); } catch {}
+  try { outWrite(JSON.stringify({ ts: new Date().toISOString(), ...ev })); } catch {}
 }
 
 const server = http.createServer((req, res) => {
@@ -113,6 +126,10 @@ const server = http.createServer((req, res) => {
       const resHeaders = { ...upr.headers };
       res.writeHead(upr.statusCode || 500, resHeaders);
       log({ level: 'info', rid, phase: 'response_head', status: upr.statusCode, headers: redactHeaders(resHeaders) });
+      if (EXIT_ON_5XX && upr.statusCode && upr.statusCode >= 500) {
+        // Propagate response then schedule exit(2) once stream completes
+        upr.on('end', () => { try { process.exitCode = 2; } catch {} });
+      }
       let total = 0;
       upr.on('data', (chunk) => { total += chunk.length; });
       upr.on('end', () => { log({ level: 'info', rid, phase: 'response_end', status: upr.statusCode, bytes: total, request_id: resHeaders['x-request-id'] || null }); });
@@ -130,5 +147,9 @@ const server = http.createServer((req, res) => {
 });
 server.headersTimeout = 650000;
 server.keepAliveTimeout = 650000;
-server.listen(PORT, '127.0.0.1', () => { log({ level: 'info', msg: 'proxy listening', addr: '127.0.0.1', port: PORT }); });
-
+server.listen(PORT, '127.0.0.1', () => {
+  log({ level: 'info', msg: 'proxy listening', addr: '127.0.0.1', port: PORT });
+  if (READY_FILE) {
+    try { require('fs').writeFileSync(READY_FILE, String(Date.now())); } catch {}
+  }
+});
