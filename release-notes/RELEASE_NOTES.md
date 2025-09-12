@@ -1,12 +1,12 @@
-## @just-every/code v0.2.140
+## @just-every/code v0.2.142
 
-This release contains CI improvements with no user-facing changes.
+This release improves CI automation for cleaner, more reliable runs.
 
 ### Changes
 
-- No user-facing changes; maintenance-only release with CI cache prewarming and policy hardening.
-- CI: prewarm Rust build cache via ./build-fast.sh to speed upstream-merge and issue-code agents.
-- CI: align cache home with enforced CARGO_HOME and enable cache-on-failure for more reliable runs.
+- CI: avoid placeholder-only issue comments to reduce noise.
+- CI: gate Code generation on OPENAI_API_KEY; skip gracefully when missing.
+- CI: ensure proxy step runs reliably in workflows.
 
 ### Install
 
@@ -15,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.139...v0.2.140
+Compare: https://github.com/just-every/code/compare/v0.2.141...v0.2.142

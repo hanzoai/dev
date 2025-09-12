@@ -429,6 +429,8 @@ jobs:
     name: Post triage comment to issue (dispatch via Code)
     if: github.event_name == 'repository_dispatch' && github.event.action == 'issue-comment'
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - name: Prepare triage context
         id: ctx
@@ -468,8 +470,6 @@ jobs:
       - name: Start local OpenAI proxy (optional; hardened)
         if: env.OPENAI_API_KEY != ''
         id: proxy
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p .github/auto
@@ -477,6 +477,7 @@ jobs:
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
       - name: Generate triage comment with Code (read-only)
+        if: env.OPENAI_API_KEY != ''
         id: gen
         continue-on-error: true
         run: |
@@ -513,6 +514,7 @@ jobs:
           set -e
 
       - name: Extract generated comment
+        if: env.OPENAI_API_KEY != ''
         run: |
           set -euo pipefail
           node - <<'JS'
@@ -527,10 +529,12 @@ jobs:
             const closeIdx = lower.indexOf(closeTag, openIdx + openTag.length);
             if (closeIdx !== -1) body = t.slice(openIdx + openTag.length, closeIdx).trim();
           }
-          if (body) fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
+          const PLACEHOLDER = '…final Markdown comment…';
+          if (body && body !== PLACEHOLDER) fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
           JS
 
       - name: Post generated comment to issue
+        if: env.OPENAI_API_KEY != ''
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
@@ -543,9 +547,15 @@ jobs:
             const ISSUE_MARK = '<!-- triage:comment -->';
             let body = '';
             try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
-            if (!body) { core.notice('No generated comment; skipping'); return; }
+            const PLACEHOLDER = '…final Markdown comment…';
+            if (!body || body.includes(PLACEHOLDER)) { core.notice('No generated comment (placeholder only); skipping'); return; }
             body = ISSUE_MARK + '\n' + body + '\n' + ISSUE_MARK;
             const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
             const mine = all.find(c => c.user?.type?.toLowerCase().includes('bot') && (c.body || '').includes(ISSUE_MARK));
             if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+      - name: Skip when no OPENAI_API_KEY
+        if: env.OPENAI_API_KEY == ''
+        run: |
+          echo "OPENAI_API_KEY not set; skipping Code-generated triage comment." >> "$GITHUB_STEP_SUMMARY"
