@@ -19,7 +19,9 @@ on:
 
 concurrency:
   group: upstream-merge
-  cancel-in-progress: true
+  # Do not cancel in‑flight runs; upstream merges can be long‑running. Starting
+  # a new run should not kill the previous one.
+  cancel-in-progress: false
 
 permissions:
   contents: write
