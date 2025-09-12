@@ -63,6 +63,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     reasoning_started: bool,
     raw_reasoning_started: bool,
     last_message_path: Option<PathBuf>,
+    had_error: bool,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -91,6 +92,7 @@ impl EventProcessorWithHumanOutput {
                 reasoning_started: false,
                 raw_reasoning_started: false,
                 last_message_path,
+                had_error: false,
             }
         } else {
             Self {
@@ -109,6 +111,7 @@ impl EventProcessorWithHumanOutput {
                 reasoning_started: false,
                 raw_reasoning_started: false,
                 last_message_path,
+                had_error: false,
             }
         }
     }
@@ -171,6 +174,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::Error(ErrorEvent { message }) => {
                 let prefix = "ERROR:".style(self.red);
                 ts_println!(self, "{prefix} {message}");
+                self.had_error = true;
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 ts_println!(self, "{}", message.style(self.dimmed));
@@ -611,7 +615,14 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         }
         CodexStatus::Running
     }
+
+    fn exit_code(&self) -> i32 {
+        if self.had_error { 1 } else { 0 }
+    }
 }
+
+// Extend trait with exit_code override
+// Add exit_code method to the existing EventProcessor impl
 
 fn escape_command(command: &[String]) -> String {
     try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" "))
