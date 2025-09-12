@@ -235,7 +235,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .github/auto
-          PORT=5056 LOG_DEST=stdout node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+          PORT=5056 LOG_DEST=stdout EXIT_ON_5XX=1 RESPONSES_BETA="responses=v1" node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
 

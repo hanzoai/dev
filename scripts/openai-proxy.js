@@ -64,7 +64,7 @@ const IDEMPOTENCY_KEY = (process.env.IDEMPOTENCY_KEY || '').toLowerCase();
 const LOG_ERROR_BODY = process.env.LOG_ERROR_BODY === '1' || false;
 const LOG_ERROR_BODY_BYTES = Number(process.env.LOG_ERROR_BODY_BYTES || 2048);
 const STRICT_HEADERS = process.env.STRICT_HEADERS === '1' || false;
-const RESPONSES_BETA = process.env.RESPONSES_BETA || 'responses=experimental';
+const RESPONSES_BETA = process.env.RESPONSES_BETA || 'responses=v1';
 
 function outWrite(s) {
   if (LOG_DEST === 'stderr') process.stderr.write(s + '\n');
