@@ -118,11 +118,13 @@ jobs:
           workspaces: |
             codex-rs -> target
           save-if: true
+          cache-on-failure: true
 
       - name: Prime Rust build cache (fast local build)
         shell: bash
         env:
           STRICT_CARGO_HOME: "1"
+          CARGO_HOME_ENFORCED: ${{ env.CARGO_HOME }}
         run: |
           set -euo pipefail
           ./build-fast.sh
