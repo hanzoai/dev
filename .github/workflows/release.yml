@@ -28,6 +28,11 @@ jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     runs-on: ubuntu-24.04
+    env:
+      # Consistent Cargo/rustup homes for caching across all workflows
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -121,6 +126,11 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: [determine-version]
     runs-on: ${{ matrix.os }}
+    env:
+      # Consistent Cargo/rustup homes for caching across all workflows
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
+      CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
     strategy:
       matrix:
         include:
