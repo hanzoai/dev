@@ -107,6 +107,46 @@ jobs:
           restore-keys: |
             npm-cache-${{ runner.os }}-node20-
 
+      - name: Cache ripgrep binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/tools/rg-13.0.0
+          key: rg-${{ runner.os }}-13.0.0
+
+      - name: Setup ripgrep (cached)
+        run: |
+          set -euo pipefail
+          if command -v rg >/dev/null 2>&1; then rg --version; exit 0; fi
+          mkdir -p "$HOME/.local/tools" "$HOME/.local/bin"
+          if [ ! -x "$HOME/.local/tools/rg-13.0.0/rg" ]; then
+            cd "$HOME/.local/tools"
+            TARBALL="ripgrep-13.0.0-x86_64-unknown-linux-musl.tar.gz"
+            URL="https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/${TARBALL}"
+            curl -sSL "$URL" -o "$TARBALL"
+            tar -xzf "$TARBALL"
+            rm -f "$TARBALL"
+            mv "ripgrep-13.0.0-x86_64-unknown-linux-musl" "rg-13.0.0"
+          fi
+          install -m 0755 "$HOME/.local/tools/rg-13.0.0/rg" "$HOME/.local/bin/rg"
+          rg --version
+
+      - name: Cache jq binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/tools/jq-1.7.1
+          key: jq-${{ runner.os }}-1.7.1
+
+      - name: Setup jq (cached)
+        run: |
+          set -euo pipefail
+          if command -v jq >/dev/null 2>&1; then jq --version; exit 0; fi
+          mkdir -p "$HOME/.local/tools/jq-1.7.1" "$HOME/.local/bin"
+          URL="https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+          curl -sSL "$URL" -o "$HOME/.local/tools/jq-1.7.1/jq"
+          chmod +x "$HOME/.local/tools/jq-1.7.1/jq"
+          install -m 0755 "$HOME/.local/tools/jq-1.7.1/jq" "$HOME/.local/bin/jq"
+          jq --version
+
       - name: Setup Rust toolchain (1.89)
         uses: dtolnay/rust-toolchain@master
         with:
@@ -318,8 +358,15 @@ jobs:
           if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then git checkout "$BRANCH"; else git checkout -b "$BRANCH"; fi
           if [ "${{ steps.changes.outputs.agent_committed }}" != "true" ]; then
             git add -A
+            # Never include auto artifacts
             git restore --staged .github/auto || true
             git rm -r --cached .github/auto 2>/dev/null || true
+            # Hard guard: unstage and fail if protected files made it into the index
+            if git diff --name-only --cached | grep -E '^(.github/|.*/)?workflows/|^\.github/'; then
+              echo 'Refusing to commit protected paths (CI/workflows). Aborting.' >&2
+              git restore --staged $(git diff --name-only --cached | tr '\n' ' ')
+              exit 1
+            fi
             git commit -m "Auto: address issue #${ISSUE_NUMBER} - ${ISSUE_TITLE}"
           fi
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
@@ -338,6 +385,17 @@ jobs:
           github-token: ${{ env.PAT || secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            // Second-chance guard: if the last commit touches protected globs, fail fast
+            const { execSync } = require('node:child_process');
+            try {
+              const out = execSync('git show --name-only --pretty=format: HEAD', { encoding: 'utf8' });
+              const files = out.split(/\n/).map(s=>s.trim()).filter(Boolean);
+              const bad = files.filter(f => f.startsWith('.github/'));
+              if (bad.length) {
+                core.setFailed('Latest commit touches protected paths: ' + bad.join(', '));
+                return;
+              }
+            } catch {}
             function readOrDefault(p, d){ try { const t = fs.readFileSync(p,'utf8').trim(); return t || d; } catch { return d; } }
             const owner = context.repo.owner; const repo = context.repo.repo;
             const head = `issue-${{ steps.meta.outputs.issue_number }}`;
