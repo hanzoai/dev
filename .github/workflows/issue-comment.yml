@@ -1,10 +1,13 @@
-name: Issue Comment (Preview)
+name: Issue Comment
 
 on:
   # Automatic: when Preview Build finishes successfully for a PR
   workflow_run:
     workflows: ["Preview Build"]
     types: [completed]
+  # From triage (or elsewhere): direct repository dispatch
+  repository_dispatch:
+    types: [issue-comment]
   # Manual: allow maintainers to trigger for a specific PR
   workflow_dispatch:
     inputs:
@@ -12,6 +15,20 @@ on:
         description: "PR number to post preview comment to linked issue"
         required: true
         type: number
+      type:
+        description: "comment type (preview|comment)"
+        required: false
+        default: preview
+        type: choice
+        options: [preview, comment]
+      issue_number:
+        description: "Issue number (for type=comment)"
+        required: false
+        type: number
+      context:
+        description: "Optional context to include in the comment"
+        required: false
+        type: string
 
 concurrency:
   group: issue-comment-${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.workflow_run.id }}
@@ -30,7 +47,7 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.conclusion == 'success')
-      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_dispatch' && (inputs.type == 'preview' || !inputs.type))
     runs-on: ubuntu-latest
 
     steps:
@@ -406,4 +423,47 @@ jobs:
               await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  dispatch_comment:
+    name: Post triage comment to issue (dispatch)
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'issue-comment'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post comment from triage
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const p = context.payload.client_payload || {};
+            const issue_number = Number(p.issue_number || 0);
+            const type = String(p.type || 'comment');
+            const slug = String(p.slug || '');
+            const info = String(p.context || '').trim();
+            if (!issue_number) { core.setFailed('Missing issue_number in client_payload'); return; }
+            const ISSUE_MARK = '<!-- triage:comment -->';
+            let body = '';
+            if (type === 'comment') {
+              const lines = [];
+              lines.push(ISSUE_MARK);
+              lines.push(`Thanks @${context.actor}! This issue was auto-reviewed.`);
+              lines.push('');
+              lines.push('For safety, the bot did not auto-apply changes.');
+              if (info) { lines.push(''); lines.push(info); }
+              if (slug) {
+                lines.push('');
+                lines.push('You can still explore a local preview in your terminal:');
+                lines.push('```bash');
+                lines.push(`code preview ${slug}`);
+                lines.push('```');
+              }
+              lines.push(ISSUE_MARK);
+              body = lines.join('\n');
+              const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+              const mine = all.find(c => c.user?.type?.toLowerCase().includes('bot') && (c.body || '').includes(ISSUE_MARK));
+              if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            } else {
+              core.notice(`Unhandled type for issue-comment dispatch: ${type}`);
             }

@@ -419,7 +419,7 @@ jobs:
             else
               # Heuristic upgrade: treat straightforward features/docs/typos etc. as safe to attempt
               text="$(printf '%s\n%s\n' "${ISSUE_TITLE:-}" "${ISSUE_BODY:-}" | tr '[:upper:]' '[:lower:]')"
-              if echo "$text" | grep -E -q '(feat|feature request|enhancement|docs|documentation|readme|typo|spelling|grammar|broken link|link fix|example|usage|lint|format|style|rename|comment|minor fix)'; then
+              if echo "$text" | grep -E -q '(feat|feature request|enhancement|docs|documentation|readme|typo|spelling|grammar|broken link|link fix|example|usage|lint|format|style|rename|minor fix)'; then
                 agent_mode='full'
               else
                 agent_mode='comment'
@@ -510,27 +510,24 @@ jobs:
             let label = allow && mode === 'full' ? 'triage/allow' : (allow ? 'triage/allow' : 'triage/block');
             try { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] }); } catch {}
 
-      - name: If no changes, post a helpful comment
-        timeout-minutes: 5
-        if: steps.gate.outputs.allow_agent != 'true' || steps.gate.outputs.agent_mode != 'full'
+      - name: Queue issue-comment (comment mode)
+        if: steps.safety.outputs.decision != 'block' && (steps.gate.outputs.allow_agent != 'true' || steps.gate.outputs.agent_mode != 'full')
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.CODE_GH_PAT }}
           script: |
-            const fs = require('fs');
-            const p = '.github/auto/ISSUE_COMMENT.md';
-            let body = '';
-            if (fs.existsSync(p)) body = fs.readFileSync(p, 'utf8').trim();
-            if (!body) {
-              body = [
-                `Thanks @${context.actor}! I reviewed this issue.`,
-                '',
-                'Right now there aren’t concrete code changes to apply.',
-                'Please add reproduction steps, expected vs actual behavior, and any logs so we can proceed.',
-              ].join('\n');
-            }
-            const payload = { owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.ISSUE_NUMBER), body };
-            await github.rest.issues.createComment(payload);
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const slug = `${{ steps.slug.outputs.slug }}`;
+            const decision = '${{ steps.safety.outputs.decision }}';
+            const rr = `${{ steps.rate_limit.outputs.reason }}` || '';
+            const rs = `${{ steps.safety.outputs.reason }}` || '';
+            const lines = [];
+            lines.push(`Decision: ${decision}`);
+            if (rr) lines.push(`Rate: ${rr}`);
+            if (rs) lines.push(`Safety: ${rs}`);
+            const contextText = lines.join('\n');
+            await github.rest.repos.createDispatchEvent({ owner, repo, event_type: 'issue-comment', client_payload: { type: 'comment', issue_number, slug, context: contextText } });
+            core.notice(`Queued issue-comment for #${issue_number} (comment mode)`);
 
       - name: Queue implementation (issue-code workflow)
         if: steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
