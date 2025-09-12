@@ -309,11 +309,12 @@ impl ThemeSelectionView {
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     cfg.model_provider.clone(),
-                    codex_core::config_types::ReasoningEffort::Medium,
+                    codex_core::config_types::ReasoningEffort::Low,
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
-                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                    // Enable debug logs for targeted triage of stream issues
+                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(true).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
                 // Build developer guidance and input
@@ -382,12 +383,18 @@ impl ThemeSelectionView {
                 // If we received no content at all, surface the transport error explicitly
                 if out.trim().is_empty() {
                     let err = last_err
-                        .map(|e| format!("model stream error: {}", e))
-                        .unwrap_or_else(|| "model stream returned no content".to_string());
-                    let _ = progress_tx.send(ProgressMsg::CompletedErr {
-                        error: err,
-                        _raw_snippet: String::new(),
-                    });
+                        .map(|e| format!(
+                            "model stream error: {} | raw_out_len={} think_len={}",
+                            e,
+                            out.len(),
+                            think_sum.len()
+                        ))
+                        .unwrap_or_else(|| format!(
+                            "model stream returned no content | raw_out_len={} think_len={}",
+                            out.len(),
+                            think_sum.len()
+                        ));
+                    let _ = progress_tx.send(ProgressMsg::CompletedErr { error: err, _raw_snippet: String::new() });
                     return;
                 }
 
