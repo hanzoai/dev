@@ -310,7 +310,7 @@ impl ThemeSelectionView {
                 );
 
                 // Build developer guidance and input
-                let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 50 frames.\n- Each frame SHOULD be between 1 and 20 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Use characters that render well in typical monospaced terminals.\n".to_string();
+                let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 60 frames.\n- Each frame SHOULD be between 1 and 30 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use both ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Be creative! You have the full range of Unicode to play with!\n".to_string();
                 let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
                 input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: developer }] });
                 input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: user_prompt }] });
@@ -320,13 +320,13 @@ impl ThemeSelectionView {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Display name for the spinner (1 - 3 words, shown in the UI)."},
-                        "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50–300)."},
+                        "interval": {"type": "integer", "minimum": 50, "maximum": 300, "description": "Delay between frames in milliseconds (50 - 300)."},
                         "frames": {
                             "type": "array",
-                            "items": {"type": "string", "minLength": 1, "maxLength": 20},
+                            "items": {"type": "string", "minLength": 1, "maxLength": 30},
                             "minItems": 2,
-                            "maxItems": 50,
-                            "description": "2–50 Spinner frames, 1–20 characters each (every frame should be the same length of characters)."
+                            "maxItems": 60,
+                            "description": "2 - 60 frames, 1 - 30 characters each (every frame should be the same length of characters)."
                         }
                     },
                     "required": ["name", "interval", "frames"],
@@ -345,6 +345,8 @@ impl ThemeSelectionView {
                 let mut stream = match client.stream(&prompt).await { Ok(s) => s, Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Request error: {}", e))); tracing::info!("spinner request error: {}", e); return; } };
                 let mut out = String::new();
                 let mut think_sum = String::new();
+                // Capture the last transport/stream error so we can surface it to the UI
+                let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
                         Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
@@ -358,12 +360,29 @@ impl ThemeSelectionView {
                             tracing::info!(target: "spinner", "LLM[item_done]");
                         }
                         Ok(codex_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
-                        Err(e) => { tracing::info!("LLM stream error: {}", e); }
+                        Err(e) => {
+                            let msg = format!("{}", e);
+                            tracing::info!("LLM stream error: {}", msg);
+                            last_err = Some(msg);
+                            break; // Stop consuming after a terminal transport error
+                        }
                         _ => {}
                     }
                 }
 
                 let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+
+                // If we received no content at all, surface the transport error explicitly
+                if out.trim().is_empty() {
+                    let err = last_err
+                        .map(|e| format!("model stream error: {}", e))
+                        .unwrap_or_else(|| "model stream returned no content".to_string());
+                    let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                        error: err,
+                        _raw_snippet: String::new(),
+                    });
+                    return;
+                }
 
                 // Parse JSON; on failure, attempt to salvage a top-level object and log raw output
                 let v: serde_json::Value = match serde_json::from_str(&out) {
@@ -395,10 +414,24 @@ impl ThemeSelectionView {
                         if let Some(obj) = extract_first_json_object(&out) {
                             match serde_json::from_str::<serde_json::Value>(&obj) {
                                 Ok(v) => v,
-                                Err(e2) => { let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e2), _raw_snippet: out.chars().take(200).collect::<String>() }); return; }
+                                Err(e2) => {
+                                    let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                                        error: format!("{}", e2),
+                                        _raw_snippet: out.chars().take(200).collect::<String>(),
+                                    });
+                                    return;
+                                }
                             }
                         } else {
-                            let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e), _raw_snippet: out.chars().take(200).collect::<String>() }); return;
+                            // Prefer a clearer message if we saw a transport error
+                            let msg = last_err
+                                .map(|le| format!("model stream error: {}", le))
+                                .unwrap_or_else(|| format!("{}", e));
+                            let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                                error: msg,
+                                _raw_snippet: out.chars().take(200).collect::<String>(),
+                            });
+                            return;
                         }
                     }
                 };
@@ -621,8 +654,16 @@ impl ThemeSelectionView {
 
                 use futures::StreamExt;
                 let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(connecting to model)".to_string()));
-                let mut stream = match client.stream(&prompt).await { Ok(s) => s, Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Request error: {}", e))); return; } };
+                let mut stream = match client.stream(&prompt).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tx.send(AppEvent::InsertBackgroundEventEarly(format!("Request error: {}", e)));
+                        return;
+                    }
+                };
                 let mut out = String::new();
+                // Capture the last transport/stream error so we can surface it to the UI
+                let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
                         Ok(codex_core::ResponseEvent::Created) => {
@@ -649,13 +690,27 @@ impl ThemeSelectionView {
                         }
                         Ok(codex_core::ResponseEvent::Completed { .. }) => break,
                         Err(e) => {
-                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta(format!("(stream error: {})", e)));
+                            let msg = format!("{}", e);
+                            let _ = progress_tx.send(ProgressMsg::ThinkingDelta(format!("(stream error: {})", msg)));
+                            last_err = Some(msg);
+                            break; // Stop consuming after a terminal transport error
                         }
                         _ => {}
                     }
                 }
 
                 let _ = progress_tx.send(ProgressMsg::RawOutput(out.clone()));
+                // If we received no content at all, surface the transport error explicitly
+                if out.trim().is_empty() {
+                    let err = last_err
+                        .map(|e| format!("model stream error: {}", e))
+                        .unwrap_or_else(|| "model stream returned no content".to_string());
+                    let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                        error: err,
+                        _raw_snippet: String::new(),
+                    });
+                    return;
+                }
                 // Try strict parse first; if that fails, salvage the first JSON object in the text.
                 let v: serde_json::Value = match serde_json::from_str(&out) {
                     Ok(v) => v,
@@ -686,12 +741,22 @@ impl ThemeSelectionView {
                             match serde_json::from_str::<serde_json::Value>(&obj) {
                                 Ok(v) => v,
                                 Err(e2) => {
-                                    let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e2), _raw_snippet: out.chars().take(200).collect() });
+                                    let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                                        error: format!("{}", e2),
+                                        _raw_snippet: out.chars().take(200).collect(),
+                                    });
                                     return;
                                 }
                             }
                         } else {
-                            let _ = progress_tx.send(ProgressMsg::CompletedErr { error: format!("{}", e), _raw_snippet: out.chars().take(200).collect() });
+                            // Prefer a clearer message if we saw a transport error
+                            let msg = last_err
+                                .map(|le| format!("model stream error: {}", le))
+                                .unwrap_or_else(|| format!("{}", e));
+                            let _ = progress_tx.send(ProgressMsg::CompletedErr {
+                                error: msg,
+                                _raw_snippet: out.chars().take(200).collect(),
+                            });
                             return;
                         }
                     }
@@ -754,6 +819,8 @@ struct CreateState {
     proposed_interval: std::cell::Cell<Option<u64>>,
     proposed_frames: std::cell::RefCell<Option<Vec<String>>>,
     proposed_name: std::cell::RefCell<Option<String>>,
+    /// Last raw model output captured (for debugging parse errors)
+    last_raw_output: std::cell::RefCell<Option<String>>,
 }
 
 struct CreateThemeState {
@@ -942,12 +1009,93 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 code: KeyCode::Left,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {}
+            } => {
+                // Treat Left like Up for navigation everywhere in this view
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                            CreateStep::Review
+                        }
+                    };
+                    s.step.set(new_step);
+                } else if let Mode::CreateTheme(ref mut s) = self.mode {
+                    match s.step.get() {
+                        CreateStep::Prompt => s.step.set(CreateStep::Action),
+                        CreateStep::Action => {
+                            if s.action_idx > 0 {
+                                s.action_idx -= 1;
+                            }
+                        }
+                        CreateStep::Review => {
+                            // In review, Left focuses the toggle (mirrors Up)
+                            s.review_focus_is_toggle.set(true);
+                        }
+                    }
+                } else {
+                    match self.mode {
+                        Mode::Overview => {
+                            self.overview_selected_index =
+                                self.overview_selected_index.saturating_sub(1) % 3;
+                        }
+                        _ => self.move_selection_up(),
+                    }
+                }
+            }
             KeyEvent {
                 code: KeyCode::Right,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {}
+            } => {
+                // Treat Right like Down for navigation everywhere in this view
+                if let Mode::CreateSpinner(ref mut s) = self.mode {
+                    let new_step = match s.step.get() {
+                        CreateStep::Prompt => CreateStep::Action,
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Action
+                        }
+                        CreateStep::Review => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                            CreateStep::Review
+                        }
+                    };
+                    s.step.set(new_step);
+                } else if let Mode::CreateTheme(ref mut s) = self.mode {
+                    match s.step.get() {
+                        CreateStep::Prompt => s.step.set(CreateStep::Action),
+                        CreateStep::Action => {
+                            if s.action_idx < 1 {
+                                s.action_idx += 1;
+                            }
+                        }
+                        CreateStep::Review => {
+                            // In review, Right moves focus to buttons (mirrors Down)
+                            s.review_focus_is_toggle.set(false);
+                        }
+                    }
+                } else {
+                    match &self.mode {
+                        Mode::Overview => {
+                            self.overview_selected_index = (self.overview_selected_index + 1) % 3;
+                        }
+                        _ => self.move_selection_down(),
+                    }
+                }
+            }
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
@@ -1024,6 +1172,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 proposed_interval: std::cell::Cell::new(None),
                                 proposed_frames: std::cell::RefCell::new(None),
                                 proposed_name: std::cell::RefCell::new(None),
+                                last_raw_output: std::cell::RefCell::new(None),
                             });
                         } else {
                             self.confirm_spinner()
@@ -1285,7 +1434,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 }
                 _ => self.cancel_detail(),
             },
-            KeyEvent { code: KeyCode::Char(c), modifiers, .. } => {
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
@@ -1309,7 +1462,10 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     }
                 }
             }
-            KeyEvent { code: KeyCode::Backspace, .. } => {
+            KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } => {
                 if let Mode::CreateSpinner(ref mut s) = self.mode {
                     if s.is_loading.get() {
                         return;
@@ -1376,7 +1532,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         let mut title_spans = vec![Span::styled(" ", t_dim), Span::styled("/theme", t_fg)];
         title_spans.extend_from_slice(&[
             Span::styled(" ——— ", t_dim),
-            Span::styled("▲ ▼", t_fg),
+            Span::styled("▲ ▼ ◀ ▶", t_fg),
             Span::styled(" select ", t_dim),
             Span::styled("——— ", t_dim),
             Span::styled("Enter", t_fg),
@@ -1635,7 +1791,11 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                 }
                                 self.app_event_tx.send(AppEvent::RequestRedraw);
                             }
-                            Ok(ProgressMsg::RawOutput(_raw)) => {}
+                            Ok(ProgressMsg::RawOutput(raw)) => {
+                                if let Mode::CreateSpinner(ref sm) = self.mode {
+                                    sm.last_raw_output.replace(Some(raw));
+                                }
+                            }
                             Ok(ProgressMsg::SetStatus(s)) => {
                                 if let Mode::CreateSpinner(ref sm) = self.mode {
                                     let mut cur = sm.thinking_current.borrow_mut();
@@ -1924,6 +2084,18 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                             last,
                             Style::default().fg(crate::colors::error()),
                         )));
+                        if let Some(raw) = s.last_raw_output.borrow().as_ref() {
+                            form_lines.push(Line::from(Span::styled(
+                                "Model output (raw):",
+                                Style::default().fg(theme.text_dim),
+                            )));
+                            for ln in raw.split('\n') {
+                                form_lines.push(Line::from(Span::styled(
+                                    ln.to_string(),
+                                    Style::default().fg(theme.text),
+                                )));
+                            }
+                        }
                         form_lines.push(Line::default());
                     }
                 }

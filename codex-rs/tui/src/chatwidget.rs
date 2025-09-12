@@ -292,6 +292,9 @@ pub(crate) struct ChatWidget<'a> {
     // Track and manage the access-mode background status cell so mode changes
     // replace the existing status instead of stacking multiple entries.
     access_status_idx: Option<usize>,
+    /// When true, render without the top status bar and HUD so the normal
+    /// terminal scrollback remains usable (Ctrl+T standard terminal mode).
+    pub(crate) standard_terminal_mode: bool,
     // Pending one-shot note about the latest access-mode change to inject into
     // the agent's conversation history on the next user message.
     pending_access_note: Option<String>,
@@ -1750,10 +1753,12 @@ impl ChatWidget<'_> {
                 last_history_viewport_height: std::cell::Cell::new(0),
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
                 scrollbar_visible_until: std::cell::Cell::new(None),
+                last_bottom_reserved_rows: std::cell::Cell::new(0),
                 last_hud_present: std::cell::Cell::new(false),
                 browser_hud_expanded: false,
                 agents_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
+                last_frame_width: std::cell::Cell::new(0),
             },
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
@@ -1788,6 +1793,7 @@ impl ChatWidget<'_> {
             pending_access_note: None,
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            standard_terminal_mode: !config.tui.alternate_screen,
         };
         // Seed footer access indicator based on current config
         new_widget.apply_access_mode_indicator_from_config();
@@ -1795,6 +1801,7 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
+        w.standard_terminal_mode = !config.tui.alternate_screen;
         w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
         let connecting_mcp = !w.config.mcp_servers.is_empty();
         w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
@@ -1925,10 +1932,12 @@ impl ChatWidget<'_> {
                 last_history_viewport_height: std::cell::Cell::new(0),
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
                 scrollbar_visible_until: std::cell::Cell::new(None),
+                last_bottom_reserved_rows: std::cell::Cell::new(0),
                 last_hud_present: std::cell::Cell::new(false),
                 browser_hud_expanded: false,
                 agents_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
+                last_frame_width: std::cell::Cell::new(0),
             },
             prefix_sums: std::cell::RefCell::new(Vec::new()),
             last_prefix_width: std::cell::Cell::new(0),
@@ -1960,6 +1969,7 @@ impl ChatWidget<'_> {
             show_order_overlay,
             scroll_history_hint_shown: false,
             access_status_idx: None,
+            standard_terminal_mode: !config.tui.alternate_screen,
             pending_access_note: None,
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
@@ -2462,6 +2472,7 @@ impl ChatWidget<'_> {
         };
 
         self.history_cells.insert(pos, cell);
+        // In terminal mode, App mirrors history lines into the native buffer.
         // Ensure order vector is also long enough for position after cell insert
         if self.cell_order_seq.len() < pos {
             self.cell_order_seq.resize(
@@ -4388,7 +4399,7 @@ impl ChatWidget<'_> {
         // Global
         lines.push(kv("Ctrl+H", "Help overlay"));
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
-        // Removed Ctrl+T per request
+        lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
         lines.push(kv("Esc", "Edit previous message / close popups"));
         // Task control shortcuts
@@ -5855,6 +5866,15 @@ impl ChatWidget<'_> {
         // Collapsed state changes affect heights; clear cache
         self.invalidate_height_cache();
         self.request_redraw();
+        // In standard terminal mode, re-mirror the transcript so scrollback reflects
+        // the new collapsed/expanded state. We cannot edit prior lines in scrollback,
+        // so append a fresh view.
+        if self.standard_terminal_mode {
+            let mut lines = Vec::new();
+            lines.push(ratatui::text::Line::from(""));
+            lines.extend(self.export_transcript_lines_for_buffer());
+            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(lines));
+        }
     }
 
     pub(crate) fn is_reasoning_shown(&self) -> bool {
@@ -7876,6 +7896,71 @@ impl ChatWidget<'_> {
         );
     }
 
+    /// Export transcript for buffer-mode mirroring: omit internal sentinels
+    /// and include gutter icons and a blank line between items for readability.
+    pub(crate) fn export_transcript_lines_for_buffer(&self) -> Vec<ratatui::text::Line<'static>> {
+        let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
+        for cell in &self.history_cells {
+            out.extend(self.render_lines_for_terminal(cell.as_ref()));
+        }
+        // Include streaming preview if present (treat like assistant output)
+        let mut streaming_lines = self
+            .live_builder
+            .display_rows()
+            .into_iter()
+            .map(|r| ratatui::text::Line::from(r.text))
+            .collect::<Vec<_>>();
+        if !streaming_lines.is_empty() {
+            // Apply gutter to streaming preview (first line gets " • ", continuations get 3 spaces)
+            if let Some(first) = streaming_lines.first_mut() {
+                first.spans.insert(0, ratatui::text::Span::raw(" • "));
+            }
+            for line in streaming_lines.iter_mut().skip(1) {
+                line.spans.insert(0, ratatui::text::Span::raw("   "));
+            }
+            out.extend(streaming_lines);
+            out.push(ratatui::text::Line::from(""));
+        }
+        out
+    }
+
+    /// Render a single history cell into terminal-friendly lines:
+    /// - Prepend a gutter icon (symbol + space) to the first line when defined.
+    /// - Add a single blank line after the cell as a separator.
+    fn render_lines_for_terminal(&self, cell: &dyn crate::history_cell::HistoryCell) -> Vec<ratatui::text::Line<'static>> {
+        let mut lines = cell.display_lines();
+        let _has_icon = cell.gutter_symbol().is_some();
+        let first_prefix = if let Some(sym) = cell.gutter_symbol() {
+            format!(" {} ", sym) // one space, icon, one space
+        } else {
+            "   ".to_string() // three spaces when no icon
+        };
+        if let Some(first) = lines.first_mut() {
+            first
+                .spans
+                .insert(0, ratatui::text::Span::raw(first_prefix));
+        }
+        // For wrapped/subsequent lines, use a 3-space gutter to maintain alignment
+        if lines.len() > 1 {
+            for (_idx, line) in lines.iter_mut().enumerate().skip(1) {
+                // Always 3 spaces for continuation lines
+                line.spans.insert(0, ratatui::text::Span::raw("   "));
+            }
+        }
+        lines.push(ratatui::text::Line::from(""));
+        lines
+    }
+
+    /// Desired bottom pane height (in rows) for a given terminal width.
+    pub(crate) fn desired_bottom_height(&self, width: u16) -> u16 {
+        self.bottom_pane.desired_height(width)
+    }
+
+    /// The last bottom pane height (rows) that the layout actually used.
+    /// If not yet set, fall back to a conservative estimate from BottomPane.
+
+    
+
     /// Clear the conversation and start fresh with a new welcome animation
     pub(crate) fn new_conversation(&mut self, enhanced_keys_supported: bool) {
         // Clear all history cells
@@ -9768,7 +9853,7 @@ impl WidgetRef for &ChatWidget<'_> {
         // spacing can show through after we reduced full clears.
         // Cost: one Block render across the frame (O(area)); acceptable and
         // fixes visual artifacts reported after redraw reductions.
-        {
+        if !self.standard_terminal_mode {
             use ratatui::style::Style;
             use ratatui::widgets::Block;
             let bg = Block::default().style(Style::default().bg(crate::colors::background()));
@@ -9777,6 +9862,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Remember full frame height for HUD sizing logic
         self.layout.last_frame_height.set(area.height);
+        self.layout.last_frame_width.set(area.width);
 
         let layout_areas = self.layout_areas(area);
         let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4
@@ -9793,12 +9879,29 @@ impl WidgetRef for &ChatWidget<'_> {
             (layout_areas[0], None, layout_areas[1], layout_areas[2])
         };
 
-        // Render status bar
-        self.render_status_bar(status_bar_area, buf);
+        // Record the effective bottom pane height for buffer-mode scrollback inserts.
+        self.layout
+            .last_bottom_reserved_rows
+            .set(bottom_pane_area.height);
 
-        // Render HUD if present (browser and/or agents)
-        if let Some(hud_area) = hud_area {
-            self.render_hud(hud_area, buf);
+        // Render status bar and HUD only in full TUI mode
+        if !self.standard_terminal_mode {
+            self.render_status_bar(status_bar_area, buf);
+            if let Some(hud_area) = hud_area {
+                self.render_hud(hud_area, buf);
+            }
+        }
+
+        // In standard-terminal mode, do not paint the history region: committed
+        // content is appended to the terminal's own scrollback via
+        // insert_history_lines and repainting here would overwrite it.
+        if self.standard_terminal_mode {
+            // Render only the bottom pane (composer or its active view) without painting
+            // backgrounds to preserve the terminal's native theme.
+            ratatui::widgets::WidgetRef::render_ref(&(&self.bottom_pane), bottom_pane_area, buf);
+            // Scrub backgrounds in the bottom pane region so any widget-set bg becomes transparent.
+            self.clear_backgrounds_in(buf, bottom_pane_area);
+            return;
         }
 
         // Create a unified scrollable container for all chat content
@@ -11165,11 +11268,14 @@ struct LayoutState {
     vertical_scrollbar_state: std::cell::RefCell<ScrollbarState>,
     // Auto-hide scrollbar timer
     scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
+    // Last effective bottom pane height used by layout (rows)
+    last_bottom_reserved_rows: std::cell::Cell<u16>,
     // HUD visibility and sizing
     last_hud_present: std::cell::Cell<bool>,
     browser_hud_expanded: bool,
     agents_hud_expanded: bool,
     last_frame_height: std::cell::Cell<u16>,
+    last_frame_width: std::cell::Cell<u16>,
 }
 
 #[derive(Default)]
@@ -11204,6 +11310,15 @@ struct PerfState {
 }
 
 impl ChatWidget<'_> {
+    fn clear_backgrounds_in(&self, buf: &mut Buffer, rect: Rect) {
+        for y in rect.y..rect.y.saturating_add(rect.height) {
+            for x in rect.x..rect.x.saturating_add(rect.width) {
+                let cell = &mut buf[(x, y)];
+                // Reset background; keep fg/content as-is
+                cell.set_bg(ratatui::style::Color::Reset);
+            }
+        }
+    }
     pub(crate) fn set_github_watcher(&mut self, enabled: bool) {
         self.config.github.check_workflows_on_push = enabled;
         match find_codex_home() {

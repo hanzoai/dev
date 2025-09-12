@@ -17,12 +17,12 @@ use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use color_eyre::eyre::Result;
-use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
+use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
 use std::path::PathBuf;
 use ratatui::prelude::Rect;
 use ratatui::text::Line;
@@ -114,6 +114,10 @@ pub(crate) struct App<'a> {
     /// If true, enable lightweight timing collection and report on exit.
     timing_enabled: bool,
     timing: TimingStats,
+
+    /// True when TUI is currently rendering in the terminal's alternate screen.
+    alt_screen_active: bool,
+
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -271,6 +275,7 @@ impl App<'_> {
         };
 
         let file_search = FileSearchManager::new(config.cwd.clone(), app_event_tx.clone());
+        let start_in_alt = config.tui.alternate_screen;
         Self {
             _server: conversation_manager,
             app_event_tx,
@@ -295,6 +300,7 @@ impl App<'_> {
             last_esc_time: None,
             timing_enabled: enable_perf,
             timing: TimingStats::default(),
+            alt_screen_active: start_in_alt,
         }
     }
 
@@ -361,21 +367,56 @@ impl App<'_> {
                             lines.append(&mut more);
                         }
                         tracing::debug!("app: InsertHistory lines={}", lines.len());
-                        widget.insert_history_lines(lines)
+                        if self.alt_screen_active {
+                            widget.insert_history_lines(lines)
+                        } else {
+                            use std::io::stdout;
+                            // Compute desired bottom height now, so growing/shrinking input
+                            // adjusts the reserved region immediately even before the next frame.
+                            let width = terminal.size().map(|s| s.width).unwrap_or(80);
+                            let reserve = widget.desired_bottom_height(width).max(1);
+                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(terminal, reserve, lines);
+                            let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
+                            self.schedule_redraw();
+                        }
                     },
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::InsertHistoryWithKind { id, kind, lines } => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         tracing::debug!("app: InsertHistoryWithKind kind={:?} id={:?} lines={}", kind, id, lines.len());
-                        widget.insert_history_lines_with_kind(kind, id, lines)
+                        // Always update widget history, even in terminal mode.
+                        // In terminal mode, the widget will emit an InsertHistory event
+                        // which we will mirror to scrollback in the handler above.
+                        let to_mirror = lines.clone();
+                        widget.insert_history_lines_with_kind(kind, id, lines);
+                        if !self.alt_screen_active {
+                            use std::io::stdout;
+                            let width = terminal.size().map(|s| s.width).unwrap_or(80);
+                            let reserve = widget.desired_bottom_height(width).max(1);
+                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(terminal, reserve, to_mirror);
+                            let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
+                            self.schedule_redraw();
+                        }
                     },
                     AppState::Onboarding { .. } => {}
                 },
                 AppEvent::InsertFinalAnswer { id, lines, source } => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         tracing::debug!("app: InsertFinalAnswer id={:?} lines={} source_len={}", id, lines.len(), source.len());
-                        widget.insert_final_answer_with_id(id, lines, source)
+                        let to_mirror = lines.clone();
+                        widget.insert_final_answer_with_id(id, lines, source);
+                        if !self.alt_screen_active {
+                            use std::io::stdout;
+                            let width = terminal.size().map(|s| s.width).unwrap_or(80);
+                            let reserve = widget.desired_bottom_height(width).max(1);
+                            let _ = execute!(stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+                            crate::insert_history::insert_history_lines_above(terminal, reserve, to_mirror);
+                            let _ = execute!(stdout(), crossterm::terminal::EndSynchronizedUpdate);
+                            self.schedule_redraw();
+                        }
                     },
                     AppState::Onboarding { .. } => {}
                 },
@@ -601,23 +642,35 @@ impl App<'_> {
                             }
                         }
                         KeyEvent {
-                            code: KeyCode::Char('r') | KeyCode::Char('t'),
+                            code: KeyCode::Char('r'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
                             kind: KeyEventKind::Press,
                             ..
                         }
                         | KeyEvent {
-                            code: KeyCode::Char('r') | KeyCode::Char('t'),
+                            code: KeyCode::Char('r'),
                             modifiers: crossterm::event::KeyModifiers::CONTROL,
                             kind: KeyEventKind::Repeat,
                             ..
                         } => {
-                            // Toggle reasoning/thinking visibility (Ctrl+R or Ctrl+T)
+                            // Toggle reasoning/thinking visibility (Ctrl+R)
                             match &mut self.app_state {
                                 AppState::Chat { widget } => {
                                     widget.toggle_reasoning_visibility();
                                 }
                                 AppState::Onboarding { .. } => {}
+                            }
+                        }
+                        KeyEvent {
+                            code: KeyCode::Char('t'),
+                            modifiers: crossterm::event::KeyModifiers::CONTROL,
+                            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                            ..
+                        } => {
+                            let _ = self.toggle_screen_mode(terminal);
+                            // Propagate mode to widget so it can adapt layout
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.standard_terminal_mode = !self.alt_screen_active;
                             }
                         }
                         KeyEvent {
@@ -1232,7 +1285,9 @@ impl App<'_> {
                 }
             }
         }
-        terminal.clear()?;
+        if self.alt_screen_active {
+            terminal.clear()?;
+        }
 
         Ok(())
     }
@@ -1273,6 +1328,50 @@ impl App<'_> {
         Ok(())
     }
 
+    /// Toggle between alternate-screen TUI and standard terminal buffer (Ctrl+T).
+    fn toggle_screen_mode(&mut self, _terminal: &mut tui::Tui) -> Result<()> {
+        if self.alt_screen_active {
+            // Leave alt screen only; keep raw mode enabled for key handling.
+            let _ = crate::tui::leave_alt_screen_only();
+            // Clear the normal buffer so our buffered transcript starts at a clean screen
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::style::ResetColor,
+                crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                crossterm::cursor::MoveTo(0, 0),
+                crossterm::terminal::EnableLineWrap
+            );
+            self.alt_screen_active = false;
+            // Persist preference
+            let _ = codex_core::config::set_tui_alternate_screen(&self.config.codex_home, false);
+            // Immediately mirror the entire transcript into the terminal scrollback so
+            // the user sees full history when entering standard mode.
+            if let AppState::Chat { widget } = &self.app_state {
+                let transcript = widget.export_transcript_lines_for_buffer();
+                if !transcript.is_empty() {
+                    // Best-effort: compute current width and bottom reservation.
+                    // We don't have `terminal` here; schedule a one-shot redraw event
+                    // that carries the transcript via InsertHistory to reuse the normal path.
+                    self.app_event_tx.send(AppEvent::InsertHistory(transcript));
+                }
+            }
+            // Ensure the input is painted in its reserved region immediately.
+            self.schedule_redraw();
+        } else {
+            // Re-enter alt screen and force a clean repaint.
+            let fg = crate::colors::text();
+            let bg = crate::colors::background();
+            let _ = crate::tui::enter_alt_screen_only(fg, bg);
+            self.clear_on_first_frame = true;
+            self.alt_screen_active = true;
+            // Persist preference
+            let _ = codex_core::config::set_tui_alternate_screen(&self.config.codex_home, true);
+            // Request immediate redraw
+            self.schedule_redraw();
+        }
+        Ok(())
+    }
+
     pub(crate) fn token_usage(&self) -> codex_core::protocol::TokenUsage {
         let usage = match &self.app_state {
             AppState::Chat { widget } => widget.token_usage().clone(),
@@ -1299,10 +1398,12 @@ impl App<'_> {
     }
 
     fn draw_next_frame(&mut self, terminal: &mut tui::Tui) -> Result<()> {
+        // Always render a frame. In standard-terminal mode we still draw the
+        // chat UI (without status/HUD) directly into the normal buffer.
         // Hard clear on the very first frame (and while onboarding) to ensure a
         // clean background across terminals that don't respect our color attrs
         // during EnterAlternateScreen.
-        if self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. }) {
+        if self.alt_screen_active && (self.clear_on_first_frame || matches!(self.app_state, AppState::Onboarding { .. })) {
             terminal.clear()?;
             self.clear_on_first_frame = false;
         }
