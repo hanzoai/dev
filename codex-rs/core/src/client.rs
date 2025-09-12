@@ -180,7 +180,8 @@ impl ModelClient {
             .as_ref()
             .map(|a| a.mode);
 
-        let store = prompt.store && auth_mode != Some(AuthMode::ChatGPT);
+        // Use non-stored turns on all paths for stability.
+        let store = false;
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
         let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
@@ -239,6 +240,7 @@ impl ModelClient {
             store,
             stream: true,
             include,
+            // Use a stable per-process cache key (session id). With store=false this is inert.
             prompt_cache_key: Some(self.session_id.to_string()),
         };
 
@@ -278,10 +280,13 @@ impl ModelClient {
                 .await?;
 
             req_builder = req_builder
-                .header("OpenAI-Beta", "responses=experimental")
-                .header("session_id", self.session_id.to_string())
+                .header("OpenAI-Beta", "responses=v1")
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload);
+            // Only include a session_id for ChatGPT auth where the backend expects it
+            if auth_mode == Some(AuthMode::ChatGPT) {
+                req_builder = req_builder.header("session_id", self.session_id.to_string());
+            }
 
             // Avoid unstable `let` chains: expand into nested conditionals.
             if let Some(auth) = auth.as_ref() {
