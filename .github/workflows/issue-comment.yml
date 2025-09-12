@@ -1,10 +1,13 @@
-name: Issue Comment (Preview)
+name: Issue Comment
 
 on:
   # Automatic: when Preview Build finishes successfully for a PR
   workflow_run:
     workflows: ["Preview Build"]
     types: [completed]
+  # From triage (or elsewhere): direct repository dispatch
+  repository_dispatch:
+    types: [issue-comment]
   # Manual: allow maintainers to trigger for a specific PR
   workflow_dispatch:
     inputs:
@@ -12,6 +15,20 @@ on:
         description: "PR number to post preview comment to linked issue"
         required: true
         type: number
+      type:
+        description: "comment type (preview|comment)"
+        required: false
+        default: preview
+        type: choice
+        options: [preview, comment]
+      issue_number:
+        description: "Issue number (for type=comment)"
+        required: false
+        type: number
+      context:
+        description: "Optional context to include in the comment"
+        required: false
+        type: string
 
 concurrency:
   group: issue-comment-${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.workflow_run.id }}
@@ -30,7 +47,7 @@ jobs:
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.event == 'pull_request' &&
        github.event.workflow_run.conclusion == 'success')
-      || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'workflow_dispatch' && (inputs.type == 'preview' || !inputs.type))
     runs-on: ubuntu-latest
 
     steps:
@@ -234,54 +251,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          cat > .github/auto/openai-proxy.js <<'JS'
-          const http = require('http');
-          const https = require('https');
-          const crypto = require('crypto');
-          const { URL } = require('url');
-          const PORT = process.env.PORT || 5056;
-          const API_KEY = process.env.OPENAI_API_KEY || '';
-          const UPSTREAM = new URL(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
-          const ALLOWED = ['/v1/chat/completions','/v1/responses'];
-          if (!API_KEY) { process.exit(0); }
-          function log(ev){ try{ console.log(JSON.stringify({ ts:new Date().toISOString(), ...ev })); }catch{} }
-          const server = http.createServer((req, res) => {
-            const rid = crypto.randomUUID();
-            if (!ALLOWED.some(p => req.url.startsWith(p))) { res.writeHead(403,{'content-type':'application/json'}); res.end(JSON.stringify({error:'blocked', path:req.url})); return; }
-            const chunks=[]; let size=0; req.on('data', c=>{ chunks.push(c); size+=c.length; if (size>2*1024*1024) req.destroy(); });
-            req.on('end', () => {
-              const body = Buffer.concat(chunks);
-              const up = new URL(req.url, UPSTREAM);
-              const headers = { ...req.headers };
-              if (!headers['content-type']) headers['content-type']='application/json';
-              headers['authorization'] = `Bearer ${API_KEY}`;
-              if (up.pathname.startsWith('/v1/responses') && !headers['openai-beta']) headers['openai-beta']='responses=experimental';
-              delete headers['host']; headers['host']=up.host;
-              if (headers['content-length']) headers['content-length']=String(body.length);
-              const opts = { protocol: up.protocol, hostname: up.hostname, port: up.port || (up.protocol==='https:'?443:80), path: up.pathname+up.search, method: req.method, headers,
-                servername: up.hostname, agent:(up.protocol==='https:'? new https.Agent({keepAlive:true, maxSockets:64, servername: up.hostname}) : new http.Agent({keepAlive:true, maxSockets:64})) };
-              const fw = (up.protocol==='https:'?https:http).request(opts, r => { res.writeHead(r.statusCode||500, r.headers); r.pipe(res); });
-              fw.on('error', e => { log({ level:'error', rid, phase:'upstream_error', err:String(e) }); res.writeHead(502,{'content-type':'application/json'}); res.end(JSON.stringify({ error:'upstream', message: String(e.message||e) })); });
-              fw.end(body);
-            });
-          });
-          server.headersTimeout=650000; server.keepAliveTimeout=650000;
-          server.listen(PORT,'127.0.0.1',()=>{ log({ level:'info', msg:'proxy listening', addr:'127.0.0.1', port: PORT }); });
-          JS
-          node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+          mkdir -p .github/auto
+          PORT=5056 LOG_DEST=stdout EXIT_ON_5XX=1 RESPONSES_BETA="responses=v1" node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
-      - name: Configure Code to use Chat Completions fallback
-        if: env.OPENAI_API_KEY != ''
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'TOML'
-          [model_providers.openai_chat]
-          name = "OpenAI (Chat)"
-          base_url = "http://127.0.0.1:5056/v1"
-          wire_api = "chat"
-          TOML
 
       - name: Generate comment with Code (read-only)
         id: gen
@@ -329,7 +302,7 @@ jobs:
           set +e
           { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
               OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:5056/v1" \
-              npx -y @just-every/code@latest exec -c model_provider=openai_chat -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
+              npx -y @just-every/code@latest exec -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
             2>&1 | tee .github/auto/AGENT_OUT.txt
           true
           set -e
@@ -451,3 +424,128 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+  dispatch_comment:
+    name: Post triage comment to issue (dispatch via Code)
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'issue-comment'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare triage context
+        id: ctx
+        uses: actions/github-script@v7
+        env:
+          CONTEXT_TEXT: ${{ github.event.client_payload.context }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const p = context.payload.client_payload || {};
+            const issue_number = Number(p.issue_number || 0);
+            if (!issue_number) { core.setFailed('Missing issue_number'); return; }
+            let issue = null; let comments = [];
+            try { const { data } = await github.rest.issues.get({ owner, repo, issue_number }); issue = data; } catch {}
+            try { comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 }); } catch {}
+            const lines = [];
+            lines.push(`# Issue #${issue_number}`);
+            if (issue && issue.title) { lines.push(`Title: ${issue.title}`); lines.push(''); }
+            if (issue && issue.body) { lines.push('## Issue body'); lines.push(issue.body); lines.push(''); }
+            if (process.env.CONTEXT_TEXT && process.env.CONTEXT_TEXT.trim()) { lines.push('## Triage context'); lines.push(process.env.CONTEXT_TEXT.trim()); lines.push(''); }
+            if (comments.length) {
+              lines.push('## Recent comments (newest first, up to 10)');
+              const last = comments.slice(-10).reverse();
+              for (const c of last) {
+                const when = (c.created_at || '').replace('T',' ').replace('Z','');
+                lines.push(`- [@${c.user?.login||'unknown'} at ${when}]`);
+                const body = (c.body || '').trim();
+                lines.push(body.length > 1200 ? body.slice(0,1200)+"\n…" : body);
+                lines.push('');
+              }
+            }
+            fs.mkdirSync('.github/auto', { recursive: true });
+            fs.writeFileSync('.github/auto/ISSUE_TRIAGE_CONTEXT.md', lines.join('\n'));
+            core.setOutput('issue_number', String(issue_number));
+
+      - name: Start local OpenAI proxy (optional; hardened)
+        if: env.OPENAI_API_KEY != ''
+        id: proxy
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github/auto
+          PORT=5056 LOG_DEST=stdout EXIT_ON_5XX=1 RESPONSES_BETA="responses=v1" node scripts/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
+          for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
+
+      - name: Generate triage comment with Code (read-only)
+        id: gen
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          SAFE_PATH="$PATH"; SAFE_HOME="$HOME";
+          PROMPT=$(cat <<'EOP'
+          <task>
+          Write a brief, kind GitHub issue reply explaining that the bot did not auto-apply changes yet and needs more details.
+          - Do not include any internal IDs, request IDs, or API errors.
+          - Do not suggest preview commands or code blocks.
+          - Ask for concrete steps to reproduce, expected vs actual behavior, and logs or screenshots.
+          - Keep it to 3–6 short sentences. Friendly, clear, and helpful.
+          - Address the issue author if visible in the context.
+          Output ONLY the final Markdown inside <comment>…</comment>.
+          </task>
+          <context>
+          $(cat .github/auto/ISSUE_TRIAGE_CONTEXT.md)
+          </context>
+          <comment>
+          …final Markdown comment…
+          </comment>
+          EOP
+          )
+          set +e
+          { printf '%s' "$PROMPT" | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+              OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:5056/v1" \
+              CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
+              RUSTUP_HOME="$GITHUB_WORKSPACE/.cargo-home/rustup" \
+              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
+              STRICT_CARGO_HOME="1" \
+              npx -y @just-every/code@latest exec -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
+            2>&1 | tee .github/auto/TRIAGE_AGENT_OUT.txt
+          true
+          set -e
+
+      - name: Extract generated comment
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs = require('fs');
+          const t = fs.readFileSync('.github/auto/TRIAGE_AGENT_OUT.txt','utf8');
+          const lower = t.toLowerCase();
+          const openTag = '<comment>';
+          const closeTag = '</comment>';
+          const openIdx = lower.lastIndexOf(openTag);
+          let body = '';
+          if (openIdx !== -1) {
+            const closeIdx = lower.indexOf(closeTag, openIdx + openTag.length);
+            if (closeIdx !== -1) body = t.slice(openIdx + openTag.length, closeIdx).trim();
+          }
+          if (body) fs.writeFileSync('.github/auto/ISSUE_COMMENT.md', body + '\n');
+          JS
+
+      - name: Post generated comment to issue
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner; const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER || 0);
+            const ISSUE_MARK = '<!-- triage:comment -->';
+            let body = '';
+            try { body = fs.readFileSync('.github/auto/ISSUE_COMMENT.md','utf8').trim(); } catch {}
+            if (!body) { core.notice('No generated comment; skipping'); return; }
+            body = ISSUE_MARK + '\n' + body + '\n' + ISSUE_MARK;
+            const all = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const mine = all.find(c => c.user?.type?.toLowerCase().includes('bot') && (c.body || '').includes(ISSUE_MARK));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
