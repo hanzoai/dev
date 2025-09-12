@@ -88,18 +88,16 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd src/rs/target/${{ matrix.target }}/release
-          tar czf ../../../../dev-${{ matrix.target }}.tar.gz dev dev-tui dev-exec
-          cd ../../../../
-          ls -la dev-*.tar.gz
+          tar czf $GITHUB_WORKSPACE/dev-${{ matrix.target }}.tar.gz dev dev-tui dev-exec
+          ls -la $GITHUB_WORKSPACE/dev-*.tar.gz
 
       - name: Create archive (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           cd src/rs/target/${{ matrix.target }}/release
-          Compress-Archive -Path dev.exe,dev-tui.exe,dev-exec.exe -DestinationPath ../../../../dev-${{ matrix.target }}.zip
-          cd ../../../../
-          Get-ChildItem dev-*.zip
+          Compress-Archive -Path dev.exe,dev-tui.exe,dev-exec.exe -DestinationPath $env:GITHUB_WORKSPACE/dev-${{ matrix.target }}.zip
+          Get-ChildItem $env:GITHUB_WORKSPACE/dev-*.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
