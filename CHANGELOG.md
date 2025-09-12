@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.142] - 2025-09-12
+
+- CI: avoid placeholder-only issue comments to reduce noise. (8254d2da)
+- CI: gate Code generation on OPENAI_API_KEY; skip gracefully when missing. (8254d2da)
+- CI: ensure proxy step runs reliably in workflows. (8254d2da)
+
 ## [0.2.141] - 2025-09-12
 
 - Exec: allow suppressing per‑turn diff output via `CODE_SUPPRESS_TURN_DIFF` to reduce noise. (ad1baf1f)
