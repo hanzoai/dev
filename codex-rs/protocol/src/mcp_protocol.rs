@@ -248,6 +248,68 @@ pub struct GetConfigTomlResponse {
     pub profiles: Option<HashMap<String, ConfigProfile>>,
 }
 
+// Upstream additions retained for protocol compatibility. Not all are used by this fork yet.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUserAgentResponse {
+    pub user_agent: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInfoResponse {
+    /// Note: `alleged_user_email` is not currently verified. We read it from
+    /// the local auth.json, which the user could theoretically modify. In the
+    /// future, we may add logic to verify the email against the server before
+    /// returning it.
+    pub alleged_user_email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct GetUserSavedConfigResponse {
+    pub config: UserSavedConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDefaultModelParams {
+    /// If set to None, this means `model` should be cleared in config.toml.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// If set to None, this means `model_reasoning_effort` should be cleared
+    /// in config.toml.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDefaultModelResponse {}
+
+/// UserSavedConfig contains a subset of the config. It is meant to expose mcp
+/// client-configurable settings that can be specified in the NewConversation
+/// and SendUserTurn requests.
+#[derive(Deserialize, Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSavedConfig {
+    /// Approvals
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_policy: Option<AskForApproval>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_mode: Option<SandboxMode>,
+
+    /// Relevant model configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_reasoning_effort: Option<ReasoningEffort>,
+
+    /// Profiles
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profiles: Option<HashMap<String, ConfigProfile>>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SendUserMessageParams {
