@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.138] - 2025-09-12
+
+- TUI/Spinner: honor active auth (ChatGPT vs API key) for custom spinner generation to avoid 401s. (e3f313b7)
+- Auth: prevent background AuthManager resets and align request shape with harness to stop retry loops. (e3f313b7)
+- Stability: reduce spinner‑creation failures by matching session auth preferences. (e3f313b7)
+
 ## [0.2.137] - 2025-09-12
 
 - Dev: add `scripts/test-responses.js` to probe Responses API with ChatGPT/API key auth; includes schema/tools/store tests. (79c69f96)
