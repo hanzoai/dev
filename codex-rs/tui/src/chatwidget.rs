@@ -833,13 +833,24 @@ impl ChatWidget<'_> {
             seq: self.internal_seq,
         }
     }
+    /// Returns true if any agents are actively running (Pending or Running), or we're about to start them.
+    /// Agents in terminal states (Completed/Failed) do not keep the spinner visible.
+    fn agents_are_actively_running(&self) -> bool {
+        if self.agents_ready_to_start {
+            return true;
+        }
+        self.active_agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Pending | AgentStatus::Running))
+    }
+
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
         let any_tools_running = !self.exec.running_commands.is_empty()
             || !self.tools_state.running_custom_tools.is_empty()
             || !self.tools_state.running_web_search.is_empty();
         let any_streaming = self.stream.is_write_cycle_active();
-        let any_agents_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
+        let any_agents_active = self.agents_are_actively_running();
         let any_tasks_active = !self.active_task_ids.is_empty();
         if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
             self.bottom_pane.set_task_running(false);
@@ -3087,7 +3098,13 @@ impl ChatWidget<'_> {
 
                 // Track last message for potential dedup heuristics.
                 self.last_assistant_message = Some(message);
-                // Do not mark closed here; the final insert path manages closed ids and replacement.
+                // Mark this Answer stream id as closed for the rest of the turn so any late
+                // AgentMessageDelta for the same id is ignored. In the full App runtime,
+                // the InsertFinalAnswer path also marks closed; setting it here makes
+                // unit tests (which do not route AppEvents back) behave identically.
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(id.clone()));
                 self.maybe_hide_spinner();
             }
             EventMsg::ReplayHistory(ev) => {
@@ -3378,8 +3395,7 @@ impl ChatWidget<'_> {
                     || !self.tools_state.running_custom_tools.is_empty()
                     || !self.tools_state.running_web_search.is_empty();
                 let any_streaming = self.stream.is_write_cycle_active();
-                let any_agents_active =
-                    !self.active_agents.is_empty() || self.agents_ready_to_start;
+                let any_agents_active = self.agents_are_actively_running();
                 let any_tasks_active = !self.active_task_ids.is_empty();
 
                 if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
@@ -3986,6 +4002,8 @@ impl ChatWidget<'_> {
                 if !self.active_agents.is_empty() {
                     self.agents_ready_to_start = false;
                 }
+                // Re-evaluate spinner visibility now that agent states changed.
+                self.maybe_hide_spinner();
                 self.request_redraw();
             }
             EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -4749,26 +4767,46 @@ impl ChatWidget<'_> {
         let theme_name = match new_theme {
             // Light themes
             codex_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
-            codex_core::config_types::ThemeName::LightPrismRainbow => "Light - Prism Rainbow".to_string(),
-            codex_core::config_types::ThemeName::LightVividTriad => "Light - Vivid Triad".to_string(),
+            codex_core::config_types::ThemeName::LightPrismRainbow => {
+                "Light - Prism Rainbow".to_string()
+            }
+            codex_core::config_types::ThemeName::LightVividTriad => {
+                "Light - Vivid Triad".to_string()
+            }
             codex_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
             codex_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
             codex_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
             // Dark themes
-            codex_core::config_types::ThemeName::DarkCarbonNight => "Dark - Carbon Night".to_string(),
-            codex_core::config_types::ThemeName::DarkShinobiDusk => "Dark - Shinobi Dusk".to_string(),
-            codex_core::config_types::ThemeName::DarkOledBlackPro => "Dark - OLED Black Pro".to_string(),
-            codex_core::config_types::ThemeName::DarkAmberTerminal => "Dark - Amber Terminal".to_string(),
+            codex_core::config_types::ThemeName::DarkCarbonNight => {
+                "Dark - Carbon Night".to_string()
+            }
+            codex_core::config_types::ThemeName::DarkShinobiDusk => {
+                "Dark - Shinobi Dusk".to_string()
+            }
+            codex_core::config_types::ThemeName::DarkOledBlackPro => {
+                "Dark - OLED Black Pro".to_string()
+            }
+            codex_core::config_types::ThemeName::DarkAmberTerminal => {
+                "Dark - Amber Terminal".to_string()
+            }
             codex_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
-            codex_core::config_types::ThemeName::DarkCharcoalRainbow => "Dark - Charcoal Rainbow".to_string(),
+            codex_core::config_types::ThemeName::DarkCharcoalRainbow => {
+                "Dark - Charcoal Rainbow".to_string()
+            }
             codex_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
-            codex_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro".to_string(),
+            codex_core::config_types::ThemeName::DarkPaperLightPro => {
+                "Dark - Paper Light Pro".to_string()
+            }
             codex_core::config_types::ThemeName::Custom => {
                 // Use saved custom name and is_dark to show a friendly label
-                let mut label = crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
+                let mut label =
+                    crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
                 // Sanitize leading Light/Dark if present
                 for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
-                    if label.starts_with(pref) { label = label[pref.len()..].trim().to_string(); break; }
+                    if label.starts_with(pref) {
+                        label = label[pref.len()..].trim().to_string();
+                        break;
+                    }
                 }
                 if crate::theme::custom_theme_is_dark().unwrap_or(false) {
                     format!("Dark - {}", label)
@@ -5674,6 +5712,13 @@ impl ChatWidget<'_> {
             let cell =
                 history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
             self.history_replace_at(idx, Box::new(cell));
+            // Mark this Answer stream id as closed for the rest of the turn so
+            // any late AgentMessageDelta for the same id is ignored.
+            if let Some(ref want) = id {
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()));
+            }
             self.autoscroll_if_near_bottom();
             return;
         }
@@ -5702,6 +5747,11 @@ impl ChatWidget<'_> {
                     &self.config,
                 );
                 self.history_replace_at(idx, Box::new(cell));
+                if let Some(ref want) = id {
+                    self.stream_state
+                        .closed_answer_ids
+                        .insert(StreamId(want.clone()));
+                }
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -5778,8 +5828,14 @@ impl ChatWidget<'_> {
             id,
             Self::debug_fmt_order_key(key)
         );
-        let cell = history_cell::AssistantMarkdownCell::new_with_id(source, id, &self.config);
+        let cell =
+            history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
         let _ = self.history_insert_with_key_global(Box::new(cell), key);
+        if let Some(ref want) = id {
+            self.stream_state
+                .closed_answer_ids
+                .insert(StreamId(want.clone()));
+        }
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
@@ -6205,38 +6261,60 @@ impl ChatWidget<'_> {
                                 let max_attempts = 2;
                                 loop {
                                     attempt += 1;
-                                    match browser_manager_inner.capture_screenshot_with_url().await {
+                                    match browser_manager_inner.capture_screenshot_with_url().await
+                                    {
                                         Ok((paths, _)) => {
                                             if let Some(first_path) = paths.first() {
-                                                tracing::info!("[cdp] auto-captured screenshot: {}", first_path.display());
+                                                tracing::info!(
+                                                    "[cdp] auto-captured screenshot: {}",
+                                                    first_path.display()
+                                                );
 
-                                            if let Ok(mut latest) = latest_screenshot_inner.lock() {
-                                                *latest = Some((first_path.clone(), url_inner.clone()));
+                                                if let Ok(mut latest) =
+                                                    latest_screenshot_inner.lock()
+                                                {
+                                                    *latest = Some((
+                                                        first_path.clone(),
+                                                        url_inner.clone(),
+                                                    ));
+                                                }
+
+                                                use codex_core::protocol::{
+                                                    BrowserScreenshotUpdateEvent, Event, EventMsg,
+                                                };
+                                                let _ = app_event_tx_inner.send(
+                                                    AppEvent::CodexEvent(Event {
+                                                        id: uuid::Uuid::new_v4().to_string(),
+                                                        event_seq: 0,
+                                                        msg: EventMsg::BrowserScreenshotUpdate(
+                                                            BrowserScreenshotUpdateEvent {
+                                                                screenshot_path: first_path.clone(),
+                                                                url: url_inner,
+                                                            },
+                                                        ),
+                                                        order: None,
+                                                    }),
+                                                );
+                                                break;
                                             }
-
-                                            use codex_core::protocol::{
-                                                BrowserScreenshotUpdateEvent, Event, EventMsg,
-                                            };
-                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
-                                                id: uuid::Uuid::new_v4().to_string(),
-                                                event_seq: 0,
-                                                msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                                                    screenshot_path: first_path.clone(),
-                                                    url: url_inner,
-                                                }),
-                                                order: None,
-                                            }));
-                                            break;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "[cdp] auto-capture failed (attempt {}): {}",
+                                                attempt,
+                                                e
+                                            );
+                                            if attempt >= max_attempts {
+                                                break;
+                                            }
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                                250,
+                                            ))
+                                            .await;
+                                            continue;
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!("[cdp] auto-capture failed (attempt {}): {}", attempt, e);
-                                        if attempt >= max_attempts { break; }
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
-                                        continue;
-                                    }
-                                }
-                                // end match
+                                    // end match
                                 }
                                 // end loop
                             });
@@ -8911,6 +8989,10 @@ mod tests {
     use codex_core::config::Config;
     use codex_core::config::ConfigOverrides;
     use codex_core::config::ConfigToml;
+    use codex_core::protocol::AgentStatusUpdateEvent;
+    use codex_core::protocol::Event;
+    use codex_core::protocol::EventMsg;
+    use codex_core::protocol::TaskCompleteEvent;
 
     fn test_config() -> Config {
         codex_core::config::Config::load_from_base_config_with_overrides(
@@ -8929,7 +9011,7 @@ mod tests {
             picker: None,
             font_size: (8, 16),
         };
-        ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term)
+        ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term, false)
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -8937,6 +9019,7 @@ mod tests {
         let mut chat = make_widget();
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "call-x".into(),
+            event_seq: 0,
             msg: codex_core::protocol::EventMsg::ExecCommandEnd(
                 codex_core::protocol::ExecCommandEndEvent {
                     call_id: "call-x".into(),
@@ -8946,9 +9029,15 @@ mod tests {
                     stderr: String::new(),
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: None,
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "call-x".into(),
+            event_seq: 1,
             msg: codex_core::protocol::EventMsg::ExecCommandBegin(
                 codex_core::protocol::ExecCommandBeginEvent {
                     call_id: "call-x".into(),
@@ -8957,6 +9046,11 @@ mod tests {
                     parsed_cmd: vec![],
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: None,
+                sequence_number: Some(2),
+            }),
         });
         let dump = chat.test_dump_history_text();
         assert!(
@@ -8971,19 +9065,31 @@ mod tests {
         let mut chat = make_widget();
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "ans-1".into(),
+            event_seq: 0,
             msg: codex_core::protocol::EventMsg::AgentMessage(
                 codex_core::protocol::AgentMessageEvent {
                     message: "hello".into(),
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "ans-1".into(),
+            event_seq: 1,
             msg: codex_core::protocol::EventMsg::AgentMessageDelta(
                 codex_core::protocol::AgentMessageDeltaEvent {
                     delta: " world".into(),
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(2),
+            }),
         });
         assert_eq!(chat.last_assistant_message.as_deref(), Some("hello"));
         // Late delta should be ignored; closed set contains the id
@@ -8999,24 +9105,139 @@ mod tests {
         let mut chat = make_widget();
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "r-1".into(),
+            event_seq: 0,
             msg: codex_core::protocol::EventMsg::AgentReasoning(
                 codex_core::protocol::AgentReasoningEvent {
                     text: "think".into(),
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(1),
+            }),
         });
         chat.handle_codex_event(codex_core::protocol::Event {
             id: "r-1".into(),
+            event_seq: 1,
             msg: codex_core::protocol::EventMsg::AgentReasoningDelta(
                 codex_core::protocol::AgentReasoningDeltaEvent {
                     delta: " harder".into(),
                 },
             ),
+            order: Some(codex_core::protocol::OrderMeta {
+                request_ordinal: 1,
+                output_index: Some(0),
+                sequence_number: Some(2),
+            }),
         });
         assert!(
             chat.stream_state
                 .closed_reasoning_ids
                 .contains(&StreamId("r-1".into()))
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn spinner_stays_while_any_agent_running() {
+        let mut chat = make_widget();
+        // Start a task → spinner should turn on
+        chat.handle_codex_event(Event {
+            id: "t1".into(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should be on after TaskStarted"
+        );
+
+        // Agent update with one running agent → still on
+        let ev = AgentStatusUpdateEvent {
+            agents: vec![codex_core::protocol::AgentInfo {
+                id: "a1".into(),
+                name: "planner".into(),
+                status: "running".into(),
+                model: None,
+                last_progress: Some("working".into()),
+                result: None,
+                error: None,
+            }],
+            context: None,
+            task: None,
+        };
+        chat.handle_codex_event(Event {
+            id: "t1".into(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(ev),
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should remain while agent is running"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn spinner_hides_after_agents_complete_and_task_complete() {
+        let mut chat = make_widget();
+        // Start a task → spinner on
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should be on after TaskStarted"
+        );
+
+        // Agents: now both are completed/failed → do not count as active
+        let ev_done = AgentStatusUpdateEvent {
+            agents: vec![
+                codex_core::protocol::AgentInfo {
+                    id: "a1".into(),
+                    name: "planner".into(),
+                    status: "completed".into(),
+                    model: None,
+                    last_progress: None,
+                    result: Some("ok".into()),
+                    error: None,
+                },
+                codex_core::protocol::AgentInfo {
+                    id: "a2".into(),
+                    name: "coder".into(),
+                    status: "failed".into(),
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: Some("boom".into()),
+                },
+            ],
+            context: None,
+            task: None,
+        };
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(ev_done),
+            order: None,
+        });
+
+        // TaskComplete → spinner should hide if nothing else is running
+        chat.handle_codex_event(Event {
+            id: "t2".into(),
+            event_seq: 2,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+        assert!(
+            !chat.bottom_pane.is_task_running(),
+            "spinner should hide after all agents are terminal and TaskComplete processed"
         );
     }
 }
