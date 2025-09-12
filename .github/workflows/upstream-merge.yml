@@ -287,6 +287,7 @@ jobs:
           workspaces: |
             codex-rs -> target
           save-if: true
+          cache-on-failure: true
 
       - name: Setup sccache (GHA backend)
         if: steps.check_upstream.outputs.skip != 'true'
@@ -309,6 +310,7 @@ jobs:
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           STRICT_CARGO_HOME: "1"
+          CARGO_HOME_ENFORCED: ${{ env.CARGO_HOME }}
         run: |
           set -euo pipefail
           ./build-fast.sh
