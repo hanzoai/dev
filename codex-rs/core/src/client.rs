@@ -201,7 +201,7 @@ impl ModelClient {
 
         let reasoning = create_reasoning_param_for_request(
             &self.config.model_family,
-            self.effort,
+            Some(self.effort),
             self.summary,
         );
 
