@@ -33,8 +33,8 @@ use crate::config::Config;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
-use crate::default_client::create_client;
 use crate::debug_logger::DebugLogger;
+use crate::default_client::create_client;
 use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::UsageLimitReachedError;
@@ -180,7 +180,8 @@ impl ModelClient {
             .as_ref()
             .map(|a| a.mode);
 
-        let store = prompt.store && auth_mode != Some(AuthMode::ChatGPT);
+        // Use non-stored turns on all paths for stability.
+        let store = false;
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
         let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
@@ -239,6 +240,7 @@ impl ModelClient {
             store,
             stream: true,
             include,
+            // Use a stable per-process cache key (session id). With store=false this is inert.
             prompt_cache_key: Some(self.session_id.to_string()),
         };
 
@@ -278,10 +280,13 @@ impl ModelClient {
                 .await?;
 
             req_builder = req_builder
-                .header("OpenAI-Beta", "responses=experimental")
-                .header("session_id", self.session_id.to_string())
+                .header("OpenAI-Beta", "responses=v1")
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload);
+            // Only include a session_id for ChatGPT auth where the backend expects it
+            if auth_mode == Some(AuthMode::ChatGPT) {
+                req_builder = req_builder.header("session_id", self.session_id.to_string());
+            }
 
             // Avoid unstable `let` chains: expand into nested conditionals.
             if let Some(auth) = auth.as_ref() {
@@ -413,18 +418,30 @@ impl ModelClient {
                         // On final attempt, surface rich diagnostics for server errors.
                         // On final attempt, surface rich diagnostics for server errors.
                         if status.is_server_error() {
-                            let (message, body_excerpt) = match serde_json::from_str::<ErrorResponse>(&body_text) {
-                                Ok(ErrorResponse { error }) => {
-                                    let msg = error.message.unwrap_or_else(|| "server error".to_string());
-                                    (msg, None)
-                                }
-                                Err(_) => {
-                                    let mut excerpt = body_text;
-                                    const MAX: usize = 600;
-                                    if excerpt.len() > MAX { excerpt.truncate(MAX); }
-                                    ("server error".to_string(), if excerpt.is_empty() { None } else { Some(excerpt) })
-                                }
-                            };
+                            let (message, body_excerpt) =
+                                match serde_json::from_str::<ErrorResponse>(&body_text) {
+                                    Ok(ErrorResponse { error }) => {
+                                        let msg = error
+                                            .message
+                                            .unwrap_or_else(|| "server error".to_string());
+                                        (msg, None)
+                                    }
+                                    Err(_) => {
+                                        let mut excerpt = body_text;
+                                        const MAX: usize = 600;
+                                        if excerpt.len() > MAX {
+                                            excerpt.truncate(MAX);
+                                        }
+                                        (
+                                            "server error".to_string(),
+                                            if excerpt.is_empty() {
+                                                None
+                                            } else {
+                                                Some(excerpt)
+                                            },
+                                        )
+                                    }
+                                };
 
                             // Build a single-line, actionable message for the UI and logs.
                             let mut msg = format!("server error {status}: {message}");
@@ -650,7 +667,9 @@ async fn process_sse<S>(
                 // Log parse error with data excerpt, and record it in the debug logger as well.
                 let mut excerpt = sse.data.clone();
                 const MAX: usize = 600;
-                if excerpt.len() > MAX { excerpt.truncate(MAX); }
+                if excerpt.len() > MAX {
+                    excerpt.truncate(MAX);
+                }
                 debug!("Failed to parse SSE event: {e}, data: {excerpt}");
                 if let Ok(logger) = debug_logger.lock() {
                     let _ = logger.append_response_event(

@@ -1554,8 +1554,8 @@ impl WidgetRef for ChatComposer {
                     }
                 }
 
-                // Right side: command key hints (Ctrl+R/D/H) followed by token usage if available
-                // We will elide hints when space is tight in this order: hide reasoning, diff viewer.
+                // Right side: command key hints (Ctrl+R/D/H), token usage, and a small auth notice
+                // when using an API key instead of ChatGPT auth. We elide hints first if space is tight.
                 let mut right_spans: Vec<Span> = Vec::new();
 
                 // Prepare token usage spans (always shown when available)
@@ -1595,10 +1595,6 @@ impl WidgetRef for ChatComposer {
                             spans.push(Span::from("Ctrl+D").style(key_hint_style));
                             spans.push(Span::from(" diff viewer").style(label_style));
                         }
-                        // Screen toggle hint is always available when space permits
-                        if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                        spans.push(Span::from("Ctrl+T").style(key_hint_style));
-                        spans.push(Span::from(" screen").style(label_style));
                         // Always show help at the end of the command hints
                         if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
                         spans.push(Span::from("Ctrl+H").style(key_hint_style));
@@ -1622,19 +1618,30 @@ impl WidgetRef for ChatComposer {
                 let total_width = bottom_line_rect.width as usize;
                 let trailing_pad = 1usize; // one space on the right edge
 
-                // We'll add separators between hints and tokens when both are present
-                let combined_len = |h: &Vec<Span>, t: &Vec<Span>| -> usize {
-                    let mut len = measure(h) + measure(t);
-                    if !h.is_empty() && !t.is_empty() { len += "  •  ".chars().count(); }
+                // Optional auth notice: show a small "API key" tag when not using ChatGPT auth
+                let mut auth_spans: Vec<Span> = Vec::new();
+                if !self.using_chatgpt_auth {
+                    auth_spans.push(Span::from("API key").style(label_style));
+                }
+
+                // We'll add separators between sections when both are present
+                let sep_len = "  •  ".chars().count();
+                let combined_len = |h: &Vec<Span>, t: &Vec<Span>, a: &Vec<Span>| -> usize {
+                    let mut len = measure(h) + measure(t) + measure(a);
+                    if !h.is_empty() && !t.is_empty() { len += sep_len; }
+                    if (!h.is_empty() || !t.is_empty()) && !a.is_empty() { len += sep_len; }
                     len
                 };
 
                 // Elide hints in order until content fits
-                while left_len + combined_len(&hint_spans, &token_spans) + trailing_pad > total_width {
+                while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad > total_width {
                     if include_reasoning {
                         include_reasoning = false;
                     } else if include_diff {
                         include_diff = false;
+                    } else if !auth_spans.is_empty() {
+                        // If still too tight, drop the auth tag as a last resort
+                        auth_spans.clear();
                     } else {
                         break;
                     }
@@ -1647,6 +1654,11 @@ impl WidgetRef for ChatComposer {
                     right_spans.push(Span::from("  •  ").style(label_style));
                 }
                 right_spans.extend(token_spans);
+                // Append auth notice at the very end (right-most) if present
+                if !right_spans.is_empty() && !auth_spans.is_empty() {
+                    right_spans.push(Span::from("  •  ").style(label_style));
+                }
+                right_spans.extend(auth_spans);
 
                 // Recompute spacer after elision
                 let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
