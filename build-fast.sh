@@ -129,13 +129,20 @@ fi
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
 # by setting STRICT_CARGO_HOME=1 (used by Issue Triage workflow to keep caching deterministic).
+# Cargo/rustup home directories
+# When STRICT_CARGO_HOME=1, honor CARGO_HOME_ENFORCED if provided; otherwise
+# force a per-repo location to avoid HOME permission/caching issues on CI.
 if [ "${STRICT_CARGO_HOME:-}" = "1" ]; then
-  export CARGO_HOME="${CARGO_HOME_ENFORCED:-${HOME}/.cargo}"
+  export CARGO_HOME="${CARGO_HOME_ENFORCED:-${REPO_ROOT}/.cargo-home}"
 else
   # Default: write inside workspace if not set to avoid HOME permission issues
   if [ -z "${CARGO_HOME:-}" ]; then
     export CARGO_HOME="${REPO_ROOT}/.cargo-home"
   fi
+fi
+# Keep rustup’s home alongside Cargo by default when not explicitly set
+if [ -z "${RUSTUP_HOME:-}" ]; then
+  export RUSTUP_HOME="${CARGO_HOME%/}/rustup"
 fi
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
   export CARGO_TARGET_DIR="${SCRIPT_DIR}/codex-rs/target"
@@ -162,7 +169,7 @@ if [ -z "$TRIPLE" ]; then
 fi
 
 # Check Cargo.lock validity (fast, non-blocking check) using the selected cargo
-if ! ${USE_CARGO} metadata --locked --format-version 1 >/dev/null 2>&1; then
+if ! CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" ${USE_CARGO} metadata --locked --format-version 1 >/dev/null 2>&1; then
     echo "⚠️  Warning: Cargo.lock appears out of date or inconsistent"
     echo "  This might mean:"
     echo "  • You've modified Cargo.toml dependencies"
@@ -203,7 +210,7 @@ FPRINT_FILE="./target/${PROFILE}/.env-fingerprint"
 # Collect fingerprint inputs (only env/toolchain/settings that affect codegen/caches)
 collect_fingerprint() {
   local cargo_v rustc_v host which_cargo which_rustc uname_srm
-  cargo_v="$(${USE_CARGO} -V 2>/dev/null || true)"
+  cargo_v="$(CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" ${USE_CARGO} -V 2>/dev/null || true)"
   rustc_v="$(rustup run "$TOOLCHAIN" rustc -vV 2>/dev/null || true)"
   host="$(printf "%s\n" "$rustc_v" | awk -F': ' '/^host: /{print $2}' || true)"
   which_cargo="${REAL_CARGO_BIN}"
