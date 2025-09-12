@@ -305,6 +305,14 @@ jobs:
 
       # Remove redundant direct caches; Swatinem/rust-cache covers target and cargo dirs via CARGO_HOME
 
+      - name: Prime Rust build cache (fast local build)
+        if: steps.check_upstream.outputs.skip != 'true'
+        env:
+          STRICT_CARGO_HOME: "1"
+        run: |
+          set -euo pipefail
+          ./build-fast.sh
+
       - name: Setup Node.js
         if: steps.check_upstream.outputs.skip != 'true'
         uses: actions/setup-node@v4
