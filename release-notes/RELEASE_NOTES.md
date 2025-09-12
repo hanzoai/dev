@@ -1,12 +1,11 @@
-## @just-every/code v0.2.140
+## @just-every/code v0.2.141
 
-This release contains CI improvements with no user-facing changes.
+This release refines exec output controls and hardens CI for stability.
 
 ### Changes
 
-- No user-facing changes; maintenance-only release with CI cache prewarming and policy hardening.
-- CI: prewarm Rust build cache via ./build-fast.sh to speed upstream-merge and issue-code agents.
-- CI: align cache home with enforced CARGO_HOME and enable cache-on-failure for more reliable runs.
+- Exec: allow suppressing per‑turn diff output via CODE_SUPPRESS_TURN_DIFF to reduce noise.
+- CI: speed up issue‑code jobs with cached ripgrep/jq and add guards for protected paths and PR runtime.
 
 ### Install
 
@@ -15,4 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.139...v0.2.140
+Compare: https://github.com/just-every/code/compare/v0.2.140...v0.2.141
+
