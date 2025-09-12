@@ -441,13 +441,7 @@ jobs:
             if [ "$decision" = 'allow' ]; then
               agent_mode='full'
             else
-              # Heuristic upgrade: treat straightforward features/docs/typos etc. as safe to attempt
-              text="$(printf '%s\n%s\n' "${ISSUE_TITLE:-}" "${ISSUE_BODY:-}" | tr '[:upper:]' '[:lower:]')"
-              if echo "$text" | grep -E -q '(feat|feature request|enhancement|docs|documentation|readme|typo|spelling|grammar|broken link|link fix|example|usage|lint|format|style|rename|minor fix)'; then
-                agent_mode='full'
-              else
-                agent_mode='comment'
-              fi
+              agent_mode='comment'
             fi
           else
             gate_reason=$(printf "Rate: %s\nSafety: %s" "${reason_rate:-none}" "${reason_safety:-none}")
@@ -554,7 +548,7 @@ jobs:
             core.notice(`Queued issue-comment for #${issue_number} (comment mode)`);
 
       - name: Queue implementation (issue-code workflow)
-        if: steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
+        if: steps.safety.outputs.decision == 'allow' && steps.gate.outputs.allow_agent == 'true' && steps.gate.outputs.agent_mode == 'full'
         uses: actions/github-script@v7
         with:
           script: |
