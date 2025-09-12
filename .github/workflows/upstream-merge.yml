@@ -319,7 +319,7 @@ jobs:
           restore-keys: |
             npm-cache-${{ runner.os }}-node20-
 
-      - name: Start local OpenAI proxy (no key to agent)
+      - name: Start local OpenAI proxy (no key to agent; verbose logging)
         if: steps.check_upstream.outputs.skip != 'true'
         id: openai_proxy
         env:
@@ -334,35 +334,103 @@ jobs:
           cat > .github/auto/openai-proxy.js <<'JS'
           const http = require('http');
           const https = require('https');
+          const crypto = require('crypto');
           const { URL } = require('url');
           const PORT = process.env.PORT || 5055;
           const API_KEY = process.env.OPENAI_API_KEY || '';
+          const UPSTREAM = new URL(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1');
           const ALLOWED = ['/v1/chat/completions','/v1/responses'];
-          if (!API_KEY) { console.error('OPENAI_API_KEY missing'); process.exit(1); }
+          if (!API_KEY) { console.error('[fatal] OPENAI_API_KEY missing'); process.exit(1); }
+
+          function redactHeaders(h) {
+            const out = {};
+            for (const [k, v] of Object.entries(h || {})) {
+              const key = k.toLowerCase();
+              if (key === 'authorization' || key === 'proxy-authorization' || key === 'cookie' || key === 'set-cookie') {
+                out[key] = 'REDACTED';
+              } else {
+                out[key] = Array.isArray(v) ? v.map(() => '<omitted>') : String(v);
+              }
+            }
+            return out;
+          }
+          function log(ev) { try { console.log(JSON.stringify({ ts: new Date().toISOString(), ...ev })); } catch { /* noop */ } }
+
           const server = http.createServer((req, res) => {
-            if (req.method !== 'POST' || !ALLOWED.some(p => req.url.startsWith(p))) {
+            const rid = crypto.randomUUID();
+            if (!ALLOWED.some(p => req.url.startsWith(p))) {
               res.writeHead(403, { 'content-type': 'application/json' });
-              res.end(JSON.stringify({ error: 'blocked' }));
+              res.end(JSON.stringify({ error: 'blocked', path: req.url }));
               return;
             }
+
             const chunks = [];
-            req.on('data', c => { chunks.push(c); if (Buffer.concat(chunks).length > 1024*1024) req.destroy(); });
+            let size = 0;
+            req.on('data', c => { chunks.push(c); size += c.length; if (size > 2*1024*1024) { req.destroy(new Error('body too large')); } });
+            req.on('error', err => {
+              log({ level: 'error', rid, msg: 'client request error', err: String(err) });
+              if (!res.headersSent) res.writeHead(400, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ error: 'bad_request' }));
+            });
             req.on('end', () => {
-              const up = new URL('https://api.openai.com' + req.url);
-              const fw = https.request({
-                method: 'POST',
+              const body = Buffer.concat(chunks);
+              const up = new URL(req.url, UPSTREAM);
+              // Prepare upstream headers: start with incoming, then override auth & ensure SSE headers are preserved.
+              const incoming = { ...req.headers };
+              if (!incoming['content-type']) incoming['content-type'] = 'application/json';
+              if (!incoming['accept']) incoming['accept'] = 'text/event-stream';
+              incoming['authorization'] = `Bearer ${API_KEY}`; // replace with real API key
+              if (up.pathname.startsWith('/v1/responses')) {
+                if (!incoming['openai-beta']) incoming['openai-beta'] = 'responses=experimental';
+              }
+              if (!incoming['originator']) incoming['originator'] = 'codex_cli_rs';
+              incoming['connection'] = 'keep-alive';
+
+              log({ level: 'info', rid, phase: 'request', method: req.method, url: up.toString(), headers: redactHeaders(incoming), body_bytes: body.length });
+
+              const opts = {
+                protocol: up.protocol,
                 hostname: up.hostname,
+                port: up.port || (up.protocol === 'https:' ? 443 : 80),
                 path: up.pathname + up.search,
-                headers: { 'content-type': 'application/json', 'authorization': `Bearer ${API_KEY}` }
-              }, r => { res.writeHead(r.statusCode || 500, r.headers); r.pipe(res); });
-              fw.on('error', e => { res.writeHead(502, {'content-type':'application/json'}); res.end(JSON.stringify({ error:'upstream', message: e.message })); });
-              fw.end(Buffer.concat(chunks));
+                method: req.method,
+                headers: incoming,
+              };
+
+              const upstream = (up.protocol === 'https:' ? https : http).request(opts, (upr) => {
+                const resHeaders = { ...upr.headers };
+                res.writeHead(upr.statusCode || 500, resHeaders);
+                log({ level: 'info', rid, phase: 'response_head', status: upr.statusCode, headers: redactHeaders(resHeaders) });
+                let total = 0;
+                upr.on('data', (chunk) => { total += chunk.length; });
+                upr.on('end', () => { log({ level: 'info', rid, phase: 'response_end', status: upr.statusCode, bytes: total, request_id: resHeaders['x-request-id'] || null }); });
+                upr.on('error', (e) => { log({ level: 'error', rid, phase: 'response_error', err: String(e) }); });
+                upr.pipe(res);
+              });
+              upstream.setTimeout(600000, () => { upstream.destroy(new Error('upstream timeout')); });
+              upstream.on('error', (e) => {
+                log({ level: 'error', rid, phase: 'upstream_error', err: String(e) });
+                if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ error: 'upstream_error' }));
+              });
+              upstream.end(body);
             });
           });
-          server.listen(PORT, '127.0.0.1', () => { console.log('proxy listening on 127.0.0.1:'+PORT); });
+          server.headersTimeout = 650000;
+          server.keepAliveTimeout = 650000;
+          server.listen(PORT, '127.0.0.1', () => { log({ level: 'info', msg: 'proxy listening', addr: '127.0.0.1', port: PORT }); });
           JS
           node .github/auto/openai-proxy.js > .github/auto/openai-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
+          # Wait briefly for readiness
+          for i in {1..30}; do if nc -z 127.0.0.1 5055; then break; else sleep 0.2; fi; done || true
+
+      - name: Print proxy startup log tail
+        if: steps.check_upstream.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare agent context (commit range, deleted paths, histogram)
         id: prep
@@ -609,6 +677,14 @@ jobs:
             --cd "$GITHUB_WORKSPACE" \
             --skip-git-repo-check \
             - | tee .github/auto/AGENT_STDOUT.txt
+
+      - name: Upload artifact - openai-proxy.log
+        if: steps.check_upstream.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openai-proxy.log
+          if-no-files-found: warn
+          path: .github/auto/openai-proxy.log
 
       - name: Post-merge verify (build-fast + API compile)
         id: verify
