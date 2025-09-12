@@ -212,6 +212,8 @@ impl CodexMessageProcessor {
         self.outgoing.send_response(request_id, response).await;
     }
 
+    // Upstream added utility endpoints (user info, set default model, one-off exec).
+    // Our fork does not expose them via this server; omit to preserve behavior.
     async fn process_new_conversation(&self, request_id: RequestId, params: NewConversationParams) {
         let config = match derive_config_from_params(params, self.codex_linux_sandbox_exe.clone()) {
             Ok(config) => config,
