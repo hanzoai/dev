@@ -113,7 +113,25 @@ impl ModelProviderInfo {
 
         let url = self.get_full_url(&effective_auth);
 
-        let mut builder = client.post(url);
+        let mut builder = client.post(&url);
+
+        // Always set an explicit Host header that matches the upstream target.
+        // Some forward proxies incorrectly reuse the inbound Host header
+        // (e.g. "127.0.0.1:5055") for TLS SNI when connecting to the
+        // upstream server, which causes handshake failures. By setting
+        // Host to the authority derived from the final URL here, we ensure
+        // the proxy sees the correct host and can forward/SNI appropriately.
+        if let Ok(parsed) = url::Url::parse(&url) {
+            if let Some(host) = parsed.host_str() {
+                let authority = match parsed.port() {
+                    Some(port) => format!("{host}:{port}"),
+                    None => host.to_string(),
+                };
+                if let Ok(hv) = reqwest::header::HeaderValue::from_str(&authority) {
+                    builder = builder.header(reqwest::header::HOST, hv);
+                }
+            }
+        }
 
         if let Some(auth) = effective_auth.as_ref() {
             builder = builder.bearer_auth(auth.get_token().await?);
