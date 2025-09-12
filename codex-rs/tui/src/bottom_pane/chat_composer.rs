@@ -1595,10 +1595,6 @@ impl WidgetRef for ChatComposer {
                             spans.push(Span::from("Ctrl+D").style(key_hint_style));
                             spans.push(Span::from(" diff viewer").style(label_style));
                         }
-                        // Screen toggle hint is always available when space permits
-                        if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                        spans.push(Span::from("Ctrl+T").style(key_hint_style));
-                        spans.push(Span::from(" screen").style(label_style));
                         // Always show help at the end of the command hints
                         if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
                         spans.push(Span::from("Ctrl+H").style(key_hint_style));
