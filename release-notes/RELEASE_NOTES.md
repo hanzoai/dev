@@ -1,11 +1,11 @@
-## @just-every/code v0.2.144
+## @just-every/code v0.2.145
 
-This release improves the reliability and signal of our CI-driven issue comment automation.
+A small maintenance release that improves the reliability and safety of our issue‑comment automation.
 
 ### Changes
 
-- CI/Issue comments: make agent assertion non-fatal; fail only on proxy 5xx; keep fallback path working.
-- CI: gate agent runs on OPENAI key; fix secrets condition syntax; reduce noisy stream errors; add proxy log tail for debug.
+- CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows.
+- CI: gate issue-comment job on OPENAI_API_KEY via env and avoid secrets in if conditions.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.143...v0.2.144
+Compare: https://github.com/just-every/code/compare/v0.2.144...v0.2.145
