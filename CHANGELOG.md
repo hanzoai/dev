@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.144] - 2025-09-13
+
+- CI/Issue comments: make agent assertion non-fatal; fail only on proxy 5xx; keep fallback path working. (51479121)
+- CI: gate agent runs on OPENAI key; fix secrets condition syntax; reduce noisy stream errors; add proxy log tail for debug. (31a8b220, 3d805551, b94e2731)
+
 ## [0.2.143] - 2025-09-13
 
 - Core: fix Responses API 400 by using supported 'web_search' tool id. (a00308b3)
