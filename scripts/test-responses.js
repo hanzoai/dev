@@ -124,10 +124,10 @@ function makePayload(kind, model, stream, store, variant) {
     tools = [ { type: 'web_search' } ];
     if (kind === 'chatgpt') {
       // Match Codex behavior: convert to preview tool for ChatGPT backend
-      tools = [ { type: 'web_search_preview' } ];
+      tools = [ { type: 'web_search' } ];
     }
   } else if (variant === 'tools-web-search-preview') {
-    tools = [ { type: 'web_search_preview' } ];
+    tools = [ { type: 'web_search' } ];
   }
   let text = undefined;
   if (variant === 'json-schema') {
