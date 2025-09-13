@@ -422,7 +422,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
         lines.pop();
     }
     // Compare only after the last session banner marker, and start at the next 'thinking' line.
-    const MARKER_PREFIX: &str = ">_ You are using OpenAI Codex in ";
+    const MARKER_PREFIX: &str = ">_ You are using OpenAI Code in ";
     let last_marker_line_idx = lines
         .iter()
         .rposition(|l| l.starts_with(MARKER_PREFIX))
@@ -454,7 +454,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
 //
 // Snapshot test: command approval modal
 //
-// Synthesizes a Codex ExecApprovalRequest event to trigger the approval modal
+// Synthesizes a Code ExecApprovalRequest event to trigger the approval modal
 // and snapshots the visual output using the ratatui TestBackend.
 #[test]
 fn approval_modal_exec_snapshot() {
@@ -633,7 +633,7 @@ fn status_widget_and_approval_modal_snapshot() {
         call_id: "call-approve-exec".into(),
         command: vec!["echo".into(), "hello world".into()],
         cwd: std::path::PathBuf::from("/tmp"),
-        reason: Some("Codex wants to run a command".into()),
+        reason: Some("Code wants to run a command".into()),
     };
     chat.handle_codex_event(Event {
         id: "sub-approve-exec".into(),
@@ -779,10 +779,10 @@ fn apply_patch_approval_sends_op_with_submission_id() {
     // Approve via key press 'y'
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
 
-    // Expect a CodexOp with PatchApproval carrying the submission id, not call id
+    // Expect a CodeOp with PatchApproval carrying the submission id, not call id
     let mut found = false;
     while let Ok(app_ev) = rx.try_recv() {
-        if let AppEvent::CodexOp(Op::PatchApproval { id, decision }) = app_ev {
+        if let AppEvent::CodeOp(Op::PatchApproval { id, decision }) = app_ev {
             assert_eq!(id, "sub-123");
             assert!(matches!(
                 decision,
@@ -815,16 +815,16 @@ fn apply_patch_full_flow_integration_like() {
         }),
     });
 
-    // 2) User approves via 'y' and App receives a CodexOp
+    // 2) User approves via 'y' and App receives a CodeOp
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
     let mut maybe_op: Option<Op> = None;
     while let Ok(app_ev) = rx.try_recv() {
-        if let AppEvent::CodexOp(op) = app_ev {
+        if let AppEvent::CodeOp(op) = app_ev {
             maybe_op = Some(op);
             break;
         }
     }
-    let op = maybe_op.expect("expected CodexOp after key press");
+    let op = maybe_op.expect("expected CodeOp after key press");
 
     // 3) App forwards to widget.submit_op, which pushes onto codex_op_tx
     chat.submit_op(op);
