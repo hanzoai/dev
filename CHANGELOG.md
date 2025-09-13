@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.145] - 2025-09-13
+
+- CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows. (81660396)
+- CI: gate issue-comment job on OPENAI_API_KEY via env and avoid secrets in if conditions. (c65cf3be)
+
 ## [0.2.144] - 2025-09-13
 
 - CI/Issue comments: make agent assertion non-fatal; fail only on proxy 5xx; keep fallback path working. (51479121)
