@@ -39,9 +39,9 @@ pub(crate) fn should_persist_response_item(item: &ResponseItem) -> bool {
 pub(crate) fn should_persist_event_msg(ev: &EventMsg) -> bool {
     match ev {
         EventMsg::AgentMessage(_)
-        | EventMsg::AgentReasoning(_)
-        | EventMsg::AgentReasoningRawContent(_)
-        | EventMsg::TokenCount(_) => true,
+            | EventMsg::AgentReasoning(_)
+            | EventMsg::AgentReasoningRawContent(_)
+            | EventMsg::TokenCount(_) => true,
         _ => false,
     }
 }

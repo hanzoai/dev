@@ -617,6 +617,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     }
                 }
             }
+            EventMsg::ConversationPath(_) => {}
+            EventMsg::UserMessage(_) => {}
+            EventMsg::EnteredReviewMode(_) => {}
+            EventMsg::ExitedReviewMode(_) => {}
         }
         CodexStatus::Running
     }
