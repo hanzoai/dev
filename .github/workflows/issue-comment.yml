@@ -258,7 +258,7 @@ jobs:
             fs.writeFileSync('.github/auto/ISSUE_PREVIEW_CONTEXT.md', lines.join('\n'));
 
       - name: Start local OpenAI proxy (optional; hardened)
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         id: proxy
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -269,7 +269,7 @@ jobs:
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
       - name: Print proxy startup log tail
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         run: |
           echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
           { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -277,7 +277,7 @@ jobs:
 
       - name: Generate comment with Code (read-only)
         id: gen
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         continue-on-error: true
         env:
           ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
@@ -327,7 +327,7 @@ jobs:
           true
           set -e
       - name: Assert agent success (fail on streaming/server errors)
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         run: |
           set -euo pipefail
           if rg -n "^\\[.*\\] ERROR: (stream error|server error|exceeded retry limit)" .github/auto/AGENT_OUT.txt >/dev/null 2>&1; then
@@ -562,7 +562,7 @@ jobs:
           set -e
 
       - name: Extract generated comment
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         run: |
           set -euo pipefail
           node - <<'JS'
@@ -582,7 +582,7 @@ jobs:
           JS
 
       - name: Post generated comment to issue
-        if: secrets.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
