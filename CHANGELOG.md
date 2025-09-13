@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.143] - 2025-09-13
+
+- Core: fix Responses API 400 by using supported 'web_search' tool id. (a00308b3)
+- CI: improve slug detection and labeling across issue comments and previews. (98fa99f2, 1373c4ab)
+- CI: guard 'Codex' branding regressions and auto-fix in TUI/CLI. (f20aee34)
+
 ## [0.2.142] - 2025-09-12
 
 - CI: avoid placeholder-only issue comments to reduce noise. (8254d2da)
