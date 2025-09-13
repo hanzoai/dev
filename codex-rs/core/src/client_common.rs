@@ -31,6 +31,8 @@ const ENVIRONMENT_CONTEXT_END: &str = "\n\n</environment_context>";
 /// wraps user instructions message in a tag for the model to parse more easily.
 const USER_INSTRUCTIONS_START: &str = "<user_instructions>\n\n";
 const USER_INSTRUCTIONS_END: &str = "\n\n</user_instructions>";
+/// Review thread system prompt. Edit `core/src/review_prompt.md` to customize.
+pub const REVIEW_PROMPT: &str = include_str!("../review_prompt.md");
 
 /// API request payload for a single model turn
 #[derive(Default, Debug, Clone)]
@@ -207,8 +209,10 @@ pub enum ResponseEvent {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Reasoning {
-    pub(crate) effort: ReasoningEffortConfig,
-    pub(crate) summary: ReasoningSummaryConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) effort: Option<ReasoningEffortConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) summary: Option<ReasoningSummaryConfig>,
 }
 
 /// Text configuration for verbosity level in OpenAI API responses.
@@ -350,7 +354,10 @@ pub(crate) fn create_reasoning_param_for_request(
         return None;
     }
 
-    effort.map(|effort| Reasoning { effort, summary })
+    Some(Reasoning {
+        effort,
+        summary: Some(summary),
+    })
 }
 
 // Removed legacy TextControls helper; use `Text` with `OpenAiTextVerbosity` instead.
