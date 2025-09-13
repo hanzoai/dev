@@ -1605,7 +1605,7 @@ impl ChatWidget<'_> {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
         let app_event_tx_clone = app_event_tx.clone();
-        // Create the Codex asynchronously so the UI loads as quickly as possible.
+        // Create the Code asynchronously so the UI loads as quickly as possible.
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
             // Use ConversationManager with an AuthManager (API key by default)
@@ -1633,7 +1633,7 @@ impl ChatWidget<'_> {
                         }),
                         order: None,
                     };
-                    app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+                    app_event_tx_clone.send(AppEvent::CodeEvent(ev));
                     return;
                 }
             };
@@ -1645,7 +1645,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(new_conversation.session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
 
             let conversation = new_conversation.conversation;
             let conversation_clone = conversation.clone();
@@ -1662,13 +1662,13 @@ impl ChatWidget<'_> {
                             }),
                             order: None,
                         };
-                        app_event_tx_submit.send(AppEvent::CodexEvent(ev));
+                        app_event_tx_submit.send(AppEvent::CodeEvent(ev));
                     }
                 }
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+                app_event_tx_clone.send(AppEvent::CodeEvent(event));
             }
             // (debug end notice removed)
         });
@@ -2725,7 +2725,7 @@ impl ChatWidget<'_> {
                         missing.display(),
                         fallback_root.display()
                     );
-                    let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                    let _ = self.app_event_tx.send(AppEvent::CodeEvent(Event {
                         id: "cwd-recover".to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
@@ -6197,7 +6197,7 @@ impl ChatWidget<'_> {
                 use codex_core::protocol::BackgroundEventEvent;
                 use codex_core::protocol::Event;
                 use codex_core::protocol::EventMsg;
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6254,7 +6254,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6309,7 +6309,7 @@ impl ChatWidget<'_> {
                                                     BrowserScreenshotUpdateEvent, Event, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodexEvent(Event {
+                                                    AppEvent::CodeEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -6380,7 +6380,7 @@ impl ChatWidget<'_> {
                                             use codex_core::protocol::Event;
                                             use codex_core::protocol::EventMsg;
                                             let _ =
-                                                app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                app_event_tx_bg.send(AppEvent::CodeEvent(Event {
                                                     id: uuid::Uuid::new_v4().to_string(),
                                                     event_seq: 0,
                                                     msg: EventMsg::BrowserScreenshotUpdate(
@@ -6483,7 +6483,7 @@ impl ChatWidget<'_> {
                                 use codex_core::protocol::BackgroundEventEvent;
                                 use codex_core::protocol::Event;
                                 use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                     id: uuid::Uuid::new_v4().to_string(),
                                     event_seq: 0,
                                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6523,7 +6523,7 @@ impl ChatWidget<'_> {
                                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                                             }
                                                             use codex_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
-                                                            let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
+                                                            let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
                                                                 event_seq: 0,
                                                                 msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -6587,7 +6587,7 @@ impl ChatWidget<'_> {
                                                         use codex_core::protocol::BrowserScreenshotUpdateEvent;
                                                         use codex_core::protocol::Event;
                                                         use codex_core::protocol::EventMsg;
-                                                        let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
+                                                        let _ = app_event_tx_bg.send(AppEvent::CodeEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             event_seq: 0,
                                                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -6624,7 +6624,7 @@ impl ChatWidget<'_> {
                                 use codex_core::protocol::BackgroundEventEvent;
                                 use codex_core::protocol::Event;
                                 use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                let _ = app_event_tx.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
                                             e2, err_msg
@@ -6642,7 +6642,7 @@ impl ChatWidget<'_> {
                                 use codex_core::protocol::BackgroundEventEvent;
                                 use codex_core::protocol::Event;
                                 use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
+                                let _ = app_event_tx.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
                                             retry_deadline.as_secs()
@@ -6661,7 +6661,7 @@ impl ChatWidget<'_> {
                         use codex_core::protocol::BackgroundEventEvent;
                         use codex_core::protocol::Event;
                         use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6816,7 +6816,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6844,7 +6844,7 @@ impl ChatWidget<'_> {
                         use codex_core::protocol::BackgroundEventEvent;
                         use codex_core::protocol::Event;
                         use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6868,7 +6868,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -6978,7 +6978,7 @@ impl ChatWidget<'_> {
                                                     BrowserScreenshotUpdateEvent, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
-                                                    AppEvent::CodexEvent(Event {
+                                                    AppEvent::CodeEvent(Event {
                                                         id: uuid::Uuid::new_v4().to_string(),
                                                         event_seq: 0,
                                                         msg: EventMsg::BrowserScreenshotUpdate(
@@ -7039,7 +7039,7 @@ impl ChatWidget<'_> {
 
                                                 // Send update event
                                                 use codex_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
-                                                let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+                                                let _ = app_event_tx_inner.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
                                                     }), order: None }));
@@ -7066,7 +7066,7 @@ impl ChatWidget<'_> {
                             // Send success message to chat
                             use codex_core::protocol::BackgroundEventEvent;
                             use codex_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                            let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
                                 msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -7096,7 +7096,7 @@ impl ChatWidget<'_> {
                                         // Send update event
                                         use codex_core::protocol::BrowserScreenshotUpdateEvent;
                                         use codex_core::protocol::EventMsg;
-                                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                             id: uuid::Uuid::new_v4().to_string(),
                                             event_seq: 0,
                                             msg: EventMsg::BrowserScreenshotUpdate(
@@ -7653,7 +7653,7 @@ impl ChatWidget<'_> {
             // Explicitly (re)start the internal browser session now
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -7668,7 +7668,7 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+            let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                 id: uuid::Uuid::new_v4().to_string(),
                 event_seq: 0,
                 msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -7697,7 +7697,7 @@ impl ChatWidget<'_> {
                         }
                         use codex_core::protocol::BrowserScreenshotUpdateEvent;
                         use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                        let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
@@ -7788,7 +7788,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                    let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -7890,7 +7890,7 @@ impl ChatWidget<'_> {
                             }
                             use codex_core::protocol::BrowserScreenshotUpdateEvent;
                             use codex_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
+                            let _ = app_event_tx.send(AppEvent::CodeEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
                                 msg: EventMsg::BrowserScreenshotUpdate(
@@ -8540,7 +8540,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
+                    let _ = tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8566,7 +8566,7 @@ impl ChatWidget<'_> {
                         use codex_core::protocol::BackgroundEventEvent;
                         use codex_core::protocol::Event;
                         use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
+                        let _ = tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8587,7 +8587,7 @@ impl ChatWidget<'_> {
                         use codex_core::protocol::BackgroundEventEvent;
                         use codex_core::protocol::Event;
                         use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
+                        let _ = tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8673,7 +8673,7 @@ impl ChatWidget<'_> {
                 use codex_core::protocol::BackgroundEventEvent;
                 use codex_core::protocol::Event;
                 use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
+                let _ = tx.send(AppEvent::CodeEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
@@ -8711,7 +8711,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
+                    let _ = tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8736,7 +8736,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
+                    let _ = tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8778,7 +8778,7 @@ impl ChatWidget<'_> {
                         } else {
                             stdout_s.trim().to_string()
                         };
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
+                        let _ = tx.send(AppEvent::CodeEvent(Event {
                             id: uuid::Uuid::new_v4().to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -8800,7 +8800,7 @@ impl ChatWidget<'_> {
                     use codex_core::protocol::BackgroundEventEvent;
                     use codex_core::protocol::Event;
                     use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)".to_string() }), order: None }));
+                    let _ = tx.send(AppEvent::CodeEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)".to_string() }), order: None }));
                     return;
                 }
             };
@@ -8860,7 +8860,7 @@ impl ChatWidget<'_> {
                             use codex_core::protocol::BackgroundEventEvent;
                             use codex_core::protocol::Event;
                             use codex_core::protocol::EventMsg;
-                            let _ = tx.send(AppEvent::CodexEvent(Event {
+                            let _ = tx.send(AppEvent::CodeEvent(Event {
                                 id: uuid::Uuid::new_v4().to_string(),
                                 event_seq: 0,
                                 msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -9004,7 +9004,7 @@ impl ChatWidget<'_> {
                     if let Some(p) = hint {
                         msg = format!("{} (checked out in worktree: {})", msg, p);
                     }
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
+                    let _ = tx.send(AppEvent::CodeEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
                         msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
@@ -9026,7 +9026,7 @@ impl ChatWidget<'_> {
                 use codex_core::protocol::BackgroundEventEvent;
                 use codex_core::protocol::Event;
                 use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
+                let _ = tx.send(AppEvent::CodeEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
@@ -9060,7 +9060,7 @@ impl ChatWidget<'_> {
                 use codex_core::protocol::BackgroundEventEvent;
                 use codex_core::protocol::Event;
                 use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
+                let _ = tx.send(AppEvent::CodeEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
                     msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
