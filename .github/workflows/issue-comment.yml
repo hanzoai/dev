@@ -49,6 +49,8 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
       || (github.event_name == 'workflow_dispatch' && (inputs.type == 'preview' || !inputs.type))
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Resolve PR + Issue
@@ -258,10 +260,8 @@ jobs:
             fs.writeFileSync('.github/auto/ISSUE_PREVIEW_CONTEXT.md', lines.join('\n'));
 
       - name: Start local OpenAI proxy (optional; hardened)
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         id: proxy
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p .github/auto
@@ -269,7 +269,7 @@ jobs:
           for i in {1..30}; do if nc -z 127.0.0.1 5056; then break; else sleep 0.2; fi; done || true
 
       - name: Print proxy startup log tail
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         run: |
           echo '### openai-proxy.log (tail)' >> "$GITHUB_STEP_SUMMARY"
           { echo '```'; tail -n 80 .github/auto/openai-proxy.log || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -277,7 +277,7 @@ jobs:
 
       - name: Generate comment with Code (read-only)
         id: gen
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         continue-on-error: true
         env:
           ISSUE_AUTHOR: ${{ steps.meta.outputs.issue_author }}
@@ -327,7 +327,7 @@ jobs:
           true
           set -e
       - name: Assert agent success (fail on server 5xx only; tolerate local stream errors)
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -564,7 +564,7 @@ jobs:
           set -e
 
       - name: Extract generated comment
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         run: |
           set -euo pipefail
           node - <<'JS'
@@ -584,7 +584,7 @@ jobs:
           JS
 
       - name: Post generated comment to issue
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        if: env.OPENAI_API_KEY != ''
         uses: actions/github-script@v7
         env:
           ISSUE_NUMBER: ${{ steps.ctx.outputs.issue_number }}
