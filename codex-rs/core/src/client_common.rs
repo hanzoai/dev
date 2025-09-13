@@ -32,6 +32,7 @@ const ENVIRONMENT_CONTEXT_END: &str = "\n\n</environment_context>";
 const USER_INSTRUCTIONS_START: &str = "<user_instructions>\n\n";
 const USER_INSTRUCTIONS_END: &str = "\n\n</user_instructions>";
 /// Review thread system prompt. Edit `core/src/review_prompt.md` to customize.
+#[allow(dead_code)]
 pub const REVIEW_PROMPT: &str = include_str!("../review_prompt.md");
 
 /// API request payload for a single model turn

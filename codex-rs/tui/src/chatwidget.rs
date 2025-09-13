@@ -4046,6 +4046,12 @@ impl ChatWidget<'_> {
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
+            // Newer protocol variants we currently ignore in the TUI
+            EventMsg::UserMessage(_) => {}
+            EventMsg::TurnAborted(_) => {}
+            EventMsg::ConversationPath(_) => {}
+            EventMsg::EnteredReviewMode(_) => {}
+            EventMsg::ExitedReviewMode(_) => {}
         }
     }
 
