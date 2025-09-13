@@ -192,7 +192,7 @@ impl ModelClient {
                     if map.get("type").and_then(|v| v.as_str()) == Some("web_search") {
                         map.insert(
                             "type".to_string(),
-                            serde_json::Value::String("web_search_preview".to_string()),
+                            serde_json::Value::String("web_search".to_string()),
                         );
                     }
                 }
