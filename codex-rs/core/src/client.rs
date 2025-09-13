@@ -191,20 +191,7 @@ impl ModelClient {
         let store = false;
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
-        let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
-        // ChatGPT backend currently expects the preview tool name.
-        if auth_mode == Some(AuthMode::ChatGPT) {
-            for tool in &mut tools_json {
-                if let Some(map) = tool.as_object_mut() {
-                    if map.get("type").and_then(|v| v.as_str()) == Some("web_search") {
-                        map.insert(
-                            "type".to_string(),
-                            serde_json::Value::String("web_search_preview".to_string()),
-                        );
-                    }
-                }
-            }
-        }
+        let tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
 
         let reasoning = create_reasoning_param_for_request(
             &self.config.model_family,

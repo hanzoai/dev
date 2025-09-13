@@ -198,28 +198,76 @@ jobs:
             const owner = context.repo.owner; const repo = context.repo.repo; const pr = context.payload.pull_request.number;
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
             const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
-            let slug = '';
-            const m = (pull.body || '').match(marker);
-            if (m) slug = m[1].toLowerCase();
-            if (!slug) {
-              // fallback: try derive from head branch issue-<n>
-              const b = pull.head.ref || '';
-              const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
-              if (issue_number) {
-                try {
-                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
-                  const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
-                  const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
-                  const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
-                  if (codeLabel) slug = codeLabel.slice(5).toLowerCase(); else if (idLabel) slug = idLabel.slice(3).toLowerCase();
-                } catch {}
-                if (!slug) {
-                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
-                }
-              }
-              if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
+
+            function normalizeSlug(s) {
+              if (!s) return '';
+              let x = String(s).toLowerCase().trim();
+              if (x.startsWith('code/')) x = x.slice(5);
+              if (x.startsWith('id/')) x = x.slice(3);
+              // keep only a–z, 0–9 and dashes; collapse repeats
+              x = x.replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+              if (!/^[a-z0-9-]{3,}$/.test(x)) return '';
+              return x;
             }
+
+            let slug = '';
+
+            // 1) Prefer PR labels code/<slug> (fallback id/<slug>)
+            try {
+              const prLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pr, per_page: 100 });
+              const names = prLabels.map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+              const codeLabel = names.find(n => n.startsWith('code/'));
+              const idLabel = names.find(n => n.startsWith('id/'));
+              slug = normalizeSlug(codeLabel || idLabel || '');
+            } catch {}
+
+            // 2) PR body marker
+            if (!slug) {
+              const m = (pull.body || '').match(marker);
+              if (m) slug = normalizeSlug(m[1]);
+            }
+
+            // 3) PR comments marker
+            if (!slug) {
+              try {
+                const prComments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr, per_page: 100 });
+                for (const c of prComments) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
+              } catch {}
+            }
+
+            // 4) Linked issue via branch name issue-<n>
+            let linkedIssue = 0;
+            const b = pull.head.ref || '';
+            const im = b.match(/^issue-(\d+)$/);
+            if (im) linkedIssue = Number(im[1]);
+            if (!slug && linkedIssue) {
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number: linkedIssue });
+                const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                slug = normalizeSlug(codeLabel || idLabel || '');
+                if (!slug) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: linkedIssue, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
+                }
+              } catch {}
+            }
+
+            if (!slug) throw new Error('Missing ID. Add a code/<slug> label on the PR or linked issue, or include <!-- codex-id: <slug> --> in the PR/issue.');
+
+            // Best-effort: ensure linked issue carries code/<slug>
+            if (linkedIssue && slug) {
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number: linkedIssue });
+                const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                const need = `code/${slug}`;
+                if (!labels.includes(need)) {
+                  try { await github.rest.issues.addLabels({ owner, repo, issue_number: linkedIssue, labels: [need] }); } catch {}
+                }
+              } catch {}
+            }
+
             // Determine next tag: preview-<slug> or preview-<slug>-N
             const base = `preview-${slug}`;
             const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
@@ -287,27 +335,42 @@ jobs:
             const owner = context.repo.owner; const repo = context.repo.repo; const pr = context.payload.pull_request.number;
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
             const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            function normalizeSlug(s){ if(!s) return ''; let x=String(s).toLowerCase().trim(); if(x.startsWith('code/')) x=x.slice(5); if(x.startsWith('id/')) x=x.slice(3); x=x.replace(/[^a-z0-9-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); return /^[a-z0-9-]{3,}$/.test(x)?x:''; }
+
             let slug = '';
-            const m = (pull.body || '').match(marker);
-            if (m) slug = m[1].toLowerCase();
+            // PR labels first
+            try { const labs = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pr, per_page: 100 });
+              const names = labs.map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+              const codeLabel = names.find(n => n.startsWith('code/'));
+              const idLabel = names.find(n => n.startsWith('id/'));
+              slug = normalizeSlug(codeLabel || idLabel || '');
+            } catch {}
+            // PR body
+            if (!slug) { const m = (pull.body || '').match(marker); if (m) slug = normalizeSlug(m[1]); }
+            // PR comments
             if (!slug) {
-              const b = pull.head.ref || '';
-              const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
-              if (issue_number) {
-                try {
-                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
-                  const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
-                  const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
-                  const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
-                  if (codeLabel) slug = codeLabel.slice(5).toLowerCase(); else if (idLabel) slug = idLabel.slice(3).toLowerCase();
-                } catch {}
+              try { const prc = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr, per_page: 100 });
+                for (const c of prc) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
+              } catch {}
+            }
+            // Linked issue via branch
+            const b = pull.head.ref || '';
+            const im = b.match(/^issue-(\d+)$/);
+            if (!slug && im) {
+              const issue_number = Number(im[1]);
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
+                const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                slug = normalizeSlug(codeLabel || idLabel || '');
                 if (!slug) {
                   const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
                 }
-              }
+              } catch {}
             }
-            if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
+            if (!slug) throw new Error('Missing ID. Add code/<slug> label or <!-- codex-id: <slug> -->.');
             const base = `preview-${slug}`;
             const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
             let latest = base; let maxN = 0; let hasBase = false;

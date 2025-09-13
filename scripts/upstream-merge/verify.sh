@@ -14,6 +14,7 @@ mkdir -p .github/auto
 status_build="ok"
 status_api="ok"
 status_guards="ok"
+status_branding="ok"
 
 {
   echo "[verify] START $(date -u +%FT%TZ)"
@@ -86,8 +87,33 @@ fi
 # Summarize guards
 echo "guards=${status_guards}" >> "$guards_log"
 
+# STEP 4: Branding guard parity with CI (non-fixing check)
+{
+  echo "[verify] STEP 4: branding guard (TUI/CLI user-visible)"
+}
+DEFAULT_BRANCH_LOCAL=${DEFAULT_BRANCH:-main}
+# Try to fetch origin to ensure refs exist; ignore failure for local runs
+git fetch origin "$DEFAULT_BRANCH_LOCAL" >/dev/null 2>&1 || true
+range_ref="origin/${DEFAULT_BRANCH_LOCAL}..HEAD"
+changed_files=$(git diff --name-only $range_ref -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
+if [ -n "${changed_files:-}" ]; then
+  if git diff -U0 --no-color $range_ref -- $changed_files \
+    | grep -E '^\+' \
+    | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
+    | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
+    echo "[branding] new user-visible 'Codex' strings detected under TUI/CLI relative to $range_ref" | tee -a "$guards_log"
+    git diff -U0 --no-color $range_ref -- $changed_files \
+      | grep -E '^\+' \
+      | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
+      | sed 's/^/> /' | tee -a "$guards_log" || true
+    status_branding="fail"
+  fi
+else
+  echo "[branding] no relevant file changes vs $range_ref; skipping" | tee -a "$guards_log"
+fi
+
 rc=0
-if [[ "$status_build" != ok || "$status_api" != ok || "$status_guards" != ok ]]; then
+if [[ "$status_build" != ok || "$status_api" != ok || "$status_guards" != ok || "$status_branding" != ok ]]; then
   rc=1
 fi
 
@@ -95,7 +121,8 @@ cat > .github/auto/VERIFY.json <<JSON
 {
   "build_fast": "$status_build",
   "api_check": "$status_api",
-  "guards": "$status_guards"
+  "guards": "$status_guards",
+  "branding": "$status_branding"
 }
 JSON
 

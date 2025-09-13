@@ -782,6 +782,34 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
+          # Auto-fix branding introduced by upstream in user-visible strings under TUI/CLI
+          # We only touch lines inside quotes/backticks and only in files changed by this merge.
+          changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
+          if [ -n "${changed_files:-}" ]; then
+            wt=.wt-branding-fix
+            rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge >/dev/null
+            pushd "$wt" >/dev/null
+            touched=()
+            for f in $changed_files; do
+              [ -f "$f" ] || continue
+              # Skip obvious non-source or vendored artifacts
+              case "$f" in
+                *.png|*.jpg|*.jpeg|*.gif|*.svg|*.pdf) continue;;
+              esac
+              # Replace 'Codex' with 'Code' only inside quoted/backtick strings (single-line)
+              if rg -n "Codex" -- "$f" >/dev/null 2>&1; then
+                python3 scripts/upstream-merge/branding_fix.py "$f" || true
+                touched+=("$f")
+              fi
+            done
+            if ! git diff --quiet -- ${touched[@]:-}; then
+              git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
+                commit -a -m "chore(merge): auto-rebrand user-visible strings ('Codex'→'Code') in TUI/CLI files"
+              git push origin HEAD:upstream-merge
+            fi
+            popd >/dev/null
+            git worktree remove -f "$wt" >/dev/null
+          fi
           # docs/** changes are allowed; we may still prefer ours but do not hard-fail here.
           if git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | grep -q .; then
             echo "::notice::docs/** changed on upstream-merge; ensuring agent reviews and preserves local branding where needed." >&2
