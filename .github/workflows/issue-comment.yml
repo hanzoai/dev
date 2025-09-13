@@ -153,27 +153,40 @@ jobs:
             // resolve slug
             const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
             const marker = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+            function normalizeSlug(s){ if(!s) return ''; let x=String(s).toLowerCase().trim(); if(x.startsWith('code/')) x=x.slice(5); if(x.startsWith('id/')) x=x.slice(3); x=x.replace(/[^a-z0-9-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); return /^[a-z0-9-]{3,}$/.test(x)?x:''; }
             let slug = '';
-            const m = (pull.body || '').match(marker);
-            if (m) slug = m[1].toLowerCase();
+            // PR labels first
+            try { const labs = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pr, per_page: 100 });
+              const names = labs.map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+              const codeLabel = names.find(n => n.startsWith('code/'));
+              const idLabel = names.find(n => n.startsWith('id/'));
+              slug = normalizeSlug(codeLabel || idLabel || '');
+            } catch {}
+            // PR body
+            if (!slug) { const m = (pull.body || '').match(marker); if (m) slug = normalizeSlug(m[1]); }
+            // PR comments
             if (!slug) {
-              const b = pull.head.ref || '';
-              const im = b.match(/^issue-(\d+)$/); let issue_number = 0; if (im) issue_number = Number(im[1]);
-              if (issue_number) {
-                try {
-                  const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number });
-                  const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
-                  const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
-                  const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
-                  if (codeLabel) slug = codeLabel.slice(5).toLowerCase(); else if (idLabel) slug = idLabel.slice(3).toLowerCase();
-                } catch {}
-                if (!slug) {
-                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
-                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = mm[1].toLowerCase(); break; } }
-                }
-              }
+              try { const prc = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr, per_page: 100 });
+                for (const c of prc) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
+              } catch {}
             }
-            if (!slug) throw new Error('Missing codex-id marker on PR/issue.');
+            // Linked issue via branch
+            const b = pull.head.ref || '';
+            const im = b.match(/^issue-(\d+)$/); let issue_number2 = 0; if (im) issue_number2 = Number(im[1]);
+            if (!slug && issue_number2) {
+              try {
+                const { data: iss } = await github.rest.issues.get({ owner, repo, issue_number: issue_number2 });
+                const labels = (iss.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                slug = normalizeSlug(codeLabel || idLabel || '');
+                if (!slug) {
+                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue_number2, per_page: 100 });
+                  for (const c of comments) { const mm = (c.body || '').match(marker); if (mm) { slug = normalizeSlug(mm[1]); if (slug) break; } }
+                }
+              } catch {}
+            }
+            if (!slug) throw new Error('Missing ID. Add code/<slug> label or <!-- codex-id: <slug> -->.');
             // resolve latest tag for slug
             const baseTag = `preview-${slug}`;
             const rels = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 });
@@ -368,18 +381,38 @@ jobs:
             const PLACEHOLDER = '…final Markdown comment…';
             if (body && body.includes(PLACEHOLDER)) { body = ''; }
             if (!body) {
-              // derive slug + latest tag
+              // derive slug + latest tag (PR labels → PR body → PR comments → linked issue)
               const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
               const slugRe = /<!--\s*codex-id:\s*([a-z0-9-]{3,})\s*-->/i;
+              const normalize = s => { if(!s) return ''; let x=String(s).toLowerCase().trim(); if(x.startsWith('code/')) x=x.slice(5); if(x.startsWith('id/')) x=x.slice(3); x=x.replace(/[^a-z0-9-]+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,''); return /^[a-z0-9-]{3,}$/.test(x)?x:''; };
               let slug = '';
-              const m = (pull.body || '').match(slugRe);
-              if (m) slug = m[1].toLowerCase();
+              try { const labs = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pr, per_page: 100 });
+                const names = labs.map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                const codeLabel = names.find(n => n.startsWith('code/'));
+                const idLabel = names.find(n => n.startsWith('id/'));
+                slug = normalize(codeLabel || idLabel || '');
+              } catch {}
+              if (!slug) { const m = (pull.body || '').match(slugRe); if (m) slug = normalize(m[1]); }
+              if (!slug) {
+                try { const prc = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr, per_page: 100 });
+                  for (const c of prc) { const mm = (c.body || '').match(slugRe); if (mm) { slug = normalize(mm[1]); if (slug) break; } }
+                } catch {}
+              }
               if (!slug) {
                 const b = pull.head.ref || '';
                 const im = b.match(/^issue-(\d+)$/); let issue_number2 = 0; if (im) issue_number2 = Number(im[1]);
                 if (issue_number2) {
-                  const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue_number2, per_page: 100 });
-                  for (const c of comments) { const mm = (c.body || '').match(slugRe); if (mm) { slug = mm[1].toLowerCase(); break; } }
+                  // labels on linked issue
+                  try { const iss = await github.rest.issues.get({ owner, repo, issue_number: issue_number2 });
+                    const labels = (iss.data.labels || []).map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+                    const codeLabel = labels.find(n => typeof n === 'string' && n.startsWith('code/'));
+                    const idLabel = labels.find(n => typeof n === 'string' && n.startsWith('id/'));
+                    slug = normalize(codeLabel || idLabel || '');
+                  } catch {}
+                  if (!slug) {
+                    const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: issue_number2, per_page: 100 });
+                    for (const c of comments) { const mm = (c.body || '').match(slugRe); if (mm) { slug = normalize(mm[1]); if (slug) break; } }
+                  }
                 }
               }
               const baseTag = `preview-${slug}`;
@@ -424,6 +457,14 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+
+            // Ensure the linked issue carries the canonical label code/<slug>
+            try {
+              const need = `code/${slug}`;
+              const labs = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number, per_page: 100 });
+              const names = labs.map(l => (typeof l === 'string' ? l : l.name)).filter(Boolean);
+              if (!names.includes(need)) { await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [need] }); }
+            } catch {}
 
   dispatch_comment:
     name: Post triage comment to issue (dispatch via Code)
