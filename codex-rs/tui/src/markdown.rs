@@ -57,6 +57,16 @@ fn append_markdown_with_opener_and_cwd_and_bold(
                 // (e.g., vscode://file...). These will later be turned
                 // into OSC8 hyperlinks by the markdown renderer.
                 let processed = rewrite_file_citations(&s, file_opener, cwd);
+                // Also rewrite web.run-style citation tokens of the form
+                // "citeturn2search5" (or multiple ids like
+                // "citeturn2search5turn2news1"). We do not have the
+                // actual URL mapping in the TUI, so convert each ref id into
+                // an inline markdown link whose target is a placeholder
+                // identifier (e.g., ref:turn2search5). Our markdown renderer
+                // will display these as underlined labels followed by the
+                // target in parentheses, which is much nicer than leaking the
+                // private-use delimiter glyphs.
+                let processed = rewrite_web_citations(&processed);
                 let rendered = if bold_first_sentence {
                     MarkdownRenderer::render_with_bold_first_sentence(&processed)
                 } else {
@@ -163,6 +173,33 @@ fn rewrite_file_citations<'a>(
         // - add a space after the link to make it easier to read
         format!("[{file}:{start_line}]({scheme}://file{absolute_path}:{start_line}) ")
     })
+}
+
+// Convert web.run-style citations (private-use delimited) into inline markdown links.
+// Examples:
+//   "citeturn2search5"              -> "[turn2search5](ref:turn2search5) "
+//   "citeturn2search5turn2news1" -> "[turn2search5](ref:turn2search5) [turn2news1](ref:turn2news1) "
+fn rewrite_web_citations<'a>(src: &'a str) -> Cow<'a, str> {
+    use once_cell::sync::OnceCell;
+    use regex_lite::Regex;
+    static WEB_CITE_RE: OnceCell<Regex> = OnceCell::new();
+    let re = WEB_CITE_RE.get_or_init(|| Regex::new(r"cite([^]+)").expect("failed to compile web cite regex"));
+    if !re.is_match(src) {
+        return Cow::Borrowed(src);
+    }
+    Cow::Owned(re.replace_all(src, |caps: &regex_lite::Captures<'_>| {
+        let inner = &caps[1];
+        let parts = inner.split('').filter(|s| !s.is_empty());
+        let mut out = String::new();
+        for (i, id) in parts.enumerate() {
+            if i > 0 { out.push(' '); }
+            // Use a stable placeholder target. Our renderer will show "label (target)".
+            out.push_str(&format!("[{id}](ref:{id})"));
+        }
+        // Add a trailing space for readability between adjacent citations and text
+        out.push(' ');
+        out
+    }).into_owned())
 }
 
 
