@@ -1,4 +1,4 @@
-use crate::config::CONFIG_TOML_FILE;
+use crate::config_types::SubagentCommandConfig;
 use anyhow::Result;
 use std::path::Path;
 use tempfile::NamedTempFile;
@@ -6,6 +6,7 @@ use toml_edit::DocumentMut;
 
 pub const CONFIG_KEY_MODEL: &str = "model";
 pub const CONFIG_KEY_EFFORT: &str = "model_reasoning_effort";
+const CONFIG_TOML_FILE: &str = "config.toml";
 
 /// Persist overrides into `config.toml` using explicit key segments per
 /// override. This avoids ambiguity with keys that contain dots or spaces.
@@ -119,6 +120,104 @@ fn apply_toml_edit_override_segments(
 
     let last = segments[segments.len() - 1];
     current[last] = value;
+}
+
+/// Upsert a `[[subagents.commands]]` entry by `name`.
+/// If an entry with the same (case-insensitive) name exists, it is updated; otherwise a new entry is appended.
+pub async fn upsert_subagent_command(codex_home: &Path, cmd: &SubagentCommandConfig) -> Result<()> {
+    const CONFIG_TOML_FILE: &str = "config.toml";
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match tokio::fs::read_to_string(&config_path).await {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tokio::fs::create_dir_all(codex_home).await?;
+            DocumentMut::new()
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // Ensure [subagents] exists
+    if !doc.as_table().contains_key("subagents") {
+        doc["subagents"] = toml_edit::table();
+        if let Some(t) = doc["subagents"].as_table_mut() { t.set_implicit(false); }
+    }
+
+    // Search for existing by name (case-insensitive) and rebuild commands array
+    let mut updated = false;
+    let mut new_commands = toml_edit::ArrayOfTables::new();
+    if let Some(arr) = doc["subagents"].get("commands").and_then(|i| i.as_array_of_tables()) {
+        for tbl_ref in arr.iter() {
+            let mut tbl = tbl_ref.clone();
+            let same = tbl
+                .get("name")
+                .and_then(|i| i.as_str())
+                .map(|s| s.eq_ignore_ascii_case(&cmd.name))
+                .unwrap_or(false);
+            if same {
+                // Update fields
+                tbl["name"] = toml_edit::value(cmd.name.clone());
+                tbl["read-only"] = toml_edit::value(cmd.read_only);
+                let agents = toml_edit::Array::from_iter(cmd.agents.iter().cloned());
+                tbl["agents"] = toml_edit::Item::Value(toml_edit::Value::Array(agents));
+                if let Some(s) = &cmd.orchestrator_instructions { tbl["orchestrator-instructions"] = toml_edit::value(s.clone()); } else { tbl.remove("orchestrator-instructions"); }
+                if let Some(s) = &cmd.agent_instructions { tbl["agent-instructions"] = toml_edit::value(s.clone()); } else { tbl.remove("agent-instructions"); }
+                updated = true;
+            }
+            new_commands.push(tbl);
+        }
+    }
+    if !updated {
+        let mut t = toml_edit::Table::new();
+        t.set_implicit(true);
+        t["name"] = toml_edit::value(cmd.name.clone());
+        t["read-only"] = toml_edit::value(cmd.read_only);
+        let agents = toml_edit::Array::from_iter(cmd.agents.iter().cloned());
+        t["agents"] = toml_edit::Item::Value(toml_edit::Value::Array(agents));
+        if let Some(s) = &cmd.orchestrator_instructions {
+            t["orchestrator-instructions"] = toml_edit::value(s.clone());
+        }
+        if let Some(s) = &cmd.agent_instructions {
+            t["agent-instructions"] = toml_edit::value(s.clone());
+        }
+        new_commands.push(t);
+    }
+
+    doc["subagents"]["commands"] = toml_edit::Item::ArrayOfTables(new_commands);
+
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
+/// Delete a `[[subagents.commands]]` entry by name. Returns true if removed.
+pub async fn delete_subagent_command(codex_home: &Path, name: &str) -> Result<bool> {
+    const CONFIG_TOML_FILE: &str = "config.toml";
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match tokio::fs::read_to_string(&config_path).await {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+
+    let Some(arr) = doc["subagents"].get_mut("commands").and_then(|i| i.as_array_of_tables_mut()) else {
+        return Ok(false);
+    };
+
+    let before = arr.len();
+    arr.retain(|t| {
+        !t.get("name")
+            .and_then(|i| i.as_str())
+            .map(|s| s.eq_ignore_ascii_case(name))
+            .unwrap_or(false)
+    });
+    let removed = arr.len() != before;
+    if removed {
+        let tmp_file = NamedTempFile::new_in(codex_home)?;
+        tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+        tmp_file.persist(config_path)?;
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]

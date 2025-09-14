@@ -4151,6 +4151,24 @@ impl ChatWidget<'_> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("/agents").fg(crate::colors::keyword()));
         lines.push(Line::from(""));
+        // Show current subagent command configuration summary
+        lines.push(Line::from("Subagents configuration".bold()));
+        if self.config.subagent_commands.is_empty() {
+            lines.push(Line::from("  • No subagent commands in config (using defaults)"));
+        } else {
+            for cmd in &self.config.subagent_commands {
+                let mode = if cmd.read_only { "read-only" } else { "write" };
+                let agents = if cmd.agents.is_empty() { "<inherit>".to_string() } else { cmd.agents.join(", ") };
+                lines.push(Line::from(format!("  • {} — {} — [{}]", cmd.name, mode, agents)));
+            }
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from("Manage with:".bold()));
+        lines.push(Line::from("  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,codex"));
+        lines.push(Line::from("  /agents edit name=<name> [read-only=..] [agents=..] [orchestrator=..] [agent=..]"));
+        lines.push(Line::from("  /agents delete name=<name>"));
+        lines.push(Line::from("  Values with spaces require quotes in the composer."));
+        lines.push(Line::from(""));
 
         // Platform + environment summary to aid debugging
         lines.push(Line::from(vec!["🖥  ".into(), "Environment".bold()]));
@@ -4279,6 +4297,158 @@ impl ChatWidget<'_> {
             kind: crate::history_cell::HistoryCellType::Notice,
         });
         self.request_redraw();
+    }
+
+    pub(crate) fn handle_agents_command(&mut self, args: String) {
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            self.add_agents_output();
+            return;
+        }
+
+        fn parse_kv(args: &str) -> std::collections::HashMap<String, String> {
+            let mut map = std::collections::HashMap::new();
+            for tok in args.split_whitespace() {
+                if let Some((k, v)) = tok.split_once('=') {
+                    map.insert(k.to_string(), v.trim_matches('"').to_string());
+                }
+            }
+            map
+        }
+
+        let mut parts = trimmed.splitn(2, ' ');
+        let action = parts.next().unwrap_or("");
+        let rest = parts.next().unwrap_or("");
+        let kv = parse_kv(rest);
+
+        match action {
+            "add" | "edit" => {
+                let name = kv.get("name").cloned().unwrap_or_default();
+                if name.is_empty() {
+                    self.history_push(crate::history_cell::new_error_event(
+                        "usage: /agents add name=<name> ...".to_string(),
+                    ));
+                    return;
+                }
+
+                let mut existing = self
+                    .config
+                    .subagent_commands
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(&name))
+                    .cloned()
+                    .unwrap_or_default();
+                if existing.name.is_empty() {
+                    existing.name = name.clone();
+                    // default read-only for built-in names if not set during add
+                    if existing.read_only == false && (name.eq_ignore_ascii_case("plan") || name.eq_ignore_ascii_case("solve")) {
+                        existing.read_only = true;
+                    }
+                }
+
+                if let Some(v) = kv.get("read-only") {
+                    existing.read_only = matches!(v.as_str(), "true" | "1" | "yes");
+                }
+                if let Some(v) = kv.get("agents") {
+                    let list = v
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    existing.agents = list;
+                }
+                if let Some(v) = kv.get("orchestrator").or_else(|| kv.get("orchestrator-instructions")) {
+                    existing.orchestrator_instructions = Some(v.clone());
+                }
+                if let Some(v) = kv.get("agent").or_else(|| kv.get("agent-instructions")) {
+                    existing.agent_instructions = Some(v.clone());
+                }
+
+                let codex_home = match codex_core::config::find_codex_home() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.history_push(crate::history_cell::new_error_event(format!(
+                            "failed to locate CODEX_HOME: {}",
+                            e
+                        )));
+                        return;
+                    }
+                };
+                let fut = codex_core::config_edit::upsert_subagent_command(&codex_home, &existing);
+                let rt = tokio::runtime::Handle::current();
+                let res = rt.block_on(fut);
+                match res {
+                    Ok(()) => {
+                        if let Some(slot) = self
+                            .config
+                            .subagent_commands
+                            .iter_mut()
+                            .find(|c| c.name.eq_ignore_ascii_case(&existing.name))
+                        {
+                            *slot = existing.clone();
+                        } else {
+                            self.config.subagent_commands.push(existing.clone());
+                        }
+                        self.history_push(crate::history_cell::PlainHistoryCell {
+                            lines: vec![ratatui::text::Line::from(format!(
+                                "✅ saved subagent command '{}'",
+                                name
+                            ))],
+                            kind: crate::history_cell::HistoryCellType::Notice,
+                        });
+                    }
+                    Err(e) => {
+                        self.history_push(crate::history_cell::new_error_event(format!(
+                            "failed to save subagent command: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+            "delete" => {
+                let name = kv.get("name").cloned().unwrap_or_default();
+                if name.is_empty() {
+                    self.history_push(crate::history_cell::new_error_event(
+                        "usage: /agents delete name=<name>".to_string(),
+                    ));
+                    return;
+                }
+                let codex_home = match codex_core::config::find_codex_home() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.history_push(crate::history_cell::new_error_event(format!("failed to locate CODEX_HOME: {}", e)));
+                        return;
+                    }
+                };
+                let fut = codex_core::config_edit::delete_subagent_command(&codex_home, &name);
+                let rt = tokio::runtime::Handle::current();
+                let res = rt.block_on(fut);
+                match res {
+                    Ok(true) => {
+                        self.config
+                            .subagent_commands
+                            .retain(|c| !c.name.eq_ignore_ascii_case(&name));
+                        self.history_push(crate::history_cell::PlainHistoryCell {
+                            lines: vec![ratatui::text::Line::from(format!("🗑 removed '{}'", name))],
+                            kind: crate::history_cell::HistoryCellType::Notice,
+                        });
+                    }
+                    Ok(false) => self.history_push(crate::history_cell::new_error_event(format!(
+                        "no subagent command named '{}'",
+                        name
+                    ))),
+                    Err(e) => self.history_push(crate::history_cell::new_error_event(format!(
+                        "failed to delete subagent command: {}",
+                        e
+                    ))),
+                }
+            }
+            _ => {
+                self.history_push(crate::history_cell::new_error_event(
+                    "usage: /agents [add|edit|delete] ...".to_string(),
+                ));
+            }
+        }
     }
 
     pub(crate) fn show_diffs_popup(&mut self) {

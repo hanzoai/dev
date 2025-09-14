@@ -24,6 +24,7 @@ pub use codex_conversation::CodexConversation;
 pub mod config;
 pub mod config_profile;
 pub mod config_types;
+pub mod config_edit;
 mod conversation_history;
 pub mod custom_prompts;
 mod environment_context;
