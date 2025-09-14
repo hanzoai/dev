@@ -52,6 +52,21 @@ impl ListSelectionView {
         let para = Paragraph::new(Line::from(""));
         para.render(area, buf);
     }
+    
+    fn wrapped_lines_for(text: &str, width: u16) -> u16 {
+        if text.is_empty() || width == 0 { return 0; }
+        let w = width as usize;
+        let mut lines: u16 = 0;
+        for part in text.split('\n') {
+            let len = part.chars().count();
+            if len == 0 { lines = lines.saturating_add(1); continue; }
+            let mut l = (len / w) as u16;
+            if len % w != 0 { l = l.saturating_add(1); }
+            if l == 0 { l = 1; }
+            lines = lines.saturating_add(l);
+        }
+        lines
+    }
     pub fn new(
         title: String,
         subtitle: Option<String>,
@@ -141,14 +156,18 @@ impl BottomPaneView<'_> for ListSelectionView {
         CancellationEvent::Handled
     }
 
-    fn desired_height(&self, _width: u16) -> u16 {
+    fn desired_height(&self, width: u16) -> u16 {
         let rows = (self.items.len()).clamp(1, self.max_rows);
-        // +1 for the title row, +1 for optional subtitle, +1 for optional footer
+        // Title row always 1
         let mut height = rows as u16 + 1;
-        if self.subtitle.is_some() {
-            // +1 for subtitle, +1 for a blank spacer line beneath it
-            height = height.saturating_add(2);
+        // If subtitle exists, estimate wrapped height + one spacer line
+        if let Some(sub) = &self.subtitle {
+            // inner width = total width - borders(2) - left padding(1)
+            let inner_w = width.saturating_sub(3);
+            let sub_rows = Self::wrapped_lines_for(sub, inner_w).max(1);
+            height = height.saturating_add(sub_rows).saturating_add(1);
         }
+        // Footer takes 2 lines (spacer + footer)
         if self.footer_hint.is_some() {
             height = height.saturating_add(2);
         }
@@ -175,12 +194,13 @@ impl BottomPaneView<'_> for ListSelectionView {
         let mut next_y = inner.y;
         if let Some(sub) = &self.subtitle {
             // Left pad by one column inside the inner area
-            let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
-            let subtitle_spans: Vec<Span<'static>> = vec![
-                Span::styled(sub.clone(), Style::default().fg(crate::colors::text_dim())),
-            ];
-            Paragraph::new(Line::from(subtitle_spans)).render(subtitle_area, buf);
-            next_y = next_y.saturating_add(1);
+            let subtitle_rows = Self::wrapped_lines_for(sub, inner.width.saturating_sub(1));
+            let sub_h = subtitle_rows.max(1);
+            let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: sub_h };
+            Paragraph::new(sub.clone())
+                .style(Style::default().fg(crate::colors::text_dim()))
+                .render(subtitle_area, buf);
+            next_y = next_y.saturating_add(sub_h);
 
             // Render a visual spacer line between subtitle and the list
             let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
@@ -188,8 +208,8 @@ impl BottomPaneView<'_> for ListSelectionView {
             next_y = next_y.saturating_add(1);
         }
 
-        // Reserve one extra blank row below the items when a footer is present
-        let footer_reserved = if self.footer_hint.is_some() { 2 } else { 0 };
+        // Reserve a single footer row when present
+        let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
         let rows_area = Rect {
             // Left pad by one column
             x: inner.x.saturating_add(1),
@@ -226,12 +246,6 @@ impl BottomPaneView<'_> for ListSelectionView {
         }
 
         if self.footer_hint.is_some() {
-            // Render a spacer line above the footer
-            let spacer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 2, width: inner.width.saturating_sub(1), height: 1 };
-            Paragraph::new(Line::from(""))
-                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-                .render(spacer_area, buf);
-
             // Left pad footer by one column and render it on the last line
             let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
             let line = Line::from(vec![
