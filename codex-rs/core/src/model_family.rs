@@ -1,4 +1,10 @@
+use crate::config_types::ReasoningSummaryFormat;
 use crate::tool_apply_patch::ApplyPatchToolType;
+
+/// The `instructions` field in the payload sent to a model should always start
+/// with this content.
+const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+const SWIFTFOX_INSTRUCTIONS: &str = include_str!("../swiftfox_prompt.md");
 
 /// A model family is a group of models that share certain characteristics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,6 +26,9 @@ pub struct ModelFamily {
     // `summary` is optional).
     pub supports_reasoning_summaries: bool,
 
+    // Define if we need a special handling of reasoning summary
+    pub reasoning_summary_format: ReasoningSummaryFormat,
+
     // This should be set to true when the model expects a tool named
     // "local_shell" to be provided. Its contract must be understood natively by
     // the model such that its description can be omitted.
@@ -29,6 +38,9 @@ pub struct ModelFamily {
     /// Present if the model performs better when `apply_patch` is provided as
     /// a tool call instead of just a bash command
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
+
+    // Instructions to use for querying the model
+    pub base_instructions: String,
 }
 
 macro_rules! model_family {
@@ -41,8 +53,10 @@ macro_rules! model_family {
             family: $family.to_string(),
             needs_special_apply_patch_instructions: false,
             supports_reasoning_summaries: false,
+            reasoning_summary_format: ReasoningSummaryFormat::None,
             uses_local_shell_tool: false,
             apply_patch_tool_type: None,
+            base_instructions: BASE_INSTRUCTIONS.to_string(),
         };
         // apply overrides
         $(
@@ -61,8 +75,10 @@ macro_rules! simple_model_family {
             family: $family.to_string(),
             needs_special_apply_patch_instructions: false,
             supports_reasoning_summaries: false,
+            reasoning_summary_format: ReasoningSummaryFormat::None,
             uses_local_shell_tool: false,
             apply_patch_tool_type: None,
+            base_instructions: BASE_INSTRUCTIONS.to_string(),
         })
     }};
 }
@@ -107,7 +123,27 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             slug, "gpt-5",
             supports_reasoning_summaries: true,
         )
+    } else if slug.starts_with("swiftfox") {
+        model_family!(
+            slug, "swiftfox",
+            supports_reasoning_summaries: true,
+            reasoning_summary_format: ReasoningSummaryFormat::Experimental,
+            base_instructions: SWIFTFOX_INSTRUCTIONS.to_string(),
+        )
     } else {
         None
+    }
+}
+
+pub fn derive_default_model_family(model: &str) -> ModelFamily {
+    ModelFamily {
+        slug: model.to_string(),
+        family: model.to_string(),
+        needs_special_apply_patch_instructions: false,
+        supports_reasoning_summaries: false,
+        reasoning_summary_format: ReasoningSummaryFormat::None,
+        uses_local_shell_tool: false,
+        apply_patch_tool_type: None,
+        base_instructions: BASE_INSTRUCTIONS.to_string(),
     }
 }

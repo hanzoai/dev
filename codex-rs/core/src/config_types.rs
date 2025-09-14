@@ -231,6 +231,14 @@ impl Default for StreamConfig {
     }
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReasoningSummaryFormat {
+    #[default]
+    None,
+    Experimental,
+}
+
 /// Theme configuration for the TUI
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ThemeConfig {
