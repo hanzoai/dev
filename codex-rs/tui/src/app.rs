@@ -825,7 +825,7 @@ impl App<'_> {
                         }
                         SlashCommand::Agents => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.add_agents_output();
+                                widget.handle_agents_command(command_args);
                             }
                         }
                         SlashCommand::Github => {
