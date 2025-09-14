@@ -554,7 +554,7 @@ jobs:
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME";
-          PROMPT=$(cat <<'EOP'
+          PROMPT=$(cat <<EOP
           <task>
           Write a brief, kind GitHub issue reply explaining that the bot did not auto-apply changes yet and needs more details.
           - Do not include any internal IDs, request IDs, or API errors.
@@ -562,14 +562,11 @@ jobs:
           - Ask for concrete steps to reproduce, expected vs actual behavior, and logs or screenshots.
           - Keep it to 3–6 short sentences. Friendly, clear, and helpful.
           - Address the issue author if visible in the context.
-          Output ONLY the final Markdown inside <comment>…</comment>.
+          Respond with exactly one <comment>…</comment> block containing the final Markdown, and nothing else.
           </task>
           <context>
           $(cat .github/auto/ISSUE_TRIAGE_CONTEXT.md)
           </context>
-          <comment>
-          …final Markdown comment…
-          </comment>
           EOP
           )
           set +e
