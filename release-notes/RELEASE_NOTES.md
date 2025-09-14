@@ -1,11 +1,13 @@
-## @just-every/code v0.2.145
+## @just-every/code v0.2.146
 
-A small maintenance release that improves the reliability and safety of our issue‑comment automation.
+A focused update with TUI markdown improvements and key bug fixes.
 
 ### Changes
 
-- CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows.
-- CI: gate issue-comment job on OPENAI_API_KEY via env and avoid secrets in if conditions.
+- TUI: rewrite web.run citation tokens into inline markdown links.
+- Core: fix /new to fully reset chat context.
+- Core: handle sandboxed agent spawn when program missing.
+- Workflows: thread issue comments; show digests oldest→newest in triage.
 
 ### Install
 
@@ -14,4 +16,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.144...v0.2.145
+Compare: https://github.com/just-every/code/compare/v0.2.145...v0.2.146
