@@ -77,11 +77,13 @@ pub struct SubagentEditorView {
     name: String,
     read_only: bool,
     selected_agent_indices: Vec<usize>,
+    agent_cursor: usize,
     orchestrator: String,
     agent: String,
     available_agents: Vec<String>,
     is_new: bool,
     field: usize, // 0 name, 1 mode, 2 agents, 3 orch, 4 agent, 5 save, 6 cancel
+    is_complete: bool,
     app_event_tx: AppEventSender,
 }
 
@@ -91,11 +93,13 @@ impl SubagentEditorView {
             name: name.to_string(),
             read_only: matches!(name, "plan" | "solve"),
             selected_agent_indices: Vec::new(),
+            agent_cursor: 0,
             orchestrator: String::new(),
             agent: String::new(),
             available_agents: root.available_agents.clone(),
             is_new: name.is_empty(),
             field: 0,
+            is_complete: false,
             app_event_tx: root.app_event_tx.clone(),
         };
         // Seed from existing config if present
@@ -159,15 +163,21 @@ impl SubagentEditorView {
 impl<'a> BottomPaneView<'a> for SubagentEditorView {
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
         match key_event {
-            KeyEvent { code: KeyCode::Esc, .. } => { /* close handled by parent */ }
+            KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(6); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
-            KeyEvent { code: KeyCode::Left | KeyCode::Right, .. } if self.field == 1 => { self.read_only = !self.read_only; }
+            KeyEvent { code: KeyCode::Up, .. } => { if self.field > 0 { self.field -= 1; } }
+            KeyEvent { code: KeyCode::Down, .. } => { self.field = (self.field + 1).min(6); }
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => { self.read_only = !self.read_only; }
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => { self.read_only = !self.read_only; }
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 2 => { if self.agent_cursor > 0 { self.agent_cursor -= 1; } }
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 2 => { if self.agent_cursor + 1 < self.available_agents.len() { self.agent_cursor += 1; } }
             KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 2 => {
-                // toggle currently highlighted agent (first one for simplicity)
-                self.toggle_agent_at(0);
+                let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
+                self.toggle_agent_at(idx);
             }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.save(); }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
                 match self.field {
                     0 => self.name.push(c),
@@ -188,9 +198,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         }
     }
 
-    fn is_complete(&self) -> bool { false }
+    fn is_complete(&self) -> bool { self.is_complete }
 
-    fn desired_height(&self, _width: u16) -> u16 { 20 }
+    fn desired_height(&self, _width: u16) -> u16 { 12 }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
@@ -210,14 +220,17 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let mode_str = if self.read_only { "read-only" } else { "write" };
         lines.push(Line::from(vec![Span::styled("Mode: ", Style::default()), Span::styled(mode_str.to_string(), sel(1))]));
 
-        // Agents selection (simple summary; toggle behavior simplified)
-        let mut sel_names: Vec<String> = Vec::new();
+        // Agents selection with cursor highlight
+        let mut spans: Vec<Span> = Vec::new();
         for (idx, a) in self.available_agents.iter().enumerate() {
             let checked = if self.selected_agent_indices.contains(&idx) { "[x]" } else { "[ ]" };
-            sel_names.push(format!("{} {}", checked, a));
+            let mut style = sel(2);
+            if idx == self.agent_cursor { style = style.fg(crate::colors::primary()).add_modifier(Modifier::BOLD); }
+            spans.push(Span::styled(format!("{} {}", checked, a), style));
+            spans.push(Span::raw("  "));
         }
         lines.push(Line::from("Agents:"));
-        lines.push(Line::from(vec![Span::styled(sel_names.join(", "), sel(2))]));
+        lines.push(Line::from(spans));
 
         lines.push(Line::from(""));
         lines.push(Line::from("Instructions to Code (orchestrator):"));
