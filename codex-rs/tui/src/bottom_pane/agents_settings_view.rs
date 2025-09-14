@@ -62,15 +62,15 @@ impl AgentsSettingsView {
             items.push(SelectionItem { name: "Add new…".to_string(), description: None, is_current: false, actions });
         }
 
-        // Show at most 5 agent rows plus one for "Add new…" (6 visible rows)
-        let subtitle = "Configure which agents run for each command. Plan/Solve run in read-only mode; Code defaults to write. Press Enter to configure.".to_string();
+        // Show all built-ins and Add new…; avoid wrapping constraints
+        let max_rows = items.len().max(4);
         ListSelectionView::new(
             " Agent Commands ".to_string(),
-            Some(subtitle),
+            None,
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
-            6,
+            max_rows,
         )
     }
 }
