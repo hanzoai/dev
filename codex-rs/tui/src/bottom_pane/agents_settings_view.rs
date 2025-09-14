@@ -185,6 +185,12 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
+            KeyEvent { code: KeyCode::Enter, modifiers, .. } if self.field == 3 => {
+                if modifiers.contains(KeyModifiers::SHIFT) { self.orchestrator.push('\n'); }
+            }
+            KeyEvent { code: KeyCode::Enter, modifiers, .. } if self.field == 4 => {
+                if modifiers.contains(KeyModifiers::SHIFT) { self.agent.push('\n'); }
+            }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.save(); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
@@ -209,6 +215,11 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
     fn is_complete(&self) -> bool { self.is_complete }
 
+    fn handle_paste(&mut self, text: String) -> super::bottom_pane_view::ConditionalUpdate {
+        self.insert_text(&text);
+        super::bottom_pane_view::ConditionalUpdate::NeedsRedraw
+    }
+
     fn desired_height(&self, width: u16) -> u16 {
         // Compute content width consistent with render: inner = width-2; content = inner-1
         let inner_w = width.saturating_sub(2);
@@ -227,15 +238,15 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             lines.max(1)
         }
 
-        // Static rows: Name(1), Mode(1), Agents label(1), buttons(1)
-        let static_rows: u16 = 4;
-        // Agents row typically one line; make it at least 1
-        let agents_row: u16 = 1;
+        // Static rows (content lines):
+        // Name(1), Mode(1), Agents label(1), Agents line(1),
+        // Orchestrator label(1), Agent label(1), Buttons(1)
+        let static_rows: u16 = 7;
+        // Content rows for the two instruction bodies (wrapped)
         let orch_rows = wrapped_lines(&self.orchestrator, content_w);
         let agent_rows = wrapped_lines(&self.agent, content_w);
         // Sum and add borders (2)
         let content_rows = static_rows
-            .saturating_add(agents_row)
             .saturating_add(orch_rows)
             .saturating_add(agent_rows);
         (content_rows + 2).clamp(8, 50)
@@ -296,7 +307,27 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
+            .wrap(ratatui::widgets::Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
-        paragraph.render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(2), height: inner.height }, buf);
+        paragraph.render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height }, buf);
     }
 }
+
+impl SubagentEditorView {
+    fn insert_text(&mut self, s: &str) {
+        match self.field {
+            0 => {
+                // Name: single line; replace newlines with spaces
+                let mut t = s.replace('\n', " ");
+                // Avoid control characters
+                t.retain(|ch| ch >= ' ');
+                self.name.push_str(&t);
+            }
+            3 => self.orchestrator.push_str(s),
+            4 => self.agent.push_str(s),
+            _ => {}
+        }
+    }
+}
+
+// (handle_paste implemented in BottomPaneView impl below)
