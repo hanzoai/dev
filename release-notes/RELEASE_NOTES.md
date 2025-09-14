@@ -1,17 +1,16 @@
-## @just-every/code v0.2.145
+## @just-every/code v0.2.148
 
-A small maintenance release that improves the reliability and safety of our issue‑comment automation.
+This release improves Qwen agent integration and updates shortcuts for a smoother experience.
 
 ### Changes
-
-- CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows.
-- CI: gate issue-comment job on OPENAI_API_KEY via env and avoid secrets in if conditions.
+- Core/Agents: mirror Qwen/DashScope API vars; respect QWEN_MODEL; add qwen examples in config.toml.example.
+- Shortcuts: set Qwen-coder as default for /plan and related commands.
 
 ### Install
-
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.144...v0.2.145
+Compare: https://github.com/just-every/code/compare/v0.2.147...v0.2.148
+
