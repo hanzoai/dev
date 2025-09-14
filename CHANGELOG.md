@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.147] - 2025-09-14
+
+- Core/Git Worktree: add opt-in mirroring of modified submodule pointers via CODEX_BRANCH_INCLUDE_SUBMODULES. (59a6107d)
+- Core/Git: keep default behavior unchanged to avoid unexpected submodule pointer updates. (59a6107d)
+
 ## [0.2.146] - 2025-09-14
 
 - TUI: rewrite web.run citation tokens into inline markdown links. (66dbc5f2)
