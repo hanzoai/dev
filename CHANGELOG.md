@@ -3,6 +3,23 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.147] - 2025-09-14
+
+- Core/Git Worktree: add opt-in mirroring of modified submodule pointers via CODEX_BRANCH_INCLUDE_SUBMODULES. (59a6107d)
+- Core/Git: keep default behavior unchanged to avoid unexpected submodule pointer updates. (59a6107d)
+
+## [0.2.146] - 2025-09-14
+
+- TUI: rewrite web.run citation tokens into inline markdown links. (66dbc5f2)
+- Core: fix /new to fully reset chat context. (d4aee996)
+- Core: handle sandboxed agent spawn when program missing. (5417eb26)
+- Workflows: thread issue comments; show digests oldest→newest in triage. (e63f5fc3)
+
+## [0.2.145] - 2025-09-13
+
+- CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows. (81660396)
+- CI: gate issue-comment job on OPENAI_API_KEY via env and avoid secrets in if conditions. (c65cf3be)
+
 ## [0.2.144] - 2025-09-13
 
 - CI/Issue comments: make agent assertion non-fatal; fail only on proxy 5xx; keep fallback path working. (51479121)

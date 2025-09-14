@@ -1,11 +1,11 @@
-## @just-every/code v0.2.144
+## @just-every/code v0.2.147
 
-This release improves the reliability and signal of our CI-driven issue comment automation.
+This release adds an opt-in for mirroring modified Git submodule pointers to support advanced workflows while keeping defaults stable.
 
 ### Changes
 
-- CI/Issue comments: make agent assertion non-fatal; fail only on proxy 5xx; keep fallback path working.
-- CI: gate agent runs on OPENAI key; fix secrets condition syntax; reduce noisy stream errors; add proxy log tail for debug.
+- Core/Git Worktree: add opt-in mirroring of modified submodule pointers via CODEX_BRANCH_INCLUDE_SUBMODULES.
+- Core/Git: keep default behavior unchanged to avoid unexpected submodule pointer updates.
 
 ### Install
 
@@ -14,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.143...v0.2.144
+Compare: https://github.com/just-every/code/compare/v0.2.146...v0.2.147
