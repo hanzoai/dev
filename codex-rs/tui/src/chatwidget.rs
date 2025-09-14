@@ -2765,10 +2765,53 @@ impl ChatWidget<'_> {
         // Process slash commands and expand them if needed
         let processed = crate::slash_command::process_slash_command_message(&text_only);
         match processed {
-            crate::slash_command::ProcessedCommand::ExpandedPrompt(expanded) => {
-                // Replace the message with the expanded prompt
-                ordered_items.clear();
-                ordered_items.push(InputItem::Text { text: expanded });
+            crate::slash_command::ProcessedCommand::ExpandedPrompt(_expanded) => {
+                // If a built-in multi-agent slash command was used, resolve
+                // configured subagent settings and show an acknowledgement in history.
+                let trimmed = original_trimmed;
+                let (cmd_name, args_opt) = if let Some(rest) = trimmed.strip_prefix("/plan ") {
+                    ("plan", Some(rest.trim().to_string()))
+                } else if let Some(rest) = trimmed.strip_prefix("/solve ") {
+                    ("solve", Some(rest.trim().to_string()))
+                } else if let Some(rest) = trimmed.strip_prefix("/code ") {
+                    ("code", Some(rest.trim().to_string()))
+                } else {
+                    ("", None)
+                };
+
+                if let Some(task) = args_opt {
+                    let res = codex_core::slash_commands::format_subagent_command(
+                        cmd_name,
+                        &task,
+                        Some(&self.config.agents),
+                        Some(&self.config.subagent_commands),
+                    );
+
+                    // Acknowledge the command and show which agents will run.
+                    use ratatui::text::Line;
+                    let mode = if res.read_only { "read-only" } else { "write" };
+                    let mut lines: Vec<Line<'static>> = Vec::new();
+                    lines.push(Line::from(format!("/{} configured", cmd_name)));
+                    lines.push(Line::from(format!("mode: {}", mode)));
+                    lines.push(Line::from(format!(
+                        "agents: {}",
+                        if res.models.is_empty() { "<none>".to_string() } else { res.models.join(", ") }
+                    )));
+                    lines.push(Line::from(format!("command: {}", original_text.trim())));
+                    self.history_push(crate::history_cell::PlainHistoryCell {
+                        lines,
+                        kind: crate::history_cell::HistoryCellType::Notice,
+                    });
+
+                    // Replace the message with the resolved prompt
+                    ordered_items.clear();
+                    ordered_items.push(InputItem::Text { text: res.prompt });
+                } else {
+                    // Fallback to default expansion behavior
+                    let expanded = _expanded;
+                    ordered_items.clear();
+                    ordered_items.push(InputItem::Text { text: expanded });
+                }
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
                 // This is a regular slash command, dispatch it normally

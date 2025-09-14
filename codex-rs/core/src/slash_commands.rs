@@ -1,4 +1,5 @@
 use crate::config_types::AgentConfig;
+use crate::config_types::SubagentCommandConfig;
 
 // NOTE: These are the prompt formatters for the prompt‑expanding slash commands
 // (/plan, /solve, /code). If you add or change a slash command, please update
@@ -22,6 +23,101 @@ fn get_default_models() -> Vec<String> {
         "qwen".to_string(),
         "codex".to_string(),
     ]
+}
+
+/// Resolution result for a subagent command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubagentResolution {
+    pub name: String,
+    pub read_only: bool,
+    pub models: Vec<String>,
+    pub orchestrator_instructions: Option<String>,
+    pub agent_instructions: Option<String>,
+    pub prompt: String,
+}
+
+fn default_read_only_for(name: &str) -> bool {
+    match name {
+        "plan" | "solve" => true,
+        _ => name != "code",
+    }
+}
+
+fn resolve_models(
+    explicit: &[String],
+    agents: Option<&[AgentConfig]>,
+) -> Vec<String> {
+    if !explicit.is_empty() {
+        return explicit.to_vec();
+    }
+    if let Some(agents) = agents {
+        let enabled = get_enabled_agents(agents);
+        if !enabled.is_empty() {
+            return enabled;
+        }
+    }
+    get_default_models()
+}
+
+/// Format a subagent command (built-in or custom) using optional overrides
+/// from `[[subagents.commands]]`. When a `plan|solve|code` entry exists, it
+/// replaces the built-in defaults for that command.
+pub fn format_subagent_command(
+    name: &str,
+    task: &str,
+    agents: Option<&[AgentConfig]>,
+    commands: Option<&[SubagentCommandConfig]>,
+) -> SubagentResolution {
+    let (user_cmd, read_only_default) = {
+        let ro = default_read_only_for(name);
+        let found = commands
+            .and_then(|list| list.iter().find(|c| c.name.eq_ignore_ascii_case(name)))
+            .cloned();
+        (found, ro)
+    };
+
+    let (read_only, models, orch_extra, agent_extra) = match user_cmd {
+        Some(cfg) => (
+            cfg.read_only, // User-provided read_only (defaults to false unless set)
+            resolve_models(&cfg.agents, agents),
+            cfg.orchestrator_instructions,
+            cfg.agent_instructions,
+        ),
+        None => (
+            read_only_default,
+            resolve_models(&[], agents),
+            None,
+            None,
+        ),
+    };
+
+    // Build the base orchestrator prompt using the built-in templates, but
+    // with the resolved model list and read_only applied via the template text.
+    let base = match name {
+        "plan" => format_plan_command(task, Some(models.clone()), agents),
+        "solve" => format_solve_command(task, Some(models.clone()), agents),
+        _ => format_code_command(task, Some(models.clone()), agents),
+    };
+
+    // Append extra instructions, if any.
+    let mut prompt = base;
+    if let Some(extra) = orch_extra.as_ref().filter(|s| !s.trim().is_empty()) {
+        prompt.push_str("\n\nAdditional instructions for Code (orchestrator):\n");
+        prompt.push_str(extra);
+    }
+    if let Some(extra) = agent_extra.as_ref().filter(|s| !s.trim().is_empty()) {
+        prompt.push_str("\n\nFor each agent you start, append these instructions to the agent's prompt:\n");
+        prompt.push_str(extra);
+    }
+
+    SubagentResolution {
+        name: name.to_string(),
+        read_only,
+        models,
+        orchestrator_instructions: orch_extra,
+        agent_instructions: agent_extra,
+        prompt,
+    }
 }
 
 /// Format the /plan command into a prompt for the LLM
