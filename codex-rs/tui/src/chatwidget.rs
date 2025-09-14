@@ -468,8 +468,10 @@ impl ChatWidget<'_> {
     ) {
         let history = std::mem::take(&mut self.history_cells);
         let order_ok = std::mem::take(&mut self.cell_order_seq);
-        let order: Vec<(u64, i32, u64)> =
-            order_ok.into_iter().map(|o| (o.req, o.out, o.seq)).collect();
+        let order: Vec<(u64, i32, u64)> = order_ok
+            .into_iter()
+            .map(|o| (o.req, o.out, o.seq))
+            .collect();
         let order_dbg = std::mem::take(&mut self.cell_order_dbg);
         (
             history,
@@ -493,14 +495,7 @@ impl ChatWidget<'_> {
             u64,
         ),
     ) {
-        let (
-            history,
-            order,
-            order_dbg,
-            last_seen_req,
-            current_req,
-            internal_seq,
-        ) = state;
+        let (history, order, order_dbg, last_seen_req, current_req, internal_seq) = state;
 
         // Replace any starter cells (welcome, etc.) with the carried history
         self.history_cells = history;
@@ -4216,10 +4211,6 @@ impl ChatWidget<'_> {
                     "  • {} — available (built-in, exe: {})",
                     name, exe
                 )));
-                // Reminder about exec flag ordering for trust bypass
-                lines.push(Line::from(
-                    "      Tip: use `exec --skip-git-repo-check` if needed (after subcommand)",
-                ));
             } else if let Some(path) = resolve_cmd(&cmd) {
                 lines.push(Line::from(format!(
                     "  • {} — available ({} at {})",
@@ -4239,16 +4230,6 @@ impl ChatWidget<'_> {
                 ));
             }
         }
-
-        // Final helpful notes
-        lines.push(Line::from(""));
-        lines.push(Line::from("Notes:".bold()));
-        lines.push(Line::from(
-            "- Built-in 'code' runs even without global shims.",
-        ));
-        lines.push(Line::from(
-            "- External CLIs must be in PATH; restart terminal after install.",
-        ));
 
         self.history_push(crate::history_cell::PlainHistoryCell {
             lines,
@@ -5930,7 +5911,8 @@ impl ChatWidget<'_> {
             let mut lines = Vec::new();
             lines.push(ratatui::text::Line::from(""));
             lines.extend(self.export_transcript_lines_for_buffer());
-            self.app_event_tx.send(crate::app_event::AppEvent::InsertHistory(lines));
+            self.app_event_tx
+                .send(crate::app_event::AppEvent::InsertHistory(lines));
         }
     }
 
@@ -8006,7 +7988,10 @@ impl ChatWidget<'_> {
     /// Render a single history cell into terminal-friendly lines:
     /// - Prepend a gutter icon (symbol + space) to the first line when defined.
     /// - Add a single blank line after the cell as a separator.
-    fn render_lines_for_terminal(&self, cell: &dyn crate::history_cell::HistoryCell) -> Vec<ratatui::text::Line<'static>> {
+    fn render_lines_for_terminal(
+        &self,
+        cell: &dyn crate::history_cell::HistoryCell,
+    ) -> Vec<ratatui::text::Line<'static>> {
         let mut lines = cell.display_lines();
         let _has_icon = cell.gutter_symbol().is_some();
         let first_prefix = if let Some(sym) = cell.gutter_symbol() {
@@ -8037,8 +8022,6 @@ impl ChatWidget<'_> {
 
     /// The last bottom pane height (rows) that the layout actually used.
     /// If not yet set, fall back to a conservative estimate from BottomPane.
-
-    
 
     // (Removed) Legacy in-place reset method. The /new command now creates a fresh
     // ChatWidget (new core session) to ensure the agent context is fully reset.
@@ -8668,7 +8651,8 @@ impl ChatWidget<'_> {
             // Using git_common_dir avoids attempting to checkout the default branch
             // inside the temporary worktree, which can fail with
             // "already checked out in worktree" errors.
-            let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd) {
+            let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
+            {
                 Some(p) => p,
                 None => {
                     use codex_core::protocol::BackgroundEventEvent;
