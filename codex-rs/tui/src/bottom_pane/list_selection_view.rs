@@ -67,6 +67,38 @@ impl ListSelectionView {
         }
         lines
     }
+
+    // Compute a consistent layout for both height calculation and rendering.
+    // Returns (content_width, subtitle_rows, spacer_top_rows, footer_rows, rows_visible, total_height)
+    fn compute_layout(&self, total_width: u16) -> (u16, u16, u16, u16, u16, u16) {
+        // Borders consume 2 cols; we also left-pad content by 1 col inside inner.
+        let inner_width = total_width.saturating_sub(2);
+        let content_width = inner_width.saturating_sub(1);
+
+        // How many list rows we want to show
+        let target_rows = (self.items.len()).clamp(1, self.max_rows) as u16;
+
+        // Subtitle wraps on content width
+        let subtitle_rows = self
+            .subtitle
+            .as_ref()
+            .map(|s| Self::wrapped_lines_for(s, content_width))
+            .unwrap_or(0);
+
+        // Always include one spacer row between subtitle/title and the list
+        let spacer_top_rows: u16 = 1;
+
+        // Footer: single line of hints when present
+        let footer_rows: u16 = if self.footer_hint.is_some() { 1 } else { 0 };
+
+        // Content rows budget equals the rows we want to show
+        let rows_visible = target_rows;
+
+        // Total height = borders (2) + subtitle + spacer + rows + footer
+        let total_height = 2 + subtitle_rows + spacer_top_rows + rows_visible + footer_rows;
+
+        (content_width, subtitle_rows, spacer_top_rows, footer_rows, rows_visible, total_height)
+    }
     pub fn new(
         title: String,
         subtitle: Option<String>,
@@ -157,21 +189,8 @@ impl BottomPaneView<'_> for ListSelectionView {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let rows = (self.items.len()).clamp(1, self.max_rows);
-        // Title row always 1
-        let mut height = rows as u16 + 1;
-        // If subtitle exists, estimate wrapped height + one spacer line
-        if let Some(sub) = &self.subtitle {
-            // inner width = total width - borders(2) - left padding(1)
-            let inner_w = width.saturating_sub(3);
-            let sub_rows = Self::wrapped_lines_for(sub, inner_w).max(1);
-            height = height.saturating_add(sub_rows).saturating_add(1);
-        }
-        // Footer takes 2 lines (spacer + footer)
-        if self.footer_hint.is_some() {
-            height = height.saturating_add(2);
-        }
-        height
+        let (_cw, _sub, _sp, _foot, _rows, total) = self.compute_layout(width);
+        total
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -190,31 +209,33 @@ impl BottomPaneView<'_> for ListSelectionView {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Layout inside the block: optional subtitle header, rows, footer
+        // Layout inside the block: optional subtitle header, spacer, rows, footer
+        let (content_width, subtitle_rows, spacer_top, footer_rows, rows_visible, _total) =
+            self.compute_layout(area.width);
         let mut next_y = inner.y;
         if let Some(sub) = &self.subtitle {
-            // Left pad by one column inside the inner area
-            let subtitle_rows = Self::wrapped_lines_for(sub, inner.width.saturating_sub(1));
-            let sub_h = subtitle_rows.max(1);
-            let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: sub_h };
-            Paragraph::new(sub.clone())
-                .style(Style::default().fg(crate::colors::text_dim()))
-                .render(subtitle_area, buf);
-            next_y = next_y.saturating_add(sub_h);
-
-            // Render a visual spacer line between subtitle and the list
-            let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
+            let sub_h = subtitle_rows;
+            if sub_h > 0 {
+                let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: content_width, height: sub_h };
+                Paragraph::new(sub.clone())
+                    .style(Style::default().fg(crate::colors::text_dim()))
+                    .render(subtitle_area, buf);
+                next_y = next_y.saturating_add(sub_h);
+            }
+        }
+        if spacer_top > 0 && next_y < inner.y.saturating_add(inner.height) {
+            let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: content_width, height: 1 };
             Self::render_dim_prefix_line(spacer_area, buf);
             next_y = next_y.saturating_add(1);
         }
 
-        // Reserve a single footer row when present
-        let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
+        // Compute rows area height from inner
+        let footer_reserved = footer_rows; // exactly as measured
         let rows_area = Rect {
             // Left pad by one column
             x: inner.x.saturating_add(1),
             y: next_y,
-            width: inner.width.saturating_sub(1),
+            width: content_width,
             height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(footer_reserved),
         };
 
@@ -242,12 +263,13 @@ impl BottomPaneView<'_> for ListSelectionView {
             })
             .collect();
         if rows_area.height > 0 {
-            render_rows(rows_area, buf, &rows, &self.state, self.max_rows, true);
+            let max_rows_to_render = rows_visible.min(rows_area.height);
+            render_rows(rows_area, buf, &rows, &self.state, max_rows_to_render as usize, true);
         }
 
         if self.footer_hint.is_some() {
-            // Left pad footer by one column and render it on the last line
-            let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
+            // Render footer on the last inner line
+            let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: content_width, height: 1 };
             let line = Line::from(vec![
                 Span::styled("↑↓", Style::default().fg(crate::colors::function())),
                 Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),

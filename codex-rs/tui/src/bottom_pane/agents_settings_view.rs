@@ -64,9 +64,10 @@ impl AgentsSettingsView {
 
         // Show all built-ins and Add new…; avoid wrapping constraints
         let max_rows = items.len().max(4);
+        let subtitle = "Configure which agents run for each command. Press Enter to configure.".to_string();
         ListSelectionView::new(
             " Agent Commands ".to_string(),
-            None,
+            Some(subtitle),
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
@@ -209,8 +210,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
     fn is_complete(&self) -> bool { self.is_complete }
 
     fn desired_height(&self, width: u16) -> u16 {
-        // Approximate inner width: block has a border and we render with +1 left pad and -2 width
-        let inner_w = width.saturating_sub(4).max(10) as usize;
+        // Compute content width consistent with render: inner = width-2; content = inner-1
+        let inner_w = width.saturating_sub(2);
+        let content_w = inner_w.saturating_sub(1).max(10) as usize;
         // Count wrapped lines for a given string and width.
         fn wrapped_lines(s: &str, w: usize) -> u16 {
             if s.is_empty() { return 1; }
@@ -229,15 +231,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let static_rows: u16 = 4;
         // Agents row typically one line; make it at least 1
         let agents_row: u16 = 1;
-        let orch_rows = wrapped_lines(&self.orchestrator, inner_w);
-        let agent_rows = wrapped_lines(&self.agent, inner_w);
-        // Sum + a tiny breathing room
-        static_rows
+        let orch_rows = wrapped_lines(&self.orchestrator, content_w);
+        let agent_rows = wrapped_lines(&self.agent, content_w);
+        // Sum and add borders (2)
+        let content_rows = static_rows
             .saturating_add(agents_row)
             .saturating_add(orch_rows)
-            .saturating_add(agent_rows)
-            .saturating_add(1) // spacer
-            .clamp(8, 40)
+            .saturating_add(agent_rows);
+        (content_rows + 2).clamp(8, 50)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
