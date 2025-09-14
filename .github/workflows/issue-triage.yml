@@ -311,22 +311,39 @@ jobs:
               }
 
               async function callResponses(model) {
-                const input = [
-                  {
+                const owner = context.repo.owner; const repo = context.repo.repo;
+                const issue_number = Number(process.env.ISSUE_NUMBER || 0);
+                // Fetch issue + comments for per-message threading
+                const issue = (await github.rest.issues.get({ owner, repo, issue_number })).data;
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+
+                const input = [];
+                // Message 1: Issue body (as the first user message)
+                const title = `Issue #${issue.number}: ${issue.title || ''}`;
+                const body = issue.body || '';
+                input.push({
+                  type: 'message',
+                  role: 'user',
+                  content: [
+                    { type: 'input_text', text: title },
+                    { type: 'input_text', text: body || '(no body provided)' }
+                  ]
+                });
+
+                // Messages 2..N: Each comment as its own user message, chronological order
+                const sorted = comments.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+                for (const c of sorted) {
+                  const header = `Comment by @${c.user?.login || 'unknown'} on ${c.created_at}`;
+                  const txt = String(c.body || '').trim();
+                  input.push({
                     type: 'message',
                     role: 'user',
                     content: [
-                      { type: 'input_text', text: JSON.stringify({
-                          repo: `${context.repo.owner}/${context.repo.repo}`,
-                          issue_number: Number(process.env.ISSUE_NUMBER || 0),
-                          title: process.env.ISSUE_TITLE || '',
-                          body: process.env.ISSUE_BODY || '',
-                          actor: context.actor
-                        })
-                      }
+                      { type: 'input_text', text: header },
+                      { type: 'input_text', text: txt || '(empty comment)' }
                     ]
-                  }
-                ];
+                  });
+                }
 
                 const payload = {
                   model,
