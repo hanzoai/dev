@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.146] - 2025-09-14
+
+- TUI: rewrite web.run citation tokens into inline markdown links. (66dbc5f2)
+- Core: fix /new to fully reset chat context. (d4aee996)
+- Core: handle sandboxed agent spawn when program missing. (5417eb26)
+- Workflows: thread issue comments; show digests oldest→newest in triage. (e63f5fc3)
+
 ## [0.2.145] - 2025-09-13
 
 - CI/Issue comments: ensure proxy script is checked out in both jobs; align with upstream flows. (81660396)
