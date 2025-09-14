@@ -195,6 +195,11 @@ pub struct Config {
 
     /// GitHub integration configuration.
     pub github: GithubConfig,
+
+    /// Resolved subagent command configurations (including custom ones).
+    /// If a command with name `plan|solve|code` exists here, it overrides
+    /// the built-in defaults for that slash command.
+    pub subagent_commands: Vec<crate::config_types::SubagentCommandConfig>,
 }
 
 impl Config {
@@ -1007,6 +1012,10 @@ pub struct ConfigToml {
 
     /// GitHub integration configuration.
     pub github: Option<GithubConfig>,
+
+    /// Configuration for subagent commands (built-ins and custom).
+    #[serde(default)]
+    pub subagents: Option<crate::config_types::SubagentsToml>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -1399,6 +1408,10 @@ impl Config {
             // Already computed before moving codex_home
             using_chatgpt_auth,
             github: cfg.github.unwrap_or_default(),
+            subagent_commands: cfg
+                .subagents
+                .map(|s| s.commands)
+                .unwrap_or_default(),
         };
         Ok(config)
     }

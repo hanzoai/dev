@@ -11,6 +11,41 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 
+/// Configuration for a subagent slash command (e.g., plan/solve/code or custom)
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SubagentCommandConfig {
+    /// Name of the command (e.g., "plan", "solve", "code", or custom)
+    pub name: String,
+
+    /// Whether agents launched for this command should run in read-only mode
+    /// Defaults: plan/solve=true, code=false (applied if not specified here)
+    #[serde(default)]
+    pub read_only: bool,
+
+    /// Agent names to enable for this command. If empty, falls back to
+    /// enabled agents from `[[agents]]`, or built-in defaults.
+    #[serde(default)]
+    pub agents: Vec<String>,
+
+    /// Extra instructions to append to the orchestrator (Code) prompt.
+    #[serde(default)]
+    pub orchestrator_instructions: Option<String>,
+
+    /// Extra instructions that the orchestrator should append to the prompt
+    /// given to each launched agent.
+    #[serde(default)]
+    pub agent_instructions: Option<String>,
+}
+
+/// Top-level subagents section containing a list of commands.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SubagentsToml {
+    #[serde(default)]
+    pub commands: Vec<SubagentCommandConfig>,
+}
+
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
