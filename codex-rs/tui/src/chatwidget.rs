@@ -5319,6 +5319,7 @@ impl ChatWidget<'_> {
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
+            8,
         );
         self.bottom_pane.show_list_selection(
             "Jump back to a previous message".to_string(),

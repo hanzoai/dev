@@ -17,7 +17,6 @@ use crate::app_event_sender::AppEventSender;
 use super::BottomPane;
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
-use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
 use super::selection_popup_common::GenericDisplayRow;
 use super::selection_popup_common::render_rows;
@@ -40,6 +39,7 @@ pub(crate) struct ListSelectionView {
     state: ScrollState,
     complete: bool,
     app_event_tx: AppEventSender,
+    max_rows: usize,
 }
 
 impl ListSelectionView {
@@ -58,6 +58,7 @@ impl ListSelectionView {
         footer_hint: Option<String>,
         items: Vec<SelectionItem>,
         app_event_tx: AppEventSender,
+        max_rows: usize,
     ) -> Self {
         let mut s = Self {
             title,
@@ -67,26 +68,27 @@ impl ListSelectionView {
             state: ScrollState::new(),
             complete: false,
             app_event_tx,
+            max_rows,
         };
         let len = s.items.len();
         if let Some(idx) = s.items.iter().position(|it| it.is_current) {
             s.state.selected_idx = Some(idx);
         }
         s.state.clamp_selection(len);
-        s.state.ensure_visible(len, MAX_POPUP_ROWS.min(len));
+        s.state.ensure_visible(len, s.max_rows.min(len));
         s
     }
 
     fn move_up(&mut self) {
         let len = self.items.len();
         self.state.move_up_wrap(len);
-        self.state.ensure_visible(len, MAX_POPUP_ROWS.min(len));
+        self.state.ensure_visible(len, self.max_rows.min(len));
     }
 
     fn move_down(&mut self) {
         let len = self.items.len();
         self.state.move_down_wrap(len);
-        self.state.ensure_visible(len, MAX_POPUP_ROWS.min(len));
+        self.state.ensure_visible(len, self.max_rows.min(len));
     }
 
     fn accept(&mut self) {
@@ -140,7 +142,7 @@ impl BottomPaneView<'_> for ListSelectionView {
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
-        let rows = (self.items.len()).clamp(1, MAX_POPUP_ROWS);
+        let rows = (self.items.len()).clamp(1, self.max_rows);
         // +1 for the title row, +1 for optional subtitle, +1 for optional footer
         let mut height = rows as u16 + 1;
         if self.subtitle.is_some() {
@@ -214,13 +216,13 @@ impl BottomPaneView<'_> for ListSelectionView {
                     name: display_name,
                     match_indices: None,
                     is_current: it.is_current,
-                    description: it.description.clone(),
+                    description: if is_selected { it.description.clone() } else { None },
                     name_color: None,
                 }
             })
             .collect();
         if rows_area.height > 0 {
-            render_rows(rows_area, buf, &rows, &self.state, MAX_POPUP_ROWS, true);
+            render_rows(rows_area, buf, &rows, &self.state, self.max_rows, true);
         }
 
         if self.footer_hint.is_some() {
