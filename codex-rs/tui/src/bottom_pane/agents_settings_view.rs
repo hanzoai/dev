@@ -180,10 +180,12 @@ impl SubagentEditorView {
             orchestrator_instructions: if self.orchestrator.trim().is_empty() { None } else { Some(self.orchestrator.clone()) },
             agent_instructions: if self.agent.trim().is_empty() { None } else { Some(self.agent.clone()) },
         };
-        // Persist to disk
+        // Persist to disk asynchronously to avoid blocking the TUI runtime
         if let Ok(home) = codex_core::config::find_codex_home() {
-            let rt = tokio::runtime::Handle::current();
-            let _ = rt.block_on(codex_core::config_edit::upsert_subagent_command(&home, &cfg));
+            let cfg_clone = cfg.clone();
+            tokio::spawn(async move {
+                let _ = codex_core::config_edit::upsert_subagent_command(&home, &cfg_clone).await;
+            });
         }
         // Update in-memory config
         self.app_event_tx.send(AppEvent::UpdateSubagentCommand(cfg));
