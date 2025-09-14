@@ -48,7 +48,8 @@ impl ListSelectionView {
     }
 
     fn render_dim_prefix_line(area: Rect, buf: &mut Buffer) {
-        let para = Paragraph::new(Line::from(Self::dim_prefix_span()));
+        // Render a simple blank spacer line (no glyphs like '▌')
+        let para = Paragraph::new(Line::from(""));
         para.render(area, buf);
     }
     pub fn new(
@@ -185,7 +186,8 @@ impl BottomPaneView<'_> for ListSelectionView {
             next_y = next_y.saturating_add(1);
         }
 
-        let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
+        // Reserve one extra blank row below the items when a footer is present
+        let footer_reserved = if self.footer_hint.is_some() { 2 } else { 0 };
         let rows_area = Rect {
             // Left pad by one column
             x: inner.x.saturating_add(1),
@@ -222,7 +224,13 @@ impl BottomPaneView<'_> for ListSelectionView {
         }
 
         if self.footer_hint.is_some() {
-            // Left pad footer by one column
+            // Render a spacer line above the footer
+            let spacer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 2, width: inner.width.saturating_sub(1), height: 1 };
+            Paragraph::new(Line::from(""))
+                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+                .render(spacer_area, buf);
+
+            // Left pad footer by one column and render it on the last line
             let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
             let line = Line::from(vec![
                 Span::styled("↑↓", Style::default().fg(crate::colors::function())),
