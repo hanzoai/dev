@@ -89,6 +89,9 @@ pub struct SubagentEditorView {
     field: usize, // 0 name, 1 mode, 2 agents, 3 orch, 4 agent, 5 save, 6 cancel
     is_complete: bool,
     app_event_tx: AppEventSender,
+    undo_name: Vec<String>,
+    undo_orch: Vec<String>,
+    undo_agent: Vec<String>,
 }
 
 impl SubagentEditorView {
@@ -105,6 +108,9 @@ impl SubagentEditorView {
             field: 0,
             is_complete: false,
             app_event_tx: root.app_event_tx.clone(),
+            undo_name: Vec::new(),
+            undo_orch: Vec::new(),
+            undo_agent: Vec::new(),
         };
         // Seed from existing config if present
         if let Some(cfg) = root.existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
@@ -206,23 +212,32 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 self.toggle_agent_at(idx);
             }
             // Enter inserts newline in instruction fields (works even when terminal doesn't send Shift)
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 3 => { self.orchestrator.push('\n'); }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.agent.push('\n'); }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push('\n'); }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.undo_agent.push(self.agent.clone()); self.agent.push('\n'); }
+            // Undo: Ctrl+Z restores last snapshot on active field
+            KeyEvent { code: KeyCode::Char('z'), modifiers: KeyModifiers::CONTROL, .. } => {
+                match self.field {
+                    0 => if let Some(prev) = self.undo_name.pop() { self.name = prev; },
+                    3 => if let Some(prev) = self.undo_orch.pop() { self.orchestrator = prev; },
+                    4 => if let Some(prev) = self.undo_agent.pop() { self.agent = prev; },
+                    _ => {}
+                }
+            }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.save(); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
                 match self.field {
-                    0 => self.name.push(c),
-                    3 => self.orchestrator.push(c),
-                    4 => self.agent.push(c),
+                    0 => { self.undo_name.push(self.name.clone()); self.name.push(c) },
+                    3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push(c) },
+                    4 => { self.undo_agent.push(self.agent.clone()); self.agent.push(c) },
                     _ => {}
                 }
             }
             KeyEvent { code: KeyCode::Backspace, .. } => {
                 match self.field {
-                    0 => { self.name.pop(); },
-                    3 => { self.orchestrator.pop(); },
-                    4 => { self.agent.pop(); },
+                    0 => { self.undo_name.push(self.name.clone()); self.name.pop(); },
+                    3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.pop(); },
+                    4 => { self.undo_agent.push(self.agent.clone()); self.agent.pop(); },
                     _ => {}
                 }
             }
@@ -335,13 +350,14 @@ impl SubagentEditorView {
         match self.field {
             0 => {
                 // Name: single line; replace newlines with spaces
+                self.undo_name.push(self.name.clone());
                 let mut t = s.replace('\n', " ");
                 // Avoid control characters
                 t.retain(|ch| ch >= ' ');
                 self.name.push_str(&t);
             }
-            3 => self.orchestrator.push_str(s),
-            4 => self.agent.push_str(s),
+            3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push_str(s); }
+            4 => { self.undo_agent.push(self.agent.clone()); self.agent.push_str(s); }
             _ => {}
         }
     }
