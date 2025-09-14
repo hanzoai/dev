@@ -8045,6 +8045,24 @@ impl ChatWidget<'_> {
         self.submit_user_message(text.into());
     }
 
+    /// Submit a message where the user sees `display` in history, but the
+    /// model receives only `prompt`. This is used for prompt-expanding
+    /// slash commands selected via the popup where expansion happens before
+    /// reaching the normal composer pipeline.
+    pub(crate) fn submit_prompt_with_display(&mut self, display: String, prompt: String) {
+        if display.is_empty() && prompt.is_empty() {
+            return;
+        }
+        use crate::chatwidget::message::UserMessage;
+        use codex_core::protocol::InputItem;
+        let mut ordered = Vec::new();
+        if !prompt.trim().is_empty() {
+            ordered.push(InputItem::Text { text: prompt });
+        }
+        let msg = UserMessage { display_text: display, ordered_items: ordered };
+        self.submit_user_message(msg);
+    }
+
     /// Submit a visible text message, but prepend a hidden instruction that is
     /// sent to the agent in the same turn. The hidden text is not added to the
     /// chat history; only `visible` appears to the user.
