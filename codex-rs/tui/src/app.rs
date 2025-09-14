@@ -1027,6 +1027,16 @@ impl App<'_> {
                         widget.toggle_mcp_server(&name, enable);
                     }
                 }
+                AppEvent::UpdateSubagentCommand(cmd) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_subagent_update(cmd);
+                    }
+                }
+                AppEvent::ShowSubagentEditor { name, available_agents, existing, is_new } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_subagent_editor_ui(name, available_agents, existing, is_new);
+                    }
+                }
                 AppEvent::PrefillComposer(text) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.insert_str(&text);
