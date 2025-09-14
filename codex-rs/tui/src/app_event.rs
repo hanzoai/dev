@@ -88,6 +88,15 @@ pub(crate) enum AppEvent {
 
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
+    /// Add or update a subagent command in memory (UI already persisted to config.toml)
+    UpdateSubagentCommand(codex_core::config_types::SubagentCommandConfig),
+    /// Open the subagent editor UI for the given command name
+    ShowSubagentEditor {
+        name: String,
+        available_agents: Vec<String>,
+        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
+        is_new: bool,
+    },
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),

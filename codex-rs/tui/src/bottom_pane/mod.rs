@@ -28,6 +28,7 @@ mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
 pub mod resume_selection_view;
+pub mod agents_settings_view;
 mod github_settings_view;
 pub mod mcp_settings_view;
 // no direct use of list_selection_view or its items here
@@ -492,6 +493,21 @@ impl BottomPane<'_> {
     pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    /// Show Subagent editor UI
+    pub fn show_subagent_editor(
+        &mut self,
+        name: String,
+        available_agents: Vec<String>,
+        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
+        is_new: bool,
+    ) {
+        use crate::bottom_pane::agents_settings_view::SubagentEditorView;
+        let view = SubagentEditorView::new_with_data(name, available_agents, existing, is_new, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();
