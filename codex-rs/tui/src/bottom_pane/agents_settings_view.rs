@@ -170,9 +170,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             KeyEvent { code: KeyCode::Down, .. } => { self.field = (self.field + 1).min(6); }
             KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => { self.read_only = !self.read_only; }
             KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => { self.read_only = !self.read_only; }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 1 => { self.read_only = !self.read_only; }
             KeyEvent { code: KeyCode::Left, .. } if self.field == 2 => { if self.agent_cursor > 0 { self.agent_cursor -= 1; } }
             KeyEvent { code: KeyCode::Right, .. } if self.field == 2 => { if self.agent_cursor + 1 < self.available_agents.len() { self.agent_cursor += 1; } }
             KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 2 => {
+                let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
+                self.toggle_agent_at(idx);
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 2 => {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
@@ -200,7 +205,37 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
     fn is_complete(&self) -> bool { self.is_complete }
 
-    fn desired_height(&self, _width: u16) -> u16 { 12 }
+    fn desired_height(&self, width: u16) -> u16 {
+        // Approximate inner width: block has a border and we render with +1 left pad and -2 width
+        let inner_w = width.saturating_sub(4).max(10) as usize;
+        // Count wrapped lines for a given string and width.
+        fn wrapped_lines(s: &str, w: usize) -> u16 {
+            if s.is_empty() { return 1; }
+            let mut lines: u16 = 0;
+            for part in s.split('\n') {
+                let len = part.chars().count();
+                let mut l = (len / w) as u16;
+                if len % w != 0 { l += 1; }
+                if l == 0 { l = 1; }
+                lines = lines.saturating_add(l);
+            }
+            lines.max(1)
+        }
+
+        // Static rows: Name(1), Mode(1), Agents label(1), buttons(1)
+        let static_rows: u16 = 4;
+        // Agents row typically one line; make it at least 1
+        let agents_row: u16 = 1;
+        let orch_rows = wrapped_lines(&self.orchestrator, inner_w);
+        let agent_rows = wrapped_lines(&self.agent, inner_w);
+        // Sum + a tiny breathing room
+        static_rows
+            .saturating_add(agents_row)
+            .saturating_add(orch_rows)
+            .saturating_add(agent_rows)
+            .saturating_add(1) // spacer
+            .clamp(8, 40)
+    }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
@@ -215,10 +250,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
+        let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        lines.push(Line::from(vec![Span::styled("Name: ", Style::default()), Span::styled(self.name.clone(), sel(0))]));
+        // Name with cursor
+        let mut name_render = self.name.clone();
+        if self.field == 0 { name_render.push('▌'); }
+        lines.push(Line::from(vec![Span::styled("Name: ", label(0)), Span::styled(name_render, sel(0))]));
         let mode_str = if self.read_only { "read-only" } else { "write" };
-        lines.push(Line::from(vec![Span::styled("Mode: ", Style::default()), Span::styled(mode_str.to_string(), sel(1))]));
+        lines.push(Line::from(vec![Span::styled("Mode: ", label(1)), Span::styled(mode_str.to_string(), sel(1))]));
 
         // Agents selection with cursor highlight
         let mut spans: Vec<Span> = Vec::new();
@@ -229,16 +268,20 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             spans.push(Span::styled(format!("{} {}", checked, a), style));
             spans.push(Span::raw("  "));
         }
-        lines.push(Line::from("Agents:"));
+        lines.push(Line::from(Span::styled("Agents:", label(2))));
         lines.push(Line::from(spans));
 
-        lines.push(Line::from(""));
-        lines.push(Line::from("Instructions to Code (orchestrator):"));
-        lines.push(Line::from(Span::styled(self.orchestrator.clone(), sel(3))));
-        lines.push(Line::from(""));
-        lines.push(Line::from("Instructions to each agent:"));
-        lines.push(Line::from(Span::styled(self.agent.clone(), sel(4))));
-        lines.push(Line::from(""));
+        // Orchestrator with cursor
+        let mut orch_render = self.orchestrator.clone();
+        if self.field == 3 { orch_render.push('▌'); }
+        lines.push(Line::from(Span::styled("Instructions to Code (orchestrator):", label(3))));
+        lines.push(Line::from(Span::styled(orch_render, sel(3))));
+
+        // Agent with cursor
+        let mut agent_render = self.agent.clone();
+        if self.field == 4 { agent_render.push('▌'); }
+        lines.push(Line::from(Span::styled("Instructions to each agent:", label(4))));
+        lines.push(Line::from(Span::styled(agent_render, sel(4))));
 
         let save_style = sel(5).fg(crate::colors::success());
         let cancel_style = sel(6).fg(crate::colors::error());
