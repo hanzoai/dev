@@ -63,9 +63,10 @@ impl AgentsSettingsView {
         }
 
         // Show at most 5 agent rows plus one for "Add new…" (6 visible rows)
+        let subtitle = "Configure which agents run for each command. Plan/Solve run in read-only mode; Code defaults to write. Press Enter to configure.".to_string();
         ListSelectionView::new(
             " Agent Commands ".to_string(),
-            None, // Only show per-row hint when selected
+            Some(subtitle),
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
