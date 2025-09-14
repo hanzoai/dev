@@ -69,6 +69,7 @@ mod util {
 }
 mod spinner;
 mod tui;
+mod ui_consts;
 mod user_approval_widget;
 mod height_manager;
 mod transcript_app;
