@@ -69,8 +69,8 @@ impl ListSelectionView {
     }
 
     // Compute a consistent layout for both height calculation and rendering.
-    // Returns (content_width, subtitle_rows, spacer_top_rows, footer_rows, rows_visible, total_height)
-    fn compute_layout(&self, total_width: u16) -> (u16, u16, u16, u16, u16, u16) {
+    // Returns (content_width, subtitle_rows, spacer_top_rows, bottom_spacer_rows, footer_rows, rows_visible, total_height)
+    fn compute_layout(&self, total_width: u16) -> (u16, u16, u16, u16, u16, u16, u16) {
         // Borders consume 2 cols; we also left-pad content by 1 col inside inner.
         let inner_width = total_width.saturating_sub(2);
         let content_width = inner_width.saturating_sub(1);
@@ -91,13 +91,16 @@ impl ListSelectionView {
         // Footer: single line of hints when present
         let footer_rows: u16 = if self.footer_hint.is_some() { 1 } else { 0 };
 
+        // A visual spacer between the last list row and the footer
+        let bottom_spacer_rows: u16 = if footer_rows > 0 { 1 } else { 0 };
+
         // Content rows budget equals the rows we want to show
         let rows_visible = target_rows;
 
-        // Total height = borders (2) + subtitle + spacer + rows + footer
-        let total_height = 2 + subtitle_rows + spacer_top_rows + rows_visible + footer_rows;
+        // Total height = borders (2) + subtitle + spacer + rows + bottom spacer + footer
+        let total_height = 2 + subtitle_rows + spacer_top_rows + rows_visible + bottom_spacer_rows + footer_rows;
 
-        (content_width, subtitle_rows, spacer_top_rows, footer_rows, rows_visible, total_height)
+        (content_width, subtitle_rows, spacer_top_rows, bottom_spacer_rows, footer_rows, rows_visible, total_height)
     }
     pub fn new(
         title: String,
@@ -189,7 +192,7 @@ impl BottomPaneView<'_> for ListSelectionView {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let (_cw, _sub, _sp, _foot, _rows, total) = self.compute_layout(width);
+        let (_cw, _sub, _sp, _bsp, _foot, _rows, total) = self.compute_layout(width);
         total
     }
 
@@ -210,7 +213,7 @@ impl BottomPaneView<'_> for ListSelectionView {
         block.render(area, buf);
 
         // Layout inside the block: optional subtitle header, spacer, rows, footer
-        let (content_width, subtitle_rows, spacer_top, footer_rows, rows_visible, _total) =
+        let (content_width, subtitle_rows, spacer_top, bottom_spacer_rows, footer_rows, rows_visible, _total) =
             self.compute_layout(area.width);
         let mut next_y = inner.y;
         if let Some(sub) = &self.subtitle {
@@ -230,13 +233,13 @@ impl BottomPaneView<'_> for ListSelectionView {
         }
 
         // Compute rows area height from inner
-        let footer_reserved = footer_rows; // exactly as measured
+        let reserved = bottom_spacer_rows.saturating_add(footer_rows); // exactly as measured
         let rows_area = Rect {
             // Left pad by one column
             x: inner.x.saturating_add(1),
             y: next_y,
             width: content_width,
-            height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(footer_reserved),
+            height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(reserved),
         };
 
         let rows: Vec<GenericDisplayRow> = self
@@ -268,6 +271,14 @@ impl BottomPaneView<'_> for ListSelectionView {
         }
 
         if self.footer_hint.is_some() {
+            // Bottom spacer above footer, if reserved
+            if bottom_spacer_rows > 0 && rows_area.height > 0 {
+                let spacer_y = inner.y + inner.height - footer_rows - bottom_spacer_rows;
+                let spacer_area = Rect { x: inner.x.saturating_add(1), y: spacer_y, width: content_width, height: bottom_spacer_rows };
+                Paragraph::new(Line::from(""))
+                    .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+                    .render(spacer_area, buf);
+            }
             // Render footer on the last inner line
             let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: content_width, height: 1 };
             let line = Line::from(vec![
