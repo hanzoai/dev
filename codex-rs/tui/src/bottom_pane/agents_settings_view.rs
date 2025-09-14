@@ -116,6 +116,26 @@ impl SubagentEditorView {
             for (idx, a) in me.available_agents.iter().enumerate() {
                 if set.contains(a) { me.selected_agent_indices.push(idx); }
             }
+        } else {
+            // No user config yet; provide sensible defaults for built-ins so users can edit them
+            match name.to_lowercase().as_str() {
+                "plan" => {
+                    me.read_only = true;
+                    me.orchestrator = "Plan a multi-agent approach. Research the repo structure, enumerate tasks, dependencies, risks, and milestones. Use multiple agents in read-only mode and synthesize a single, actionable plan.".to_string();
+                    me.agent = "Study the codebase, cite files you read, list assumptions. Propose concrete steps and call out risks or unknowns.".to_string();
+                }
+                "solve" => {
+                    me.read_only = true;
+                    me.orchestrator = "Coordinate multiple agents to propose competing solutions. Keep all agents read-only. Compare proposals, pick one, and outline verification steps.".to_string();
+                    me.agent = "Propose a fix with exact steps to validate. Be explicit about tests to run and edge cases to check.".to_string();
+                }
+                "code" => {
+                    me.read_only = false;
+                    me.orchestrator = "Coordinate write-mode agents to implement the task in isolated worktrees. Surface worktree_path and branch_name after completion.".to_string();
+                    me.agent = "Make minimal, focused changes with clear rationale. Include tests or validation steps where possible.".to_string();
+                }
+                _ => {}
+            }
         }
         me
     }
@@ -185,12 +205,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
-            KeyEvent { code: KeyCode::Enter, modifiers, .. } if self.field == 3 => {
-                if modifiers.contains(KeyModifiers::SHIFT) { self.orchestrator.push('\n'); }
-            }
-            KeyEvent { code: KeyCode::Enter, modifiers, .. } if self.field == 4 => {
-                if modifiers.contains(KeyModifiers::SHIFT) { self.agent.push('\n'); }
-            }
+            // Enter inserts newline in instruction fields (works even when terminal doesn't send Shift)
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 3 => { self.orchestrator.push('\n'); }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.agent.push('\n'); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.save(); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
