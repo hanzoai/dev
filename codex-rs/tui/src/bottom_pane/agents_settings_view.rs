@@ -62,12 +62,14 @@ impl AgentsSettingsView {
             items.push(SelectionItem { name: "Add new…".to_string(), description: None, is_current: false, actions });
         }
 
+        // Show at most 5 agent rows plus one for "Add new…" (6 visible rows)
         ListSelectionView::new(
             " Agent Commands ".to_string(),
-            Some("Press Enter to configure".to_string()),
+            None, // Only show per-row hint when selected
             Some("Esc cancel".to_string()),
             items,
             self.app_event_tx.clone(),
+            6,
         )
     }
 }
