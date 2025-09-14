@@ -1087,6 +1087,7 @@ impl Session {
             aggregated_output: _,
             duration,
             exit_code,
+            timed_out: _,
         } = output;
         // Because stdout and stderr could each be up to 100 KiB, we send
         // truncated versions.
@@ -1158,6 +1159,7 @@ impl Session {
         let output_stderr;
         let borrowed: &ExecToolCallOutput = match &result {
             Ok(output) => output,
+            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => output,
             Err(e) => {
                 output_stderr = ExecToolCallOutput {
                     exit_code: -1,
@@ -1165,6 +1167,7 @@ impl Session {
                     stderr: StreamOutput::new(get_error_message_ui(e)),
                     aggregated_output: StreamOutput::new(get_error_message_ui(e)),
                     duration: Duration::default(),
+                    timed_out: false,
                 };
                 &output_stderr
             }
@@ -5272,35 +5275,24 @@ async fn handle_sandbox_error(
         AskForApproval::Never | AskForApproval::OnRequest => {
             // Clarify when Read Only mode is the reason a command cannot proceed.
             let content = if matches!(sess.sandbox_policy, SandboxPolicy::ReadOnly) {
-                format!(
-                    "command blocked by Read Only mode: {}",
-                    error
-                )
+                format!("command blocked by Read Only mode: {error}")
             } else {
-                format!(
-                    "failed in sandbox {sandbox_type:?} with execution error: {error}"
-                )
+                format!("failed in sandbox {sandbox_type:?} with execution error: {error}")
             };
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
-                output: FunctionCallOutputPayload {
-                    content,
-                    success: Some(false),
-                },
+                output: FunctionCallOutputPayload { content, success: Some(false) },
             };
         }
         AskForApproval::UnlessTrusted | AskForApproval::OnFailure => (),
     }
 
     // similarly, if the command timed out, we can simply return this failure to the model
-    if matches!(error, SandboxErr::Timeout) {
+    if matches!(error, SandboxErr::Timeout { .. }) {
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                content: format!(
-                    "command timed out after {} milliseconds",
-                    params.timeout_duration().as_millis()
-                ),
+                content: "command timed out".to_string(),
                 success: Some(false),
             },
         };
@@ -5622,6 +5614,7 @@ async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String)
         }
     }
 }
+// removed upstream exit_review_mode helper: not used in fork
 
 /// Send agent status update event to the TUI
 async fn send_agent_status_update(sess: &Session) {
