@@ -613,8 +613,22 @@ async fn execute_model_with_permissions(
             }
         }
         "qwen" => {
-            // Qwen coder: follow Gemini CLI UX, but do not pin a model.
-            if read_only {
+            // Qwen coder: follow Gemini CLI UX by default, and do not pin a model
+            // unless the user explicitly sets QWEN_MODEL in the environment.
+            // We intentionally omit default "-m" to track the CLI's latest default model.
+            if let Ok(model_override) = std::env::var("QWEN_MODEL") {
+                if !model_override.trim().is_empty() {
+                    if read_only {
+                        cmd.args(&["-m", &model_override, "-p", prompt]);
+                    } else {
+                        cmd.args(&["-m", &model_override, "-y", "-p", prompt]);
+                    }
+                } else if read_only {
+                    cmd.args(&["-p", prompt]);
+                } else {
+                    cmd.args(&["-y", "-p", prompt]);
+                }
+            } else if read_only {
                 cmd.args(&["-p", prompt]);
             } else {
                 cmd.args(&["-y", "-p", prompt]);
@@ -662,6 +676,20 @@ async fn execute_model_with_permissions(
         }
         if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
             env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
+        }
+        // Qwen/DashScope convenience: mirror API keys and base URLs both ways so
+        // either variable name works across tools.
+        if let Some(qwen_key) = env.get("QWEN_API_KEY").cloned() {
+            env.entry("DASHSCOPE_API_KEY".to_string()).or_insert(qwen_key);
+        }
+        if let Some(dashscope_key) = env.get("DASHSCOPE_API_KEY").cloned() {
+            env.entry("QWEN_API_KEY".to_string()).or_insert(dashscope_key);
+        }
+        if let Some(qwen_base) = env.get("QWEN_BASE_URL").cloned() {
+            env.entry("DASHSCOPE_BASE_URL".to_string()).or_insert(qwen_base);
+        }
+        if let Some(ds_base) = env.get("DASHSCOPE_BASE_URL").cloned() {
+            env.entry("QWEN_BASE_URL".to_string()).or_insert(ds_base);
         }
         // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
         env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
@@ -725,7 +753,13 @@ async fn execute_model_with_permissions(
                 args.extend(["-p".to_string(), prompt.to_string()]);
             }
             "qwen" => {
-                // Do not specify a model to allow latest default.
+                // Respect QWEN_MODEL override if set in the effective env; otherwise
+                // omit -m to allow the CLI to pick its latest default.
+                if let Some(m) = env.get("QWEN_MODEL").cloned() {
+                    if !m.trim().is_empty() {
+                        args.extend(["-m".to_string(), m]);
+                    }
+                }
                 if !read_only { args.push("-y".to_string()); }
                 args.extend(["-p".to_string(), prompt.to_string()]);
             }
