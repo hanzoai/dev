@@ -11,6 +11,7 @@ use crate::app_event_sender::AppEventSender;
 use super::bottom_pane_view::BottomPaneView;
 use super::list_selection_view::{ListSelectionView, SelectionAction, SelectionItem};
 use super::BottomPane;
+use super::form_text_field::FormTextField;
 
 #[derive(Clone, Debug)]
 pub struct AgentsSettingsView {
@@ -76,48 +77,42 @@ impl AgentsSettingsView {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SubagentEditorView {
-    name: String,
+    name_field: FormTextField,
     read_only: bool,
     selected_agent_indices: Vec<usize>,
     agent_cursor: usize,
-    orchestrator: String,
-    agent: String,
+    orch_field: FormTextField,
+    agent_field: FormTextField,
     available_agents: Vec<String>,
     is_new: bool,
     field: usize, // 0 name, 1 mode, 2 agents, 3 orch, 4 agent, 5 save, 6 cancel
     is_complete: bool,
     app_event_tx: AppEventSender,
-    undo_name: Vec<String>,
-    undo_orch: Vec<String>,
-    undo_agent: Vec<String>,
 }
 
 impl SubagentEditorView {
     pub fn new(root: &AgentsSettingsView, name: &str) -> Self {
         let mut me = Self {
-            name: name.to_string(),
+            name_field: FormTextField::new_single_line(),
             read_only: matches!(name, "plan" | "solve"),
             selected_agent_indices: Vec::new(),
             agent_cursor: 0,
-            orchestrator: String::new(),
-            agent: String::new(),
+            orch_field: FormTextField::new_multi_line(),
+            agent_field: FormTextField::new_multi_line(),
             available_agents: root.available_agents.clone(),
             is_new: name.is_empty(),
             field: 0,
             is_complete: false,
             app_event_tx: root.app_event_tx.clone(),
-            undo_name: Vec::new(),
-            undo_orch: Vec::new(),
-            undo_agent: Vec::new(),
         };
         // Seed from existing config if present
         if let Some(cfg) = root.existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
-            me.name = cfg.name.clone();
+            me.name_field.set_text(&cfg.name);
             me.read_only = cfg.read_only;
-            me.orchestrator = cfg.orchestrator_instructions.clone().unwrap_or_default();
-            me.agent = cfg.agent_instructions.clone().unwrap_or_default();
+            me.orch_field.set_text(&cfg.orchestrator_instructions.clone().unwrap_or_default());
+            me.agent_field.set_text(&cfg.agent_instructions.clone().unwrap_or_default());
             let set: std::collections::HashSet<String> = cfg.agents.iter().cloned().collect();
             for (idx, a) in me.available_agents.iter().enumerate() {
                 if set.contains(a) { me.selected_agent_indices.push(idx); }
@@ -127,20 +122,20 @@ impl SubagentEditorView {
             match name.to_lowercase().as_str() {
                 "plan" => {
                     me.read_only = true;
-                    me.orchestrator = "Plan a multi-agent approach. Research the repo structure, enumerate tasks, dependencies, risks, and milestones. Use multiple agents in read-only mode and synthesize a single, actionable plan.".to_string();
-                    me.agent = "Study the codebase, cite files you read, list assumptions. Propose concrete steps and call out risks or unknowns.".to_string();
+                    me.orch_field.set_text("Plan a multi-agent approach. Research the repo structure, enumerate tasks, dependencies, risks, and milestones. Use multiple agents in read-only mode and synthesize a single, actionable plan.");
+                    me.agent_field.set_text("Study the codebase, cite files you read, list assumptions. Propose concrete steps and call out risks or unknowns.");
                 }
                 "solve" => {
                     me.read_only = true;
-                    me.orchestrator = "Coordinate multiple agents to propose competing solutions. Keep all agents read-only. Compare proposals, pick one, and outline verification steps.".to_string();
-                    me.agent = "Propose a fix with exact steps to validate. Be explicit about tests to run and edge cases to check.".to_string();
+                    me.orch_field.set_text("Coordinate multiple agents to propose competing solutions. Keep all agents read-only. Compare proposals, pick one, and outline verification steps.");
+                    me.agent_field.set_text("Propose a fix with exact steps to validate. Be explicit about tests to run and edge cases to check.");
                 }
                 "code" => {
                     me.read_only = false;
-                    me.orchestrator = "Coordinate write-mode agents to implement the task in isolated worktrees. Surface worktree_path and branch_name after completion.".to_string();
-                    me.agent = "Make minimal, focused changes with clear rationale. Include tests or validation steps where possible.".to_string();
+                    me.orch_field.set_text("Coordinate write-mode agents to implement the task in isolated worktrees. Surface worktree_path and branch_name after completion.");
+                    me.agent_field.set_text("Make minimal, focused changes with clear rationale. Include tests or validation steps where possible.");
                 }
-                _ => {}
+                _ => { me.name_field.set_text(name); }
             }
         }
         me
@@ -174,11 +169,17 @@ impl SubagentEditorView {
             self.selected_agent_indices.iter().filter_map(|i| self.available_agents.get(*i).cloned()).collect()
         };
         let cfg = codex_core::config_types::SubagentCommandConfig {
-            name: self.name.clone(),
+            name: self.name_field.text().to_string(),
             read_only: self.read_only,
             agents,
-            orchestrator_instructions: if self.orchestrator.trim().is_empty() { None } else { Some(self.orchestrator.clone()) },
-            agent_instructions: if self.agent.trim().is_empty() { None } else { Some(self.agent.clone()) },
+            orchestrator_instructions: {
+                let t = self.orch_field.text().trim().to_string();
+                if t.is_empty() { None } else { Some(t) }
+            },
+            agent_instructions: {
+                let t = self.agent_field.text().trim().to_string();
+                if t.is_empty() { None } else { Some(t) }
+            },
         };
         // Persist to disk asynchronously to avoid blocking the TUI runtime
         if let Ok(home) = codex_core::config::find_codex_home() {
@@ -198,8 +199,16 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
             KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(6); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
-            KeyEvent { code: KeyCode::Up, .. } => { if self.field > 0 { self.field -= 1; } }
-            KeyEvent { code: KeyCode::Down, .. } => { self.field = (self.field + 1).min(6); }
+            KeyEvent { code: KeyCode::Up, modifiers, .. } => {
+                if (self.field == 3 || self.field == 4) && modifiers.contains(KeyModifiers::SHIFT) {
+                    let _ = match self.field { 3 => self.orch_field.handle_key(key_event), 4 => self.agent_field.handle_key(key_event), _ => false };
+                } else if self.field > 0 { self.field -= 1; }
+            }
+            KeyEvent { code: KeyCode::Down, modifiers, .. } => {
+                if (self.field == 3 || self.field == 4) && modifiers.contains(KeyModifiers::SHIFT) {
+                    let _ = match self.field { 3 => self.orch_field.handle_key(key_event), 4 => self.agent_field.handle_key(key_event), _ => false };
+                } else { self.field = (self.field + 1).min(6); }
+            }
             KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => { self.read_only = !self.read_only; }
             KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => { self.read_only = !self.read_only; }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 1 => { self.read_only = !self.read_only; }
@@ -213,36 +222,12 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
-            // Enter inserts newline in instruction fields (works even when terminal doesn't send Shift)
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push('\n'); }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.undo_agent.push(self.agent.clone()); self.agent.push('\n'); }
-            // Undo: Ctrl+Z restores last snapshot on active field
-            KeyEvent { code: KeyCode::Char('z'), modifiers: KeyModifiers::CONTROL, .. } => {
-                match self.field {
-                    0 => if let Some(prev) = self.undo_name.pop() { self.name = prev; },
-                    3 => if let Some(prev) = self.undo_orch.pop() { self.orchestrator = prev; },
-                    4 => if let Some(prev) = self.undo_agent.pop() { self.agent = prev; },
-                    _ => {}
-                }
-            }
+            // Delegate input to focused text fields (handles Shift‑chars, Enter/newline, undo, etc.)
+            ev @ KeyEvent { .. } if self.field == 0 => { let _ = self.name_field.handle_key(ev); }
+            ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
+            ev @ KeyEvent { .. } if self.field == 4 => { let _ = self.agent_field.handle_key(ev); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.save(); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 => { self.is_complete = true; }
-            KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } => {
-                match self.field {
-                    0 => { self.undo_name.push(self.name.clone()); self.name.push(c) },
-                    3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push(c) },
-                    4 => { self.undo_agent.push(self.agent.clone()); self.agent.push(c) },
-                    _ => {}
-                }
-            }
-            KeyEvent { code: KeyCode::Backspace, .. } => {
-                match self.field {
-                    0 => { self.undo_name.push(self.name.clone()); self.name.pop(); },
-                    3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.pop(); },
-                    4 => { self.undo_agent.push(self.agent.clone()); self.agent.pop(); },
-                    _ => {}
-                }
-            }
             _ => {}
         }
     }
@@ -250,7 +235,12 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
     fn is_complete(&self) -> bool { self.is_complete }
 
     fn handle_paste(&mut self, text: String) -> super::bottom_pane_view::ConditionalUpdate {
-        self.insert_text(&text);
+        match self.field {
+            0 => self.name_field.handle_paste(text),
+            3 => self.orch_field.handle_paste(text),
+            4 => self.agent_field.handle_paste(text),
+            _ => {}
+        }
         super::bottom_pane_view::ConditionalUpdate::NeedsRedraw
     }
 
@@ -258,27 +248,13 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Compute content width consistent with render: inner = width-2; content = inner-1
         let inner_w = width.saturating_sub(2);
         let content_w = inner_w.saturating_sub(1).max(10) as usize;
-        // Count wrapped lines for a given string and width.
-        fn wrapped_lines(s: &str, w: usize) -> u16 {
-            if s.is_empty() { return 1; }
-            let mut lines: u16 = 0;
-            for part in s.split('\n') {
-                let len = part.chars().count();
-                let mut l = (len / w) as u16;
-                if len % w != 0 { l += 1; }
-                if l == 0 { l = 1; }
-                lines = lines.saturating_add(l);
-            }
-            lines.max(1)
-        }
-
         // Static rows (content lines):
         // Name(1), Mode(1), Agents label(1), Agents line(1),
         // Orchestrator label(1), Agent label(1), Buttons(1)
         let static_rows: u16 = 7;
         // Content rows for the two instruction bodies (wrapped)
-        let orch_rows = wrapped_lines(&self.orchestrator, content_w);
-        let agent_rows = wrapped_lines(&self.agent, content_w);
+        let orch_rows = self.orch_field.desired_height(content_w as u16);
+        let agent_rows = self.agent_field.desired_height(content_w as u16);
         // Sum and add borders (2)
         let content_rows = static_rows
             .saturating_add(orch_rows)
@@ -301,10 +277,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        // Name with cursor
-        let mut name_render = self.name.clone();
-        if self.field == 0 { name_render.push('▌'); }
-        lines.push(Line::from(vec![Span::styled("Name: ", label(0)), Span::styled(name_render, sel(0))]));
+        // Name label (input will be drawn in-place to its right)
+        lines.push(Line::from(vec![Span::styled("Name: ", label(0))]));
         let mode_str = if self.read_only { "read-only" } else { "write" };
         lines.push(Line::from(vec![Span::styled("Mode: ", label(1)), Span::styled(mode_str.to_string(), sel(1))]));
 
@@ -320,17 +294,13 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         lines.push(Line::from(Span::styled("Agents:", label(2))));
         lines.push(Line::from(spans));
 
-        // Orchestrator with cursor
-        let mut orch_render = self.orchestrator.clone();
-        if self.field == 3 { orch_render.push('▌'); }
+        // Orchestrator label (content drawn below)
         lines.push(Line::from(Span::styled("Instructions to Code (orchestrator):", label(3))));
-        lines.push(Line::from(Span::styled(orch_render, sel(3))));
+        lines.push(Line::from(""));
 
-        // Agent with cursor
-        let mut agent_render = self.agent.clone();
-        if self.field == 4 { agent_render.push('▌'); }
+        // Agent label (content drawn below)
         lines.push(Line::from(Span::styled("Instructions to each agent:", label(4))));
-        lines.push(Line::from(Span::styled(agent_render, sel(4))));
+        lines.push(Line::from(""));
 
         let save_style = sel(5).fg(crate::colors::success());
         let cancel_style = sel(6).fg(crate::colors::error());
@@ -343,26 +313,35 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
-        paragraph.render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height }, buf);
+        let content_rect = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height };
+        paragraph.render(content_rect, buf);
+
+        // Draw text fields over the paragraph using the same content rect
+        let content_w = content_rect.width;
+        let mut y = content_rect.y;
+
+        // Row 0: Name input on the same line as label, to the right of "Name: "
+        let name_label = "Name: ";
+        let name_label_w = name_label.chars().count() as u16;
+        let name_field_rect = Rect { x: content_rect.x + name_label_w, y, width: content_w.saturating_sub(name_label_w), height: 1 };
+        self.name_field.render(name_field_rect, buf, self.field == 0);
+
+        // Row 1: Mode; Row 2: Agents label; Row 3: Agents list
+        y = y.saturating_add(3);
+
+        // Row 4: Orchestrator label; draw field starting next row
+        y = y.saturating_add(1);
+        let orch_h = self.orch_field.desired_height(content_w);
+        self.orch_field.render(Rect { x: content_rect.x, y, width: content_w, height: orch_h }, buf, self.field == 3);
+        y = y.saturating_add(orch_h);
+
+        // Next row is Agent label; draw field starting the row after
+        y = y.saturating_add(1);
+        let agent_h = self.agent_field.desired_height(content_w);
+        self.agent_field.render(Rect { x: content_rect.x, y, width: content_w, height: agent_h }, buf, self.field == 4);
     }
 }
 
-impl SubagentEditorView {
-    fn insert_text(&mut self, s: &str) {
-        match self.field {
-            0 => {
-                // Name: single line; replace newlines with spaces
-                self.undo_name.push(self.name.clone());
-                let mut t = s.replace('\n', " ");
-                // Avoid control characters
-                t.retain(|ch| ch >= ' ');
-                self.name.push_str(&t);
-            }
-            3 => { self.undo_orch.push(self.orchestrator.clone()); self.orchestrator.push_str(s); }
-            4 => { self.undo_agent.push(self.agent.clone()); self.agent.push_str(s); }
-            _ => {}
-        }
-    }
-}
+impl SubagentEditorView {}
 
 // (handle_paste implemented in BottomPaneView impl below)

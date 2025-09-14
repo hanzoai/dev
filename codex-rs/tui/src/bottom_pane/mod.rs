@@ -33,6 +33,7 @@ mod github_settings_view;
 pub mod mcp_settings_view;
 // no direct use of list_selection_view or its items here
 mod textarea;
+pub mod form_text_field;
 mod theme_selection_view;
 mod verbosity_selection_view;
 
