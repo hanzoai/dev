@@ -169,8 +169,4 @@ pub(crate) enum AppEvent {
     
 }
 
-impl AppEvent {
-    // Back-compat: allow call sites still constructing CodeEvent to map to CodexEvent
-    #[allow(non_snake_case)]
-    pub fn CodeEvent(ev: Event) -> Self { AppEvent::CodexEvent(ev) }
-}
+// No helper constructor; use `AppEvent::CodeEvent(ev)` directly to avoid shadowing.

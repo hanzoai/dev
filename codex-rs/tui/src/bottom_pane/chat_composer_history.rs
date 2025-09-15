@@ -231,7 +231,7 @@ impl ChatComposerHistory {
                 offset: global_idx,
                 log_id,
             };
-            app_event_tx.send(AppEvent::CodexOp(op));
+            app_event_tx.send(AppEvent::CodeOp(op));
         }
         None
     }
@@ -258,9 +258,9 @@ mod tests {
         assert!(history.should_handle_navigation("", 0));
         assert!(history.navigate_up("", &tx).is_none()); // don't replace the text yet
 
-        // Verify that an AppEvent::CodexOp with the correct GetHistoryEntryRequest was sent.
+        // Verify that an AppEvent::CodeOp with the correct GetHistoryEntryRequest was sent.
         let event = rx.try_recv().expect("expected AppEvent to be sent");
-        let AppEvent::CodexOp(history_request1) = event else {
+        let AppEvent::CodeOp(history_request1) = event else {
             panic!("unexpected event variant");
         };
         assert_eq!(
@@ -282,7 +282,7 @@ mod tests {
 
         // Verify second CodexOp event for offset 1.
         let event2 = rx.try_recv().expect("expected second event");
-        let AppEvent::CodexOp(history_request_2) = event2 else {
+        let AppEvent::CodeOp(history_request_2) = event2 else {
             panic!("unexpected event variant");
         };
         assert_eq!(

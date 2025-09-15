@@ -626,9 +626,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         CodexStatus::Running
     }
 
-    fn exit_code(&self) -> i32 {
-        if self.had_error { 1 } else { 0 }
-    }
+    // exit_code handled by CLI; suppress unused warnings by omitting method.
 }
 
 // Extend trait with exit_code override
