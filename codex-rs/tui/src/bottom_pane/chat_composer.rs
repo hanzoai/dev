@@ -791,20 +791,22 @@ impl ChatComposer {
                             return (InputResult::None, true);
                         }
                         CommandItem::Subagent(i) => {
-                            // Insert the subagent slash with a trailing space for args
+                            // If the current input already starts with this subagent slash,
+                            // treat Enter as submit (close popup and forward to default handler).
                             if let Some(name) = popup.subagent_name(i) {
-                                let starts_with_cmd = command_text
-                                    .lines()
-                                    .next()
-                                    .unwrap_or("")
-                                    .trim_start()
-                                    .starts_with(&format!("/{}", name));
-                                if !starts_with_cmd {
+                                let first_line = command_text.lines().next().unwrap_or("");
+                                let starts_with = first_line.trim_start().starts_with(&format!("/{}", name));
+                                if starts_with {
+                                    // Dismiss popup and submit normally (this will handle args or empty string)
+                                    self.active_popup = ActivePopup::None;
+                                    return self.handle_key_event_without_popup(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                                } else {
+                                    // Insert the subagent slash with a trailing space for args
                                     self.textarea.set_text(&format!("/{} ", name));
                                     let new_cursor = self.textarea.text().len();
                                     self.textarea.set_cursor(new_cursor);
+                                    return (InputResult::None, true);
                                 }
-                                return (InputResult::None, true);
                             }
                             return (InputResult::None, true);
                         }
