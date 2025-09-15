@@ -16,7 +16,6 @@ use base64::Engine;
 use chrono::Utc;
 use codex_core::auth::AuthDotJson;
 use codex_core::auth::get_auth_file;
-use codex_core::default_client::ORIGINATOR;
 use codex_core::token_data::TokenData;
 use codex_core::token_data::parse_id_token;
 use rand::RngCore;
@@ -36,10 +35,11 @@ pub struct ServerOptions {
     pub port: u16,
     pub open_browser: bool,
     pub force_state: Option<String>,
+    pub originator: String,
 }
 
 impl ServerOptions {
-    pub fn new(codex_home: PathBuf, client_id: String) -> Self {
+    pub fn new(codex_home: PathBuf, client_id: String, originator: String) -> Self {
         Self {
             codex_home,
             client_id,
@@ -47,6 +47,7 @@ impl ServerOptions {
             port: DEFAULT_PORT,
             open_browser: true,
             force_state: None,
+            originator,
         }
     }
 }
@@ -102,7 +103,14 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     let server = Arc::new(server);
 
     let redirect_uri = format!("http://localhost:{actual_port}/auth/callback");
-    let auth_url = build_authorize_url(&opts.issuer, &opts.client_id, &redirect_uri, &pkce, &state);
+    let auth_url = build_authorize_url(
+        &opts.issuer,
+        &opts.client_id,
+        &redirect_uri,
+        &pkce,
+        &state,
+        &opts.originator,
+    );
 
     if opts.open_browser {
         let _ = webbrowser::open(&auth_url);
@@ -303,6 +311,7 @@ fn build_authorize_url(
     redirect_uri: &str,
     pkce: &PkceCodes,
     state: &str,
+    originator: &str,
 ) -> String {
     let query = vec![
         ("response_type", "code"),
@@ -314,7 +323,7 @@ fn build_authorize_url(
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
         ("state", state),
-        ("originator", ORIGINATOR.value.as_str()),
+        ("originator", originator),
     ];
     let qs = query
         .into_iter()

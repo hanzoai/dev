@@ -5,6 +5,10 @@ use strum_macros::EnumString;
 use strum_macros::IntoStaticStr;
 
 /// Commands that can be invoked by starting a message with a leading slash.
+///
+/// IMPORTANT: When adding or changing slash commands, also update
+/// `docs/slash-commands.md` at the repo root so users can discover them easily.
+/// This enum is the source of truth for the list and ordering shown in the UI.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]
@@ -26,6 +30,9 @@ pub enum SlashCommand {
     Prompts,
     Perf,
     Agents,
+    Branch,
+    Github,
+    Mcp,
     Resume,
     // Prompt-expanding commands
     Plan,
@@ -50,17 +57,20 @@ impl SlashCommand {
             SlashCommand::Reasoning => "change reasoning effort (minimal/low/medium/high)",
             SlashCommand::Verbosity => "change text verbosity (high/medium/low)",
             SlashCommand::New => "start a new chat during a conversation",
-            SlashCommand::Init => "create an AGENTS.md file with instructions for Hanzo Dev",
+            SlashCommand::Init => "create an AGENTS.md file with instructions for Code",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
-            SlashCommand::Quit => "exit Hanzo Dev",
+            SlashCommand::Quit => "exit Code",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Theme => "switch between color themes",
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Agents => "list agents (running and availability)",
+            SlashCommand::Branch => "create a worktree branch and switch (/branch [task])",
+            SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
+            SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
-            SlashCommand::Logout => "log out of Codex",
+            SlashCommand::Logout => "log out of Code",
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => "test approval request",
         }
@@ -99,13 +109,13 @@ impl SlashCommand {
         // Note: We pass None for agents here as the TUI doesn't have access to the session config
         // The actual agents will be determined when the agent tool is invoked
         match self {
-            SlashCommand::Plan => Some(dev_core::slash_commands::format_plan_command(
+            SlashCommand::Plan => Some(codex_core::slash_commands::format_plan_command(
                 args, None, None,
             )),
-            SlashCommand::Solve => Some(dev_core::slash_commands::format_solve_command(
+            SlashCommand::Solve => Some(codex_core::slash_commands::format_solve_command(
                 args, None, None,
             )),
-            SlashCommand::Code => Some(dev_core::slash_commands::format_code_command(
+            SlashCommand::Code => Some(codex_core::slash_commands::format_code_command(
                 args, None, None,
             )),
             _ => None,

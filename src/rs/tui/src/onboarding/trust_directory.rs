@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use dev_core::config::set_project_trusted;
-use dev_core::protocol::AskForApproval;
-use dev_core::protocol::SandboxPolicy;
+use codex_core::config::set_project_trusted;
+use codex_core::config::set_project_access_mode;
+use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
+use codex_core::protocol::AskForApproval;
+use codex_core::protocol::SandboxPolicy;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -28,7 +30,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 pub(crate) struct TrustDirectoryWidget {
-    pub dev_home: PathBuf,
+    pub codex_home: PathBuf,
     pub cwd: PathBuf,
     pub is_git_repo: bool,
     pub selection: Option<TrustDirectorySelection>,
@@ -59,7 +61,7 @@ impl WidgetRef for &TrustDirectoryWidget {
 
         if self.is_git_repo {
             lines.push(Line::from(
-                "  Since this folder is version controlled, you may wish to allow CoCodedex",
+                "  Since this folder is version controlled, you may wish to allow Code",
             ));
             lines.push(Line::from(
                 "  to work in this folder without asking for approval.",
@@ -94,7 +96,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Yes, allow Hanzo Dev to work in this folder without asking for approval",
+                "Yes, allow Code to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -105,7 +107,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Allow Hanzo Dev to work in this folder without asking for approval",
+                "Allow Code to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -159,17 +161,28 @@ impl StepStateProvider for TrustDirectoryWidget {
 
 impl TrustDirectoryWidget {
     fn handle_trust(&mut self) {
-        if let Err(e) = set_project_trusted(&self.dev_home, &self.cwd) {
+        if let Err(e) = set_project_trusted(&self.codex_home, &self.cwd) {
             tracing::error!("Failed to set project trusted: {e:?}");
             self.error = Some(e.to_string());
             // self.error = Some("Failed to set project trusted".to_string());
         }
 
         // Update the in-memory chat config for this session to a more permissive
-        // policy suitable for a trusted workspace.
+        // policy suitable for a trusted workspace (Full Access).
         if let Ok(mut args) = self.chat_widget_args.lock() {
-            args.config.approval_policy = AskForApproval::OnRequest;
-            args.config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
+            args.config.approval_policy = AskForApproval::Never;
+            args.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+        }
+
+        // Persist the access mode explicitly so subsequent runs don't rely solely on
+        // the trust fallback logic and so the UI reflects the chosen mode immediately.
+        if let Err(e) = set_project_access_mode(
+            &self.codex_home,
+            &self.cwd,
+            AskForApproval::Never,
+            SandboxModeCfg::DangerFullAccess,
+        ) {
+            tracing::warn!("Failed to persist project access mode: {e:?}");
         }
 
         self.selection = Some(TrustDirectorySelection::Trust);

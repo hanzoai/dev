@@ -4,81 +4,89 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
-use codex_core::AuthManager;
 use codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use codex_core::CodexAuth;
-use codex_core::RolloutRecorder;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
-use codex_core::config::GPT_5_CODEX_MEDIUM_MODEL;
 use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_overrides;
-use codex_core::config::persist_model_selection;
-use codex_core::find_conversation_path_by_id_str;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
+use codex_login::AuthMode;
+use codex_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_protocol::config_types::SandboxMode;
-use codex_protocol::mcp_protocol::AuthMode;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
-use tracing::error;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
+// Colorize strings printed to stderr for the release‑mode update banner.
+// Gate the import so we don't trigger an unused‑import warning in debug builds.
+#[cfg(not(debug_assertions))]
+use color_eyre::owo_colors::OwoColorize;
+
 mod app;
-mod app_backtrack;
 mod app_event;
 mod app_event_sender;
-mod backtrack_helpers;
 mod bottom_pane;
 mod chatwidget;
 mod citation_regex;
 mod cli;
-mod clipboard_paste;
-pub mod custom_terminal;
+mod common;
+mod colors;
 mod diff_render;
 mod exec_command;
 mod file_search;
-mod frames;
 mod get_git_diff;
+mod glitch_animation;
 mod history_cell;
-pub mod insert_history;
-mod key_hint;
+mod insert_history;
 pub mod live_wrap;
 mod markdown;
-mod markdown_render;
+mod markdown_renderer;
 mod markdown_stream;
-mod new_model_popup;
+mod syntax_highlight;
 pub mod onboarding;
 mod pager_overlay;
 mod render;
-mod resume_picker;
+// mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
 mod shimmer;
 mod slash_command;
-mod status_indicator_widget;
+mod resume;
 mod streaming;
+mod sanitize;
+mod layout_consts;
+mod terminal_info;
+// mod text_block; // Orphaned after trait-based HistoryCell migration
 mod text_formatting;
+mod text_processing;
+mod theme;
+mod util {
+    pub mod list_window;
+}
+mod spinner;
 mod tui;
-mod ui_consts;
 mod user_approval_widget;
-mod version;
-mod wrapping;
+mod height_manager;
+mod transcript_app;
+mod clipboard_paste;
+mod greeting;
+// Upstream introduced a standalone status indicator widget. Our fork renders
+// status within the composer title; keep the module private unless tests need it.
+mod status_indicator_widget;
+
+// Internal vt100-based replay tests live as a separate source file to keep them
+// close to the widget code. Include them in unit tests.
+#[cfg(all(test, feature = "legacy_tests"))]
+mod chatwidget_stream_tests;
 
 #[cfg(not(debug_assertions))]
 mod updates;
 
-use crate::new_model_popup::ModelUpgradeDecision;
-use crate::new_model_popup::run_model_upgrade_popup;
-use crate::onboarding::TrustDirectorySelection;
-use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
-use crate::onboarding::onboarding_screen::run_onboarding_app;
-use crate::tui::Tui;
 pub use cli::Cli;
-use codex_core::internal_storage::InternalStorage;
 
 // (tests access modules directly within the crate)
 
@@ -89,7 +97,7 @@ pub async fn run_main(
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
-            Some(AskForApproval::OnRequest),
+            Some(AskForApproval::OnFailure),
         )
     } else if cli.dangerously_bypass_approvals_and_sandbox {
         (
@@ -125,7 +133,6 @@ pub async fn run_main(
 
     let overrides = ConfigOverrides {
         model,
-        review_model: None,
         approval_policy,
         sandbox_mode,
         cwd,
@@ -134,14 +141,15 @@ pub async fn run_main(
         codex_linux_sandbox_exe,
         base_instructions: None,
         include_plan_tool: Some(true),
-        include_apply_patch_tool: None,
-        include_view_image_tool: None,
+        disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
-        tools_web_search_request: cli.web_search.then_some(true),
+        debug: Some(cli.debug),
+        // Enable web search by default (no CLI flag).
+        tools_web_search_request: Some(true),
     };
-    let raw_overrides = cli.config_overrides.raw_overrides.clone();
-    let overrides_cli = codex_common::CliConfigOverrides { raw_overrides };
-    let cli_kv_overrides = match overrides_cli.parse_overrides() {
+
+    // Parse `-c` overrides from the CLI.
+    let cli_kv_overrides = match cli.config_overrides.parse_overrides() {
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
         Err(e) => {
@@ -183,20 +191,13 @@ pub async fn run_main(
         }
     };
 
-    let cli_profile_override = cli.config_profile.clone();
-    let active_profile = cli_profile_override
-        .clone()
-        .or_else(|| config_toml.profile.clone());
-
     let should_show_trust_screen = determine_repo_trust_state(
         &mut config,
         &config_toml,
         approval_policy,
         sandbox_mode,
-        cli_profile_override,
+        cli.config_profile.clone(),
     )?;
-
-    let internal_storage = InternalStorage::load(&config.codex_home);
 
     let log_dir = codex_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
@@ -207,7 +208,7 @@ pub async fn run_main(
     // Ensure the file is only readable and writable by the current user.
     // Doing the equivalent to `chmod 600` on Windows is quite a bit more code
     // and requires the Windows API crates, so we can reconsider that when
-    // Hanzo Dev is officially supported on Windows.
+    // Codex CLI is officially supported on Windows.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -221,8 +222,9 @@ pub async fn run_main(
 
     // use RUST_LOG env var, default to info for codex crates.
     let env_filter = || {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("codex_core=info,codex_tui=info"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new("codex_core=info,codex_tui=info,codex_browser=info")
+        })
     };
 
     // Build layered subscriber:
@@ -240,25 +242,47 @@ pub async fn run_main(
 
     let _ = tracing_subscriber::registry().with(file_layer).try_init();
 
-    run_ratatui_app(
-        cli,
-        config,
-        internal_storage,
-        active_profile,
-        should_show_trust_screen,
-    )
-    .await
-    .map_err(|err| std::io::Error::other(err.to_string()))
+    #[allow(clippy::print_stderr)]
+    #[cfg(not(debug_assertions))]
+    if let Some(latest_version) = updates::get_upgrade_version(&config) {
+        let current_version = codex_version::version();
+        let exe = std::env::current_exe()?;
+        let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
+
+        eprintln!(
+            "{} {current_version} -> {latest_version}.",
+            "Code update available!".blue()
+        );
+
+        if managed_by_npm {
+            let npm_cmd = "npm install -g @just-every/code@latest";
+            eprintln!("Run {} to update.", npm_cmd.cyan().on_black());
+        } else if cfg!(target_os = "macos")
+            && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
+        {
+            let brew_cmd = "brew upgrade code";
+            eprintln!("Run {} to update.", brew_cmd.cyan().on_black());
+        } else {
+            eprintln!(
+                "See {} for the latest releases and installation options.",
+                "https://github.com/just-every/code/releases/latest"
+                    .cyan()
+                    .on_black()
+            );
+        }
+
+        eprintln!("");
+    }
+
+    run_ratatui_app(cli, config, should_show_trust_screen)
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
-async fn run_ratatui_app(
+fn run_ratatui_app(
     cli: Cli,
     config: Config,
-    mut internal_storage: InternalStorage,
-    active_profile: Option<String>,
     should_show_trust_screen: bool,
 ) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
-    let mut config = config;
     color_eyre::install()?;
 
     // Forward panic reports through tracing so they appear in the UI status
@@ -270,10 +294,20 @@ async fn run_ratatui_app(
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
-    let mut terminal = tui::init()?;
-    terminal.clear()?;
-
-    let mut tui = Tui::new(terminal);
+    let (mut terminal, terminal_info) = tui::init(&config)?;
+    if config.tui.alternate_screen {
+        terminal.clear()?;
+    } else {
+        // Start in standard terminal mode: leave alt screen and DO NOT clear
+        // the normal buffer. We want prior shell history to remain intact and
+        // new chat output to append inline into scrollback. Ensure line wrap is
+        // enabled and cursor is left where the shell put it.
+        let _ = tui::leave_alt_screen_only();
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::terminal::EnableLineWrap
+        );
+    }
 
     // Show update banner in terminal history (instead of stderr) so it is visible
     // within the TUI scrollback. Building spans keeps styling consistent.
@@ -281,150 +315,87 @@ async fn run_ratatui_app(
     if let Some(latest_version) = updates::get_upgrade_version(&config) {
         use ratatui::style::Stylize as _;
         use ratatui::text::Line;
+        use ratatui::text::Span;
 
-        let current_version = env!("CARGO_PKG_VERSION");
+        let current_version = codex_version::version();
         let exe = std::env::current_exe()?;
         let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(vec![
             "✨⬆️ Update available!".bold().cyan(),
-            " ".into(),
-            format!("{current_version} -> {latest_version}.").into(),
+            Span::raw(" "),
+            Span::raw(format!("{current_version} -> {latest_version}.")),
         ]));
 
         if managed_by_npm {
-            let npm_cmd = "npm install -g @hanzo/dev@latest";
+            let npm_cmd = "npm install -g @openai/codex@latest";
             lines.push(Line::from(vec![
-                "Run ".into(),
+                Span::raw("Run "),
                 npm_cmd.cyan(),
-                " to update.".into(),
+                Span::raw(" to update."),
             ]));
         } else if cfg!(target_os = "macos")
             && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
         {
             let brew_cmd = "brew upgrade codex";
             lines.push(Line::from(vec![
-                "Run ".into(),
+                Span::raw("Run "),
                 brew_cmd.cyan(),
-                " to update.".into(),
+                Span::raw(" to update."),
             ]));
         } else {
             lines.push(Line::from(vec![
-                "See ".into(),
+                Span::raw("See "),
                 "https://github.com/openai/codex/releases/latest".cyan(),
-                " for the latest releases and installation options.".into(),
+                Span::raw(" for the latest releases and installation options."),
             ]));
         }
 
-        lines.push("".into());
-        tui.insert_history_lines(lines);
+        lines.push(Line::from(""));
+        crate::insert_history::insert_history_lines(&mut terminal, lines);
     }
 
     // Initialize high-fidelity session event logging if enabled.
     session_log::maybe_init(&config);
 
-    let auth_manager = AuthManager::shared(config.codex_home.clone());
-    let login_status = get_login_status(&config);
-    let should_show_onboarding =
-        should_show_onboarding(login_status, &config, should_show_trust_screen);
-    if should_show_onboarding {
-        let directory_trust_decision = run_onboarding_app(
-            OnboardingScreenArgs {
-                show_login_screen: should_show_login_screen(login_status, &config),
-                show_trust_screen: should_show_trust_screen,
-                login_status,
-                auth_manager: auth_manager.clone(),
-                config: config.clone(),
-            },
-            &mut tui,
-        )
-        .await?;
-        if let Some(TrustDirectorySelection::Trust) = directory_trust_decision {
-            config.approval_policy = AskForApproval::OnRequest;
-            config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
-        }
-    }
-
-    // Determine resume behavior: explicit id, then resume last, then picker.
-    let resume_selection = if let Some(id_str) = cli.resume_session_id.as_deref() {
-        match find_conversation_path_by_id_str(&config.codex_home, id_str).await? {
-            Some(path) => resume_picker::ResumeSelection::Resume(path),
-            None => {
-                error!("Error finding conversation path: {id_str}");
-                resume_picker::ResumeSelection::StartFresh
-            }
-        }
-    } else if cli.resume_last {
-        match RolloutRecorder::list_conversations(&config.codex_home, 1, None).await {
-            Ok(page) => page
-                .items
-                .first()
-                .map(|it| resume_picker::ResumeSelection::Resume(it.path.clone()))
-                .unwrap_or(resume_picker::ResumeSelection::StartFresh),
-            Err(_) => resume_picker::ResumeSelection::StartFresh,
-        }
-    } else if cli.resume_picker {
-        match resume_picker::run_resume_picker(&mut tui, &config.codex_home).await? {
-            resume_picker::ResumeSelection::Exit => {
-                restore();
-                session_log::log_session_end();
-                return Ok(codex_core::protocol::TokenUsage::default());
-            }
-            other => other,
-        }
-    } else {
-        resume_picker::ResumeSelection::StartFresh
-    };
-
-    if should_show_model_rollout_prompt(
-        &cli,
-        &config,
-        active_profile.as_deref(),
-        internal_storage.gpt_5_codex_model_prompt_seen,
-    ) {
-        internal_storage.gpt_5_codex_model_prompt_seen = true;
-        if let Err(e) = internal_storage.persist().await {
-            error!("Failed to persist internal storage: {e:?}");
-        }
-
-        let upgrade_decision = run_model_upgrade_popup(&mut tui).await?;
-        let switch_to_new_model = upgrade_decision == ModelUpgradeDecision::Switch;
-
-        if switch_to_new_model {
-            config.model = GPT_5_CODEX_MEDIUM_MODEL.to_owned();
-            config.model_reasoning_effort = None;
-            if let Err(e) = persist_model_selection(
-                &config.codex_home,
-                active_profile.as_deref(),
-                &config.model,
-                config.model_reasoning_effort,
-            )
-            .await
-            {
-                error!("Failed to persist model selection: {e:?}");
-            }
-        }
-    }
-
-    let Cli { prompt, images, .. } = cli;
-
-    let app_result = App::run(
-        &mut tui,
-        auth_manager,
-        config,
-        active_profile,
+    let Cli {
         prompt,
         images,
-        resume_selection,
-    )
-    .await;
+        debug,
+        order,
+        timing,
+        ..
+    } = cli;
+    let mut app = App::new(
+        config.clone(),
+        prompt,
+        images,
+        should_show_trust_screen,
+        debug,
+        order,
+        terminal_info,
+        timing,
+    );
+
+    let app_result = app.run(&mut terminal);
+    let usage = app.token_usage();
+
+    // Optionally print timing summary to stderr after restoring the terminal.
+    let timing_summary = app.perf_summary();
 
     restore();
+
+    // After restoring the terminal, clean up any worktrees created by this process.
+    cleanup_session_worktrees_and_print();
     // Mark the end of the recorded session.
     session_log::log_session_end();
+    if let Some(summary) = timing_summary {
+        print_timing_summary(&summary);
+    }
+
     // ignore error when collecting usage – report underlying error instead
-    app_result
+    app_result.map(|_| usage)
 }
 
 #[expect(
@@ -439,27 +410,57 @@ fn restore() {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoginStatus {
-    AuthMode(AuthMode),
-    NotAuthenticated,
+#[allow(clippy::print_stderr)]
+fn print_timing_summary(summary: &str) {
+    eprintln!("\n== Timing Summary ==\n{}", summary);
 }
 
-fn get_login_status(config: &Config) -> LoginStatus {
-    if config.model_provider.requires_openai_auth {
-        // Reading the OpenAI API key is an async operation because it may need
-        // to refresh the token. Block on it.
-        let codex_home = config.codex_home.clone();
-        match CodexAuth::from_codex_home(&codex_home) {
-            Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
-            Ok(None) => LoginStatus::NotAuthenticated,
-            Err(err) => {
-                error!("Failed to read auth.json: {err}");
-                LoginStatus::NotAuthenticated
-            }
+#[allow(clippy::print_stdout, clippy::print_stderr)]
+fn cleanup_session_worktrees_and_print() {
+    use std::process::Command;
+    let pid = std::process::id();
+    let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
+    let session_dir = home.join(".code").join("working").join("_session");
+    let file = session_dir.join(format!("pid-{}.txt", pid));
+    let Ok(data) = std::fs::read_to_string(&file) else { return };
+    let mut entries: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    for line in data.lines() {
+        if line.trim().is_empty() { continue; }
+        if let Some((root_s, path_s)) = line.split_once('\t') {
+            entries.push((std::path::PathBuf::from(root_s), std::path::PathBuf::from(path_s)));
         }
-    } else {
-        LoginStatus::NotAuthenticated
+    }
+    // Deduplicate paths in case of retries
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    entries.retain(|(_, p)| seen.insert(p.clone()));
+    if entries.is_empty() { let _ = std::fs::remove_file(&file); return; }
+
+    eprintln!("Cleaning remaining worktrees ({}).", entries.len());
+    for (git_root, worktree) in entries {
+        let wt_str = match worktree.to_str() { Some(s) => s, None => continue };
+        let _ = Command::new("git")
+            .current_dir(&git_root)
+            .args(["worktree", "remove", wt_str, "--force"])
+            .output();
+        let _ = std::fs::remove_dir_all(&worktree);
+    }
+    let _ = std::fs::remove_file(&file);
+}
+
+/// Minimal login status indicator for onboarding flow.
+#[derive(Debug, Clone, Copy)]
+pub enum LoginStatus {
+    NotAuthenticated,
+    AuthMode(AuthMode),
+}
+
+/// Determine current login status based on auth.json presence.
+pub fn get_login_status(config: &Config) -> LoginStatus {
+    let codex_home = config.codex_home.clone();
+    match CodexAuth::from_codex_home(&codex_home, AuthMode::ChatGPT, &config.responses_originator_header) {
+        Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),
+        _ => LoginStatus::NotAuthenticated,
     }
 }
 
@@ -475,6 +476,19 @@ fn determine_repo_trust_state(
 ) -> std::io::Result<bool> {
     let config_profile = config_toml.get_config_profile(config_profile_override)?;
 
+    // If this project has explicit per-project overrides for approval and/or sandbox,
+    // honor them and skip the trust screen entirely.
+    let proj_key = config.cwd.to_string_lossy().to_string();
+    let has_per_project_overrides = config_toml
+        .projects
+        .as_ref()
+        .and_then(|m| m.get(&proj_key))
+        .map(|p| p.approval_policy.is_some() || p.sandbox_mode.is_some())
+        .unwrap_or(false);
+    if has_per_project_overrides {
+        return Ok(false);
+    }
+
     if approval_policy_overide.is_some() || sandbox_mode_override.is_some() {
         // if the user has overridden either approval policy or sandbox mode,
         // skip the trust flow
@@ -488,167 +502,14 @@ fn determine_repo_trust_state(
         // skip the trust flow
         Ok(false)
     } else if config_toml.is_cwd_trusted(&config.cwd) {
-        // if the current cwd project is trusted and no config has been set
-        // skip the trust flow and set the approval policy and sandbox mode
-        config.approval_policy = AskForApproval::OnRequest;
-        config.sandbox_policy = SandboxPolicy::new_workspace_write_policy();
+        // If the current cwd project is trusted and no explicit config has been set,
+        // default to fully trusted, non‑interactive execution to match expected behavior.
+        // This restores the previous semantics before the recent trust‑flow refactor.
+        config.approval_policy = AskForApproval::Never;
+        config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         Ok(false)
     } else {
-        // if none of the above conditions are met, show the trust screen
+        // if none of the above conditions are met (and no per‑project overrides), show the trust screen
         Ok(true)
-    }
-}
-
-fn should_show_onboarding(
-    login_status: LoginStatus,
-    config: &Config,
-    show_trust_screen: bool,
-) -> bool {
-    if show_trust_screen {
-        return true;
-    }
-
-    should_show_login_screen(login_status, config)
-}
-
-fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool {
-    // Only show the login screen for providers that actually require OpenAI auth
-    // (OpenAI or equivalents). For OSS/other providers, skip login entirely.
-    if !config.model_provider.requires_openai_auth {
-        return false;
-    }
-
-    login_status == LoginStatus::NotAuthenticated
-}
-
-fn should_show_model_rollout_prompt(
-    cli: &Cli,
-    config: &Config,
-    active_profile: Option<&str>,
-    gpt_5_codex_model_prompt_seen: bool,
-) -> bool {
-    let login_status = get_login_status(config);
-
-    active_profile.is_none()
-        && cli.model.is_none()
-        && !gpt_5_codex_model_prompt_seen
-        && config.model_provider.requires_openai_auth
-        && matches!(login_status, LoginStatus::AuthMode(AuthMode::ChatGPT))
-        && !cli.oss
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-    use codex_core::auth::AuthDotJson;
-    use codex_core::auth::get_auth_file;
-    use codex_core::auth::login_with_api_key;
-    use codex_core::auth::write_auth_json;
-    use codex_core::token_data::IdTokenInfo;
-    use codex_core::token_data::TokenData;
-    fn make_config() -> Config {
-        // Create a unique CODEX_HOME per test to isolate auth.json writes.
-        let mut codex_home = std::env::temp_dir();
-        let unique_suffix = format!(
-            "codex_tui_test_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        codex_home.push(unique_suffix);
-        std::fs::create_dir_all(&codex_home).expect("create unique CODEX_HOME");
-
-        Config::load_from_base_config_with_overrides(
-            ConfigToml::default(),
-            ConfigOverrides::default(),
-            codex_home,
-        )
-        .expect("load default config")
-    }
-
-    /// Test helper to write an `auth.json` with the requested auth mode into the
-    /// provided CODEX_HOME directory. This ensures `get_login_status()` reads the
-    /// intended mode deterministically.
-    fn set_auth_method(codex_home: &std::path::Path, mode: AuthMode) {
-        match mode {
-            AuthMode::ApiKey => {
-                login_with_api_key(codex_home, "sk-test-key").expect("write api key auth.json");
-            }
-            AuthMode::ChatGPT => {
-                // Minimal valid JWT payload: header.payload.signature (all base64url, no padding)
-                const FAKE_JWT: &str = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.e30.c2ln"; // {"alg":"none","typ":"JWT"}.{}."sig"
-                let mut id_info = IdTokenInfo::default();
-                id_info.raw_jwt = FAKE_JWT.to_string();
-                let auth = AuthDotJson {
-                    openai_api_key: None,
-                    tokens: Some(TokenData {
-                        id_token: id_info,
-                        access_token: "access-token".to_string(),
-                        refresh_token: "refresh-token".to_string(),
-                        account_id: None,
-                    }),
-                    last_refresh: None,
-                };
-                let file = get_auth_file(codex_home);
-                write_auth_json(&file, &auth).expect("write chatgpt auth.json");
-            }
-        }
-    }
-
-    #[test]
-    fn shows_login_when_not_authenticated() {
-        let cfg = make_config();
-        assert!(should_show_login_screen(
-            LoginStatus::NotAuthenticated,
-            &cfg
-        ));
-    }
-
-    #[test]
-    fn shows_model_rollout_prompt_for_default_model() {
-        let cli = Cli::parse_from(["codex"]);
-        let cfg = make_config();
-        set_auth_method(&cfg.codex_home, AuthMode::ChatGPT);
-        assert!(should_show_model_rollout_prompt(&cli, &cfg, None, false,));
-    }
-
-    #[test]
-    fn hides_model_rollout_prompt_when_api_auth_mode() {
-        let cli = Cli::parse_from(["codex"]);
-        let cfg = make_config();
-        set_auth_method(&cfg.codex_home, AuthMode::ApiKey);
-        assert!(!should_show_model_rollout_prompt(&cli, &cfg, None, false,));
-    }
-
-    #[test]
-    fn hides_model_rollout_prompt_when_marked_seen() {
-        let cli = Cli::parse_from(["codex"]);
-        let cfg = make_config();
-        set_auth_method(&cfg.codex_home, AuthMode::ChatGPT);
-        assert!(!should_show_model_rollout_prompt(&cli, &cfg, None, true,));
-    }
-
-    #[test]
-    fn hides_model_rollout_prompt_when_cli_overrides_model() {
-        let cli = Cli::parse_from(["codex", "--model", "gpt-4.1"]);
-        let cfg = make_config();
-        set_auth_method(&cfg.codex_home, AuthMode::ChatGPT);
-        assert!(!should_show_model_rollout_prompt(&cli, &cfg, None, false,));
-    }
-
-    #[test]
-    fn hides_model_rollout_prompt_when_profile_active() {
-        let cli = Cli::parse_from(["codex"]);
-        let cfg = make_config();
-        set_auth_method(&cfg.codex_home, AuthMode::ChatGPT);
-        assert!(!should_show_model_rollout_prompt(
-            &cli,
-            &cfg,
-            Some("gpt5"),
-            false,
-        ));
     }
 }

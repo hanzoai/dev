@@ -26,7 +26,7 @@ use super::list::Cursor;
 use super::list::get_conversations;
 use super::policy::is_persisted_response_item;
 use crate::config::Config;
-use crate::default_client::ORIGINATOR;
+use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InitialHistory;
@@ -46,7 +46,7 @@ pub struct SavedSession {
     pub items: Vec<ResponseItem>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
-    pub session_id: ConversationId,
+    pub session_id: uuid::Uuid,
 }
 
 /// Records all [`ResponseItem`]s for a session and flushes them to disk after
@@ -61,6 +61,7 @@ pub struct SavedSession {
 #[derive(Clone)]
 pub struct RolloutRecorder {
     tx: Sender<RolloutCmd>,
+    #[allow(dead_code)]
     pub(crate) rollout_path: PathBuf,
 }
 
@@ -77,13 +78,7 @@ pub enum RolloutRecorderParams {
 
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
-    /// Ensure all prior writes are processed; respond when flushed.
-    Flush {
-        ack: oneshot::Sender<()>,
-    },
-    Shutdown {
-        ack: oneshot::Sender<()>,
-    },
+    Shutdown { ack: oneshot::Sender<()> },
 }
 
 impl RolloutRecorderParams {
@@ -94,13 +89,12 @@ impl RolloutRecorderParams {
         }
     }
 
-    pub fn resume(path: PathBuf) -> Self {
-        Self::Resume { path }
-    }
+    // Note: older APIs used a different resume entrypoint; prefer RolloutRecorder::resume.
 }
 
 impl RolloutRecorder {
     /// List conversations (rollout files) under the provided Codex home directory.
+    #[allow(dead_code)]
     pub async fn list_conversations(
         codex_home: &Path,
         page_size: usize,
@@ -140,7 +134,7 @@ impl RolloutRecorder {
                         id: session_id,
                         timestamp,
                         cwd: config.cwd.clone(),
-                        originator: ORIGINATOR.value.clone(),
+                        originator: DEFAULT_ORIGINATOR.to_string(),
                         cli_version: env!("CARGO_PKG_VERSION").to_string(),
                         instructions,
                     }),
@@ -172,14 +166,14 @@ impl RolloutRecorder {
         Ok(Self { tx, rollout_path })
     }
 
-    pub(crate) async fn record_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
-        let mut filtered = Vec::new();
+    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
+        let mut filtered: Vec<RolloutItem> = Vec::new();
         for item in items {
             // Note that function calls may look a bit strange if they are
             // "fully qualified MCP tool calls," so we could consider
             // reformatting them in that case.
-            if is_persisted_response_item(item) {
-                filtered.push(item.clone());
+            if super::policy::should_persist_response_item(item) {
+                filtered.push(RolloutItem::ResponseItem(item.clone()));
             }
         }
         if filtered.is_empty() {
@@ -191,19 +185,35 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to queue rollout items: {e}")))
     }
 
-    /// Flush all queued writes and wait until they are committed by the writer task.
-    pub async fn flush(&self) -> std::io::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(RolloutCmd::Flush { ack: tx })
-            .await
-            .map_err(|e| IoError::other(format!("failed to queue rollout flush: {e}")))?;
-        rx.await
-            .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))
+    /// No-op compatibility shim for older APIs expecting a state snapshot.
+    pub async fn record_state(&self, _snapshot: SessionStateSnapshot) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    /// Compatibility wrapper for older resume API used by codex.rs
+    pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
+        let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
+        let history = Self::get_rollout_history(path).await?;
+        let (session_id, items) = match history {
+            InitialHistory::Resumed(resumed) => (resumed.conversation_id.0, resumed
+                .history
+                .into_iter()
+                .filter_map(|ri| match ri { RolloutItem::ResponseItem(it) => Some(it), _ => None })
+                .collect::<Vec<ResponseItem>>()),
+            _ => (uuid::Uuid::new_v4(), Vec::new()),
+        };
+        let saved = SavedSession {
+            session: SessionMeta::default(),
+            items,
+            state: SessionStateSnapshot::default(),
+            session_id,
+        };
+        Ok((recorder, saved))
     }
 
     pub(crate) async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
         info!("Resuming rollout from {path:?}");
+        tracing::error!("Resuming rollout from {path:?}");
         let text = tokio::fs::read_to_string(path).await?;
         if text.trim().is_empty() {
             return Err(IoError::other("empty session file"));
@@ -227,21 +237,15 @@ impl RolloutRecorder {
             match serde_json::from_value::<RolloutLine>(v.clone()) {
                 Ok(rollout_line) => match rollout_line.item {
                     RolloutItem::SessionMeta(session_meta_line) => {
-                        // Use the FIRST SessionMeta encountered in the file as the canonical
-                        // conversation id and main session information. Keep all items intact.
-                        if conversation_id.is_none() {
-                            conversation_id = Some(session_meta_line.meta.id);
-                        }
+                        tracing::error!(
+                            "Parsed conversation ID from rollout file: {:?}",
+                            session_meta_line.meta.id
+                        );
+                        conversation_id = Some(session_meta_line.meta.id);
                         items.push(RolloutItem::SessionMeta(session_meta_line));
                     }
                     RolloutItem::ResponseItem(item) => {
                         items.push(RolloutItem::ResponseItem(item));
-                    }
-                    RolloutItem::Compacted(item) => {
-                        items.push(RolloutItem::Compacted(item));
-                    }
-                    RolloutItem::TurnContext(item) => {
-                        items.push(RolloutItem::TurnContext(item));
                     }
                     RolloutItem::EventMsg(_ev) => {
                         items.push(RolloutItem::EventMsg(_ev));
@@ -253,7 +257,7 @@ impl RolloutRecorder {
             }
         }
 
-        info!(
+        tracing::error!(
             "Resumed rollout with {} items, conversation ID: {:?}",
             items.len(),
             conversation_id
@@ -271,10 +275,6 @@ impl RolloutRecorder {
             history: items,
             rollout_path: path.to_path_buf(),
         }))
-    }
-
-    pub(crate) fn get_rollout_path(&self) -> PathBuf {
-        self.rollout_path.clone()
     }
 
     pub async fn shutdown(&self) -> std::io::Result<()> {
@@ -376,14 +376,6 @@ async fn rollout_writer(
                         writer.write_rollout_item(item).await?;
                     }
                 }
-            }
-            RolloutCmd::Flush { ack } => {
-                // Ensure underlying file is flushed and then ack.
-                if let Err(e) = writer.file.flush().await {
-                    let _ = ack.send(());
-                    return Err(e);
-                }
-                let _ = ack.send(());
             }
             RolloutCmd::Shutdown { ack } => {
                 let _ = ack.send(());

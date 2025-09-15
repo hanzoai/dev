@@ -1,10 +1,10 @@
-# Codex TUI Theme Configuration
+# Code TUI Theme Configuration
 
-The Codex TUI now supports customizable color themes! You can use predefined themes or create your own custom color scheme.
+The Code TUI now supports customizable color themes! You can use predefined themes or create your own custom color scheme.
 
 ## Configuration
 
-Add theme configuration to your `~/.codex/config.toml` file:
+Add theme configuration to your `~/.code/config.toml` file:
 
 ### Using Predefined Themes
 

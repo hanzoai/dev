@@ -8,23 +8,16 @@ Currently, we made Codex binaries available in three places:
 
 # Cutting a Release
 
-Run the `codex-rs/scripts/create_github_release` script in the repository to publish a new release. The script will choose the appropriate version number depending on the type of release you are creating.
+Currently, choosing the version number for the next release is a manual process. In general, just go to https://github.com/openai/codex/releases/latest and see what the latest release is and increase the minor version by `1`, so if the current release is `0.20.0`, then the next release should be `0.21.0`.
 
-To cut a new alpha release from `main` (feel free to cut alphas liberally):
+Assuming you are trying to publish `0.21.0`, first you would run:
 
-```
-./codex-rs/scripts/create_github_release --publish-alpha
-```
-
-To cut a new _public_ release from `main` (which requires more caution), run:
-
-```
-./codex-rs/scripts/create_github_release --publish-release
+```shell
+VERSION=0.21.0
+./codex-rs/scripts/create_github_release.sh "$VERSION"
 ```
 
-TIP: Add the `--dry-run` flag to report the next version number for the respective release and exit.
-
-Running the publishing script will kick off a GitHub Action to build the release, so go to https://github.com/openai/codex/actions/workflows/rust-release.yml to find the corresponding workflow. (Note: we should automate finding the workflow URL with `gh`.)
+This will kick off a GitHub Action to build the release, so go to https://github.com/openai/codex/actions/workflows/rust-release.yml to find the corresponding workflow. (Note: we should automate finding the workflow URL with `gh`.)
 
 When the workflow finishes, the GitHub Release is "done," but you still have to consider npm and Homebrew.
 

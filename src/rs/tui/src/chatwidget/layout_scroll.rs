@@ -25,6 +25,7 @@ pub(super) fn page_up(chat: &mut ChatWidget<'_>) {
     flash_scrollbar(chat);
     chat.app_event_tx.send(crate::app_event::AppEvent::RequestRedraw);
     chat.height_manager.borrow_mut().record_event(crate::height_manager::HeightEvent::UserScroll);
+    chat.maybe_show_history_nav_hint_on_first_scroll();
 }
 
 pub(super) fn page_down(chat: &mut ChatWidget<'_>) {
@@ -38,6 +39,7 @@ pub(super) fn page_down(chat: &mut ChatWidget<'_>) {
     flash_scrollbar(chat);
     chat.app_event_tx.send(crate::app_event::AppEvent::RequestRedraw);
     chat.height_manager.borrow_mut().record_event(crate::height_manager::HeightEvent::UserScroll);
+    chat.maybe_show_history_nav_hint_on_first_scroll();
 }
 
 pub(super) fn mouse_scroll(chat: &mut ChatWidget<'_>, up: bool) {
@@ -52,13 +54,16 @@ pub(super) fn mouse_scroll(chat: &mut ChatWidget<'_>, up: bool) {
             chat.bottom_pane.set_compact_compose(true);
         }
         chat.app_event_tx.send(crate::app_event::AppEvent::RequestRedraw);
+        chat.maybe_show_history_nav_hint_on_first_scroll();
     } else {
         if chat.layout.scroll_offset >= 3 {
             chat.layout.scroll_offset = chat.layout.scroll_offset.saturating_sub(3);
             chat.app_event_tx.send(crate::app_event::AppEvent::RequestRedraw);
+            chat.maybe_show_history_nav_hint_on_first_scroll();
         } else if chat.layout.scroll_offset > 0 {
             chat.layout.scroll_offset = 0;
             chat.app_event_tx.send(crate::app_event::AppEvent::RequestRedraw);
+            chat.maybe_show_history_nav_hint_on_first_scroll();
         }
         flash_scrollbar(chat);
         if chat.layout.scroll_offset == 0 {
@@ -76,6 +81,33 @@ pub(super) fn flash_scrollbar(chat: &ChatWidget<'_>) {
         tokio::time::sleep(Duration::from_millis(1300)).await;
         tx.send(crate::app_event::AppEvent::RequestRedraw);
     });
+}
+
+/// Jump to the very top of the history (oldest content).
+pub(super) fn to_top(chat: &mut ChatWidget<'_>) {
+    chat.layout.scroll_offset = chat.layout.last_max_scroll.get();
+    chat.bottom_pane.set_compact_compose(true);
+    flash_scrollbar(chat);
+    chat.app_event_tx
+        .send(crate::app_event::AppEvent::RequestRedraw);
+    chat.height_manager
+        .borrow_mut()
+        .record_event(HeightEvent::UserScroll);
+    chat.maybe_show_history_nav_hint_on_first_scroll();
+}
+
+/// Jump to the very bottom of the history (latest content).
+pub(super) fn to_bottom(chat: &mut ChatWidget<'_>) {
+    chat.layout.scroll_offset = 0;
+    chat.bottom_pane.set_compact_compose(false);
+    flash_scrollbar(chat);
+    chat.app_event_tx
+        .send(crate::app_event::AppEvent::RequestRedraw);
+    chat.height_manager
+        .borrow_mut()
+        .record_event(HeightEvent::UserScroll);
+    // No hint necessary when landing at bottom, but keep behavior consistent
+    chat.maybe_show_history_nav_hint_on_first_scroll();
 }
 
 pub(super) fn toggle_browser_hud(chat: &mut ChatWidget<'_>) {
@@ -101,7 +133,8 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         .map(|lock| lock.is_some())
         .unwrap_or(false);
     let has_active_agents = !chat.active_agents.is_empty() || chat.agents_ready_to_start;
-    let hud_present = has_browser_screenshot || has_active_agents;
+    // In standard terminal mode, suppress HUD entirely.
+    let hud_present = if chat.standard_terminal_mode { false } else { has_browser_screenshot || has_active_agents };
 
     let bottom_desired = chat.bottom_pane.desired_height(area.width);
     let font_cell = chat.measured_font_size();
@@ -129,5 +162,13 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         Some(target)
     };
 
-    hm.begin_frame(area, hud_present, bottom_desired, font_cell, hud_target)
+    hm.begin_frame(
+        area,
+        hud_present,
+        bottom_desired,
+        font_cell,
+        hud_target,
+        // Disable status bar when in standard terminal mode
+        !chat.standard_terminal_mode,
+    )
 }

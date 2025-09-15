@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::cmp::Reverse;
 use std::io::{self};
 use std::path::Path;
@@ -14,7 +15,7 @@ use time::macros::format_description;
 use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
-use crate::protocol::EventMsg;
+use codex_protocol::protocol::EventMsg as ProtocolEventMsg;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 
@@ -322,14 +323,8 @@ async fn read_head_and_flags(
                     head.push(val);
                 }
             }
-            RolloutItem::TurnContext(_) => {
-                // Not included in `head`; skip.
-            }
-            RolloutItem::Compacted(_) => {
-                // Not included in `head`; skip.
-            }
             RolloutItem::EventMsg(ev) => {
-                if matches!(ev, EventMsg::UserMessage(_)) {
+                if matches!(ev, ProtocolEventMsg::AgentMessage(_)) {
                     saw_user_event = true;
                 }
             }

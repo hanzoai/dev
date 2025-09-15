@@ -2,7 +2,7 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use dev_core::CODEX_APPLY_PATCH_ARG1;
+use codex_core::CODEX_APPLY_PATCH_ARG1;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
@@ -19,7 +19,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 ///
 /// When the current executable is invoked through the hard-link or alias named
 /// `codex-linux-sandbox` we *directly* execute
-/// [`dev_linux_sandbox::run_main`] (which never returns). Otherwise we:
+/// [`codex_linux_sandbox::run_main`] (which never returns). Otherwise we:
 ///
 /// 1.  Use [`dotenvy::from_path`] and [`dotenvy::dotenv`] to modify the
 ///     environment before creating any threads.
@@ -27,9 +27,9 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 /// 3.  Derive the path to the current executable (so children can re-invoke the
 ///     sandbox) when running on Linux.
 /// 4.  Execute the provided async `main_fn` inside that runtime, forwarding any
-///     error. Note that `main_fn` receives `dev_linux_sandbox_exe:
+///     error. Note that `main_fn` receives `codex_linux_sandbox_exe:
 ///     Option<PathBuf>`, as an argument, which is generally needed as part of
-///     constructing [`dev_core::config::Config`].
+///     constructing [`codex_core::config::Config`].
 ///
 /// This function should be used to wrap any `main()` function in binary crates
 /// in this workspace that depends on these helper CLIs.
@@ -48,9 +48,9 @@ where
 
     if exe_name == LINUX_SANDBOX_ARG0 {
         // Safety: [`run_main`] never returns.
-        dev_linux_sandbox::run_main();
+        codex_linux_sandbox::run_main();
     } else if exe_name == APPLY_PATCH_ARG0 || exe_name == MISSPELLED_APPLY_PATCH_ARG0 {
-        dev_apply_patch::main();
+        codex_apply_patch::main();
     }
 
     let argv1 = args.next().unwrap_or_default();
@@ -60,7 +60,7 @@ where
             Some(patch_arg) => {
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
-                match dev_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
+                match codex_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
                     Ok(()) => 0,
                     Err(_) => 1,
                 }
@@ -94,13 +94,13 @@ where
     // async entry-point.
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        let dev_linux_sandbox_exe: Option<PathBuf> = if cfg!(target_os = "linux") {
+        let codex_linux_sandbox_exe: Option<PathBuf> = if cfg!(target_os = "linux") {
             std::env::current_exe().ok()
         } else {
             None
         };
 
-        main_fn(dev_linux_sandbox_exe).await
+        main_fn(codex_linux_sandbox_exe).await
     })
 }
 
@@ -111,14 +111,29 @@ const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
-    if let Ok(dev_home) = dev_core::config::find_dev_home() {
-        if let Ok(iter) = dotenvy::from_path_iter(dev_home.join(".env")) {
+    // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
+    if let Ok(codex_home) = codex_core::config::find_codex_home() {
+        if let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env")) {
+            // Global env may legitimately contain provider keys for Code usage.
             set_filtered(iter);
         }
     }
 
+    // 2) Load from the current project's .env, but with extra safety:
+    //    - Do NOT import provider API keys by default (e.g., OPENAI_API_KEY, AZURE_OPENAI_API_KEY).
+    //    - Users can opt back in via CODEX_ALLOW_PROJECT_OPENAI_KEYS=1 (either exported
+    //      in the shell or placed in ~/.code/.env).
     if let Ok(iter) = dotenvy::dotenv_iter() {
-        set_filtered(iter);
+        // Filtered setter that always blocks provider keys from the project's .env.
+        for (key, value) in iter.into_iter().flatten() {
+            let upper = key.to_ascii_uppercase();
+            // Never allow CODEX_* to be set from .env files for safety.
+            if upper.starts_with(ILLEGAL_ENV_VAR_PREFIX) { continue; }
+            // Always ignore provider keys from project .env (must be set globally or in shell).
+            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" { continue; }
+            // Safe: still single-threaded during startup.
+            unsafe { std::env::set_var(&key, &value) };
+        }
     }
 }
 

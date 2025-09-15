@@ -20,7 +20,7 @@ pub(crate) fn spawn_agent(
 ) -> UnboundedSender<Op> {
     let (dev_op_tx, mut dev_op_rx) = unbounded_channel::<Op>();
 
-    let app_event_tx_clone = app_event_tx;
+    let app_event_tx_clone = app_event_tx.clone();
     tokio::spawn(async move {
         let NewConversation {
             conversation_id: _,
@@ -71,7 +71,7 @@ pub(crate) fn spawn_agent_from_existing(
 ) -> UnboundedSender<Op> {
     let (dev_op_tx, mut dev_op_rx) = unbounded_channel::<Op>();
 
-    let app_event_tx_clone = app_event_tx;
+    let app_event_tx_clone = app_event_tx.clone();
     tokio::spawn(async move {
         // Forward the captured `SessionConfigured` event so it can be rendered in the UI.
         let ev = dev_core::protocol::Event {

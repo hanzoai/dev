@@ -200,11 +200,14 @@ pub enum SandboxPolicy {
         exclude_slash_tmp: bool,
 
         /// When true, do not protect the top-level `.git` folder under a
-        /// writable root. Defaults to false for safety.
-        #[serde(default)]
+        /// writable root. Defaults to true (historical behavior allows Git writes).
+        #[serde(default = "crate::protocol::default_true_bool")]
         allow_git_writes: bool,
     },
 }
+
+// Serde helper: default to true for flags where we want historical permissive behavior.
+pub(crate) const fn default_true_bool() -> bool { true }
 
 /// A writable root path accompanied by a list of subpaths that should remain
 /// read‑only even when the root is writable. This is primarily used to ensure
@@ -253,7 +256,7 @@ impl SandboxPolicy {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
-            allow_git_writes: false,
+            allow_git_writes: true,
         }
     }
 
@@ -850,6 +853,18 @@ pub struct AgentInfo {
     pub status: String,
     /// Optional model being used
     pub model: Option<String>,
+    /// Latest progress line (if any) for UI previews
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub last_progress: Option<String>,
+    /// Final success message, when `status == "completed"`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub result: Option<String>,
+    /// Final error message, when `status == "failed"`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.

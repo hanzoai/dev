@@ -5,7 +5,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
@@ -97,6 +96,9 @@ impl AgentManager {
                         name,
                         status: format!("{:?}", agent.status).to_lowercase(),
                         model: Some(agent.model.clone()),
+                        last_progress: agent.progress.last().cloned(),
+                        result: agent.result.clone(),
+                        error: agent.error.clone(),
                     }
                 })
                 .collect();
@@ -368,26 +370,7 @@ async fn get_git_root() -> Result<PathBuf, String> {
     }
 }
 
-fn sanitize_ref_component(s: &str) -> String {
-    // Git refname safe component: [a-z0-9-]+, collapse invalid runs to '-'
-    let mut out = String::with_capacity(s.len());
-    let mut last_dash = false;
-    for ch in s.chars() {
-        let c = ch.to_ascii_lowercase();
-        let valid = c.is_ascii_alphanumeric() || c == '-';
-        if valid {
-            out.push(c);
-            last_dash = c == '-';
-        } else if !last_dash {
-            out.push('-');
-            last_dash = true;
-        }
-    }
-    // Trim leading/trailing '-'
-    let out = out.trim_matches('-').to_string();
-    // Avoid empty component
-    if out.is_empty() { "agent".to_string() } else { out }
-}
+use crate::git_worktree::sanitize_ref_component;
 
 fn generate_branch_id(model: &str, agent: &str) -> String {
     // Extract first few meaningful words from agent for the branch name
@@ -425,51 +408,7 @@ fn generate_branch_id(model: &str, agent: &str) -> String {
     format!("code-{}-{}", model_s, suffix_s)
 }
 
-async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<PathBuf, String> {
-    // Create .code/branches directory if it doesn't exist
-    let code_dir = git_root.join(".code").join("branches");
-    tokio::fs::create_dir_all(&code_dir)
-        .await
-        .map_err(|e| format!("Failed to create .code/branches directory: {}", e))?;
-
-    // Path for this model's worktree
-    let worktree_path = code_dir.join(branch_id);
-
-    // Remove existing worktree if it exists (cleanup from previous runs)
-    if worktree_path.exists() {
-        Command::new("git")
-            .args(&[
-                "worktree",
-                "remove",
-                worktree_path.to_str().unwrap(),
-                "--force",
-            ])
-            .output()
-            .await
-            .ok(); // Ignore errors, it might not be a worktree
-    }
-
-    // Create new worktree
-    let output = Command::new("git")
-        .current_dir(git_root)
-        .args(&[
-            "worktree",
-            "add",
-            "-b",
-            branch_id,
-            worktree_path.to_str().unwrap(),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Failed to create git worktree: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to create worktree: {}", stderr));
-    }
-
-    Ok(worktree_path)
-}
+use crate::git_worktree::setup_worktree;
 
 async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
     let mut manager = AGENT_MANAGER.write().await;
@@ -526,7 +465,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                 drop(manager);
 
                 match setup_worktree(&git_root, &branch_id).await {
-                    Ok(worktree_path) => {
+                    Ok((worktree_path, used_branch)) => {
                         let mut manager = AGENT_MANAGER.write().await;
                         manager
                             .add_progress(
@@ -538,7 +477,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                             .update_worktree_info(
                                 &agent_id,
                                 worktree_path.display().to_string(),
-                                branch_id.clone(),
+                                used_branch.clone(),
                             )
                             .await;
                         drop(manager);
@@ -579,7 +518,8 @@ async fn execute_model_with_permissions(
     working_dir: Option<PathBuf>,
     config: Option<AgentConfig>,
 ) -> Result<String, String> {
-    // Helper: cross‑platform check whether an executable is available in PATH.
+    // Helper: cross‑platform check whether an executable is available in PATH
+    // and is directly spawnable by std::process::Command (no shell wrappers).
     fn command_exists(cmd: &str) -> bool {
         // Absolute/relative path with separators: check directly (files only).
         if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
@@ -588,7 +528,17 @@ async fn execute_model_with_permissions(
 
         #[cfg(target_os = "windows")]
         {
-            return which::which(cmd).map(|p| p.is_file()).unwrap_or(false);
+            // On Windows, ensure we only accept spawnable extensions. PowerShell
+            // scripts like .ps1 are not directly spawnable via Command::new.
+            if let Ok(p) = which::which(cmd) {
+                if !p.is_file() { return false; }
+                match p.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase()) {
+                    Some(ext) if matches!(ext.as_str(), "exe" | "com" | "cmd" | "bat") => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -631,7 +581,7 @@ async fn execute_model_with_permissions(
     };
 
     // Set working directory if provided
-    if let Some(dir) = working_dir {
+    if let Some(dir) = working_dir.clone() {
         cmd.current_dir(dir);
     }
 
@@ -673,6 +623,28 @@ async fn execute_model_with_permissions(
                 cmd.args(&["-m", "gemini-2.5-pro", "-y", "-p", prompt]);
             }
         }
+        "qwen" => {
+            // Qwen coder: follow Gemini CLI UX by default, and do not pin a model
+            // unless the user explicitly sets QWEN_MODEL in the environment.
+            // We intentionally omit default "-m" to track the CLI's latest default model.
+            if let Ok(model_override) = std::env::var("QWEN_MODEL") {
+                if !model_override.trim().is_empty() {
+                    if read_only {
+                        cmd.args(&["-m", &model_override, "-p", prompt]);
+                    } else {
+                        cmd.args(&["-m", &model_override, "-y", "-p", prompt]);
+                    }
+                } else if read_only {
+                    cmd.args(&["-p", prompt]);
+                } else {
+                    cmd.args(&["-y", "-p", prompt]);
+                }
+            } else if read_only {
+                cmd.args(&["-p", prompt]);
+            } else {
+                cmd.args(&["-y", "-p", prompt]);
+            }
+        }
         "codex" | "code" => {
             if read_only {
                 cmd.args(&["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
@@ -692,34 +664,185 @@ async fn execute_model_with_permissions(
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
-    // Attempt to spawn the external command; if it fails due to NotFound or a
-    // similar OS error, fall back to invoking the current executable (built‑in)
-    // for better portability, especially on Windows with PATH shims.
-    let output = match cmd.output().await {
-        Ok(o) => o,
-        Err(e) => {
-            // Only fall back for external CLIs (not the built-in code/codex path)
-            if model_name == "codex" || model_name == "code" {
-                return Err(format!("Failed to execute {}: {}", model, e));
+    // Agents: run without OS sandboxing; rely on per-branch worktrees for isolation.
+    use crate::protocol::SandboxPolicy;
+    use crate::spawn::StdioPolicy;
+    let output = if !read_only {
+        // Build env from current process then overlay any config-provided vars.
+        let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
+        let orig_home: Option<String> = env.get("HOME").cloned();
+        if let Some(ref cfg) = config {
+            if let Some(ref e) = cfg.env { for (k, v) in e { env.insert(k.clone(), v.clone()); } }
+        }
+
+        // Convenience: map common key names so external CLIs "just work".
+        if let Some(google_key) = env.get("GOOGLE_API_KEY").cloned() {
+            env.entry("GEMINI_API_KEY".to_string()).or_insert(google_key);
+        }
+        if let Some(claude_key) = env.get("CLAUDE_API_KEY").cloned() {
+            env.entry("ANTHROPIC_API_KEY".to_string()).or_insert(claude_key);
+        }
+        if let Some(anthropic_key) = env.get("ANTHROPIC_API_KEY").cloned() {
+            env.entry("CLAUDE_API_KEY".to_string()).or_insert(anthropic_key);
+        }
+        if let Some(anthropic_base) = env.get("ANTHROPIC_BASE_URL").cloned() {
+            env.entry("CLAUDE_BASE_URL".to_string()).or_insert(anthropic_base);
+        }
+        // Qwen/DashScope convenience: mirror API keys and base URLs both ways so
+        // either variable name works across tools.
+        if let Some(qwen_key) = env.get("QWEN_API_KEY").cloned() {
+            env.entry("DASHSCOPE_API_KEY".to_string()).or_insert(qwen_key);
+        }
+        if let Some(dashscope_key) = env.get("DASHSCOPE_API_KEY").cloned() {
+            env.entry("QWEN_API_KEY".to_string()).or_insert(dashscope_key);
+        }
+        if let Some(qwen_base) = env.get("QWEN_BASE_URL").cloned() {
+            env.entry("DASHSCOPE_BASE_URL".to_string()).or_insert(qwen_base);
+        }
+        if let Some(ds_base) = env.get("DASHSCOPE_BASE_URL").cloned() {
+            env.entry("QWEN_BASE_URL".to_string()).or_insert(ds_base);
+        }
+        // Reduce startup overhead for Claude CLI: disable auto-updater/telemetry.
+        env.entry("DISABLE_AUTOUPDATER".to_string()).or_insert("1".to_string());
+        env.entry("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string()).or_insert("1".to_string());
+        env.entry("DISABLE_ERROR_REPORTING".to_string()).or_insert("1".to_string());
+        // Prefer explicit Claude config dir to avoid touching $HOME/.claude.json.
+        // Do not force CLAUDE_CONFIG_DIR here; leave CLI free to use its default
+        // (including Keychain) unless we explicitly redirect HOME below.
+
+        // If GEMINI_API_KEY not provided, try pointing to host config for read‑only
+        // discovery (Gemini CLI supports GEMINI_CONFIG_DIR). We keep HOME as-is so
+        // CLIs that require ~/.gemini and ~/.claude continue to work with your
+        // existing config.
+        if env.get("GEMINI_API_KEY").is_none() {
+            if let Some(h) = orig_home.clone() {
+                let host_gem_cfg = std::path::PathBuf::from(&h).join(".gemini");
+                if host_gem_cfg.is_dir() {
+                    env.insert(
+                        "GEMINI_CONFIG_DIR".to_string(),
+                        host_gem_cfg.to_string_lossy().to_string(),
+                    );
+                }
             }
-            let mut fb = match std::env::current_exe() {
-                Ok(p) => Command::new(p),
-                Err(e2) => return Err(format!(
-                    "Failed to execute {} and could not resolve built-in fallback: {} / {}",
-                    model, e, e2
-                )),
-            };
-            if read_only {
-                fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
-            } else {
-                fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+        }
+
+        // No OS sandbox.
+
+        // Resolve the command and args we prepared above into Vec<String> for spawn helpers.
+        // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
+        // Rebuild the invocation as `command` + args set above.
+        // We reconstruct to run under our sandbox helpers.
+        let program = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+            // Use current exe path
+            std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
+        } else {
+            // Use program name; PATH resolution will be handled by spawn helper with provided env.
+            std::path::PathBuf::from(&command)
+        };
+
+        // Rebuild args exactly as above
+        let mut args: Vec<String> = Vec::new();
+        match model_name {
+            "claude" => {
+                args.extend(
+                    [
+                        if read_only { "--allowedTools" } else { "--dangerously-skip-permissions" },
+                    ]
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                );
+                if read_only {
+                    args.push("Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch".to_string());
+                }
+                args.push("-p".to_string());
+                args.push(prompt.to_string());
             }
-            fb.output().await.map_err(|e2| {
-                format!(
-                    "Failed to execute {} ({}). Built-in fallback also failed: {}",
-                    model, e, e2
+            "gemini" => {
+                args.extend(["-m".to_string(), "gemini-2.5-pro".to_string()]);
+                if !read_only { args.push("-y".to_string()); }
+                args.extend(["-p".to_string(), prompt.to_string()]);
+            }
+            "qwen" => {
+                // Respect QWEN_MODEL override if set in the effective env; otherwise
+                // omit -m to allow the CLI to pick its latest default.
+                if let Some(m) = env.get("QWEN_MODEL").cloned() {
+                    if !m.trim().is_empty() {
+                        args.extend(["-m".to_string(), m]);
+                    }
+                }
+                if !read_only { args.push("-y".to_string()); }
+                args.extend(["-p".to_string(), prompt.to_string()]);
+            }
+            "codex" | "code" => {
+                args.extend(["-s".to_string(), if read_only { "read-only" } else { "workspace-write" }.to_string()]);
+                args.extend(["-a".to_string(), "never".to_string(), "exec".to_string(), "--skip-git-repo-check".to_string(), prompt.to_string()]);
+            }
+            _ => {}
+        }
+
+        // Always run agents without OS sandboxing.
+        let sandbox_type = crate::exec::SandboxType::None;
+
+        // Spawn via helpers and capture output
+        let child_result: std::io::Result<tokio::process::Child> = match sandbox_type {
+            crate::exec::SandboxType::None | crate::exec::SandboxType::MacosSeatbelt | crate::exec::SandboxType::LinuxSeccomp => {
+                crate::spawn::spawn_child_async(
+                    program.clone(),
+                    args.clone(),
+                    Some(&program.to_string_lossy()),
+                    working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+                    &SandboxPolicy::DangerFullAccess,
+                    StdioPolicy::RedirectForShellTool,
+                    env.clone(),
                 )
-            })?
+                .await
+            }
+        };
+
+        match child_result {
+            Ok(child) => child
+                .wait_with_output()
+                .await
+                .map_err(|e| format!("Failed to read output: {}", e))?,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return Err(format!(
+                        "Required agent '{}' is not installed or not in PATH",
+                        command
+                    ));
+                }
+                return Err(format!("Failed to spawn sandboxed agent: {}", e));
+            }
+        }
+    } else {
+        // Read-only path: use prior behavior
+        match cmd.output().await {
+            Ok(o) => o,
+            Err(e) => {
+                // Only fall back for external CLIs (not the built-in code/codex path)
+                if model_name == "codex" || model_name == "code" {
+                    return Err(format!("Failed to execute {}: {}", model, e));
+                }
+                let mut fb = match std::env::current_exe() {
+                    Ok(p) => Command::new(p),
+                    Err(e2) => return Err(format!(
+                        "Failed to execute {} and could not resolve built-in fallback: {} / {}",
+                        model, e, e2
+                    )),
+                };
+                if read_only {
+                    fb.args(["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+                } else {
+                    fb.args(["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+                }
+                fb.output().await.map_err(|e2| {
+                    format!(
+                        "Failed to execute {} ({}). Built-in fallback also failed: {}",
+                        model, e, e2
+                    )
+                })?
+            }
         }
     };
 
@@ -727,7 +850,15 @@ async fn execute_model_with_permissions(
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Command failed: {}", stderr))
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else if stdout.trim().is_empty() {
+            stderr.trim().to_string()
+        } else {
+            format!("{}\n{}", stderr.trim(), stdout.trim())
+        };
+        Err(format!("Command failed: {}", combined))
     }
 }
 
@@ -745,8 +876,8 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     properties.insert(
         "model".to_string(),
         JsonSchema::String {
-            description: Some(
-                "Model: 'claude', 'gemini', or 'code' (or array of models for batch execution)"
+        description: Some(
+                "Model: 'claude', 'gemini', 'qwen', or 'code' (or array of models for batch execution)"
                     .to_string(),
             ),
         },

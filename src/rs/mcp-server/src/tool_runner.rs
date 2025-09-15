@@ -5,10 +5,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::exec_approval::handle_exec_approval_request;
-use crate::outgoing_message::OutgoingMessageSender;
-use crate::outgoing_message::OutgoingNotificationMeta;
-use crate::patch_approval::handle_patch_approval_request;
 use codex_core::CodexConversation;
 use codex_core::ConversationManager;
 use codex_core::NewConversation;
@@ -22,13 +18,18 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::Submission;
 use codex_core::protocol::TaskCompleteEvent;
-use codex_protocol::mcp_protocol::ConversationId;
 use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
 use mcp_types::TextContent;
 use serde_json::json;
 use tokio::sync::Mutex;
+use uuid::Uuid;
+
+use crate::exec_approval::handle_exec_approval_request;
+use crate::outgoing_message::OutgoingMessageSender;
+use crate::outgoing_message::OutgoingNotificationMeta;
+use crate::patch_approval::handle_patch_approval_request;
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
@@ -42,7 +43,7 @@ pub async fn run_codex_tool_session(
     config: CodexConfig,
     outgoing: Arc<OutgoingMessageSender>,
     conversation_manager: Arc<ConversationManager>,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
 ) {
     let NewConversation {
         conversation_id,
@@ -68,7 +69,9 @@ pub async fn run_codex_tool_session(
     let session_configured_event = Event {
         // Use a fake id value for now.
         id: "".to_string(),
+        event_seq: 0,
         msg: EventMsg::SessionConfigured(session_configured.clone()),
+        order: None,
     };
     outgoing
         .send_event_as_notification(
@@ -118,13 +121,13 @@ pub async fn run_codex_tool_session_reply(
     outgoing: Arc<OutgoingMessageSender>,
     request_id: RequestId,
     prompt: String,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
-    conversation_id: ConversationId,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
+    session_id: Uuid,
 ) {
     running_requests_id_to_codex_uuid
         .lock()
         .await
-        .insert(request_id.clone(), conversation_id);
+        .insert(request_id.clone(), session_id);
     if let Err(e) = conversation
         .submit(Op::UserInput {
             items: vec![InputItem::Text { text: prompt }],
@@ -153,7 +156,7 @@ async fn run_codex_tool_session_inner(
     codex: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
     request_id: RequestId,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
 ) {
     let request_id_str = match &request_id {
         RequestId::String(s) => s.clone(),
@@ -222,7 +225,7 @@ async fn run_codex_tool_session_inner(
                     }
                     EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                         let text = match last_agent_message {
-                            Some(msg) => msg,
+                            Some(msg) => msg.clone(),
                             None => "".to_string(),
                         };
                         let result = CallToolResult {
@@ -256,32 +259,30 @@ async fn run_codex_tool_session_inner(
                     }
                     EventMsg::AgentReasoningRawContent(_)
                     | EventMsg::AgentReasoningRawContentDelta(_)
-                    | EventMsg::TaskStarted(_)
+                    | EventMsg::TaskStarted
                     | EventMsg::TokenCount(_)
                     | EventMsg::AgentReasoning(_)
                     | EventMsg::AgentReasoningSectionBreak(_)
                     | EventMsg::McpToolCallBegin(_)
                     | EventMsg::McpToolCallEnd(_)
-                    | EventMsg::McpListToolsResponse(_)
-                    | EventMsg::ListCustomPromptsResponse(_)
+                    // | EventMsg::McpListToolsResponse(_)
                     | EventMsg::ExecCommandBegin(_)
                     | EventMsg::ExecCommandOutputDelta(_)
                     | EventMsg::ExecCommandEnd(_)
                     | EventMsg::BackgroundEvent(_)
-                    | EventMsg::StreamError(_)
                     | EventMsg::PatchApplyBegin(_)
                     | EventMsg::PatchApplyEnd(_)
                     | EventMsg::TurnDiff(_)
                     | EventMsg::WebSearchBegin(_)
-                    | EventMsg::WebSearchEnd(_)
+                    | EventMsg::WebSearchComplete(_)
                     | EventMsg::GetHistoryEntryResponse(_)
+                    | EventMsg::ReplayHistory(_)
                     | EventMsg::PlanUpdate(_)
-                    | EventMsg::TurnAborted(_)
-                    | EventMsg::ConversationPath(_)
-                    | EventMsg::UserMessage(_)
+                    | EventMsg::BrowserScreenshotUpdate(_)
+                    | EventMsg::AgentStatusUpdate(_)
                     | EventMsg::ShutdownComplete
-                    | EventMsg::EnteredReviewMode(_)
-                    | EventMsg::ExitedReviewMode(_) => {
+                    | EventMsg::CustomToolCallBegin(_)
+                    | EventMsg::CustomToolCallEnd(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that
                         // send(codex_event_to_notification(&event)) above has

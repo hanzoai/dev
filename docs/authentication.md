@@ -2,10 +2,10 @@
 
 ## Usage-based billing alternative: Use an OpenAI API key
 
-If you prefer to pay-as-you-go, you can still authenticate with your OpenAI API key:
+If you prefer to pay-as-you-go, you can still authenticate with your OpenAI API key by setting it as an environment variable:
 
 ```shell
-codex login --api-key "your-api-key-here"
+export OPENAI_API_KEY="your-api-key-here"
 ```
 
 This key must, at minimum, have write access to the Responses API.
@@ -17,6 +17,53 @@ If you've used the Codex CLI before with usage-based billing via an API key and 
 1. Update the CLI and ensure `codex --version` is `0.20.0` or later
 2. Delete `~/.codex/auth.json` (on Windows: `C:\\Users\\USERNAME\\.codex\\auth.json`)
 3. Run `codex login` again
+
+## Forcing a specific auth method (advanced)
+
+You can explicitly choose which authentication Codex should prefer when both are available.
+
+- To always use your API key (even when ChatGPT auth exists), set:
+
+```toml
+# ~/.codex/config.toml
+preferred_auth_method = "apikey"
+```
+
+Or override ad-hoc via CLI:
+
+```bash
+codex --config preferred_auth_method="apikey"
+```
+
+- To prefer ChatGPT auth (default), set:
+
+```toml
+# ~/.codex/config.toml
+preferred_auth_method = "chatgpt"
+```
+
+Notes:
+
+- When `preferred_auth_method = "apikey"` and an API key is available, the login screen is skipped.
+- When `preferred_auth_method = "chatgpt"` (default), Codex prefers ChatGPT auth if present; if only an API key is present, it will use the API key. Certain account types may also require API-key mode.
+- To check which auth method is being used during a session, use the `/status` command in the TUI.
+
+## Project .env safety (OPENAI_API_KEY)
+
+By default, Codex will no longer read `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` from a project’s local `.env` file.
+
+Why: many repos include an API key in `.env` for unrelated tooling, which could cause Codex to silently use the API key instead of your ChatGPT plan in that folder.
+
+What still works:
+
+- `~/.code/.env` (or `~/.codex/.env`) is loaded first and may contain your `OPENAI_API_KEY` for global use.
+- A shell-exported `OPENAI_API_KEY` is honored.
+
+Project `.env` provider keys are always ignored — there is no opt‑in.
+
+UI clarity:
+
+- When Codex is using an API key, the chat footer shows a bold “Auth: API key” badge so it’s obvious which mode you’re in.
 
 ## Connecting on a "Headless" Machine
 

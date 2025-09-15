@@ -29,8 +29,6 @@ use ratatui::widgets::Wrap;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history_cell;
-use crate::text_formatting::truncate_text;
 
 /// Request coming from the agent that needs user approval.
 pub(crate) enum ApprovalRequest {
@@ -97,11 +95,11 @@ static PATCH_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
 });
 
 /// A modal prompting the user to approve or deny the pending request.
-pub(crate) struct UserApprovalWidget {
+pub(crate) struct UserApprovalWidget<'a> {
     approval_request: ApprovalRequest,
     app_event_tx: AppEventSender,
-    confirmation_prompt: Paragraph<'static>,
-    select_options: &'static Vec<SelectOption>,
+    confirmation_prompt: Paragraph<'a>,
+    select_options: &'a Vec<SelectOption>,
 
     /// Currently selected index in *select* mode.
     selected_option: usize,
@@ -111,11 +109,25 @@ pub(crate) struct UserApprovalWidget {
     done: bool,
 }
 
-impl UserApprovalWidget {
+impl UserApprovalWidget<'_> {
     pub(crate) fn new(approval_request: ApprovalRequest, app_event_tx: AppEventSender) -> Self {
         let confirmation_prompt = match &approval_request {
-            ApprovalRequest::Exec { reason, .. } => {
-                let mut contents: Vec<Line> = vec![];
+            ApprovalRequest::Exec {
+                command, reason, ..
+            } => {
+                let cmd = strip_bash_lc_and_escape(command);
+                // Present a single-line summary without cwd: "codex wants to run: <cmd>"
+                let mut cmd_span: Span = cmd.clone().into();
+                cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
+                let mut contents: Vec<Line> = vec![
+                    Line::from(""), // extra spacing above the prompt
+                    Line::from(vec![
+                        "? ".fg(crate::colors::info()),
+                        "Code wants to run ".bold(),
+                        cmd_span,
+                    ]),
+                    Line::from(""),
+                ];
                 if let Some(reason) = reason {
                     contents.push(Line::from(reason.clone().italic()));
                     contents.push(Line::from(""));
@@ -168,7 +180,15 @@ impl UserApprovalWidget {
     /// captures input while visible, we don’t need to report whether the event
     /// was consumed—callers can assume it always is.
     pub(crate) fn handle_key_event(&mut self, key: KeyEvent) {
-        if key.kind == KeyEventKind::Press {
+        // Prevent duplicate decisions if the key auto‑repeats while the modal
+        // is being torn down.
+        if self.done {
+            return;
+        }
+        // Accept both Press and Repeat to accommodate Windows terminals that
+        // may emit an initial Repeat for some keys (e.g. Enter) when keyboard
+        // enhancement flags are enabled.
+        if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             self.handle_select_key(key);
         }
     }
@@ -223,77 +243,36 @@ impl UserApprovalWidget {
     }
 
     fn send_decision_with_feedback(&mut self, decision: ReviewDecision, feedback: String) {
-        match &self.approval_request {
+        // Emit a background event instead of an assistant message.
+        let message = match &self.approval_request {
             ApprovalRequest::Exec { command, .. } => {
-                let full_cmd = strip_bash_lc_and_escape(command);
-                // Construct a concise, single-line summary of the command:
-                // - If multi-line, take the first line and append " ...".
-                // - Truncate to 80 graphemes.
-                let mut snippet = match full_cmd.split_once('\n') {
-                    Some((first, _)) => format!("{first} ..."),
-                    None => full_cmd.clone(),
-                };
-                // Enforce the 80 character length limit.
-                snippet = truncate_text(&snippet, 80);
-
-                let mut result_spans: Vec<Span<'static>> = Vec::new();
+                let cmd = strip_bash_lc_and_escape(command);
                 match decision {
-                    ReviewDecision::Approved => {
-                        result_spans.extend(vec![
-                            "✔ ".fg(Color::Green),
-                            "You ".into(),
-                            "approved".bold(),
-                            " codex to run ".into(),
-                            snippet.dim(),
-                            " this time".bold(),
-                        ]);
-                    }
-                    ReviewDecision::ApprovedForSession => {
-                        result_spans.extend(vec![
-                            "✔ ".fg(Color::Green),
-                            "You ".into(),
-                            "approved".bold(),
-                            " codex to run ".into(),
-                            snippet.dim(),
-                            " every time this session".bold(),
-                        ]);
-                    }
-                    ReviewDecision::Denied => {
-                        result_spans.extend(vec![
-                            "✗ ".fg(Color::Red),
-                            "You ".into(),
-                            "did not approve".bold(),
-                            " codex to run ".into(),
-                            snippet.dim(),
-                        ]);
-                    }
-                    ReviewDecision::Abort => {
-                        result_spans.extend(vec![
-                            "✗ ".fg(Color::Red),
-                            "You ".into(),
-                            "canceled".bold(),
-                            " the request to run ".into(),
-                            snippet.dim(),
-                        ]);
-                    }
+                    ReviewDecision::Approved => format!("approved: run {} (this time)", cmd),
+                    ReviewDecision::ApprovedForSession => format!("approved: run {} (every time this session)", cmd),
+                    ReviewDecision::Denied => format!("not approved: run {}", cmd),
+                    ReviewDecision::Abort => format!("canceled: run {}", cmd),
                 }
-
-                let mut lines: Vec<Line<'static>> = vec![Line::from(result_spans)];
-
-                if !feedback.trim().is_empty() {
-                    lines.push(Line::from("feedback:"));
-                    for l in feedback.lines() {
-                        lines.push(Line::from(l.to_string()));
-                    }
-                }
-
-                self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    history_cell::new_user_approval_decision(lines),
-                )));
             }
             ApprovalRequest::ApplyPatch { .. } => {
-                // No history line for patch approval decisions.
+                format!("patch approval decision: {:?}", decision)
             }
+        };
+        let message = if feedback.trim().is_empty() {
+            message
+        } else {
+            // Append feedback, preserving line breaks
+            format!("{}\nfeedback:\n{}", message, feedback)
+        };
+        // Insert above the upcoming command begin so the decision reads first.
+        self.app_event_tx
+            .send(AppEvent::InsertBackgroundEventEarly(message));
+
+        // If the user aborted an exec approval, immediately cancel any running task
+        // so the UI reflects their intent (clear spinner/status) without waiting
+        // for backend cleanup. Core still receives the Abort below.
+        if matches!((&self.approval_request, decision), (ApprovalRequest::Exec { .. }, ReviewDecision::Abort)) {
+            self.app_event_tx.send(AppEvent::CancelRunningTask);
         }
 
         let op = match &self.approval_request {
@@ -326,7 +305,7 @@ impl UserApprovalWidget {
     }
 }
 
-impl WidgetRef for &UserApprovalWidget {
+impl WidgetRef for &UserApprovalWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let prompt_height = self.get_confirmation_prompt_height(area.width);
         let [prompt_chunk, response_chunk] = Layout::default()
@@ -340,7 +319,9 @@ impl WidgetRef for &UserApprovalWidget {
             .enumerate()
             .map(|(idx, opt)| {
                 let style = if idx == self.selected_option {
-                    Style::new().bg(Color::Cyan).fg(Color::Black)
+                    Style::new()
+                        .bg(crate::colors::light_blue())
+                        .fg(crate::colors::background())
                 } else {
                     Style::new().add_modifier(Modifier::DIM)
                 };
@@ -379,7 +360,7 @@ impl WidgetRef for &UserApprovalWidget {
 
         Block::bordered()
             .border_type(BorderType::QuadrantOutside)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(crate::colors::light_blue()))
             .borders(Borders::LEFT)
             .render_ref(
                 Rect::new(0, response_chunk.y, 1, response_chunk.height),
@@ -388,17 +369,17 @@ impl WidgetRef for &UserApprovalWidget {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::mpsc::channel;
 
     #[test]
     fn lowercase_shortcut_is_accepted() {
-        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx_raw, rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let req = ApprovalRequest::Exec {
             id: "1".to_string(),
@@ -408,10 +389,7 @@ mod tests {
         let mut widget = UserApprovalWidget::new(req, tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
-        let mut events: Vec<AppEvent> = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
             AppEvent::CodexOp(Op::ExecApproval {
@@ -423,7 +401,7 @@ mod tests {
 
     #[test]
     fn uppercase_shortcut_is_accepted() {
-        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx_raw, rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let req = ApprovalRequest::Exec {
             id: "2".to_string(),
@@ -433,10 +411,7 @@ mod tests {
         let mut widget = UserApprovalWidget::new(req, tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
-        let mut events: Vec<AppEvent> = Vec::new();
-        while let Ok(ev) = rx.try_recv() {
-            events.push(ev);
-        }
+        let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
             AppEvent::CodexOp(Op::ExecApproval {

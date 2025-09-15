@@ -99,17 +99,20 @@ pub(crate) async fn handle_patch_approval_request(
         .await;
 
     // Listen for the response on a separate task so we don't block the main agent loop.
+    // Important: correlate approval by call_id (unique per request) to match core's
+    // pending_approvals key, not by event id. Using the event id here can lead to
+    // "no pending approval found" warnings and a stuck approval UI.
     {
         let codex = codex.clone();
-        let event_id = event_id.clone();
+        let call_id_for_response = tool_call_id.clone();
         tokio::spawn(async move {
-            on_patch_approval_response(event_id, on_response, codex).await;
+            on_patch_approval_response(call_id_for_response, on_response, codex).await;
         });
     }
 }
 
 pub(crate) async fn on_patch_approval_response(
-    event_id: String,
+    approval_id: String,
     receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
     codex: Arc<CodexConversation>,
 ) {
@@ -120,7 +123,7 @@ pub(crate) async fn on_patch_approval_response(
             error!("request failed: {err:?}");
             if let Err(submit_err) = codex
                 .submit(Op::PatchApproval {
-                    id: event_id.clone(),
+                    id: approval_id.clone(),
                     decision: ReviewDecision::Denied,
                 })
                 .await
@@ -140,7 +143,7 @@ pub(crate) async fn on_patch_approval_response(
 
     if let Err(err) = codex
         .submit(Op::PatchApproval {
-            id: event_id,
+            id: approval_id,
             decision: response.decision,
         })
         .await

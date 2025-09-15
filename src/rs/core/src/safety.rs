@@ -30,6 +30,14 @@ pub fn assess_patch_safety(
         };
     }
 
+    // In Read Only mode, write operations are not permitted. Reject immediately
+    // so the agent receives a clear failure without prompting for approval.
+    if matches!(sandbox_policy, SandboxPolicy::ReadOnly) {
+        return SafetyCheck::Reject {
+            reason: "write operations are disabled in read-only mode".to_string(),
+        };
+    }
+
     match policy {
         AskForApproval::OnFailure | AskForApproval::Never | AskForApproval::OnRequest => {
             // Continue to see if this can be auto-approved.
@@ -293,7 +301,7 @@ mod tests {
         // With the parent dir explicitly added as a writable root, the
         // outside write should be permitted.
         let policy_with_parent = SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![parent],
+            writable_roots: vec![parent.clone()],
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,
