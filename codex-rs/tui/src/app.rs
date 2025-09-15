@@ -1033,6 +1033,11 @@ impl App<'_> {
                         widget.apply_subagent_update(cmd);
                     }
                 }
+                AppEvent::DeleteSubagentCommand(name) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.delete_subagent_by_name(&name);
+                    }
+                }
                 AppEvent::ShowSubagentEditor { name, available_agents, existing, is_new } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_subagent_editor_ui(name, available_agents, existing, is_new);

@@ -4404,6 +4404,12 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn delete_subagent_by_name(&mut self, name: &str) {
+        self.config
+            .subagent_commands
+            .retain(|c| !c.name.eq_ignore_ascii_case(name));
+    }
+
     
 
     pub(crate) fn show_diffs_popup(&mut self) {

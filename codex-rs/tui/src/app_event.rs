@@ -90,6 +90,8 @@ pub(crate) enum AppEvent {
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
     UpdateSubagentCommand(codex_core::config_types::SubagentCommandConfig),
+    /// Remove a subagent command from memory (UI already deleted from config.toml)
+    DeleteSubagentCommand(String),
     /// Open the subagent editor UI for the given command name
     ShowSubagentEditor {
         name: String,
