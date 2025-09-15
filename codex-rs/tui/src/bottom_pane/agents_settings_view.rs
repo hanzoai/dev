@@ -133,6 +133,10 @@ impl SubagentEditorView {
                 }
                 _ => {}
             }
+            // Default selection: when no explicit config exists, preselect all available agents.
+            if me.selected_agent_indices.is_empty() {
+                me.selected_agent_indices = (0..me.available_agents.len()).collect();
+            }
         }
         me
     }
@@ -236,10 +240,12 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let inner_w = width.saturating_sub(2);
         let content_w = inner_w.saturating_sub(1).max(10) as usize;
         // Static rows (content lines):
-        // Name(1), Mode(1), Agents label(1), Agents line(1), Orchestrator label(1), Buttons(1)
-        let static_rows: u16 = 6;
-        // Content rows for the instruction body (wrapped)
-        let orch_rows = self.orch_field.desired_height(content_w as u16);
+        // Name label(1) + name box(3), Mode(1), Agents label(1), Agents line(1), Orchestrator label(1), Buttons(1)
+        let name_box_h: u16 = 3;
+        let static_rows: u16 = 1 + name_box_h + 1 + 1 + 1 + 1 + 1;
+        // Content rows for the instruction body (wrapped) inside a box (+2 for borders)
+        let orch_inner_w = (content_w as u16).saturating_sub(2);
+        let orch_rows = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
         // Sum and add borders (2)
         let content_rows = static_rows.saturating_add(orch_rows);
         (content_rows + 2).clamp(8, 50)
@@ -262,8 +268,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        // Name label (input will be drawn in-place to its right)
-        lines.push(Line::from(vec![Span::styled("Name: ", label(0))]));
+        // Name label then a reserved box area (drawn later)
+        lines.push(Line::from(vec![Span::styled("Name:", label(0))]));
+        let name_box_h: u16 = 3;
+        for _ in 0..name_box_h { lines.push(Line::from("")); }
         let mode_str = if self.read_only { "read-only" } else { "write" };
         lines.push(Line::from(vec![Span::styled("Mode: ", label(1)), Span::styled(mode_str.to_string(), sel(1))]));
 
@@ -272,7 +280,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         for (idx, a) in self.available_agents.iter().enumerate() {
             let checked = if self.selected_agent_indices.contains(&idx) { "[x]" } else { "[ ]" };
             let mut style = sel(2);
-            if idx == self.agent_cursor { style = style.fg(crate::colors::primary()).add_modifier(Modifier::BOLD); }
+            if self.field == 2 && idx == self.agent_cursor { style = style.fg(crate::colors::primary()).add_modifier(Modifier::BOLD); }
             spans.push(Span::styled(format!("{} {}", checked, a), style));
             spans.push(Span::raw("  "));
         }
@@ -302,19 +310,32 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let content_w = content_rect.width;
         let mut y = content_rect.y;
 
-        // Row 0: Name input on the same line as label, to the right of "Name: "
-        let name_label = "Name: ";
-        let name_label_w = name_label.chars().count() as u16;
-        let name_field_rect = Rect { x: content_rect.x + name_label_w, y, width: content_w.saturating_sub(name_label_w), height: 1 };
-        self.name_field.render(name_field_rect, buf, self.field == 0);
-
-        // Row 1: Mode; Row 2: Agents label; Row 3: Agents list
-        y = y.saturating_add(3);
-
-        // Row 4: Orchestrator label; draw field starting next row (reserved area)
+        // Row 0: Name label; draw a box starting next line (3 rows tall)
         y = y.saturating_add(1);
-        let orch_h2 = self.orch_field.desired_height(content_w);
-        self.orch_field.render(Rect { x: content_rect.x, y, width: content_w, height: orch_h2 }, buf, self.field == 3);
+        let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
+        let name_block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(crate::colors::border()));
+        let name_inner = name_block.inner(name_box_rect);
+        name_block.render(name_box_rect, buf);
+        self.name_field.render(name_inner, buf, self.field == 0);
+
+        // After name box
+        y = y.saturating_add(name_box_h);
+        // Mode row
+        y = y.saturating_add(1);
+        // Agents label row
+        y = y.saturating_add(1);
+        // Agents list row
+        y = y.saturating_add(1);
+        // Orchestrator label row
+        y = y.saturating_add(1);
+        // Orchestrator box: height = inner content + 2 borders
+        let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(2));
+        let orch_box_h = orch_inner_h.saturating_add(2);
+        let orch_box_rect = Rect { x: content_rect.x, y, width: content_w, height: orch_box_h };
+        let orch_block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(crate::colors::border()));
+        let orch_inner = orch_block.inner(orch_box_rect);
+        orch_block.render(orch_box_rect, buf);
+        self.orch_field.render(orch_inner, buf, self.field == 3);
     }
 }
 
