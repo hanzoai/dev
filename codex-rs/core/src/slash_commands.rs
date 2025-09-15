@@ -64,9 +64,7 @@ fn resolve_models(explicit: &[String], agents: Option<&[AgentConfig]>) -> Vec<St
 /// Returns None for custom subagent names.
 pub fn default_instructions_for(name: &str) -> Option<String> {
     match name.to_ascii_lowercase().as_str() {
-        "plan" => Some(r#"Plan a task by synthesizing approaches from multiple state-of-the-art agents working in parallel.
-        
-1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
+        "plan" => Some(r#"1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
 2. Start multiple agents working in parallel.
 3. Wait for all agents to complete.
 4. Analyze every agent's plans and recommendations. Identify common themes and best practices from each agent.
