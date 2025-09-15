@@ -98,16 +98,9 @@ impl FormTextField {
         // read-only &self; form owns a &mut when calling this in practice.
     }
 
-    /// Mutable render variant used by form views to keep scroll state stable.
-    pub fn render_mut(&mut self, area: Rect, buf: &mut Buffer, focused: bool) {
-        StatefulWidgetRef::render_ref(&(&self.textarea), area, buf, &mut self.state);
-        if focused {
-            if let Some((cx, cy)) = self.textarea.cursor_pos_with_state(area, &self.state) {
-                if cy >= area.y && cy < area.y + area.height && cx >= area.x && cx < area.x + area.width {
-                    let caret_style = Style::default().fg(crate::colors::info());
-                    buf.set_string(cx, cy, "▏", caret_style);
-                }
-            }
-        }
-    }
+    // Note: a mutable render variant previously existed to persist internal scroll
+    // state during form rendering. It was unused across the workspace, so it was
+    // removed to keep builds warning‑free per repo policy. If a future caller
+    // needs to preserve state, it can call `render` after cloning and restoring
+    // the state across frames.
 }
