@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Rect, Margin};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
@@ -240,14 +240,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let inner_w = width.saturating_sub(2);
         let content_w = inner_w.saturating_sub(1).max(10) as usize;
         // Static rows (content lines) with boxed inputs (titles on the boxes):
-        // Name box(3), Mode(1), Agents label(1), Agents row(1), Orchestrator box(dynamic), Buttons(1)
+        // Name box(3), Mode(1), Agents row(1), Orchestrator box(dynamic), Buttons(1)
         let name_box_h: u16 = 3;
-        let orch_inner_w = (content_w as u16).saturating_sub(2);
+        // Orchestrator inner width accounts for borders (2) and left/right padding (2)
+        let orch_inner_w = (content_w as u16).saturating_sub(4);
         let orch_box_h = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
         let content_rows = name_box_h
             .saturating_add(1) // Mode
-            .saturating_add(1) // Agents label
-            .saturating_add(1) // Agents row
+            .saturating_add(1) // Agents row (label inline)
             .saturating_add(orch_box_h) // Orchestrator box
             .saturating_add(1); // Buttons
         (content_rows + 2).clamp(8, 50)
@@ -273,8 +273,20 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Reserve a box area for Name (we draw the bordered box with a title after)
         let name_box_h: u16 = 3;
         for _ in 0..name_box_h { lines.push(Line::from("")); }
-        let mode_str = if self.read_only { "read-only" } else { "write" };
-        lines.push(Line::from(vec![Span::styled("Mode: ", label(1)), Span::styled(mode_str.to_string(), sel(1))]));
+        // Mode row: checkbox style
+        {
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::styled("Mode:", label(1)));
+            spans.push(Span::raw("  "));
+            // [x] read-only
+            let ro = if self.read_only { "[x]" } else { "[ ]" };
+            spans.push(Span::styled(format!("{} read-only", ro), sel(1)));
+            spans.push(Span::raw("  "));
+            // [x] write (inverse of read_only)
+            let wr = if self.read_only { "[ ]" } else { "[x]" };
+            spans.push(Span::styled(format!("{} write", wr), sel(1)));
+            lines.push(Line::from(spans));
+        }
 
         // Agents selection with cursor highlight
         let mut spans: Vec<Span> = Vec::new();
@@ -285,11 +297,17 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             spans.push(Span::styled(format!("{} {}", checked, a), style));
             spans.push(Span::raw("  "));
         }
-        lines.push(Line::from(Span::styled("Agents:", label(2))));
-        lines.push(Line::from(spans));
+        // Agents on the same line as label
+        {
+            let mut line_spans: Vec<Span> = Vec::new();
+            line_spans.push(Span::styled("Agents:", label(2)));
+            line_spans.push(Span::raw("  "));
+            line_spans.extend(spans);
+            lines.push(Line::from(line_spans));
+        }
 
         // Reserve rows for the orchestrator box (height = inner + borders)
-        let orch_inner_h_reserved = self.orch_field.desired_height(content_rect.width.saturating_sub(2));
+        let orch_inner_h_reserved = self.orch_field.desired_height(content_rect.width.saturating_sub(4));
         let orch_box_h_reserved = orch_inner_h_reserved.saturating_add(2);
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
 
@@ -318,29 +336,29 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             .border_style(name_border)
             .title(Line::from("Name"));
         let name_inner = name_block.inner(name_box_rect);
+        let name_padded = name_inner.inner(Margin::new(1, 0));
         name_block.render(name_box_rect, buf);
-        self.name_field.render(name_inner, buf, self.field == 0);
+        self.name_field.render(name_padded, buf, self.field == 0);
 
         // After name box
         y = y.saturating_add(name_box_h);
         // Mode row
         y = y.saturating_add(1);
-        // Agents label row
-        y = y.saturating_add(1);
-        // Agents list row
+        // Agents single row
         y = y.saturating_add(1);
         // Orchestrator box: height = inner content + 2 borders, with title as label
-        let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(2));
+        let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(4));
         let orch_box_h = orch_inner_h.saturating_add(2);
         let orch_box_rect = Rect { x: content_rect.x, y, width: content_w, height: orch_box_h };
         let orch_border = if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
         let orch_block = Block::default()
             .borders(Borders::ALL)
             .border_style(orch_border)
-            .title(Line::from("Command (sent to orchestrator)"));
+            .title(Line::from("Command"));
         let orch_inner = orch_block.inner(orch_box_rect);
+        let orch_padded = orch_inner.inner(Margin::new(1, 0));
         orch_block.render(orch_box_rect, buf);
-        self.orch_field.render(orch_inner, buf, self.field == 3);
+        self.orch_field.render(orch_padded, buf, self.field == 3);
     }
 }
 
