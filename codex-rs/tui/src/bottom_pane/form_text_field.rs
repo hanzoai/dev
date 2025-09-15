@@ -50,6 +50,12 @@ impl FormTextField {
         self.textarea.set_cursor(self.textarea.text().len());
     }
 
+    pub fn move_cursor_to_start(&mut self) {
+        self.textarea.set_cursor(0);
+    }
+
+    // Intentionally no "move_cursor_to_end" to avoid unused-warn; add if needed.
+
     pub fn text(&self) -> &str { self.textarea.text() }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {

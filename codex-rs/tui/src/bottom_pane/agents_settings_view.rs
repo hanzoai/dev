@@ -126,6 +126,8 @@ impl SubagentEditorView {
                 me.read_only = codex_core::slash_commands::default_read_only_for(name);
                 if let Some(instr) = codex_core::slash_commands::default_instructions_for(name) {
                     me.orch_field.set_text(&instr);
+                    // Start cursor at the top so the first lines are visible.
+                    me.orch_field.move_cursor_to_start();
                 }
             }
             // Default selection: when no explicit config exists, preselect all available agents.
@@ -262,7 +264,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let name_box_h: u16 = 3;
         // Orchestrator inner width accounts for borders (2) and left/right padding (2)
         let orch_inner_w = (content_w as u16).saturating_sub(4);
-        let orch_box_h = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
+        // Show up to 8 rows initially; allow scrolling inside the field for more
+        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w);
+        let orch_inner_capped = desired_orch_inner.min(8);
+        let orch_box_h = orch_inner_capped.saturating_add(2);
         let content_rows: u16 = 1  // top spacer
             + 1  // title
             + 1  // spacer after title
@@ -351,7 +356,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let desired_orch_inner_h = self
             .orch_field
             .desired_height(content_rect.width.saturating_sub(4));
-        let desired_orch_box_h = desired_orch_inner_h.saturating_add(2);
+        // Cap visible inner height to 8 rows; overflow is scrollable via caret moves
+        let desired_orch_box_h = desired_orch_inner_h.min(8).saturating_add(2);
         let available_h = content_rect.height; // total rows available for all content
         let base_rows_without_orch: u16 = 14; // all rows except the orch box
         let max_orch_box_h = available_h.saturating_sub(base_rows_without_orch);
