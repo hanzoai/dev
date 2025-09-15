@@ -62,6 +62,42 @@ fn resolve_models(
 /// Format a subagent command (built-in or custom) using optional overrides
 /// from `[[subagents.commands]]`. When a `plan|solve|code` entry exists, it
 /// replaces the built-in defaults for that command.
+fn default_instructions_for(name: &str) -> Option<String> {
+    match name.to_ascii_lowercase().as_str() {
+        "plan" => Some(r#"1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
+2. Start multiple agents working in parallel.
+3. Wait for all agents to complete.
+4. Analyze every agent's plans and recommendations. Identify common themes and best practices from each agent.
+5. Think deeply and synthesize the best elements from each to create a final, comprehensive plan that incorporates the strongest recommendations from all agents.
+6. Present the final plan with clear steps and rationale."#.to_string()),
+        "solve" => Some(r#"Solve a complicated problem leveraging multiple state-of-the-art agents working in parallel.
+
+1. If you do not fully understand the problem, research it briefly. Do not attempt to solve it yet, just understand what the problem is and what the desired result should be.
+2. Provide full context to the agents so they can work on the problem themselves. You do not need to guide them on how to solve the problem - focus on describing the current issue and desired outcome. Allow each agent to come up with it's own path to the solution. If there have been previous attempts at the problem which have not worked, please explain these.
+3. Wait for most agents to complete. If a couple of agents complete and one is still working, look at the completed agents first.
+4. Go through each possible solution to the problem from each agent. If you're able to test each solution to compare them, you should do so. Utilize short helper scripts to do this.
+5. If no solutions work, then start additional agents. You should always try to gather additional debugging information to feed to the agents.
+6. Do no stop any agents prematurely - wait until problem is completely solved. Longer running agents may sometimes come up with unique solutions.
+7. Once you have a working solution, check all running agents once again - see if there's any new solutions which might be optimal before completing the task."#.to_string()),
+        "code" => Some(r#"Complete a coding task using multiple state-of-the-art agents working in parallel.
+
+1. If you do not fully understand the task, research it briefly. Do not attempt to code or solve it, just understand the task in the context of the current code base.
+2. Provide full context to the agents so they can work on the task themselves. You do not need to guide them on how to write the code - focus on describing the current task and desired outcome.
+3. Start agents with read-only: false - each agents will work in a separate worktree and can:
+- Read and analyze existing code
+- Create new files
+- Modify existing files
+- Execute commands
+- Run tests
+- Install dependencies
+4. Wait for all agents to complete.
+5. View each agent's implementation in the worktree for each agent. You may use git to compare changes. Consider the different approaches and solutions
+6. Bring the best parts of each solution into your own final implementation
+7. If you are not satisfied the solution has been found, start a new round of agents with additional context"#.to_string()),
+        _ => None,
+    }
+}
+
 pub fn format_subagent_command(
     name: &str,
     task: &str,
@@ -91,24 +127,26 @@ pub fn format_subagent_command(
         ),
     };
 
-    // Build the base orchestrator prompt using the built-in templates, but
-    // with the resolved model list and read_only applied via the template text.
-    let base = match name {
-        "plan" => format_plan_command(task, Some(models.clone()), agents),
-        "solve" => format_solve_command(task, Some(models.clone()), agents),
-        _ => format_code_command(task, Some(models.clone()), agents),
-    };
+    // Compose unified prompt used for all subagent commands (built-ins and custom)
+    let models_str = models
+        .iter()
+        .map(|m| format!("\"{}\"", m))
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    // Append extra instructions, if any.
-    let mut prompt = base;
-    if let Some(extra) = orch_extra.as_ref().filter(|s| !s.trim().is_empty()) {
-        prompt.push_str("\n\nAdditional instructions for Code (orchestrator):\n");
-        prompt.push_str(extra);
-    }
-    if let Some(extra) = agent_extra.as_ref().filter(|s| !s.trim().is_empty()) {
-        prompt.push_str("\n\nFor each agent you start, append these instructions to the agent's prompt:\n");
-        prompt.push_str(extra);
-    }
+    let instr_text = orch_extra
+        .clone()
+        .or_else(|| default_instructions_for(name))
+        .unwrap_or_default();
+
+    let prompt = format!(
+        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent_run` to start a batch of agents with:\n    - `models`: an array containing [{models}]\n    - `read_only`: {ro}\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using `agent_run` will start all agents at once and return a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results. \n    Use `agent_result` to get the results, or inspect the worktree directly if `read_only` is false.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
+        name = name,
+        models = models_str,
+        ro = read_only,
+        instructions = instr_text,
+        task = task,
+    );
 
     SubagentResolution {
         name: name.to_string(),

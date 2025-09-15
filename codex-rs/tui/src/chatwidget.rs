@@ -2763,6 +2763,51 @@ impl ChatWidget<'_> {
         }
 
         // Process slash commands and expand them if needed
+        // First, allow custom subagent commands: if the message starts with a slash and the
+        // command name matches a saved subagent in config, synthesize a unified prompt using
+        // format_subagent_command and replace the message with that prompt.
+        if let Some(first) = original_text.trim().strip_prefix('/') {
+            let mut parts = first.splitn(2, ' ');
+            let cmd_name = parts.next().unwrap_or("").trim();
+            let args = parts.next().unwrap_or("").trim().to_string();
+            if !cmd_name.is_empty() {
+                let has_custom = self
+                    .config
+                    .subagent_commands
+                    .iter()
+                    .any(|c| c.name.eq_ignore_ascii_case(cmd_name));
+                // Treat built-ins via the standard path below to preserve existing ack flow,
+                // but allow any other saved subagent command to be executed here.
+                let is_builtin = matches!(cmd_name.to_ascii_lowercase().as_str(), "plan"|"solve"|"code");
+                if has_custom && !is_builtin {
+                    let res = codex_core::slash_commands::format_subagent_command(
+                        cmd_name,
+                        &args,
+                        Some(&self.config.agents),
+                        Some(&self.config.subagent_commands),
+                    );
+                    // Acknowledge configuration
+                    let mode = if res.read_only { "read-only" } else { "write" };
+                    let mut ack: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    ack.push(ratatui::text::Line::from(format!("/{} configured", res.name)));
+                    ack.push(ratatui::text::Line::from(format!("mode: {}", mode)));
+                    ack.push(ratatui::text::Line::from(format!(
+                        "agents: {}",
+                        if res.models.is_empty() { "<none>".to_string() } else { res.models.join(", ") }
+                    )));
+                    ack.push(ratatui::text::Line::from(format!("command: {}", original_text.trim())));
+                    self.history_push(crate::history_cell::PlainHistoryCell {
+                        lines: ack,
+                        kind: crate::history_cell::HistoryCellType::Notice,
+                    });
+
+                    ordered_items.clear();
+                    ordered_items.push(InputItem::Text { text: res.prompt });
+                    // Continue with normal submission after this match block
+                }
+            }
+        }
+
         let processed = crate::slash_command::process_slash_command_message(&text_only);
         match processed {
             crate::slash_command::ProcessedCommand::ExpandedPrompt(_expanded) => {
