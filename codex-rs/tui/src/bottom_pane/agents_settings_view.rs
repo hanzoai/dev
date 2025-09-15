@@ -242,17 +242,26 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Compute content width consistent with render: inner = width-2; content = inner-1
         let inner_w = width.saturating_sub(2);
         let content_w = inner_w.saturating_sub(1).max(10) as usize;
-        // Static rows (content lines) with boxed inputs (titles on the boxes):
-        // Name box(3), Mode(1), Agents row(1), Orchestrator box(dynamic), Buttons(1)
+        // Static rows (with spacing and title):
+        // top(1) + title(1) + spacer(1) + name box(3) + spacer(1) + mode(1) + spacer(1)
+        // + agents(1) + spacer(1) + orch box(dynamic) + spacer(1) + buttons(1) + bottom(1)
         let name_box_h: u16 = 3;
         // Orchestrator inner width accounts for borders (2) and left/right padding (2)
         let orch_inner_w = (content_w as u16).saturating_sub(4);
         let orch_box_h = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
-        let content_rows = name_box_h
-            .saturating_add(1) // Mode
-            .saturating_add(1) // Agents row (label inline)
-            .saturating_add(orch_box_h) // Orchestrator box
-            .saturating_add(1); // Buttons
+        let content_rows: u16 = 1  // top spacer
+            + 1  // title
+            + 1  // spacer after title
+            + name_box_h
+            + 1  // spacer
+            + 1  // mode row
+            + 1  // spacer
+            + 1  // agents row
+            + 1  // spacer
+            + orch_box_h // orchestrator box
+            + 1  // spacer
+            + 1  // buttons
+            + 1; // bottom spacer
         (content_rows + 2).clamp(8, 50)
     }
 
@@ -273,9 +282,17 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
+        // Top spacer
+        lines.push(Line::from(""));
+        // Bold title
+        lines.push(Line::from(Span::styled("Agents » Edit Command", Style::default().add_modifier(Modifier::BOLD))));
+        // Spacer after title
+        lines.push(Line::from(""));
         // Reserve a box area for Name (we draw the bordered box with a title after)
         let name_box_h: u16 = 3;
         for _ in 0..name_box_h { lines.push(Line::from("")); }
+        // Spacer between inputs
+        lines.push(Line::from(""));
         // Mode row: checkbox style
         {
             let mut spans: Vec<Span> = Vec::new();
@@ -300,6 +317,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             spans.push(Span::styled(format!("{} {}", checked, a), style));
             spans.push(Span::raw("  "));
         }
+        // Spacer between inputs
+        lines.push(Line::from(""));
         // Agents on the same line as label
         {
             let mut line_spans: Vec<Span> = Vec::new();
@@ -309,10 +328,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             lines.push(Line::from(line_spans));
         }
 
+        // Spacer between inputs
+        lines.push(Line::from(""));
         // Reserve rows for the orchestrator box (height = inner + borders)
         let orch_inner_h_reserved = self.orch_field.desired_height(content_rect.width.saturating_sub(4));
         let orch_box_h_reserved = orch_inner_h_reserved.saturating_add(2);
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
+        // Spacer between inputs
+        lines.push(Line::from(""));
 
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::error());
@@ -322,6 +345,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         btn_spans.push(Span::raw("  "));
         btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
         lines.push(Line::from(btn_spans));
+        // Bottom spacer
+        lines.push(Line::from(""));
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -333,7 +358,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let content_w = content_rect.width;
         let mut y = content_rect.y;
 
-        // Row 0: Name box with title; height fixed (3)
+        // Skip top spacer + title + spacer
+        y = y.saturating_add(3);
+        // Row: Name box with title; height fixed (3)
         let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
         let name_border = if self.field == 0 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
         let name_block = Block::default()
@@ -345,12 +372,13 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         name_block.render(name_box_rect, buf);
         self.name_field.render(name_padded, buf, self.field == 0);
 
-        // After name box
+        // After name box + spacer + mode row + spacer + agents row + spacer
         y = y.saturating_add(name_box_h);
-        // Mode row
-        y = y.saturating_add(1);
-        // Agents single row
-        y = y.saturating_add(1);
+        y = y.saturating_add(1); // spacer
+        y = y.saturating_add(1); // mode row
+        y = y.saturating_add(1); // spacer
+        y = y.saturating_add(1); // agents row
+        y = y.saturating_add(1); // spacer
         // Orchestrator box: height = inner content + 2 borders, with title as label
         let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(4));
         let orch_box_h = orch_inner_h.saturating_add(2);
