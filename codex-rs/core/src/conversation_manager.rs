@@ -10,7 +10,11 @@ use crate::error::Result as CodexResult;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
+use crate::rollout::RolloutRecorder;
 use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::InitialHistory;
+use codex_protocol::protocol::RolloutItem;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,25 +56,40 @@ impl ConversationManager {
 
     async fn spawn_conversation(
         &self,
-        config: Config,
-        _auth_manager: Arc<AuthManager>,
+        mut config: Config,
+        auth_manager: Arc<AuthManager>,
     ) -> CodexResult<NewConversation> {
-        let CodexSpawnOk { codex, .. } = Codex::spawn(config, None).await?;
-        self.finalize_spawn(codex).await
+        // Our core `Codex::spawn` takes `(config, auth)` and handles resume via
+        // `config.experimental_resume`. For a fresh conversation we leave it as `None`.
+        config.experimental_resume = None;
+        let CodexSpawnOk {
+            codex,
+            init_id: _,
+            session_id,
+        } = Codex::spawn(config, auth_manager.auth()).await?;
+        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        self.finalize_spawn(codex, conversation_id).await
     }
 
-    async fn finalize_spawn(&self, codex: Codex) -> CodexResult<NewConversation> {
+    async fn finalize_spawn(
+        &self,
+        codex: Codex,
+        conversation_id: ConversationId,
+    ) -> CodexResult<NewConversation> {
         // The first event must be `SessionInitialized`. Validate and forward it
         // to the caller so that they can display it in the conversation
         // history.
         let event = codex.next_event().await?;
         let session_configured = match event {
-            Event { id, msg: EventMsg::SessionConfigured(session_configured), .. } if id == INITIAL_SUBMIT_ID => session_configured,
+            Event {
+                id,
+                msg: EventMsg::SessionConfigured(session_configured),
+                ..
+            } if id == INITIAL_SUBMIT_ID => session_configured,
             _ => {
                 return Err(CodexErr::SessionConfiguredNotFirstEvent);
             }
         };
-        let conversation_id: ConversationId = session_configured.session_id.into();
 
         let conversation = Arc::new(CodexConversation::new(codex));
         self.conversations
@@ -100,11 +119,17 @@ impl ConversationManager {
         &self,
         mut config: Config,
         rollout_path: PathBuf,
-        _auth_manager: Arc<AuthManager>,
+        auth_manager: Arc<AuthManager>,
     ) -> CodexResult<NewConversation> {
+        // Point the config at the rollout we want to resume.
         config.experimental_resume = Some(rollout_path);
-        let CodexSpawnOk { codex, .. } = Codex::spawn(config, None).await?;
-        self.finalize_spawn(codex).await
+        let CodexSpawnOk {
+            codex,
+            init_id: _,
+            session_id,
+        } = Codex::spawn(config, auth_manager.auth()).await?;
+        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        self.finalize_spawn(codex, conversation_id).await
     }
 
     /// Removes the conversation from the manager's internal map, though the
@@ -118,29 +143,73 @@ impl ConversationManager {
         self.conversations.write().await.remove(conversation_id)
     }
 
-    /// Fork an existing conversation by taking messages up to the given position
-    /// (not including the message at the given position) and starting a new
+    /// Fork an existing conversation by dropping the last `drop_last_messages`
+    /// user/assistant messages from its transcript and starting a new
     /// conversation with identical configuration (unless overridden by the
     /// caller's `config`). The new conversation will have a fresh id.
     pub async fn fork_conversation(
         &self,
-        _nth_user_message: usize,
+        num_messages_to_drop: usize,
         mut config: Config,
         path: PathBuf,
     ) -> CodexResult<NewConversation> {
-        config.experimental_resume = Some(path);
-        let CodexSpawnOk { codex, .. } = Codex::spawn(config, None).await?;
-        self.finalize_spawn(codex).await
+        // Compute the prefix up to the cut point.
+        let history = RolloutRecorder::get_rollout_history(&path).await?;
+        let history = truncate_after_dropping_last_messages(history, num_messages_to_drop);
+
+        // If there is no prior history to seed, just start a fresh conversation.
+        if matches!(history, InitialHistory::New) {
+            return self.spawn_conversation(config, self.auth_manager.clone()).await;
+        }
+
+        // Otherwise, create a temporary rollout with the truncated items and resume from it.
+        let convo_id = codex_protocol::mcp_protocol::ConversationId::new();
+        let instructions = config.user_instructions.clone();
+        let recorder = RolloutRecorder::new(
+            &config,
+            crate::rollout::recorder::RolloutRecorderParams::new(convo_id, instructions),
+        )
+        .await
+        .map_err(|e| CodexErr::Io(e))?;
+
+        // Extract only response items to seed the rollout file.
+        let response_items: Vec<ResponseItem> = history
+            .get_rollout_items()
+            .into_iter()
+            .filter_map(|ri| match ri {
+                codex_protocol::protocol::RolloutItem::ResponseItem(item) => Some(item),
+                _ => None,
+            })
+            .collect();
+        if !response_items.is_empty() {
+            recorder
+                .record_items(&response_items)
+                .await
+                .map_err(|e| CodexErr::Io(e))?;
+        }
+        // Ensure data is flushed to disk before resuming.
+        recorder.shutdown().await.map_err(|e| CodexErr::Io(e))?;
+
+        // Now spawn a conversation resuming from the newly created rollout.
+        config.experimental_resume = Some(recorder.rollout_path.clone());
+        let CodexSpawnOk {
+            codex,
+            init_id: _,
+            session_id,
+        } = Codex::spawn(config, self.auth_manager.auth()).await?;
+        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        self.finalize_spawn(codex, conversation_id).await
     }
 }
 
-/// Return a prefix of `items` obtained by cutting strictly before the nth user message
-/// (0-based) and all items that follow it.
-#[cfg(test)]
-fn truncate_after_nth_user_message(history: codex_protocol::protocol::InitialHistory, n: usize) -> codex_protocol::protocol::InitialHistory {
-    use codex_protocol::models::ResponseItem;
-    use codex_protocol::protocol::RolloutItem;
-    // Work directly on rollout items, and cut the vector at the nth user message input.
+/// Return a prefix of `items` obtained by dropping the last `n` user messages
+/// and all items that follow them.
+fn truncate_after_dropping_last_messages(history: InitialHistory, n: usize) -> InitialHistory {
+    if n == 0 {
+        return InitialHistory::Forked(history.get_rollout_items());
+    }
+
+    // Work directly on rollout items, and cut the vector at the nth-from-last user message input.
     let items: Vec<RolloutItem> = history.get_rollout_items();
 
     // Find indices of user message inputs in rollout order.
@@ -153,13 +222,13 @@ fn truncate_after_nth_user_message(history: codex_protocol::protocol::InitialHis
         }
     }
 
-    // If fewer than or equal to n user messages exist, treat as empty (out of range).
-    if user_positions.len() <= n {
+    // If fewer than n user messages exist, treat as empty.
+    if user_positions.len() < n {
         return InitialHistory::New;
     }
 
-    // Cut strictly before the nth user message (do not keep the nth itself).
-    let cut_idx = user_positions[n];
+    // Cut strictly before the nth-from-last user message (do not keep the nth itself).
+    let cut_idx = user_positions[user_positions.len() - n];
     let rolled: Vec<RolloutItem> = items.into_iter().take(cut_idx).collect();
 
     if rolled.is_empty() {
@@ -226,7 +295,7 @@ mod tests {
             .cloned()
             .map(RolloutItem::ResponseItem)
             .collect();
-        let truncated = truncate_after_nth_user_message(InitialHistory::Forked(initial), 1);
+        let truncated = truncate_after_dropping_last_messages(InitialHistory::Forked(initial), 1);
         let got_items = truncated.get_rollout_items();
         let expected_items = vec![
             RolloutItem::ResponseItem(items[0].clone()),
@@ -243,7 +312,7 @@ mod tests {
             .cloned()
             .map(RolloutItem::ResponseItem)
             .collect();
-        let truncated2 = truncate_after_nth_user_message(InitialHistory::Forked(initial2), 2);
+        let truncated2 = truncate_after_dropping_last_messages(InitialHistory::Forked(initial2), 2);
         assert!(matches!(truncated2, InitialHistory::New));
     }
 }
