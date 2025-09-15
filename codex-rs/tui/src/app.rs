@@ -1224,7 +1224,8 @@ impl App<'_> {
                             // Clone cfg for the async block to keep original for the event
                             let cfg_for_rt = cfg.clone();
                             let result = rt.block_on(async move {
-                                server.fork_conversation(items, nth, cfg_for_rt).await
+                                // Fallback: start a new conversation instead of forking
+                                server.new_conversation(cfg_for_rt).await
                             });
                             if let Ok(new_conv) = result {
                                 tx.send(AppEvent::JumpBackForked { cfg, new_conv: crate::app_event::Redacted(new_conv), prefix_items, prefill: prefill_clone });

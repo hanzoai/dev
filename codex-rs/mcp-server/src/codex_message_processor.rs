@@ -175,7 +175,7 @@ impl CodexMessageProcessor {
                     ..
                 } = conversation_id;
                 let response = NewConversationResponse {
-                    conversation_id: ConversationId(conversation_id),
+                    conversation_id,
                     model: session_configured.model,
                     reasoning_effort: None,
                     // We do not expose the underlying rollout file path in this fork; provide the sessions root.
@@ -201,7 +201,7 @@ impl CodexMessageProcessor {
         } = params;
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -243,7 +243,7 @@ impl CodexMessageProcessor {
         let InterruptConversationParams { conversation_id } = params;
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -269,7 +269,7 @@ impl CodexMessageProcessor {
         let AddConversationListenerParams { conversation_id } = params;
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -401,7 +401,7 @@ impl CodexMessageProcessor {
 
         let Ok(conversation) = self
             .conversation_manager
-            .get_conversation(conversation_id.0)
+            .get_conversation(conversation_id)
             .await
         else {
             let error = JSONRPCErrorError {
@@ -542,6 +542,8 @@ fn derive_config_from_params(
         codex_linux_sandbox_exe,
         base_instructions,
         include_plan_tool,
+        include_apply_patch_tool: None,
+        include_view_image_tool: None,
         disable_response_storage: None,
         show_raw_agent_reasoning: None,
         debug: None,
