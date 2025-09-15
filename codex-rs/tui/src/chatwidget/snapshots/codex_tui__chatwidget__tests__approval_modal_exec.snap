@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests.rs
 expression: terminal.backend()
 ---
-"? Codex wants to run echo hello world                                           "
+"? Code wants to run echo hello world                                           "
 "                                                                                "
 "Model wants to run a command                                                    "
 "                                                                                "
