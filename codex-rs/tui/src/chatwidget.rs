@@ -4210,7 +4210,7 @@ impl ChatWidget<'_> {
         }
         lines.push(Line::from(""));
         lines.push(Line::from("Manage with:".bold()));
-        lines.push(Line::from("  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,codex"));
+        lines.push(Line::from("  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,code"));
         lines.push(Line::from("  /agents edit name=<name> [read-only=..] [agents=..] [orchestrator=..] [agent=..]"));
         lines.push(Line::from("  /agents delete name=<name>"));
         lines.push(Line::from("  Values with spaces require quotes in the composer."));
@@ -4353,7 +4353,7 @@ impl ChatWidget<'_> {
     pub(crate) fn show_agents_settings_ui(&mut self) {
         use crate::bottom_pane::agents_settings_view::AgentsSettingsView;
         let available_agents: Vec<String> = if self.config.agents.is_empty() {
-            vec!["claude".into(), "gemini".into(), "qwen".into(), "codex".into()]
+            vec!["claude".into(), "gemini".into(), "qwen".into(), "code".into()]
         } else {
             self.config
                 .agents
