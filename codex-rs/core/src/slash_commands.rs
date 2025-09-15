@@ -36,17 +36,15 @@ pub struct SubagentResolution {
     pub prompt: String,
 }
 
-fn default_read_only_for(name: &str) -> bool {
+/// Default read_only for built-in subagent commands.
+pub fn default_read_only_for(name: &str) -> bool {
     match name {
         "plan" | "solve" => true,
         _ => name != "code",
     }
 }
 
-fn resolve_models(
-    explicit: &[String],
-    agents: Option<&[AgentConfig]>,
-) -> Vec<String> {
+fn resolve_models(explicit: &[String], agents: Option<&[AgentConfig]>) -> Vec<String> {
     if !explicit.is_empty() {
         return explicit.to_vec();
     }
@@ -62,9 +60,13 @@ fn resolve_models(
 /// Format a subagent command (built-in or custom) using optional overrides
 /// from `[[subagents.commands]]`. When a `plan|solve|code` entry exists, it
 /// replaces the built-in defaults for that command.
-fn default_instructions_for(name: &str) -> Option<String> {
+/// Default multi-line instructions for built-in commands.
+/// Returns None for custom subagent names.
+pub fn default_instructions_for(name: &str) -> Option<String> {
     match name.to_ascii_lowercase().as_str() {
-        "plan" => Some(r#"1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
+        "plan" => Some(r#"Plan a task by synthesizing approaches from multiple state-of-the-art agents working in parallel.
+        
+1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
 2. Start multiple agents working in parallel.
 3. Wait for all agents to complete.
 4. Analyze every agent's plans and recommendations. Identify common themes and best practices from each agent.
@@ -119,12 +121,7 @@ pub fn format_subagent_command(
             cfg.orchestrator_instructions,
             cfg.agent_instructions,
         ),
-        None => (
-            read_only_default,
-            resolve_models(&[], agents),
-            None,
-            None,
-        ),
+        None => (read_only_default, resolve_models(&[], agents), None, None),
     };
 
     // Compose unified prompt used for all subagent commands (built-ins and custom)
@@ -160,21 +157,33 @@ pub fn format_subagent_command(
 
 /// Format the /plan command into a prompt for the LLM
 /// Legacy wrapper retained for compatibility; now delegates to unified formatter.
-pub fn format_plan_command(task: &str, _models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_plan_command(
+    task: &str,
+    _models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let res = format_subagent_command("plan", task, agents, None);
     res.prompt
 }
 
 /// Format the /solve command into a prompt for the LLM
 /// Legacy wrapper retained for compatibility; now delegates to unified formatter.
-pub fn format_solve_command(task: &str, _models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_solve_command(
+    task: &str,
+    _models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let res = format_subagent_command("solve", task, agents, None);
     res.prompt
 }
 
 /// Format the /code command into a prompt for the LLM
 /// Legacy wrapper retained for compatibility; now delegates to unified formatter.
-pub fn format_code_command(task: &str, _models: Option<Vec<String>>, agents: Option<&[AgentConfig]>) -> String {
+pub fn format_code_command(
+    task: &str,
+    _models: Option<Vec<String>>,
+    agents: Option<&[AgentConfig]>,
+) -> String {
     let res = format_subagent_command("code", task, agents, None);
     res.prompt
 }
@@ -195,16 +204,28 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
 
     match command {
         "/plan" => {
-            if args.is_empty() { Some("Error: /plan requires a task description. Usage: /plan <task>".to_string()) }
-            else { Some(format_plan_command(&args, None, agents)) }
+            if args.is_empty() {
+                Some("Error: /plan requires a task description. Usage: /plan <task>".to_string())
+            } else {
+                Some(format_plan_command(&args, None, agents))
+            }
         }
         "/solve" => {
-            if args.is_empty() { Some("Error: /solve requires a problem description. Usage: /solve <problem>".to_string()) }
-            else { Some(format_solve_command(&args, None, agents)) }
+            if args.is_empty() {
+                Some(
+                    "Error: /solve requires a problem description. Usage: /solve <problem>"
+                        .to_string(),
+                )
+            } else {
+                Some(format_solve_command(&args, None, agents))
+            }
         }
         "/code" => {
-            if args.is_empty() { Some("Error: /code requires a task description. Usage: /code <task>".to_string()) }
-            else { Some(format_code_command(&args, None, agents)) }
+            if args.is_empty() {
+                Some("Error: /code requires a task description. Usage: /code <task>".to_string())
+            } else {
+                Some(format_code_command(&args, None, agents))
+            }
         }
         _ => None,
     }
