@@ -120,13 +120,16 @@ impl FormTextField {
         let mut state = self.state;
         StatefulWidgetRef::render_ref(&(&self.textarea), area, buf, &mut state);
 
-        // Draw a pseudo-caret when focused.
+        // Draw a pseudo-caret when focused. Place it one cell ahead of the
+        // cursor to avoid visually overwriting the last typed glyph.
         if focused {
             if let Some((cx, cy)) = self.textarea.cursor_pos_with_state(area, &state) {
-                if cy >= area.y && cy < area.y + area.height && cx >= area.x && cx < area.x + area.width {
-                    // Use theme info color for caret; overwrite a single cell
+                let mut caret_x = cx.saturating_add(1);
+                let max_x = area.x.saturating_add(area.width.saturating_sub(1));
+                if caret_x > max_x { caret_x = max_x; }
+                if cy >= area.y && cy < area.y + area.height && caret_x >= area.x && caret_x < area.x + area.width {
                     let caret_style = Style::default().fg(crate::colors::info());
-                    buf.set_string(cx, cy, "▏", caret_style);
+                    buf.set_string(caret_x, cy, "▏", caret_style);
                 }
             }
         }
