@@ -190,7 +190,11 @@ impl SessionManager {
         let (writer_tx, mut output_rx) = {
             let sessions = self.sessions.lock().await;
             match sessions.get(&session_id) {
-                Some(session) => (session.writer_sender(), session.output_receiver()),
+                Some(session) => {
+                    // Touch exit flag to mark the field as used and enable early checks in the future.
+                    let _exited = session.has_exited();
+                    (session.writer_sender(), session.output_receiver())
+                }
                 None => {
                     return Err(format!("unknown session id {}", session_id.0));
                 }
@@ -336,12 +340,17 @@ async fn create_exec_command_session(
 
     // Keep the child alive until it exits, then signal exit code.
     let (exit_tx, exit_rx) = oneshot::channel::<i32>();
+    // Track process exit status for concurrent queries.
+    let exit_status = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let exit_status_for_wait = exit_status.clone();
     let wait_handle = tokio::task::spawn_blocking(move || {
         let code = match child.wait() {
             Ok(status) => status.exit_code() as i32,
             Err(_) => -1,
         };
         let _ = exit_tx.send(code);
+        // Mark as exited so readers can stop without waiting on the channel.
+        exit_status_for_wait.store(true, std::sync::atomic::Ordering::SeqCst);
     });
 
     // Create and store the session with channels.
@@ -352,6 +361,7 @@ async fn create_exec_command_session(
         reader_handle,
         writer_handle,
         wait_handle,
+        exit_status,
     );
     Ok((session, initial_output_rx, exit_rx))
 }
