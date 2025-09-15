@@ -347,8 +347,15 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Spacer between inputs
         lines.push(Line::from(""));
         // Reserve rows for the orchestrator box (height = inner + borders)
-        let orch_inner_h_reserved = self.orch_field.desired_height(content_rect.width.saturating_sub(4));
-        let orch_box_h_reserved = orch_inner_h_reserved.saturating_add(2);
+        // Clamp to available height so we never overflow the buffer.
+        let desired_orch_inner_h = self
+            .orch_field
+            .desired_height(content_rect.width.saturating_sub(4));
+        let desired_orch_box_h = desired_orch_inner_h.saturating_add(2);
+        let available_h = content_rect.height; // total rows available for all content
+        let base_rows_without_orch: u16 = 14; // all rows except the orch box
+        let max_orch_box_h = available_h.saturating_sub(base_rows_without_orch);
+        let orch_box_h_reserved = desired_orch_box_h.min(max_orch_box_h);
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
         // Spacer between inputs
         lines.push(Line::from(""));
@@ -418,18 +425,24 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         y = y.saturating_add(1); // agents row
         y = y.saturating_add(1); // spacer
         // Orchestrator box: height = inner content + 2 borders, with title as label
-        let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(4));
-        let orch_box_h = orch_inner_h.saturating_add(2);
+        // Use the same clamped height for the actual box we render
+        let orch_box_h = orch_box_h_reserved;
+        let orch_inner_h = orch_box_h.saturating_sub(2);
         let orch_box_rect = Rect { x: content_rect.x, y, width: content_w, height: orch_box_h };
         let orch_border = if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
         let orch_block = Block::default()
             .borders(Borders::ALL)
             .border_style(orch_border)
             .title(Line::from(" Instructions "));
-        let orch_inner = orch_block.inner(orch_box_rect);
-        let orch_padded = orch_inner.inner(Margin::new(1, 0));
-        orch_block.render(orch_box_rect, buf);
-        self.orch_field.render(orch_padded, buf, self.field == 3);
+        if orch_box_h >= 2 {
+            let orch_inner = orch_block.inner(orch_box_rect);
+            let orch_padded = orch_inner.inner(Margin::new(1, 0));
+            orch_block.render(orch_box_rect, buf);
+            // Render the text field only if there is inner height
+            if orch_inner_h > 0 {
+                self.orch_field.render(orch_padded, buf, self.field == 3);
+            }
+        }
     }
 }
 
