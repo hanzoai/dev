@@ -1,409 +1,651 @@
 # Changelog
 
-> [!TIP]
-> We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
+## 1.0.113
 
-## [0.2.73] - 2025-09-06
+- Deprecated piped input in interactive mode
+- Move Ctrl+R keybinding for toggling transcript to Ctrl+O
 
-- CI/Build: default CARGO_HOME and CARGO_TARGET_DIR to workspace; use sparse registry; precreate dirs for sandboxed runs. (dd9ff4b8)
-- CI/Exec: enable network for workspace-write exec runs; keep git writes opt-in. (510c323b)
-- CLI/Fix: remove invalid '-a never' in 'code exec'; verified locally. (87ae88cf)
-- CI: pass flags after subcommand so Exec receives them; fix heredoc quoting and cache mapping; minor formatting cleanups. (854525c9, 06190bba, c4ce2088, 086be4a5)
+## 1.0.112
 
-## [0.2.72] - 2025-09-06
+- Transcript mode (Ctrl+R): Added the model used to generate each assistant message
+- Addressed issue where some Claude Max users were incorrectly recognized as Claude Pro users
+- Hooks: Added systemMessage support for SessionEnd hooks
+- Added `spinnerTipsEnabled` setting to disable spinner tips
+- IDE: Various improvements and bug fixes
 
-- Core/Sandbox: add workspace-write opt-in (default off); allow .git writes via CI override. (3df630f9)
-- CI: improve upstream-merge push/auth and skip recursive workflows to stabilize releases. (274dcaef, 8fadbd03, dc1dcac0)
+## 1.0.111
 
-## [0.2.71] - 2025-09-06
+- /model now validates provided model names
+- Fixed Bash tool crashes caused by malformed shell syntax parsing
 
-- TUI/Onboarding: apply themed background to auth picker surface. (ac994e87)
-- Login: remove /oauth2/token fallback; adopt upstream-visible request shape. (d43eb23e)
-- Login/Success: fix background and theme variables. (c4e586cf)
+## 1.0.110
 
-## [0.2.70] - 2025-09-06
+- /terminal-setup command now supports WezTerm
+- MCP: OAuth tokens now proactively refresh before expiration
+- Fixed reliability issues with background Bash processes
 
-- TUI: add time-based greeting placeholder across composer, welcome, and history; map 10–13 to "today". (26b6d3c5, a97dc542)
-- TUI/Windows: prevent double character echo by ignoring Release events without enhancement flags. (9e6b1945)
-- Login: fallback to /oauth2/token and send Accept for reliable token exchange. (993c0453)
-- TUI: fully reset UI after jump-back to avoid stalls when sending next message. (9d482af2)
-- TUI/Chrome: allow specifying host for external Chrome connection (dev containers). (2b745f29)
+## 1.0.109
 
-## [0.2.69] - 2025-09-06
+- SDK: Added partial message streaming support via `--include-partial-messages` CLI flag
 
-- TUI: add session resume picker (--resume) and quick resume (--continue). (234c0a04)
-- TUI: show minutes/hours in thinking timer. (6cfc012e)
-- Fix: skip release key events on Windows. (13a2ce78)
-- Core: respect model family overrides from config. (ba9620ae)
-- Breaking: stop loading project .env files. (db383473)
+## 1.0.106
 
-## [0.2.68] - 2025-09-06
+- Windows: Fixed path permission matching to consistently use POSIX format (e.g., `Read(//c/Users/...)`)
 
-- Core: normalize working directory to Git repo root for consistent path resolution. (520b1c3e)
-- Approvals: warn when approval policy is missing to avoid silent failures. (520b1c3e)
+## 1.0.97
 
-## [0.2.67] - 2025-09-05
+- Settings: /doctor now validates permission rule syntax and suggests corrections
 
-- TUI: prevent doubled characters on Windows by ignoring Repeat/Release for printable keys. (73a22bd6)
-- CI: issue triage improves comment‑mode capture, writes DECISION.json, and adds token fallbacks for comment/assign/close steps. (8b4ea0f4, 544c8f15, 980aa10b)
+## 1.0.94
 
-## [0.2.66] - 2025-09-05
+- Vertex: add support for global endpoints for supported models
+- /memory command now allows direct editing of all imported memory files
+- SDK: Add custom tools as callbacks
+- Added /todos command to list current todo items
 
-- No functional changes; maintenance-only release focused on CI. (a6158474)
-- CI: triage workflow uses REST via fetch; GITHUB_TOKEN fallback. (731c3fce)
-- CI: enforce strict JSON schema and robust response parsing. (22a3d846, b5eaecf4)
-- CI: standardize Responses API usage and model endpoint selection. (118c4581, 9b8c2107, 73b73ba2)
+## 1.0.93
 
-## [0.2.65] - 2025-09-05
+- Windows: Add alt + v shortcut for pasting images from clipboard
+- Support NO_PROXY environment variable to bypass proxy for specified hostnames and IPs
 
-- Core: embed version via rustc-env; fix version reporting. (32c495f6)
-- Release: harden publish flow; safer non-FF handling and retries. (6e35f47c)
+## 1.0.90
 
-## [0.2.63] - 2025-09-05
+- Settings file changes take effect immediately - no restart required
 
-- TUI: inline images only; keep non-image paths as text; drop pending file tracking. (ff19a9d9)
-- TUI: align composer/history wrapping; add sanitize markers. (9e3e0d86)
-- Core: embed display version via tiny crate; remove CODE_VERSION env. (32f18333)
+## 1.0.88
 
-## [0.2.61] - 2025-09-05
+- Fixed issue causing "OAuth authentication is currently not supported"
+- Status line input now includes `exceeds_200k_tokens`
+- Fixed incorrect usage tracking in /cost.
+- Introduced `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` for controlling model aliases opusplan, opus, and sonnet.
+- Bedrock: Updated default Sonnet model to Sonnet 4
 
-- No functional changes; maintenance-only release focused on CI. (d7ac45c)
-- CI: trigger releases only from tags; parse version from tag to prevent unintended runs. (15ad27a8)
-- CI: reduce noise by enforcing [skip ci] on notes-only commits and ignoring notes-only paths. (52a08324, 12511ad2, c36ab3d8)
+## 1.0.86
 
-## [0.2.60] - 2025-09-05
+- Added /context to help users self-serve debug context issues
+- SDK: Added UUID support for all SDK messages
+- SDK: Added `--replay-user-messages` to replay user messages back to stdout
 
-- Release: collect all `code-*` artifacts recursively to ensure assets. (d9f9ebfd)
-- Release notes: add Compare link and optional Thanks; enforce strict sections. (f7a5cc88, 84253961)
-- Docs: use '@latest' in install snippet; tighten notes format. (b5aee550)
+## 1.0.85
 
-## [0.2.59] - 2025-09-05
+- Status line input now includes session cost info
+- Hooks: Introduced SessionEnd hook
 
-- TUI: enforce strict global ordering and require stream IDs for stable per‑turn history. (7c71037d, 7577fe4b)
-- TUI/Core: make cancel/exit immediate during streaming; kill child process on abort to avoid orphans. (74bfed68, 64491a1f)
-- TUI: sanitize diff/output (expand tabs; strip OSC/DCS/C1/zero‑width) for safe rendering. (d497a1aa)
-- TUI: add WebFetch tool cell with preview; preserve first line during streaming. (f6735992)
-- TUI: restore typing on Git Bash/mintty by normalizing key event kind (Windows). (5b722e07)
+## 1.0.84
 
-## [0.2.56] - 2025-09-01
+- Fix tool_use/tool_result id mismatch error when network is unstable
+- Fix Claude sometimes ignoring real-time steering when wrapping up a task
+- @-mention: Add ~/.claude/\* files to suggestions for easier agent, output style, and slash command editing
+- Use built-in ripgrep by default; to opt out of this behavior, set USE_BUILTIN_RIPGREP=0
 
-- Strict event ordering in TUI: keep exec/tool cells ahead of the final assistant cell; render tool results from embedded markdown; stabilize interrupt processing. (dfb703a)
-- Reasoning titles: better collapsed-title extraction and formatting rules; remove brittle phrase checks. (5ca1670, 7f4c569, 6d029d5)
-- Plan streaming: queue PlanUpdate history while streaming to prevent interleaving; flush on finalize. (770d72c)
-- De-dup reasoning: ignore duplicate final Reasoning events and guard out-of-order deltas. (f1098ad)
+## 1.0.83
 
-## [0.2.55] - 2025-09-01
+- @-mention: Support files with spaces in path
+- New shimmering spinner
 
-- Reasoning delta ordering: key by `(item_id, output_index, content_index)`, record `sequence_number`, and drop duplicates/out-of-order fragments. (b39ed09, 509fc87)
-- Merge streamed + final reasoning so text is not lost on finalize. (2e5f4f8)
-- Terminal color detection: unify truecolor checks; avoid 256-color fallback on Windows Terminal; smoother shimmer gradients. (90fdb6a)
-- Startup rendering: skip full-screen background paint on Windows Terminal; gate macOS Terminal behavior behind `TERM_PROGRAM` and `CODE_FORCE_FULL_BG_PAINT`. (6d7bc98)
+## 1.0.82
 
-## [0.2.54] - 2025-09-01
+- SDK: Add request cancellation support
+- SDK: New additionalDirectories option to search custom paths, improved slash command processing
+- Settings: Validation prevents invalid fields in .claude/settings.json files
+- MCP: Improve tool name consistency
+- Bash: Fix crash when Claude tries to automatically read large files
 
-- Clipboard image paste: show `[image: filename]` placeholders; accept raw base64 and data-URI images; enable PNG encoding; add paste shortcut fallback to read raw images. (d597f0e, 6f068d8, d4287d2, 7c32e8e)
-- Exec event ordering: ensure `ExecCommandBegin` is handled before flushing queued interrupts to avoid out-of-order “End” lines. (74427d4)
-- ANSI color mapping: fix 256-indexed → RGB conversion and luminance decisions. (ddf6b68)
+## 1.0.81
 
-## [0.2.53] - 2025-09-01
+- Released output styles, including new built-in educational output styles "Explanatory" and "Learning". Docs: https://docs.anthropic.com/en/docs/claude-code/output-styles
+- Agents: Fix custom agent loading when agent files are unparsable
 
-- Browser + HUD: add CDP console log capture, collapsible HUD, and coalesced redraws; raise expanded HUD minimum height to 25 rows. (34f68b0, 1fa906d, d6fd6e5, 95ba819)
-- General: improve internal browser launch diagnostics and log path. (95ba819)
+## 1.0.80
 
-## [0.2.52] - 2025-08-30
+- UI improvements: Fix text contrast for custom subagent colors and spinner rendering issues
 
-- Diff rendering: sanitize diff content like input/output (expand tabs, strip control sequences) to avoid layout issues. (7985c70)
+## 1.0.77
 
-## [0.2.51] - 2025-08-30
+- Bash tool: Fix heredoc and multiline string escaping, improve stderr redirection handling
+- SDK: Add session support and permission denial tracking
+- Fix token limit errors in conversation summarization
+- Opus Plan Mode: New setting in `/model` to run Opus only in plan mode, Sonnet otherwise
 
-- CLI: de-duplicate `validateBinary` to avoid ESM redeclare errors under Bun/Node 23. (703e080)
+## 1.0.73
 
-## [0.2.50] - 2025-08-30
+- MCP: Support multiple config files with `--mcp-config file1.json file2.json`
+- MCP: Press Esc to cancel OAuth authentication flows
+- Bash: Improved command validation and reduced false security warnings
+- UI: Enhanced spinner animations and status line visual hierarchy
+- Linux: Added support for Alpine and musl-based distributions (requires separate ripgrep installation)
 
-- CLI bootstrap: make bootstrap helper async and correctly await in the entry; fixes Bun global installs when postinstall is blocked. (9b9e50c)
+## 1.0.72
 
-## [0.2.49] - 2025-08-30
+- Ask permissions: have Claude Code always ask for confirmation to use specific tools with /permissions
 
-- CLI install: bootstrap the native binary on first run when postinstall is blocked; prefer cached/platform pkg then fall back to GitHub release. (27a0b4e)
-- Packaging: adjust Windows optional dependency metadata for parity with published packages. (030e9ae)
+## 1.0.71
 
-## [0.2.48] - 2025-08-30
+- Background commands: (Ctrl-b) to run any Bash command in the background so Claude can keep working (great for dev servers, tailing logs, etc.)
+- Customizable status line: add your terminal prompt to Claude Code with /statusline
 
-- TUI Help: show environment summary and resolved tool paths in the Help panel. (01b4a8c)
-- CLI install safety: stop publishing a `code` bin by default; create a wrapper only when no PATH collision exists and remove on collision to avoid overriding VS Code. (1a95e83)
+## 1.0.70
 
-## [0.2.47] - 2025-08-30
+- Performance: Optimized message rendering for better performance with large contexts
+- Windows: Fixed native file search, ripgrep, and subagent functionality
+- Added support for @-mentions in slash command arguments
 
-- Agents: add `/agents` command; smoother TUI animations and safe branch names. (0b49a37)
-- Core git UX: avoid false branch-change detection by ignoring quoted text and tokenizing git subcommands; show suggested confirm argv when blocking branch change. (7111b30, a061dc8)
-- Exec cells: clearer visual status — black ❯ on completed commands, tinting for completed lines, and concise tree guides. (f2d31bb)
-- Syntax highlighting: derive syntect theme from the active UI theme for cohesive code styling. (b8c06b5)
+## 1.0.69
 
-## [0.2.46] - 2025-08-30
+- Upgraded Opus to version 4.1
 
-- CLI postinstall: print clear guidance when a PATH collision with VS Code’s `code` is detected; suggest using `coder`. (09ebae9)
-- Maintenance: upstream sync prior to release. (d2234fb)
+## 1.0.68
 
-## [0.2.45] - 2025-08-30
+- Fix incorrect model names being used for certain commands like `/pr-comments`
+- Windows: improve permissions checks for allow / deny tools and project trust. This may create a new project entry in `.claude.json` - manually merge the history field if desired.
+- Windows: improve sub-process spawning to eliminate "No such file or directory" when running commands like pnpm
+- Enhanced /doctor command with CLAUDE.md and MCP tool context for self-serve debugging
+- SDK: Added canUseTool callback support for tool confirmation
+- Added `disableAllHooks` setting
+- Improved file suggestions performance in large repos
 
-- TUI “glitch” animation: compute render rect first, scale safely, and cap height; bail early on tiny areas. (8268dd1)
-- Upstream integration: adopt MCP unbounded channels and Windows target updates while keeping forked TUI hooks. (70bd689, 3b062ea)
-- CI/infra: various stability fixes (Windows cache priming; clippy profile; unbounded channel). (7eee69d, 5d2d300, 970e466, 3f81840)
+## 1.0.65
 
-## [0.2.44] - 2025-08-29
+- IDE: Fixed connection stability issues and error handling for diagnostics
+- Windows: Fixed shell environment setup for users without .bashrc files
 
-- Exec UX: show suggested confirm argv when branch-change is blocked. (a061dc8)
-- File completion: prioritize CWD matches for more relevant suggestions. (7d4cf9b)
-- Assistant code cards: unify streaming/final layout; refine padding and colors; apply consistent background for code blocks. (e12f31c, 986a764, e4601bd, 97a91e8, beaa1c7)
-- Syntax highlighting: theme-aware syntect mapping for better readability. (b8c06b5)
+## 1.0.64
 
-## [0.2.43] - 2025-08-29
+- Agents: Added model customization support - you can now specify which model an agent should use
+- Agents: Fixed unintended access to the recursive agent tool
+- Hooks: Added systemMessage field to hook JSON output for displaying warnings and context
+- SDK: Fixed user input tracking across multi-turn conversations
+- Added hidden files to file search and @-mention suggestions
 
-- npx/bin behavior: always run bundled binary and show exact path; stop delegating to system VS Code. (448b176)
-- Postinstall safety: remove global `code` shim if any conflicting `code` is on PATH; keep `coder` as the entrypoint. (1dc19da)
-- Exec cells: clearer completed-state visuals and line tinting. (f2d31bb)
+## 1.0.63
 
-## [0.2.42] - 2025-08-29
+- Windows: Fixed file search, @agent mentions, and custom slash commands functionality
 
-- Housekeeping: release and sync tasks for CLI, core, and TUI. (eea7d98, 6d80b3a)
+## 1.0.62
 
-## [0.2.41] - 2025-08-29
+- Added @-mention support with typeahead for custom agents. @<your-custom-agent> to invoke it
+- Hooks: Added SessionStart hook for new session initialization
+- /add-dir command now supports typeahead for directory paths
+- Improved network connectivity check reliability
 
-- Housekeeping: release and pre-sync commits ahead of broader upstream merges. (75bb264, 75ed347)
+## 1.0.61
 
-## [0.2.40] - 2025-08-29
+- Transcript mode (Ctrl+R): Changed Esc to exit transcript mode rather than interrupt
+- Settings: Added `--settings` flag to load settings from a JSON file
+- Settings: Fixed resolution of settings files paths that are symlinks
+- OTEL: Fixed reporting of wrong organization after authentication changes
+- Slash commands: Fixed permissions checking for allowed-tools with Bash
+- IDE: Added support for pasting images in VSCode MacOS using ⌘+V
+- IDE: Added `CLAUDE_CODE_AUTO_CONNECT_IDE=false` for disabling IDE auto-connection
+- Added `CLAUDE_CODE_SHELL_PREFIX` for wrapping Claude and user-provided shell commands run by Claude Code
 
-- Upstream sync: align web_search events and TUI popup APIs; clean warnings; maintain forked behaviors. (f20bffe, 4d9874f)
-- Features: custom `/prompts`; deadlock fix in message routing. (b8e8454, f7cb2f8)
-- Docs: clarify merge-only push policy. (7c7b63e)
+## 1.0.60
 
-## [0.2.39] - 2025-08-29
+- You can now create custom subagents for specialized tasks! Run /agents to get started
 
-- Upstream integration: reconcile core/TUI APIs; add pager overlay stubs; keep transcript app specifics; ensure clean build. (c90d140, b1b01d0)
-- Tools: add “View Image” tool; improve cursor after suspend; fix doubled lines/hanging markers. (4e9ad23, 3e30980, 488a402)
-- UX: welcome message polish, issue templates, slash command restrictions while running. (bbcfd63, c3a8b96, e5611aa)
+## 1.0.59
 
-## [0.2.38] - 2025-08-29
+- SDK: Added tool confirmation support with canUseTool callback
+- SDK: Allow specifying env for spawned process
+- Hooks: Exposed PermissionDecision to hooks (including "ask")
+- Hooks: UserPromptSubmit now supports additionalContext in advanced JSON output
+- Fixed issue where some Max users that specified Opus would still see fallback to Sonnet
 
-- TUI: code-block background styling and improved syntax highlighting. (bb29c30)
-- Markdown: strip OSC 8 hyperlinks; refine rendering and syntax handling. (a30c019)
-- Exec rendering: highlight executed commands as bash and show inline durations. (38dc45a)
-- Maintenance: merged fixes from feature branches (`feat/codeblock-bg`, `fix/strip-osc8-in-markdown`). (6b30005, 0704775)
+## 1.0.58
 
-## [0.2.37] - 2025-08-27
+- Added support for reading PDFs
+- MCP: Improved server health status display in 'claude mcp list'
+- Hooks: Added CLAUDE_PROJECT_DIR env var for hook commands
 
-- Packaging: move platform-specific binaries to npm optionalDependencies; postinstall resolves platform package before GitHub fallback. (5bb9d01)
-- CI: fix env guard for NPM_TOKEN and YAML generation for platform package metadata. (7ae25a9, d29be0a)
+## 1.0.57
 
-## [0.2.36] - 2025-08-27
+- Added support for specifying a model in slash commands
+- Improved permission messages to help Claude understand allowed tools
+- Fix: Remove trailing newlines from bash output in terminal wrapping
 
-- Packaging: switch CI to produce a single `code` binary and generate `code-tui`/`code-exec` wrappers. (7cd2b18)
-- CI: stabilize cargo fetch and Windows setup; adjust --frozen/--locked usage to keep builds reliable. (5c6bf9f, 5769cec, 7ebcd9f)
+## 1.0.56
 
-## [0.2.35] - 2025-08-27
+- Windows: Enabled shift+tab for mode switching on versions of Node.js that support terminal VT mode
+- Fixes for WSL IDE detection
+- Fix an issue causing awsRefreshHelper changes to .aws directory not to be picked up
 
-- Release artifacts: slimmer assets with dual-format (.zst preferred, .tar.gz fallback) and stripped debuginfo; smaller npm package. (f5f2fd0)
+## 1.0.55
 
-## [0.2.34] - 2025-08-26
+- Clarified knowledge cutoff for Opus 4 and Sonnet 4 models
+- Windows: fixed Ctrl+Z crash
+- SDK: Added ability to capture error logging
+- Add --system-prompt-file option to override system prompt in print mode
 
-- Clipboard: add raw image paste support and upstream TUI integration; fix Windows path separators and ESC/Ctrl+C flow. (0c6f35c, 0996314, 568d6f8, e5283b6)
-- UX polish: reduce bottom padding, improve rate-limit message, queue messages, fix italic styling for queued. (d085f73, ab9250e, 251c4c2, b107918)
-- Stability: token refresh fix; avoid showing timeouts as “sandbox error”. (d63e44a, 17e5077)
+## 1.0.54
 
-## [0.2.33] - 2025-08-26
+- Hooks: Added UserPromptSubmit hook and the current working directory to hook inputs
+- Custom slash commands: Added argument-hint to frontmatter
+- Windows: OAuth uses port 45454 and properly constructs browser URL
+- Windows: mode switching now uses alt + m, and plan mode renders properly
+- Shell: Switch to in-memory shell snapshot to fix file-related errors
 
-- Maintenance: housekeeping after successful build; release tag. (2c6bb4d)
+## 1.0.53
 
-## [0.2.32] - 2025-08-25
+- Updated @-mention file truncation from 100 lines to 2000 lines
+- Add helper script settings for AWS token refresh: awsAuthRefresh (for foreground operations like aws sso login) and awsCredentialExport (for background operation with STS-like response).
 
-- Sessions: fast /resume picker with themed table and replay improvements. (0488753)
-- Input UX: double‑Esc behavior and deterministic MCP tool ordering; fix build warnings. (b048248, ee2ccb5, fcf7435)
-- Core/TUI: per-session ExecSessionManager; ToolsConfig fixes with `new_from_params`. (15af899, 7b20db9)
+## 1.0.52
 
-## [0.2.31] - 2025-08-25
+- Added support for MCP server instructions
 
-- Diff wrapping: add one extra space to continuation hang indent for perfect alignment. (bee040a)
+## 1.0.51
 
-## [0.2.30] - 2025-08-24
+- Added support for native Windows (requires Git for Windows)
+- Added support for Bedrock API keys through environment variable AWS_BEARER_TOKEN_BEDROCK
+- Settings: /doctor can now help you identify and fix invalid setting files
+- `--append-system-prompt` can now be used in interactive mode, not just --print/-p.
+- Increased auto-compact warning threshold from 60% to 80%
+- Fixed an issue with handling user directories with spaces for shell snapshots
+- OTEL resource now includes os.type, os.version, host.arch, and wsl.version (if running on Windows Subsystem for Linux)
+- Custom slash commands: Fixed user-level commands in subdirectories
+- Plan mode: Fixed issue where rejected plan from sub-task would get discarded
 
-- Diff summary: width-aware patch summary rendering with hanging indent; always show gutter icon at top of visible portion. (03beb32, 41b7273)
+## 1.0.48
 
-## [0.2.29] - 2025-08-24
+- Fixed a bug in v1.0.45 where the app would sometimes freeze on launch
+- Added progress messages to Bash tool based on the last 5 lines of command output
+- Added expanding variables support for MCP server configuration
+- Moved shell snapshots from /tmp to ~/.claude for more reliable Bash tool calls
+- Improved IDE extension path handling when Claude Code runs in WSL
+- Hooks: Added a PreCompact hook
+- Vim mode: Added c, f/F, t/T
 
-- Version embedding: prefer `CODE_VERSION` env with fallback to Cargo pkg version across codex-rs; update banners and headers. (af3a8bc)
+## 1.0.45
 
-## [0.2.28] - 2025-08-24
+- Redesigned Search (Grep) tool with new tool input parameters and features
+- Disabled IDE diffs for notebook files, fixing "Timeout waiting after 1000ms" error
+- Fixed config file corruption issue by enforcing atomic writes
+- Updated prompt input undo to Ctrl+\_ to avoid breaking existing Ctrl+U behavior, matching zsh's undo shortcut
+- Stop Hooks: Fixed transcript path after /clear and fixed triggering when loop ends with tool call
+- Custom slash commands: Restored namespacing in command names based on subdirectories. For example, .claude/commands/frontend/component.md is now /frontend:component, not /component.
 
-- Windows toolchain: refactor vcpkg + lld-link config; ensure Rust binary embeds correct version in release. (9a57ec3, 8d61a2c)
+## 1.0.44
 
-## [0.2.27] - 2025-08-24
+- New /export command lets you quickly export a conversation for sharing
+- MCP: resource_link tool results are now supported
+- MCP: tool annotations and tool titles now display in /mcp view
+- Changed Ctrl+Z to suspend Claude Code. Resume by running `fg`. Prompt input undo is now Ctrl+U.
 
-- Web search: integrate tool and TUI WebSearch event/handler; keep browser + agent tools; wire configs and tests. (6793a2a, a7c514a, 0994b78)
-- CI: faster cross-platform linking/caching; streamlined Cargo version/lockfile updates. (c7c28f2, 5961330)
+## 1.0.43
 
-## [0.2.26] - 2025-08-24
+- Fixed a bug where the theme selector was saving excessively
+- Hooks: Added EPIPE system error handling
 
-- CI: improved caching and simplified release workflows for reliability. (e37a2f6, 8402d5a)
+## 1.0.42
 
-## [0.2.25] - 2025-08-24
+- Added tilde (`~`) expansion support to `/add-dir` command
 
-- Release infra: multiple small workflow fixes (build version echo, Rust release process). (ac6b56c, 64dda2d)
+## 1.0.41
 
-## [0.2.24] - 2025-08-24
+- Hooks: Split Stop hook triggering into Stop and SubagentStop
+- Hooks: Enabled optional timeout configuration for each command
+- Hooks: Added "hook_event_name" to hook input
+- Fixed a bug where MCP tools would display twice in tool list
+- New tool parameters JSON for Bash tool in `tool_decision` event
 
-- Release workflow: update Rust build process for reliability. (64dda2d)
+## 1.0.40
 
-## [0.2.23] - 2025-08-24
+- Fixed a bug causing API connection errors with UNABLE_TO_GET_ISSUER_CERT_LOCALLY if `NODE_EXTRA_CA_CERTS` was set
 
-- CI: fix build version echo in release workflow. (2f0bdd1)
+## 1.0.39
 
-## [0.2.22] - 2025-08-24
+- New Active Time metric in OpenTelemetry logging
 
-- Release workflow: incremental YAML fixes and cleanup. (3a88196, 7e4cea1)
+## 1.0.38
 
-## [0.2.21] - 2025-08-24
+- Released hooks. Special thanks to community input in https://github.com/anthropics/claude-code/issues/712. Docs: https://docs.anthropic.com/en/docs/claude-code/hooks
 
-- CI cache: use `SCCACHE_GHA_VERSION` to restore sccache effectiveness. (43e4c05)
+## 1.0.37
 
-## [0.2.20] - 2025-08-24
+- Remove ability to set `Proxy-Authorization` header via ANTHROPIC_AUTH_TOKEN or apiKeyHelper
 
-- Docs: add module description to trigger CI and verify doc gating. (e4c4456)
+## 1.0.36
 
-## [0.2.19] - 2025-08-24
+- Web search now takes today's date into context
+- Fixed a bug where stdio MCP servers were not terminating properly on exit
 
-- CI: move sccache key configuration; tighten input responsiveness and diff readability in TUI. (46e57f0, 9bcf7c7)
+## 1.0.35
 
-## [0.2.18] - 2025-08-24
+- Added support for MCP OAuth Authorization Server discovery
 
-- TUI: clean unused `mut` and normalize overwrite sequences; preserve warning-free builds. (621f4f9)
+## 1.0.34
 
-## [0.2.17] - 2025-08-24
+- Fixed a memory leak causing a MaxListenersExceededWarning message to appear
 
-- TUI: housekeeping and stable sccache cache keys. (85089e1, 17bbc71)
+## 1.0.33
 
-## [0.2.16] - 2025-08-23
+- Improved logging functionality with session ID support
+- Added prompt input undo functionality (Ctrl+Z and vim 'u' command)
+- Improvements to plan mode
 
-- Navigation: gate Up/Down history keys when history isn’t scrollable to avoid dual behavior. (150754a)
+## 1.0.32
 
-## [0.2.15] - 2025-08-23
+- Updated loopback config for litellm
+- Added forceLoginMethod setting to bypass login selection screen
 
-- CI: stabilize sccache startup to fix slow releases. (f00ea33)
+## 1.0.31
 
-## [0.2.14] - 2025-08-23
+- Fixed a bug where ~/.claude.json would get reset when file contained invalid JSON
 
-- CI: small test to validate caching; no product changes. (7ebd744)
+## 1.0.30
 
-## [0.2.13] - 2025-08-23
+- Custom slash commands: Run bash output, @-mention files, enable thinking with thinking keywords
+- Improved file path autocomplete with filename matching
+- Added timestamps in Ctrl-r mode and fixed Ctrl-c handling
+- Enhanced jq regex support for complex filters with pipes and select
 
-- Build cleanliness: fix all warnings under build-fast. (0356a99)
+## 1.0.29
 
-## [0.2.12] - 2025-08-23
+- Improved CJK character support in cursor navigation and rendering
 
-- CI: correct SCCACHE_DIR usage, export/guard env, and make caching resilient; better heredoc detection for apply_patch. (0a59600, b10c86a, c263b05, 39a3ec8, de54dbe)
+## 1.0.28
 
-## [0.2.11] - 2025-08-23
+- Slash commands: Fix selector display during history navigation
+- Resizes images before upload to prevent API size limit errors
+- Added XDG_CONFIG_HOME support to configuration directory
+- Performance optimizations for memory usage
+- New attributes (terminal.type, language) in OpenTelemetry logging
 
-- Rendering: fully paint history region and margins to remove artifacts; add transcript hint and aggregated-output support. (b6ee050, ffd1120, eca97d8, 957d449)
+## 1.0.27
 
-## [0.2.10] - 2025-08-23
+- Streamable HTTP MCP servers are now supported
+- Remote MCP servers (SSE and HTTP) now support OAuth
+- MCP resources can now be @-mentioned
+- /resume slash command to switch conversations within Claude Code
 
-- Stability: align protocol/core with upstream; fix TUI E0423 and history clearing; regenerate Cargo.lock for locked builds. (52d29c5, 663d1ad, 2317707, da80a25)
+## 1.0.25
 
-## [0.2.9] - 2025-08-21
+- Slash commands: moved "project" and "user" prefixes to descriptions
+- Slash commands: improved reliability for command discovery
+- Improved support for Ghostty
+- Improved web search reliability
 
-- Transcript mode: add transcript view; hide chain-of-thought by default; show “thinking” headers. (2ec5a28, e95cad1, 9193eb6)
-- Exec ordering: insert running exec into history and replace in place on completion to prevent out-of-order rendering. (c1a50d7)
-- Onboarding: split onboarding screen to its own app; improve login handling. (0d12380, c579ae4)
+## 1.0.24
 
-## [0.2.8] - 2025-08-21
+- Improved /mcp output
+- Fixed a bug where settings arrays got overwritten instead of merged
 
-- Exec previews: use middle-dot ellipsis and concise head/tail previews; rely on Block borders for visuals. (1ac3a67, 352ce75, 5ca0e06)
+## 1.0.23
 
-## [0.2.7] - 2025-08-20
+- Released TypeScript SDK: import @anthropic-ai/claude-code to get started
+- Released Python SDK: pip install claude-code-sdk to get started
 
-- Browser tool: robust reconnect when cached Chrome WS URL is stale; clearer screenshot strategy and retries. (9516794)
-- Merge hygiene and build fixes from upstream while keeping forked UX. (fb08c84, d79b51c)
+## 1.0.22
 
-## [0.2.6] - 2025-08-20
+- SDK: Renamed `total_cost` to `total_cost_usd`
 
-- History: live timers for custom/MCP tools; stdout preview for run commands; clearer background events. (f24446b, 5edbbe4, 2b9c1c9)
-- Apply patch: auto-convert more shell-wrapped forms; suppress noisy screenshot-captured lines. (2fb30b7, 3da06e5)
+## 1.0.21
 
-## [0.2.5] - 2025-08-19
+- Improved editing of files with tab-based indentation
+- Fix for tool_use without matching tool_result errors
+- Fixed a bug where stdio MCP server processes would linger after quitting Claude Code
 
-- CLI downloads: verify Content-Length, add timeouts/retries, and improve WSL guidance for missing/invalid binaries. (ca55c2e)
+## 1.0.18
 
-## [0.2.4] - 2025-08-19
+- Added --add-dir CLI argument for specifying additional working directories
+- Added streaming input support without require -p flag
+- Improved startup performance and session storage performance
+- Added CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR environment variable to freeze working directory for bash commands
+- Added detailed MCP server tools display (/mcp)
+- MCP authentication and permission improvements
+- Added auto-reconnection for MCP SSE connections on disconnect
+- Fixed issue where pasted content was lost when dialogs appeared
 
-- Windows CLI: guard against corrupt/empty downloads; clearer spawn error guidance (EFTYPE/ENOEXEC/EACCES). (bb21419)
+## 1.0.17
 
-## [0.2.3] - 2025-08-19
+- We now emit messages from sub-tasks in -p mode (look for the parent_tool_use_id property)
+- Fixed crashes when the VS Code diff tool is invoked multiple times quickly
+- MCP server list UI improvements
+- Update Claude Code process title to display "claude" instead of "node"
 
-- Release CI: enable sccache and mold; tune incremental to improve cache hit rate. (69f6c3c)
+## 1.0.11
 
-## [0.2.2] - 2025-08-19
+- Claude Code can now also be used with a Claude Pro subscription
+- Added /upgrade for smoother switching to Claude Max plans
+- Improved UI for authentication from API keys and Bedrock/Vertex/external auth tokens
+- Improved shell configuration error handling
+- Improved todo list handling during compaction
 
-- Protocol alignment and dep bumps across codex-rs; login flow async-ified; smaller fixes. (4db0749, 6e8c055, 38b84ff)
+## 1.0.10
 
-## [0.2.1] - 2025-08-19
+- Added markdown table support
+- Improved streaming performance
 
-- Fork stabilization: large upstream sync while preserving TUI/theme and protocol; add tests and clean colors/styles. (b8548a0, 47ba653, c004ae5)
+## 1.0.8
 
-## [0.1.13] - 2025-08-16
+- Fixed Vertex AI region fallback when using CLOUD_ML_REGION
+- Increased default otel interval from 1s -> 5s
+- Fixed edge cases where MCP_TIMEOUT and MCP_TOOL_TIMEOUT weren't being respected
+- Fixed a regression where search tools unnecessarily asked for permissions
+- Added support for triggering thinking non-English languages
+- Improved compacting UI
 
-- Rebrand: switch npm bin to `code`, handle collisions; rename Coder → Code across UI and docs. (0f1974a, b3176fe)
-- TUI polish: glitch animations, status handling, stabilized scroll viewport; improved token footer and search suffix. (3375965, 2e42af0, 96913aa, 80fe37d)
-- Core: Rust login server port; sandbox fixes; exec timer; browser console tool. (e9b597c, c26d42a, 2359878, d6da1a4)
+## 1.0.7
 
-## [0.1.12] - 2025-08-14
+- Renamed /allowed-tools -> /permissions
+- Migrated allowedTools and ignorePatterns from .claude.json -> settings.json
+- Deprecated claude config commands in favor of editing settings.json
+- Fixed a bug where --dangerously-skip-permissions sometimes didn't work in --print mode
+- Improved error handling for /install-github-app
+- Bugfixes, UI polish, and tool reliability improvements
 
-- CI/build: switch to rust-cache; fix sccache error; optimize builds; improve terminal query and image init. (2d1d974, eb922a7, 3055068, 9ca7661)
+## 1.0.6
 
-## [0.1.11] - 2025-08-14
+- Improved edit reliability for tab-indented files
+- Respect CLAUDE_CONFIG_DIR everywhere
+- Reduced unnecessary tool permission prompts
+- Added support for symlinks in @file typeahead
+- Bugfixes, UI polish, and tool reliability improvements
 
-- Release hygiene: fix version embedding and PowerShell replacement on Windows. (537f50b, 5d50fff)
+## 1.0.4
 
-## [0.1.10] - 2025-08-14
+- Fixed a bug where MCP tool errors weren't being parsed correctly
 
-- MCP/Reasoning: JSON‑RPC support; enable reasoning for codex‑prefixed models; parse reasoning text. (e7bad65, de2c6a2, f1be797)
-- TUI: diff preview color tweak, standardized tree glyphs, ctrl‑b/ctrl‑f shortcuts. (d4533a0, bb9ce3c, 0159bc7)
-- CI/docs: restore markdown streaming; interrupt/Esc improvements; user‑agent; tracing; rate‑limit delays respected. (6340acd, 12cf0dd, cb78f23, e8670ad, 41eb59a)
+## 1.0.1
 
-## [0.1.9] - 2025-08-13
+- Added `DISABLE_INTERLEAVED_THINKING` to give users the option to opt out of interleaved thinking.
+- Improved model references to show provider-specific names (Sonnet 3.7 for Bedrock, Sonnet 4 for Console)
+- Updated documentation links and OAuth process descriptions
 
-- Debug logging system and better conversation history; remove unused APIs. (92793b3, 34f7a50)
+## 1.0.0
 
-## [0.1.8] - 2025-08-13
+- Claude Code is now generally available
+- Introducing Sonnet 4 and Opus 4 models
 
-- TUI history: correct wrapping and height calc; prevent duplication; improve JS harness for browser. (dc31517, 98b26df, 58fd385, 7099f78)
+## 0.2.125
 
-## [0.1.7] - 2025-08-12
+- Breaking change: Bedrock ARN passed to `ANTHROPIC_MODEL` or `ANTHROPIC_SMALL_FAST_MODEL` should no longer contain an escaped slash (specify `/` instead of `%2F`)
+- Removed `DEBUG=true` in favor of `ANTHROPIC_LOG=debug`, to log all requests
 
-- Rebrand foundation: fork as just‑every/coder; major TUI styling/animation upgrades. (aefd1e5, e2930ce)
-- Browser: CDP connect to local Chrome with auto‑discovery, port parsing and stability fixes. (006e4eb, 1d02262, b8f6bcb, 756e4ea)
-- Agents HUD: live agent panel with status; animated sparkline; improved focus behavior. (271ded3, e230be5, 0b631c7)
+## 0.2.117
 
-## [0.1.6] - 2025-08-12
+- Breaking change: --print JSON output now returns nested message objects, for forwards-compatibility as we introduce new metadata fields
+- Introduced settings.cleanupPeriodDays
+- Introduced CLAUDE_CODE_API_KEY_HELPER_TTL_MS env var
+- Introduced --debug mode
 
-- TUI: show apply‑patch diff; split multiline commands; ctrl‑Z suspend fix. (9cd5ac5, 55f9505, 320f150)
-- Prompts: prompt cache key and caching integration tests. (7781e4f, 0a6cba8)
-- CI/build: resolve workflow compilation errors; dependency bumps; docs refresh. (7440ed1, 38a422c, d17c58b)
+## 0.2.108
 
-## [0.1.5] - 2025-08-12
+- You can now send messages to Claude while it works to steer Claude in real-time
+- Introduced BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS env vars
+- Fixed a bug where thinking was not working in -p mode
+- Fixed a regression in /cost reporting
+- Deprecated MCP wizard interface in favor of other MCP commands
+- Lots of other bugfixes and improvements
 
-- Theme UI: live preview and wrapping fixes; improved input (double‑Esc clear, precise history). (96a5922, 1f68fb0)
-- Layout: browser preview URL tracking and layout reorg; mute unnecessary mut warnings. (47bc272, 3778243)
+## 0.2.107
 
-## [0.1.4] - 2025-08-12
+- CLAUDE.md files can now import other files. Add @path/to/file.md to ./CLAUDE.md to load additional files on launch
 
-- Fork enhancements: mouse scrolling, glitch animation, status bar, improved TUI; configurable agents and browser tools with screenshots. (5d40d09, 55f72d7, a3939a0, cab23924)
-- Packaging: shrink npm package by downloading binaries on install; fix Windows builds and permissions. (aea9845, 240efb8, 2953a7f)
-- Workflows: align release pipeline; fix conflicts/warnings post‑merge. (f2925e9, 52bd7f6, ae47b2f)
+## 0.2.106
 
-## [0.1.3] - 2025-08-10
+- MCP SSE server configs can now specify custom headers
+- Fixed a bug where MCP permission prompt didn't always show correctly
 
-- Release pipeline cleanup: handle existing tags/npm version conflicts; drop redundant workflow. (cc243b1, 1cc2867)
+## 0.2.105
 
-## [0.1.2] - 2025-08-10
+- Claude can now search the web
+- Moved system & account status to /status
+- Added word movement keybindings for Vim
+- Improved latency for startup, todo tool, and file edits
 
-- Initial fork releases: set up rebrand + npm publishing; simplified release workflow; cross‑compilation fixes. (ff8378b, 3676c6a, 40d17e4, 1914e7b)
+## 0.2.102
+
+- Improved thinking triggering reliability
+- Improved @mention reliability for images and folders
+- You can now paste multiple large chunks into one prompt
+
+## 0.2.100
+
+- Fixed a crash caused by a stack overflow error
+- Made db storage optional; missing db support disables --continue and --resume
+
+## 0.2.98
+
+- Fixed an issue where auto-compact was running twice
+
+## 0.2.96
+
+- Claude Code can now also be used with a Claude Max subscription (https://claude.ai/upgrade)
+
+## 0.2.93
+
+- Resume conversations from where you left off from with "claude --continue" and "claude --resume"
+- Claude now has access to a Todo list that helps it stay on track and be more organized
+
+## 0.2.82
+
+- Added support for --disallowedTools
+- Renamed tools for consistency: LSTool -> LS, View -> Read, etc.
+
+## 0.2.75
+
+- Hit Enter to queue up additional messages while Claude is working
+- Drag in or copy/paste image files directly into the prompt
+- @-mention files to directly add them to context
+- Run one-off MCP servers with `claude --mcp-config <path-to-file>`
+- Improved performance for filename auto-complete
+
+## 0.2.74
+
+- Added support for refreshing dynamically generated API keys (via apiKeyHelper), with a 5 minute TTL
+- Task tool can now perform writes and run bash commands
+
+## 0.2.72
+
+- Updated spinner to indicate tokens loaded and tool usage
+
+## 0.2.70
+
+- Network commands like curl are now available for Claude to use
+- Claude can now run multiple web queries in parallel
+- Pressing ESC once immediately interrupts Claude in Auto-accept mode
+
+## 0.2.69
+
+- Fixed UI glitches with improved Select component behavior
+- Enhanced terminal output display with better text truncation logic
+
+## 0.2.67
+
+- Shared project permission rules can be saved in .claude/settings.json
+
+## 0.2.66
+
+- Print mode (-p) now supports streaming output via --output-format=stream-json
+- Fixed issue where pasting could trigger memory or bash mode unexpectedly
+
+## 0.2.63
+
+- Fixed an issue where MCP tools were loaded twice, which caused tool call errors
+
+## 0.2.61
+
+- Navigate menus with vim-style keys (j/k) or bash/emacs shortcuts (Ctrl+n/p) for faster interaction
+- Enhanced image detection for more reliable clipboard paste functionality
+- Fixed an issue where ESC key could crash the conversation history selector
+
+## 0.2.59
+
+- Copy+paste images directly into your prompt
+- Improved progress indicators for bash and fetch tools
+- Bugfixes for non-interactive mode (-p)
+
+## 0.2.54
+
+- Quickly add to Memory by starting your message with '#'
+- Press ctrl+r to see full output for long tool results
+- Added support for MCP SSE transport
+
+## 0.2.53
+
+- New web fetch tool lets Claude view URLs that you paste in
+- Fixed a bug with JPEG detection
+
+## 0.2.50
+
+- New MCP "project" scope now allows you to add MCP servers to .mcp.json files and commit them to your repository
+
+## 0.2.49
+
+- Previous MCP server scopes have been renamed: previous "project" scope is now "local" and "global" scope is now "user"
+
+## 0.2.47
+
+- Press Tab to auto-complete file and folder names
+- Press Shift + Tab to toggle auto-accept for file edits
+- Automatic conversation compaction for infinite conversation length (toggle with /config)
+
+## 0.2.44
+
+- Ask Claude to make a plan with thinking mode: just say 'think' or 'think harder' or even 'ultrathink'
+
+## 0.2.41
+
+- MCP server startup timeout can now be configured via MCP_TIMEOUT environment variable
+- MCP server startup no longer blocks the app from starting up
+
+## 0.2.37
+
+- New /release-notes command lets you view release notes at any time
+- `claude config add/remove` commands now accept multiple values separated by commas or spaces
+
+## 0.2.36
+
+- Import MCP servers from Claude Desktop with `claude mcp add-from-claude-desktop`
+- Add MCP servers as JSON strings with `claude mcp add-json <n> <json>`
+
+## 0.2.34
+
+- Vim bindings for text input - enable with /vim or /config
+
+## 0.2.32
+
+- Interactive MCP setup wizard: Run "claude mcp add" to add MCP servers with a step-by-step interface
+- Fix for some PersistentShell issues
+
+## 0.2.31
+
+- Custom slash commands: Markdown files in .claude/commands/ directories now appear as custom slash commands to insert prompts into your conversation
+- MCP debug mode: Run with --mcp-debug flag to get more information about MCP server errors
+
+## 0.2.30
+
+- Added ANSI color theme for better terminal compatibility
+- Fixed issue where slash command arguments weren't being sent properly
+- (Mac-only) API keys are now stored in macOS Keychain
+
+## 0.2.26
+
+- New /approved-tools command for managing tool permissions
+- Word-level diff display for improved code readability
+- Fuzzy matching for slash commands
+
+## 0.2.21
+
+- Fuzzy matching for /commands
