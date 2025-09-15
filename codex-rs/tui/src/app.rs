@@ -707,7 +707,7 @@ impl App<'_> {
                         widget.register_pasted_image(placeholder, path);
                     }
                 }
-                AppEvent::CodeEvent(event) => {
+                AppEvent::CodexEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
                 AppEvent::ExitRequest => {
@@ -722,7 +722,7 @@ impl App<'_> {
                     }
                 }
                 // fallthrough handled by break
-                AppEvent::CodeOp(op) => match &mut self.app_state {
+                AppEvent::CodexOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
@@ -733,7 +733,7 @@ impl App<'_> {
                     if !command.is_prompt_expanding() {
                         let _ = self
                             .app_event_tx
-                            .send(AppEvent::CodeOp(Op::AddToHistory { text: command_text.clone() }));
+                            .send(AppEvent::CodexOp(Op::AddToHistory { text: command_text.clone() }));
                     }
                     // Extract command arguments by removing the slash command from the beginning
                     // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"
@@ -785,7 +785,7 @@ impl App<'_> {
                         SlashCommand::Compact => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.clear_token_usage();
-                                self.app_event_tx.send(AppEvent::CodeOp(Op::Compact));
+                                self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
                             }
                         }
                         SlashCommand::Quit => { break 'main; }
@@ -895,7 +895,7 @@ impl App<'_> {
                             use codex_core::protocol::ApplyPatchApprovalRequestEvent;
                             use codex_core::protocol::FileChange;
 
-                            self.app_event_tx.send(AppEvent::CodeEvent(Event {
+                            self.app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: "1".to_string(),
                                 event_seq: 0,
                                 // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
@@ -965,7 +965,7 @@ impl App<'_> {
                     {
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                         let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
-                        let _ = self.app_event_tx.send(AppEvent::CodeEvent(Event {
+                        let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
                             id: "switch-cwd".to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
@@ -1268,7 +1268,7 @@ impl App<'_> {
                         ),
                         order: None,
                     };
-                    self.app_event_tx.send(AppEvent::CodeEvent(ev));
+                    self.app_event_tx.send(AppEvent::CodexEvent(ev));
 
                     // Prefill composer with the edited text
                     if let AppState::Chat { widget } = &mut self.app_state {
