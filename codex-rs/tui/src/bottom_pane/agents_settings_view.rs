@@ -239,15 +239,17 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Compute content width consistent with render: inner = width-2; content = inner-1
         let inner_w = width.saturating_sub(2);
         let content_w = inner_w.saturating_sub(1).max(10) as usize;
-        // Static rows (content lines):
-        // Name label(1) + name box(3), Mode(1), Agents label(1), Agents line(1), Orchestrator label(1), Buttons(1)
+        // Static rows (content lines) with boxed inputs (titles on the boxes):
+        // Name box(3), Mode(1), Agents label(1), Agents row(1), Orchestrator box(dynamic), Buttons(1)
         let name_box_h: u16 = 3;
-        let static_rows: u16 = 1 + name_box_h + 1 + 1 + 1 + 1 + 1;
-        // Content rows for the instruction body (wrapped) inside a box (+2 for borders)
         let orch_inner_w = (content_w as u16).saturating_sub(2);
-        let orch_rows = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
-        // Sum and add borders (2)
-        let content_rows = static_rows.saturating_add(orch_rows);
+        let orch_box_h = self.orch_field.desired_height(orch_inner_w).saturating_add(2);
+        let content_rows = name_box_h
+            .saturating_add(1) // Mode
+            .saturating_add(1) // Agents label
+            .saturating_add(1) // Agents row
+            .saturating_add(orch_box_h) // Orchestrator box
+            .saturating_add(1); // Buttons
         (content_rows + 2).clamp(8, 50)
     }
 
@@ -268,8 +270,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        // Name label then a reserved box area (drawn later)
-        lines.push(Line::from(vec![Span::styled("Name:", label(0))]));
+        // Reserve a box area for Name (we draw the bordered box with a title after)
         let name_box_h: u16 = 3;
         for _ in 0..name_box_h { lines.push(Line::from("")); }
         let mode_str = if self.read_only { "read-only" } else { "write" };
@@ -287,11 +288,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         lines.push(Line::from(Span::styled("Agents:", label(2))));
         lines.push(Line::from(spans));
 
-        // Orchestrator label (content will be drawn in reserved blank rows below)
-        lines.push(Line::from(Span::styled("Instructions to Code (orchestrator):", label(3))));
-        // Reserve as many blank lines as needed for the field height
-        let orch_h = self.orch_field.desired_height(content_rect.width);
-        for _ in 0..orch_h.max(1) { lines.push(Line::from("")); }
+        // Reserve rows for the orchestrator box (height = inner + borders)
+        let orch_inner_h_reserved = self.orch_field.desired_height(content_rect.width.saturating_sub(2));
+        let orch_box_h_reserved = orch_inner_h_reserved.saturating_add(2);
+        for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
 
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::error());
@@ -310,10 +310,13 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let content_w = content_rect.width;
         let mut y = content_rect.y;
 
-        // Row 0: Name label; draw a box starting next line (3 rows tall)
-        y = y.saturating_add(1);
+        // Row 0: Name box with title; height fixed (3)
         let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
-        let name_block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(crate::colors::border()));
+        let name_border = if self.field == 0 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
+        let name_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(name_border)
+            .title(Line::from("Name"));
         let name_inner = name_block.inner(name_box_rect);
         name_block.render(name_box_rect, buf);
         self.name_field.render(name_inner, buf, self.field == 0);
@@ -326,13 +329,15 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         y = y.saturating_add(1);
         // Agents list row
         y = y.saturating_add(1);
-        // Orchestrator label row
-        y = y.saturating_add(1);
-        // Orchestrator box: height = inner content + 2 borders
+        // Orchestrator box: height = inner content + 2 borders, with title as label
         let orch_inner_h = self.orch_field.desired_height(content_w.saturating_sub(2));
         let orch_box_h = orch_inner_h.saturating_add(2);
         let orch_box_rect = Rect { x: content_rect.x, y, width: content_w, height: orch_box_h };
-        let orch_block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(crate::colors::border()));
+        let orch_border = if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
+        let orch_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(orch_border)
+            .title(Line::from("Command (sent to orchestrator)"));
         let orch_inner = orch_block.inner(orch_box_rect);
         orch_block.render(orch_box_rect, buf);
         self.orch_field.render(orch_inner, buf, self.field == 3);
