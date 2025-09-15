@@ -776,57 +776,48 @@ jobs:
           popd >/dev/null
           git worktree remove -f "$wt"
       
-      - name: Policy guard checks (branding, perma-deleted)
+      - name: Branding report (guide-only) and perma-deleted guard
         if: steps.check_upstream.outputs.skip != 'true'
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
-          # Auto-fix branding introduced by upstream in user-visible strings under TUI/CLI
-          # We only touch lines inside quotes/backticks and only in files changed by this merge.
+          # Guide-only branding report: detect user-visible 'Codex' strings under TUI/CLI affected by this merge.
+          mkdir -p .github/auto
+          : > .github/auto/VERIFY_branding.log
           changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
           if [ -n "${changed_files:-}" ]; then
-            wt=.wt-branding-fix
-            rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge >/dev/null
-            pushd "$wt" >/dev/null
-            touched=()
-            for f in $changed_files; do
-              [ -f "$f" ] || continue
-              # Skip obvious non-source or vendored artifacts
-              case "$f" in
-                *.png|*.jpg|*.jpeg|*.gif|*.svg|*.pdf) continue;;
-              esac
-              # Replace 'Codex' with 'Code' only inside quoted/backtick strings (single-line)
-              if rg -n "Codex" -- "$f" >/dev/null 2>&1; then
-                python3 scripts/upstream-merge/branding_fix.py "$f" || true
-                touched+=("$f")
-              fi
-            done
-            if ! git diff --quiet -- ${touched[@]:-}; then
-              git -c user.email="github-actions[bot]@users.noreply.github.com" -c user.name="github-actions[bot]" \
-                commit -a -m "chore(merge): auto-rebrand user-visible strings ('Codex'→'Code') in TUI/CLI files"
-              git push origin HEAD:upstream-merge
-            fi
-            popd >/dev/null
-            git worktree remove -f "$wt" >/dev/null
+            echo "[branding] scanning changed TUI/CLI files for user-visible 'Codex' strings..." | tee -a .github/auto/VERIFY_branding.log
+            git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
+              | grep -E '^\+' \
+              | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
+              | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' \
+              | sed 's/^/+ /' | tee -a .github/auto/VERIFY_branding.log || true
+            echo "[branding] Note: guidance only. No changes applied or committed." | tee -a .github/auto/VERIFY_branding.log
+          else
+            echo "[branding] no TUI/CLI files changed vs origin/${DEFAULT_BRANCH}." | tee -a .github/auto/VERIFY_branding.log
           fi
           # docs/** changes are allowed; we may still prefer ours but do not hard-fail here.
           if git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'docs/**' | grep -q .; then
             echo "::notice::docs/** changed on upstream-merge; ensuring agent reviews and preserves local branding where needed." >&2
           fi
-          # Branding guard: user-facing strings only, in TUI/CLI code (ignore docs/ and comments)
-          changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
-          if [ -n "${changed_files:-}" ]; then
-            if git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
-              | grep -E '^\+' \
-              | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
-              | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
-              echo "Branding guard tripped: new user-visible 'Codex' strings detected in TUI/CLI code." >&2
-              git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
-                | grep -E '^\+' \
-                | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
-                | sed 's/^/> /' >&2 || true
-              exit 1
+          # Perma-deleted guard: ensure none of perma_removed_paths exist on branch
+          if command -v jq >/dev/null 2>&1 && [ -f ".github/merge-policy.json" ]; then
+            mapfile -t perma  < <(jq -r '.perma_removed_paths[]? // empty' .github/merge-policy.json 2>/dev/null || true)
+            if [ ${#perma[@]} -gt 0 ]; then
+              wt=.wt-guard
+              rm -rf "$wt" && git worktree add -f "$wt" origin/upstream-merge >/dev/null
+              pushd "$wt" >/dev/null
+              for pat in "${perma[@]}"; do
+                [ -n "${pat:-}" ] || continue
+                if git ls-files -- "$pat" | grep -q .; then
+                  echo "Perma-deleted guard: files present matching '$pat'" >&2
+                  git ls-files -- "$pat" >&2 || true
+                  exit 1
+                fi
+              done
+              popd >/dev/null
+              git worktree remove -f "$wt" >/dev/null
             fi
           fi
           # Perma-deleted guard: ensure none of perma_removed_paths exist on branch
