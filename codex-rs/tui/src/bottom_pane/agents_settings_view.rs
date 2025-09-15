@@ -255,6 +255,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             .title_alignment(Alignment::Center);
         let inner = block.inner(area);
         block.render(area, buf);
+        // Compute the content rect once and reuse for layout and reserved lines
+        let content_rect = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height };
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
@@ -280,8 +282,6 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Orchestrator label (content will be drawn in reserved blank rows below)
         lines.push(Line::from(Span::styled("Instructions to Code (orchestrator):", label(3))));
         // Reserve as many blank lines as needed for the field height
-        let inner = Block::default().inner(area);
-        let content_rect = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height };
         let orch_h = self.orch_field.desired_height(content_rect.width);
         for _ in 0..orch_h.max(1) { lines.push(Line::from("")); }
 
@@ -296,7 +296,6 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
-        let content_rect = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(1), height: inner.height };
         paragraph.render(content_rect, buf);
 
         // Draw text fields over the paragraph using the same content rect
