@@ -225,7 +225,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             // Delegate input to focused text fields (handles Shift‑chars, Enter/newline, undo, etc.)
             ev @ KeyEvent { .. } if self.field == 0 => { let _ = self.name_field.handle_key(ev); }
             ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.save(); }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.save(); self.is_complete = true; }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.is_complete = true; }
             _ => {}
         }
