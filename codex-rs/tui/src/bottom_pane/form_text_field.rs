@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::StatefulWidgetRef};
+use std::cell::RefCell;
 
 use super::textarea::{TextArea, TextAreaState};
 
@@ -20,17 +21,17 @@ pub enum InputFilter {
 #[derive(Debug)]
 pub struct FormTextField {
     textarea: TextArea,
-    state: TextAreaState,
+    state: RefCell<TextAreaState>,
     single_line: bool,
     filter: InputFilter,
 }
 
 impl FormTextField {
     pub fn new_single_line() -> Self {
-        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: true, filter: InputFilter::None }
+        Self { textarea: TextArea::new(), state: RefCell::new(TextAreaState::default()), single_line: true, filter: InputFilter::None }
     }
     pub fn new_multi_line() -> Self {
-        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: false, filter: InputFilter::None }
+        Self { textarea: TextArea::new(), state: RefCell::new(TextAreaState::default()), single_line: false, filter: InputFilter::None }
     }
 
     pub fn set_filter(&mut self, filter: InputFilter) { self.filter = filter; }
@@ -57,6 +58,9 @@ impl FormTextField {
     // Intentionally no "move_cursor_to_end" to avoid unused-warn; add if needed.
 
     pub fn text(&self) -> &str { self.textarea.text() }
+
+    pub fn cursor_is_at_start(&self) -> bool { self.textarea.cursor() == 0 }
+    pub fn cursor_is_at_end(&self) -> bool { self.textarea.cursor() == self.textarea.text().len() }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         // For single-line inputs, swallow Enter (treat as no-op here; the form
@@ -123,13 +127,15 @@ impl FormTextField {
     /// hidden while overlays are active).
     pub fn render(&self, area: Rect, buf: &mut Buffer, focused: bool) {
         // Paint text using the TextArea renderer for exact wrapping
-        let mut state = self.state;
+        let mut state = self.state.borrow().clone();
         StatefulWidgetRef::render_ref(&(&self.textarea), area, buf, &mut state);
+        // Persist any scroll changes made during rendering
+        *self.state.borrow_mut() = state;
 
         // Draw a pseudo-caret when focused. Place it one cell ahead of the
         // cursor to avoid visually overwriting the last typed glyph.
         if focused {
-            if let Some((cx, cy)) = self.textarea.cursor_pos_with_state(area, &state) {
+            if let Some((cx, cy)) = self.textarea.cursor_pos_with_state(area, &self.state.borrow()) {
                 let mut caret_x = cx.saturating_add(1);
                 let max_x = area.x.saturating_add(area.width.saturating_sub(1));
                 if caret_x > max_x { caret_x = max_x; }
