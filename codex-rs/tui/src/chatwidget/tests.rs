@@ -779,10 +779,10 @@ fn apply_patch_approval_sends_op_with_submission_id() {
     // Approve via key press 'y'
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
 
-    // Expect a CodeOp with PatchApproval carrying the submission id, not call id
+    // Expect a CodexOp with PatchApproval carrying the submission id, not call id
     let mut found = false;
     while let Ok(app_ev) = rx.try_recv() {
-        if let AppEvent::CodeOp(Op::PatchApproval { id, decision }) = app_ev {
+        if let AppEvent::CodexOp(Op::PatchApproval { id, decision }) = app_ev {
             assert_eq!(id, "sub-123");
             assert!(matches!(
                 decision,
@@ -815,16 +815,16 @@ fn apply_patch_full_flow_integration_like() {
         }),
     });
 
-    // 2) User approves via 'y' and App receives a CodeOp
+    // 2) User approves via 'y' and App receives a CodexOp
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
     let mut maybe_op: Option<Op> = None;
     while let Ok(app_ev) = rx.try_recv() {
-        if let AppEvent::CodeOp(op) = app_ev {
+        if let AppEvent::CodexOp(op) = app_ev {
             maybe_op = Some(op);
             break;
         }
     }
-    let op = maybe_op.expect("expected CodeOp after key press");
+    let op = maybe_op.expect("expected CodexOp after key press");
 
     // 3) App forwards to widget.submit_op, which pushes onto codex_op_tx
     chat.submit_op(op);
