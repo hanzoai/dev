@@ -380,6 +380,26 @@ Currently, customers whose accounts are set to use Zero Data Retention (ZDR) mus
 disable_response_storage = true
 ```
 
+### Managing MCP servers from CLI (experimental)
+
+You can also manage these entries from the CLI:
+
+```shell
+# Add a server (env can be repeated; `--` separates the launcher command)
+codex mcp add docs -- docs-server --port 4000
+
+# List configured servers (pretty table or JSON)
+codex mcp list
+codex mcp list --json
+
+# Show one server (table or JSON)
+codex mcp get docs
+codex mcp get docs --json
+
+# Remove a server
+codex mcp remove docs
+```
+
 ## shell_environment_policy
 
 Codex spawns subprocesses (e.g. when executing a `local_shell` tool-call suggested by the assistant). By default it now passes **your full environment** to those subprocesses. You can tune this behavior via the **`shell_environment_policy`** block in `config.toml`:
