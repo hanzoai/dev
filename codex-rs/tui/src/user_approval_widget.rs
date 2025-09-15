@@ -286,7 +286,7 @@ impl UserApprovalWidget<'_> {
             },
         };
 
-        self.app_event_tx.send(AppEvent::CodexOp(op));
+        self.app_event_tx.send(AppEvent::CodeOp(op));
         self.done = true;
     }
 
@@ -392,7 +392,7 @@ mod tests {
         let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
-            AppEvent::CodexOp(Op::ExecApproval {
+            AppEvent::CodeOp(Op::ExecApproval {
                 decision: ReviewDecision::Approved,
                 ..
             })
@@ -414,7 +414,7 @@ mod tests {
         let events: Vec<AppEvent> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(
             e,
-            AppEvent::CodexOp(Op::ExecApproval {
+            AppEvent::CodeOp(Op::ExecApproval {
                 decision: ReviewDecision::Approved,
                 ..
             })

@@ -722,7 +722,7 @@ impl App<'_> {
                     }
                 }
                 // fallthrough handled by break
-                AppEvent::CodexOp(op) => match &mut self.app_state {
+                AppEvent::CodeOp(op) => match &mut self.app_state {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
@@ -733,7 +733,7 @@ impl App<'_> {
                     if !command.is_prompt_expanding() {
                         let _ = self
                             .app_event_tx
-                            .send(AppEvent::CodexOp(Op::AddToHistory { text: command_text.clone() }));
+                            .send(AppEvent::CodeOp(Op::AddToHistory { text: command_text.clone() }));
                     }
                     // Extract command arguments by removing the slash command from the beginning
                     // e.g., "/browser status" -> "status", "/chrome 9222" -> "9222"

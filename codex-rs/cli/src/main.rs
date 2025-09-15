@@ -225,7 +225,7 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             codex_mcp_server::run_main(codex_linux_sandbox_exe, root_config_overrides.clone())
                 .await?;
         }
-        Some(Subcommand::Resume(ResumeCommand { session_id, last })) => {
+        Some(Subcommand::Resume(ResumeCommand { session_id, last: _last })) => {
             // Start with the parsed interactive CLI so resume shares the same
             // configuration surface area as `codex` without additional flags.
             let _resume_session_id = session_id;
