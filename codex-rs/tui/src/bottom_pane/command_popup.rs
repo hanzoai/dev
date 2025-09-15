@@ -19,6 +19,8 @@ pub(crate) enum CommandItem {
     Builtin(SlashCommand),
     // Index into `prompts`
     UserPrompt(usize),
+    // Index into `subagents`
+    Subagent(usize),
 }
 
 pub(crate) struct CommandPopup {
@@ -26,6 +28,7 @@ pub(crate) struct CommandPopup {
     builtins: Vec<(&'static str, SlashCommand)>,
     prompts: Vec<CustomPrompt>,
     state: ScrollState,
+    subagents: Vec<String>,
 }
 
 impl CommandPopup {
@@ -45,6 +48,7 @@ impl CommandPopup {
             builtins: commands,
             prompts: Vec::new(),
             state: ScrollState::new(),
+            subagents: Vec::new(),
         }
     }
 
@@ -66,6 +70,21 @@ impl CommandPopup {
 
     pub(crate) fn prompt_content(&self, idx: usize) -> Option<&str> {
         self.prompts.get(idx).map(|p| p.content.as_str())
+    }
+
+    pub(crate) fn subagent_name(&self, idx: usize) -> Option<&str> {
+        self.subagents.get(idx).map(|s| s.as_str())
+    }
+
+    /// Supply custom subagent command names (e.g., ["demo", "ship"]) to include in the
+    /// slash popup. Built-ins should already be excluded by the caller.
+    pub(crate) fn set_subagent_commands(&mut self, mut names: Vec<String>) {
+        // Normalize: drop duplicates, keep stable order
+        let mut seen = HashSet::new();
+        names.retain(|n| seen.insert(n.to_ascii_lowercase()));
+        self.subagents = names;
+        // Clamp selection relative to new item count
+        self.state.clamp_selection(self.filtered_items().len());
     }
 
     /// Update the filter string based on the current composer text. The text
@@ -116,6 +135,10 @@ impl CommandPopup {
             for (_, cmd) in self.builtins.iter() {
                 out.push((CommandItem::Builtin(*cmd), None, 0));
             }
+            // Then subagent commands
+            for (idx, _) in self.subagents.iter().enumerate() {
+                out.push((CommandItem::Subagent(idx), None, 0));
+            }
             // Then prompts, already sorted by name.
             for idx in 0..self.prompts.len() {
                 out.push((CommandItem::UserPrompt(idx), None, 0));
@@ -126,6 +149,11 @@ impl CommandPopup {
         for (_, cmd) in self.builtins.iter() {
             if let Some((indices, score)) = fuzzy_match(cmd.command(), filter) {
                 out.push((CommandItem::Builtin(*cmd), Some(indices), score));
+            }
+        }
+        for (idx, name) in self.subagents.iter().enumerate() {
+            if let Some((indices, score)) = fuzzy_match(name, filter) {
+                out.push((CommandItem::Subagent(idx), Some(indices), score));
             }
         }
         for (idx, p) in self.prompts.iter().enumerate() {
@@ -139,10 +167,12 @@ impl CommandPopup {
                 let an = match a.0 {
                     CommandItem::Builtin(c) => c.command(),
                     CommandItem::UserPrompt(i) => &self.prompts[i].name,
+                    CommandItem::Subagent(i) => &self.subagents[i],
                 };
                 let bn = match b.0 {
                     CommandItem::Builtin(c) => c.command(),
                     CommandItem::UserPrompt(i) => &self.prompts[i].name,
+                    CommandItem::Subagent(i) => &self.subagents[i],
                 };
                 an.cmp(bn)
             })
@@ -205,6 +235,10 @@ impl WidgetRef for CommandPopup {
                         CommandItem::UserPrompt(i) => (
                             format!("/{}", self.prompts[i].name),
                             None,
+                        ),
+                        CommandItem::Subagent(i) => (
+                            format!("/{}", self.subagents[i]),
+                            Some("custom subagent".to_string()),
                         ),
                     };
                     GenericDisplayRow {
