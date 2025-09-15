@@ -174,7 +174,7 @@ impl BottomPane<'_> {
             // send an interrupt even while the composer has focus.
             if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
                 // Send Op::Interrupt directly when a task is running so Esc can cancel.
-                self.app_event_tx.send(AppEvent::CodeOp(Op::Interrupt));
+                self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
                 self.request_redraw();
                 return InputResult::None;
             }

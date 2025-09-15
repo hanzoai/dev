@@ -78,7 +78,7 @@ impl StatusIndicatorWidget {
     }
 
     pub(crate) fn interrupt(&self) {
-        self.app_event_tx.send(AppEvent::CodeOp(Op::Interrupt));
+        self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
     }
 
     /// Update the animated header label (left of the brackets).

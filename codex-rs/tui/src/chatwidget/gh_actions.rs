@@ -157,7 +157,7 @@ fn surface_failure(tx: &AppEventSender, owner: &str, repo: &str, branch: &str, s
     } else {
         format!("❌ GitHub Actions failed for {owner}/{repo}@{short} on {branch}: {conclusion} — {url}")
     };
-    let _ = tx.send(AppEvent::CodeEvent(Event {
+    let _ = tx.send(AppEvent::CodexEvent(Event {
         id: uuid::Uuid::new_v4().to_string(),
         event_seq: 0,
         msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
