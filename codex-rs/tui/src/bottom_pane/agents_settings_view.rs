@@ -219,6 +219,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
+            // Left/Right between Save and Cancel
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => { self.field = 4; }
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 4 => { self.field = 5; }
             // Delegate input to focused text fields (handles Shift‑chars, Enter/newline, undo, etc.)
             ev @ KeyEvent { .. } if self.field == 0 => { let _ = self.name_field.handle_key(ev); }
             ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
@@ -313,10 +316,12 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::error());
-        lines.push(Line::from(vec![
-            Span::styled("[ Save ]  ", save_style),
-            Span::styled("[ Cancel ]", cancel_style),
-        ]));
+        // Style labels without trailing spaces to avoid highlighting the gap between buttons
+        let mut btn_spans: Vec<Span> = Vec::new();
+        btn_spans.push(Span::styled("[ Save ]", save_style));
+        btn_spans.push(Span::raw("  "));
+        btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
+        lines.push(Line::from(btn_spans));
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -334,7 +339,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let name_block = Block::default()
             .borders(Borders::ALL)
             .border_style(name_border)
-            .title(Line::from("Name"));
+            .title(Line::from(" Name "));
         let name_inner = name_block.inner(name_box_rect);
         let name_padded = name_inner.inner(Margin::new(1, 0));
         name_block.render(name_box_rect, buf);
@@ -354,7 +359,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let orch_block = Block::default()
             .borders(Borders::ALL)
             .border_style(orch_border)
-            .title(Line::from("Command"));
+            .title(Line::from(" Command "));
         let orch_inner = orch_block.inner(orch_box_rect);
         let orch_padded = orch_inner.inner(Margin::new(1, 0));
         orch_block.render(orch_box_rect, buf);
