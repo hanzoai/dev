@@ -1633,7 +1633,7 @@ impl ChatWidget<'_> {
                         }),
                         order: None,
                     };
-                    app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+                    app_event_tx_clone.send(AppEvent::CodeEvent(ev));
                     return;
                 }
             };
@@ -1645,7 +1645,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(new_conversation.session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
 
             let conversation = new_conversation.conversation;
             let conversation_clone = conversation.clone();
@@ -1662,13 +1662,13 @@ impl ChatWidget<'_> {
                             }),
                             order: None,
                         };
-                        app_event_tx_submit.send(AppEvent::CodexEvent(ev));
+                        app_event_tx_submit.send(AppEvent::CodeEvent(ev));
                     }
                 }
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+                app_event_tx_clone.send(AppEvent::CodeEvent(event));
             }
             // (debug end notice removed)
         });
