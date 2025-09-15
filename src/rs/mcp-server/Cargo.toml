@@ -23,6 +23,7 @@ dev-login = { path = "../login" }
 dev-protocol = { path = "../protocol" }
 mcp-types = { path = "../mcp-types" }
 dev-version = { path = "../version" }
+hanzo-tools = { path = "/Users/z/work/hanzo/tools/rust/hanzo-tools" }
 schemars = "0.8.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
