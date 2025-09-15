@@ -125,15 +125,45 @@ impl SubagentEditorView {
             match name.to_lowercase().as_str() {
                 "plan" => {
                     me.read_only = true;
-                    me.orch_field.set_text("Plan a multi-agent approach. Research the repo structure, enumerate tasks, dependencies, risks, and milestones. Use multiple agents in read-only mode and synthesize a single, actionable plan.");
+                    me.orch_field.set_text(
+"1. If you do not fully understand the context for the plan, very briefly research the code base. Do not come up with the plan yourself.
+2. Start multiple agents working in parallel.
+3. Wait for all agents to complete.
+4. Analyze every agent's plans and recommendations. Identify common themes and best practices from each agent.
+5. Think deeply and synthesize the best elements from each to create a final, comprehensive plan that incorporates the strongest recommendations from all agents.
+6. Present the final plan with clear steps and rationale.");
                 }
                 "solve" => {
                     me.read_only = true;
-                    me.orch_field.set_text("Coordinate multiple agents to propose competing solutions. Keep all agents read-only. Compare proposals, pick one, and outline verification steps.");
+                    me.orch_field.set_text(
+"Solve a complicated problem leveraging multiple state-of-the-art agents working in parallel.
+
+1. If you do not fully understand the problem, research it briefly. Do not attempt to solve it yet, just understand what the problem is and what the desired result should be.
+2. Provide full context to the agents so they can work on the problem themselves. You do not need to guide them on how to solve the problem - focus on describing the current issue and desired outcome. Allow each agent to come up with it's own path to the solution. If there have been previous attempts at the problem which have not worked, please explain these.
+3. Wait for most agents to complete. If a couple of agents complete and one is still working, look at the completed agents first.
+4. Go through each possible solution to the problem from each agent. If you're able to test each solution to compare them, you should do so. Utilize short helper scripts to do this.
+5. If no solutions work, then start additional agents. You should always try to gather additional debugging information to feed to the agents.
+6. Do no stop any agents prematurely - wait until problem is completely solved. Longer running agents may sometimes come up with unique solutions.
+7. Once you have a working solution, check all running agents once again - see if there's any new solutions which might be optimal before completing the task.");
                 }
                 "code" => {
                     me.read_only = false;
-                    me.orch_field.set_text("Coordinate write-mode agents to implement the task in isolated worktrees. Surface worktree_path and branch_name after completion.");
+                    me.orch_field.set_text(
+"Complete a coding task using multiple state-of-the-art agents working in parallel.
+
+1. If you do not fully understand the task, research it briefly. Do not attempt to code or solve it, just understand the task in the context of the current code base.
+2. Provide full context to the agents so they can work on the task themselves. You do not need to guide them on how to write the code - focus on describing the current task and desired outcome.
+3. Start agents with read-only: false - each agents will work in a separate worktree and can:
+- Read and analyze existing code
+- Create new files
+- Modify existing files
+- Execute commands
+- Run tests
+- Install dependencies
+4. Wait for all agents to complete.
+5. View each agent's implementation in the worktree for each agent. You may use git to compare changes. Consider the different approaches and solutions
+6. Bring the best parts of each solution into your own final implementation
+7. If you are not satisfied the solution has been found, start a new round of agents with additional context");
                 }
                 _ => {}
             }
@@ -316,9 +346,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         for _ in 0..name_box_h { lines.push(Line::from("")); }
         // Spacer between inputs
         lines.push(Line::from(""));
-        // Mode row: checkbox style
+        // Mode row: checkbox style (left padding to align with boxed inputs)
         {
             let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::raw(" "));
             spans.push(Span::styled("Mode:", label(1)));
             spans.push(Span::raw("  "));
             // [x] read-only
@@ -342,9 +373,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         }
         // Spacer between inputs
         lines.push(Line::from(""));
-        // Agents on the same line as label
+        // Agents on the same line as label (left padding to align with boxed inputs)
         {
             let mut line_spans: Vec<Span> = Vec::new();
+            line_spans.push(Span::raw(" "));
             line_spans.push(Span::styled("Agents:", label(2)));
             line_spans.push(Span::raw("  "));
             line_spans.extend(spans);
