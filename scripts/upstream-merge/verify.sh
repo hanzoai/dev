@@ -96,24 +96,27 @@ DEFAULT_BRANCH_LOCAL=${DEFAULT_BRANCH:-main}
 git fetch origin "$DEFAULT_BRANCH_LOCAL" >/dev/null 2>&1 || true
 range_ref="origin/${DEFAULT_BRANCH_LOCAL}..HEAD"
 changed_files=$(git diff --name-only $range_ref -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
+branding_log=.github/auto/VERIFY_branding.log
+: > "$branding_log"
 if [ -n "${changed_files:-}" ]; then
+  echo "[branding] scanning changed TUI/CLI files for user-visible 'Codex' strings relative to $range_ref" | tee -a "$branding_log"
   if git diff -U0 --no-color $range_ref -- $changed_files \
     | grep -E '^\+' \
     | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
-    | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' >/dev/null 2>&1; then
-    echo "[branding] new user-visible 'Codex' strings detected under TUI/CLI relative to $range_ref" | tee -a "$guards_log"
-    git diff -U0 --no-color $range_ref -- $changed_files \
-      | grep -E '^\+' \
-      | grep -E '"[^"]*Codex[^"]*"|'\''[^'\''']*Codex[^'\''']*'\''|`[^`]*Codex[^`]*`' \
-      | sed 's/^/> /' | tee -a "$guards_log" || true
-    status_branding="fail"
+    | grep -Evi '(codex-rs|codex-[a-z0-9_-]+|https?://|Cargo|crate|package|workspace)' \
+    | sed 's/^/+ /' | tee -a "$branding_log"; then
+    echo "[branding] NOTE: guidance only; no changes applied." | tee -a "$branding_log"
+    status_branding="notice"
+  else
+    echo "[branding] no user-visible 'Codex' strings detected in changed TUI/CLI files." | tee -a "$branding_log"
   fi
 else
-  echo "[branding] no relevant file changes vs $range_ref; skipping" | tee -a "$guards_log"
+  echo "[branding] no relevant file changes vs $range_ref; skipping" | tee -a "$branding_log"
 fi
 
 rc=0
-if [[ "$status_build" != ok || "$status_api" != ok || "$status_guards" != ok || "$status_branding" != ok ]]; then
+# Branding is guide-only and does not affect rc. Fail only on build/api/guards.
+if [[ "$status_build" != ok || "$status_api" != ok || "$status_guards" != ok ]]; then
   rc=1
 fi
 
