@@ -132,16 +132,24 @@ impl FormTextField {
         // Persist any scroll changes made during rendering
         *self.state.borrow_mut() = state;
 
-        // Draw a pseudo-caret when focused. Place it one cell ahead of the
-        // cursor to avoid visually overwriting the last typed glyph.
+        // Draw a pseudo-caret when focused without hiding the underlying glyph.
+        // Invert colors on the cursor cell so the character remains visible.
         if focused {
-            if let Some((cx, cy)) = self.textarea.cursor_pos_with_state(area, &self.state.borrow()) {
-                let mut caret_x = cx.saturating_add(1);
+            if let Some((cx, cy)) = self
+                .textarea
+                .cursor_pos_with_state(area, &self.state.borrow())
+            {
                 let max_x = area.x.saturating_add(area.width.saturating_sub(1));
-                if caret_x > max_x { caret_x = max_x; }
-                if cy >= area.y && cy < area.y + area.height && caret_x >= area.x && caret_x < area.x + area.width {
-                    let caret_style = Style::default().fg(crate::colors::info());
-                    buf.set_string(caret_x, cy, "▏", caret_style);
+                let x = cx.min(max_x);
+                if cy >= area.y
+                    && cy < area.y + area.height
+                    && x >= area.x
+                    && x < area.x + area.width
+                {
+                    let style = Style::default()
+                        .bg(crate::colors::text())
+                        .fg(crate::colors::background());
+                    buf[(x, cy)].set_style(style);
                 }
             }
         }

@@ -192,7 +192,11 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let show_delete = !self.is_new && !matches!(self.name_field.text().to_ascii_lowercase().as_str(), "plan" | "solve" | "code");
         let last_btn_idx = if show_delete { 6 } else { 5 };
         match key_event {
-            KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
+            KeyEvent { code: KeyCode::Esc, .. } => {
+                // Return to Agents list on first Esc
+                self.is_complete = true;
+                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+            }
             KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(last_btn_idx); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
             KeyEvent { code: KeyCode::Up, modifiers, .. } => {
@@ -234,7 +238,16 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => { self.save(); self.is_complete = true; }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => { self.confirm_delete = true; }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => { self.is_complete = true; }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => {
+                // Cancel → return to Agents list
+                self.is_complete = true;
+                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && !show_delete && !self.confirm_delete => {
+                // Cancel in 2-button layout
+                self.is_complete = true;
+                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+            }
             // Confirm phase: 4 = Confirm, 5 = Back (when confirm_delete is true)
             KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
                 // Delete from disk and in-memory, then close
