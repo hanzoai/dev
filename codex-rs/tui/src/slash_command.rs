@@ -109,15 +109,9 @@ impl SlashCommand {
         // Note: We pass None for agents here as the TUI doesn't have access to the session config
         // The actual agents will be determined when the agent tool is invoked
         match self {
-            SlashCommand::Plan => Some(codex_core::slash_commands::format_plan_command(
-                args, None, None,
-            )),
-            SlashCommand::Solve => Some(codex_core::slash_commands::format_solve_command(
-                args, None, None,
-            )),
-            SlashCommand::Code => Some(codex_core::slash_commands::format_code_command(
-                args, None, None,
-            )),
+            SlashCommand::Plan => Some(codex_core::slash_commands::format_plan_command(args, None, None)),
+            SlashCommand::Solve => Some(codex_core::slash_commands::format_solve_command(args, None, None)),
+            SlashCommand::Code => Some(codex_core::slash_commands::format_code_command(args, None, None)),
             _ => None,
         }
     }
