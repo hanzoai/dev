@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use dev_protocol::mcp_protocol::AddConversationListenerParams;
-use dev_protocol::mcp_protocol::AddConversationSubscriptionResponse;
-use dev_protocol::mcp_protocol::InputItem;
-use dev_protocol::mcp_protocol::NewConversationParams;
-use dev_protocol::mcp_protocol::NewConversationResponse;
-use dev_protocol::mcp_protocol::SendUserMessageParams;
-use dev_protocol::mcp_protocol::SendUserMessageResponse;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::InputItem;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::NewConversationResponse;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserMessageResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::create_final_assistant_message_sse_response;
 use mcp_test_support::create_mock_chat_completions_server;
@@ -29,11 +29,11 @@ async fn test_conversation_create_and_send_message_ok() {
     let server = create_mock_chat_completions_server(responses).await;
 
     // Temporary Codex home with config pointing at the mock server.
-    let dev_home = TempDir::new().expect("create temp dir");
-    create_config_toml(dev_home.path(), &server.uri()).expect("write config.toml");
+    let codex_home = TempDir::new().expect("create temp dir");
+    create_config_toml(codex_home.path(), &server.uri()).expect("write config.toml");
 
     // Start MCP server process and initialize.
-    let mut mcp = McpProcess::new(dev_home.path())
+    let mut mcp = McpProcess::new(codex_home.path())
         .await
         .expect("spawn mcp process");
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize())
@@ -60,6 +60,7 @@ async fn test_conversation_create_and_send_message_ok() {
         conversation_id,
         model,
         reasoning_effort: _,
+        rollout_path: _,
     } = to_response::<NewConversationResponse>(new_conv_resp)
         .expect("deserialize newConversation response");
     assert_eq!(model, "o3");
@@ -132,8 +133,8 @@ async fn test_conversation_create_and_send_message_ok() {
 }
 
 // Helper to create a config.toml pointing at the mock model server.
-fn create_config_toml(dev_home: &Path, server_uri: &str) -> std::io::Result<()> {
-    let config_toml = dev_home.join("config.toml");
+fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
         format!(

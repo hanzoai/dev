@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use dev_core::models::ContentItem;
-use dev_core::ModelClient;
-use dev_core::ModelProviderInfo;
-use dev_core::Prompt;
-use dev_core::ResponseEvent;
-use dev_core::ResponseItem;
-use dev_core::WireApi;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_core::ContentItem;
+use codex_core::ModelClient;
+use codex_core::ModelProviderInfo;
+use codex_core::Prompt;
+use codex_core::ResponseEvent;
+use codex_core::ResponseItem;
+use codex_core::WireApi;
+use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_protocol::mcp_protocol::ConversationId;
 use core_test_support::load_default_config_for_test;
 use futures::StreamExt;
 use tempfile::TempDir;
-use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -51,11 +51,11 @@ async fn run_stream(sse_body: &str) -> Vec<ResponseEvent> {
         requires_openai_auth: false,
     };
 
-    let dev_home = match TempDir::new() {
+    let codex_home = match TempDir::new() {
         Ok(dir) => dir,
         Err(e) => panic!("failed to create TempDir: {e}"),
     };
-    let mut config = load_default_config_for_test(&dev_home);
+    let mut config = load_default_config_for_test(&codex_home);
     config.model_provider_id = provider.name.clone();
     config.model_provider = provider.clone();
     config.show_raw_agent_reasoning = true;
@@ -69,7 +69,7 @@ async fn run_stream(sse_body: &str) -> Vec<ResponseEvent> {
         provider,
         effort,
         summary,
-        Uuid::new_v4(),
+        ConversationId::new(),
     );
 
     let mut prompt = Prompt::default();
@@ -119,8 +119,8 @@ fn assert_reasoning(item: &ResponseItem, expected: &str) {
         let mut combined = String::new();
         for part in parts {
             match part {
-                dev_core::ReasoningItemContent::ReasoningText { text }
-                | dev_core::ReasoningItemContent::Text { text } => combined.push_str(text),
+                codex_core::ReasoningItemContent::ReasoningText { text }
+                | codex_core::ReasoningItemContent::Text { text } => combined.push_str(text),
             }
         }
         assert_eq!(combined, expected);

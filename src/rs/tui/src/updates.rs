@@ -1,32 +1,38 @@
 #![cfg(any(not(debug_assertions), test))]
 
 use chrono::DateTime;
+use chrono::Duration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
 
-use dev_core::config::Config;
-use dev_core::default_client::create_client;
+use codex_core::config::Config;
+use codex_core::default_client::create_client;
+
+use crate::version::CODEX_CLI_VERSION;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
-    let originator = config.responses_originator_header.clone();
 
-    // Always refresh the cached latest version in the background so TUI startup
-    // isn’t blocked by a network call. The UI reads the previously cached
-    // value (if any) for this run; the next run shows the banner if needed.
-    tokio::spawn(async move {
-        check_for_update(&version_file, &originator)
-            .await
-            .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
-    });
+    if match &info {
+        None => true,
+        Some(info) => info.last_checked_at < Utc::now() - Duration::hours(20),
+    } {
+        // Refresh the cached latest version in the background so TUI startup
+        // isn’t blocked by a network call. The UI reads the previously cached
+        // value (if any) for this run; the next run shows the banner if needed.
+        tokio::spawn(async move {
+            check_for_update(&version_file)
+                .await
+                .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
+        });
+    }
 
     info.and_then(|info| {
-        let current_version = dev_version::version();
-        if is_newer(&info.latest_version, current_version).unwrap_or(false) {
+        if is_newer(&info.latest_version, CODEX_CLI_VERSION).unwrap_or(false) {
             Some(info.latest_version)
         } else {
             None
@@ -47,10 +53,10 @@ struct ReleaseInfo {
 }
 
 const VERSION_FILENAME: &str = "version.json";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/just-every/code/releases/latest";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
 
 fn version_filepath(config: &Config) -> PathBuf {
-    config.dev_home.join(VERSION_FILENAME)
+    config.codex_home.join(VERSION_FILENAME)
 }
 
 fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
@@ -58,10 +64,10 @@ fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
     Ok(serde_json::from_str(&contents)?)
 }
 
-async fn check_for_update(version_file: &Path, originator: &str) -> anyhow::Result<()> {
+async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
     let ReleaseInfo {
         tag_name: latest_tag_name,
-    } = create_client(originator)
+    } = create_client()
         .get(LATEST_RELEASE_URL)
         .send()
         .await?
@@ -69,27 +75,11 @@ async fn check_for_update(version_file: &Path, originator: &str) -> anyhow::Resu
         .json::<ReleaseInfo>()
         .await?;
 
-    // Support both tagging schemes:
-    // - "rust-vX.Y.Z" (legacy Rust-release workflow)
-    // - "vX.Y.Z" (general release workflow)
-    let latest_version = if let Some(v) = latest_tag_name.strip_prefix("rust-v") {
-        v.to_string()
-    } else if let Some(v) = latest_tag_name.strip_prefix('v') {
-        v.to_string()
-    } else {
-        // As a last resort, accept the raw tag if it looks like semver
-        // so we can recover from unexpected tag formats.
-        match parse_version(&latest_tag_name) {
-            Some(_) => latest_tag_name.clone(),
-            None => anyhow::bail!(
-                "Failed to parse latest tag name '{}': expected 'rust-vX.Y.Z' or 'vX.Y.Z'",
-                latest_tag_name
-            ),
-        }
-    };
-
     let info = VersionInfo {
-        latest_version,
+        latest_version: latest_tag_name
+            .strip_prefix("rust-v")
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse latest tag name '{latest_tag_name}'"))?
+            .into(),
         last_checked_at: Utc::now(),
     };
 
@@ -116,7 +106,7 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     Some((maj, min, pat))
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

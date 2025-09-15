@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use dev_common::CliConfigOverrides;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
+use codex_common::CliConfigOverrides;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
 
 use crate::chatgpt_token::init_chatgpt_token_from_auth;
 use crate::get_task::GetTaskResponse;
@@ -31,7 +31,7 @@ pub async fn run_apply_command(
         ConfigOverrides::default(),
     )?;
 
-    init_chatgpt_token_from_auth(&config.dev_home, &config.responses_originator_header).await?;
+    init_chatgpt_token_from_auth(&config.codex_home).await?;
 
     let task_response = get_task(&config, apply_cli.task_id).await?;
     apply_diff_from_task(task_response, cwd).await

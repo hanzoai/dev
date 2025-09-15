@@ -1,13 +1,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-use dev_core::auth::login_with_api_key;
-use dev_protocol::mcp_protocol::CancelLoginChatGptParams;
-use dev_protocol::mcp_protocol::CancelLoginChatGptResponse;
-use dev_protocol::mcp_protocol::GetAuthStatusParams;
-use dev_protocol::mcp_protocol::GetAuthStatusResponse;
-use dev_protocol::mcp_protocol::LoginChatGptResponse;
-use dev_protocol::mcp_protocol::LogoutChatGptResponse;
+use codex_login::login_with_api_key;
+use codex_protocol::mcp_protocol::CancelLoginChatGptParams;
+use codex_protocol::mcp_protocol::CancelLoginChatGptResponse;
+use codex_protocol::mcp_protocol::GetAuthStatusParams;
+use codex_protocol::mcp_protocol::GetAuthStatusResponse;
+use codex_protocol::mcp_protocol::LoginChatGptResponse;
+use codex_protocol::mcp_protocol::LogoutChatGptResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::to_response;
 use mcp_types::JSONRPCResponse;
@@ -18,8 +18,8 @@ use tokio::time::timeout;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 // Helper to create a config.toml; mirrors create_conversation.rs
-fn create_config_toml(dev_home: &Path) -> std::io::Result<()> {
-    let config_toml = dev_home.join("config.toml");
+fn create_config_toml(codex_home: &Path) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
         r#"
@@ -41,12 +41,12 @@ stream_max_retries = 0
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn logout_chatgpt_removes_auth() {
-    let dev_home = TempDir::new().unwrap_or_else(|e| panic!("create tempdir: {e}"));
-    create_config_toml(dev_home.path()).expect("write config.toml");
-    login_with_api_key(dev_home.path(), "sk-test-key").expect("seed api key");
-    assert!(dev_home.path().join("auth.json").exists());
+    let codex_home = TempDir::new().unwrap_or_else(|e| panic!("create tempdir: {e}"));
+    create_config_toml(codex_home.path()).expect("write config.toml");
+    login_with_api_key(codex_home.path(), "sk-test-key").expect("seed api key");
+    assert!(codex_home.path().join("auth.json").exists());
 
-    let mut mcp = McpProcess::new(dev_home.path())
+    let mut mcp = McpProcess::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)])
         .await
         .expect("spawn mcp process");
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize())
@@ -68,7 +68,7 @@ async fn logout_chatgpt_removes_auth() {
     let _ok: LogoutChatGptResponse = to_response(resp).expect("deserialize logout response");
 
     assert!(
-        !dev_home.path().join("auth.json").exists(),
+        !codex_home.path().join("auth.json").exists(),
         "auth.json should be deleted"
     );
 
@@ -94,10 +94,10 @@ async fn logout_chatgpt_removes_auth() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn login_and_cancel_chatgpt() {
-    let dev_home = TempDir::new().unwrap_or_else(|e| panic!("create tempdir: {e}"));
-    create_config_toml(dev_home.path()).expect("write config.toml");
+    let codex_home = TempDir::new().unwrap_or_else(|e| panic!("create tempdir: {e}"));
+    create_config_toml(codex_home.path()).unwrap_or_else(|err| panic!("write config.toml: {err}"));
 
-    let mut mcp = McpProcess::new(dev_home.path())
+    let mut mcp = McpProcess::new(codex_home.path())
         .await
         .expect("spawn mcp process");
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize())

@@ -1,29 +1,32 @@
-use dev_common::elapsed::format_duration;
-use dev_common::elapsed::format_elapsed;
-use dev_core::config::Config;
-use dev_core::plan_tool::UpdatePlanArgs;
-use dev_core::protocol::AgentMessageDeltaEvent;
-use dev_core::protocol::AgentMessageEvent;
-use dev_core::protocol::AgentReasoningDeltaEvent;
-use dev_core::protocol::AgentReasoningRawContentDeltaEvent;
-use dev_core::protocol::AgentReasoningRawContentEvent;
-use dev_core::protocol::BackgroundEventEvent;
-use dev_core::protocol::ErrorEvent;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::ExecCommandBeginEvent;
-use dev_core::protocol::ExecCommandEndEvent;
-use dev_core::protocol::FileChange;
-use dev_core::protocol::McpInvocation;
-use dev_core::protocol::McpToolCallBeginEvent;
-use dev_core::protocol::McpToolCallEndEvent;
-use dev_core::protocol::PatchApplyBeginEvent;
-use dev_core::protocol::PatchApplyEndEvent;
-use dev_core::protocol::SessionConfiguredEvent;
-use dev_core::protocol::TaskCompleteEvent;
-use dev_core::protocol::TurnDiffEvent;
-use dev_core::protocol::WebSearchBeginEvent;
-use dev_core::protocol::WebSearchCompleteEvent;
+use codex_common::elapsed::format_duration;
+use codex_common::elapsed::format_elapsed;
+use codex_core::config::Config;
+use codex_core::plan_tool::UpdatePlanArgs;
+use codex_core::protocol::AgentMessageDeltaEvent;
+use codex_core::protocol::AgentMessageEvent;
+use codex_core::protocol::AgentReasoningDeltaEvent;
+use codex_core::protocol::AgentReasoningRawContentDeltaEvent;
+use codex_core::protocol::AgentReasoningRawContentEvent;
+use codex_core::protocol::BackgroundEventEvent;
+use codex_core::protocol::ErrorEvent;
+use codex_core::protocol::Event;
+use codex_core::protocol::EventMsg;
+use codex_core::protocol::ExecCommandBeginEvent;
+use codex_core::protocol::ExecCommandEndEvent;
+use codex_core::protocol::FileChange;
+use codex_core::protocol::McpInvocation;
+use codex_core::protocol::McpToolCallBeginEvent;
+use codex_core::protocol::McpToolCallEndEvent;
+use codex_core::protocol::PatchApplyBeginEvent;
+use codex_core::protocol::PatchApplyEndEvent;
+use codex_core::protocol::SessionConfiguredEvent;
+use codex_core::protocol::StreamErrorEvent;
+use codex_core::protocol::TaskCompleteEvent;
+use codex_core::protocol::TurnAbortReason;
+use codex_core::protocol::TurnDiffEvent;
+use codex_core::protocol::WebSearchBeginEvent;
+use codex_core::protocol::WebSearchEndEvent;
+use codex_protocol::num_format::format_with_separators;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use shlex::try_join;
@@ -35,7 +38,7 @@ use std::time::Instant;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::event_processor::handle_last_message;
-use dev_common::create_config_summary_entries;
+use codex_common::create_config_summary_entries;
 
 /// This should be configurable. When used in CI, users may not want to impose
 /// a limit so they can see the full transcript.
@@ -139,11 +142,11 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     /// for the session. This mirrors the information shown in the TUI welcome
     /// screen.
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
-        let version = dev_version::version();
+        const VERSION: &str = env!("CARGO_PKG_VERSION");
         ts_println!(
             self,
-            "Code v{}\n--------",
-            version
+            "Hanzo Dev v{} (research preview)\n--------",
+            VERSION
         );
 
         let entries = create_config_summary_entries(config);
@@ -166,7 +169,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     }
 
     fn process_event(&mut self, event: Event) -> CodexStatus {
-        let Event { id: _, msg, .. } = event;
+        let Event { id: _, msg } = event;
         match msg {
             EventMsg::Error(ErrorEvent { message }) => {
                 let prefix = "ERROR:".style(self.red);
@@ -175,8 +178,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 ts_println!(self, "{}", message.style(self.dimmed));
             }
-            // Stream errors are surfaced as Error/Background events in core
-            EventMsg::TaskStarted => {
+            EventMsg::StreamError(StreamErrorEvent { message }) => {
+                ts_println!(self, "{}", message.style(self.dimmed));
+            }
+            EventMsg::TaskStarted(_) => {
                 // Ignore.
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
@@ -185,8 +190,14 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
                 return CodexStatus::InitiateShutdown;
             }
-            EventMsg::TokenCount(token_usage) => {
-                ts_println!(self, "tokens used: {}", token_usage.blended_total());
+            EventMsg::TokenCount(ev) => {
+                if let Some(usage_info) = ev.info {
+                    ts_println!(
+                        self,
+                        "tokens used: {}",
+                        format_with_separators(usage_info.total_token_usage.blended_total())
+                    );
+                }
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 if !self.answer_started {
@@ -269,7 +280,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 parsed_cmd: _,
             }) => {
                 self.call_id_to_command.insert(
-                    call_id.clone(),
+                    call_id,
                     ExecCommandBegin {
                         command: command.clone(),
                     },
@@ -285,10 +296,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::ExecCommandOutputDelta(_) => {}
             EventMsg::ExecCommandEnd(ExecCommandEndEvent {
                 call_id,
-                stdout,
-                stderr,
+                aggregated_output,
                 duration,
                 exit_code,
+                ..
             }) => {
                 let exec_command = self.call_id_to_command.remove(&call_id);
                 let (duration, call) = if let Some(ExecCommandBegin { command, .. }) = exec_command
@@ -301,8 +312,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ("".to_string(), format!("exec('{call_id}')"))
                 };
 
-                let combined = if exit_code == 0 { stdout } else { stderr };
-                let truncated_output = combined
+                let truncated_output = aggregated_output
                     .lines()
                     .take(MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL)
                     .collect::<Vec<_>>()
@@ -360,11 +370,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     }
                 }
             }
-            EventMsg::WebSearchBegin(WebSearchBeginEvent { .. }) => {}
-            EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id: _, query }) => {
-                if let Some(query) = query {
-                    ts_println!(self, "🌐 Searched: {query}");
-                }
+            EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id: _ }) => {}
+            EventMsg::WebSearchEnd(WebSearchEndEvent { call_id: _, query }) => {
+                ts_println!(self, "🌐 Searched: {query}");
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id,
@@ -374,7 +382,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 // Store metadata so we can calculate duration later when we
                 // receive the corresponding PatchApplyEnd event.
                 self.call_id_to_patch.insert(
-                    call_id.clone(),
+                    call_id,
                     PatchApplyBegin {
                         start_time: Instant::now(),
                         auto_approved,
@@ -403,13 +411,16 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                                 println!("{}", line.style(self.green));
                             }
                         }
-                        FileChange::Delete => {
+                        FileChange::Delete { content } => {
                             let header = format!(
                                 "{} {}",
                                 format_file_change(change),
                                 path.to_string_lossy()
                             );
                             println!("{}", header.style(self.magenta));
+                            for line in content.lines() {
+                                println!("{}", line.style(self.red));
+                            }
                         }
                         FileChange::Update {
                             unified_diff,
@@ -507,18 +518,20 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             EventMsg::SessionConfigured(session_configured_event) => {
                 let SessionConfiguredEvent {
-                    session_id,
+                    session_id: conversation_id,
                     model,
                     reasoning_effort: _,
                     history_log_id: _,
                     history_entry_count: _,
+                    initial_messages: _,
+                    rollout_path: _,
                 } = session_configured_event;
 
                 ts_println!(
                     self,
                     "{} {}",
-                    "hanzo dev session".style(self.magenta).style(self.bold),
-                    session_id.to_string().style(self.dimmed)
+                    "codex session".style(self.magenta).style(self.bold),
+                    conversation_id.to_string().style(self.dimmed)
                 );
 
                 ts_println!(self, "model: {}", model);
@@ -532,63 +545,25 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::GetHistoryEntryResponse(_) => {
                 // Currently ignored in exec output.
             }
-            EventMsg::ReplayHistory(_) => {
-                // Replay is a TUI concern; ignore in headless output
-            }
-            EventMsg::BrowserScreenshotUpdate(_) => {
+            EventMsg::McpListToolsResponse(_) => {
                 // Currently ignored in exec output.
             }
-            EventMsg::AgentStatusUpdate(_) => {
+            EventMsg::ListCustomPromptsResponse(_) => {
                 // Currently ignored in exec output.
             }
+            EventMsg::TurnAborted(abort_reason) => match abort_reason.reason {
+                TurnAbortReason::Interrupted => {
+                    ts_println!(self, "task interrupted");
+                }
+                TurnAbortReason::Replaced => {
+                    ts_println!(self, "task aborted: replaced by a new task");
+                }
+            },
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,
-            EventMsg::CustomToolCallBegin(event) => {
-                ts_println!(
-                    self,
-                    "{} {}",
-                    "tool".style(self.magenta),
-                    event.tool_name.style(self.bold),
-                );
-                if let Some(params) = &event.parameters {
-                    if let Ok(formatted) = serde_json::to_string_pretty(params) {
-                        for line in formatted.lines() {
-                            println!("{}", line.style(self.dimmed));
-                        }
-                    }
-                }
-            }
-            EventMsg::CustomToolCallEnd(event) => {
-                let status = if event.result.is_ok() {
-                    "success".style(self.green)
-                } else {
-                    "failed".style(self.red)
-                };
-                ts_println!(
-                    self,
-                    "{} {} {}",
-                    "tool".style(self.magenta),
-                    event.tool_name.style(self.bold),
-                    status,
-                );
-                // Print the tool's textual result for visibility in exec mode
-                match &event.result {
-                    Ok(content) => {
-                        if !content.is_empty() {
-                            // Keep output concise; print as-is (it may be pre-formatted)
-                            for line in content.lines() {
-                                println!("{}", line.style(self.dimmed));
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        if !err.is_empty() {
-                            for line in err.lines() {
-                                println!("{}", line.style(self.red));
-                            }
-                        }
-                    }
-                }
-            }
+            EventMsg::ConversationPath(_) => {}
+            EventMsg::UserMessage(_) => {}
+            EventMsg::EnteredReviewMode(_) => {}
+            EventMsg::ExitedReviewMode(_) => {}
         }
         CodexStatus::Running
     }

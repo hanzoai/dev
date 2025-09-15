@@ -1,22 +1,31 @@
 use clap::Parser;
-use dev_common::ApprovalModeCliArg;
-use dev_common::CliConfigOverrides;
+use codex_common::ApprovalModeCliArg;
+use codex_common::CliConfigOverrides;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Cli {
     /// Optional user prompt to start the session.
+    #[arg(value_name = "PROMPT")]
     pub prompt: Option<String>,
 
     /// Optional image(s) to attach to the initial prompt.
-    #[arg(
-        long = "image",
-        short = 'i',
-        value_name = "FILE",
-        value_delimiter = ','
-    )]
+    #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',', num_args = 1..)]
     pub images: Vec<PathBuf>,
+
+    // Internal controls set by the top-level `codex resume` subcommand.
+    // These are not exposed as user flags on the base `codex` command.
+    #[clap(skip)]
+    pub resume_picker: bool,
+
+    #[clap(skip)]
+    pub resume_last: bool,
+
+    /// Internal: resume a specific recorded session by id (UUID). Set by the
+    /// top-level `codex resume <SESSION_ID>` wrapper; not exposed as a public flag.
+    #[clap(skip)]
+    pub resume_session_id: Option<String>,
 
     /// Model the agent should use.
     #[arg(long, short = 'm')]
@@ -35,7 +44,7 @@ pub struct Cli {
     /// Select the sandbox policy to use when executing model-generated shell
     /// commands.
     #[arg(long = "sandbox", short = 's')]
-    pub sandbox_mode: Option<dev_common::SandboxModeCliArg>,
+    pub sandbox_mode: Option<codex_common::SandboxModeCliArg>,
 
     /// Configure when the model requires human approval before executing a command.
     #[arg(long = "ask-for-approval", short = 'a')]
@@ -59,22 +68,9 @@ pub struct Cli {
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
 
-    // Web search is now enabled by default via an internal override.
-    // Intentionally not exposed as a command-line option.
-    /// Enable debug logging of all LLM requests and responses to files.
-    #[clap(long = "debug", short = 'd', default_value_t = false)]
-    pub debug: bool,
-
-    /// Show per-cell ordering overlays (request index, order key, window/position) to debug
-    /// event ordering. Off by default.
-    #[arg(long = "order", default_value_t = false)]
-    pub order: bool,
-
-    /// Enable lightweight in-app timing and print a summary report on exit.
-    /// This records render/measurement hotspots while the UI runs and writes a
-    /// short report to stderr when the program exits.
-    #[arg(long = "timing", default_value_t = false)]
-    pub timing: bool,
+    /// Enable web search (off by default). When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval).
+    #[arg(long = "search", default_value_t = false)]
+    pub web_search: bool,
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,

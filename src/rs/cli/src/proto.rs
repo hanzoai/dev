@@ -1,15 +1,15 @@
 use std::io::IsTerminal;
 
 use clap::Parser;
-use dev_common::CliConfigOverrides;
-use dev_core::AuthManager;
-use dev_core::ConversationManager;
-use dev_core::NewConversation;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::Submission;
+use codex_common::CliConfigOverrides;
+use codex_core::AuthManager;
+use codex_core::ConversationManager;
+use codex_core::NewConversation;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
+use codex_core::protocol::Event;
+use codex_core::protocol::EventMsg;
+use codex_core::protocol::Submission;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tracing::error;
@@ -37,11 +37,8 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
 
     let config = Config::load_with_cli_overrides(overrides_vec, ConfigOverrides::default())?;
     // Use conversation_manager API to start a conversation
-    let conversation_manager = ConversationManager::new(AuthManager::shared(
-        config.dev_home.clone(),
-        dev_login::AuthMode::ApiKey,
-        config.responses_originator_header.clone(),
-    ));
+    let conversation_manager =
+        ConversationManager::new(AuthManager::shared(config.codex_home.clone()));
     let NewConversation {
         conversation_id: _,
         conversation,
@@ -52,9 +49,7 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
     let synthetic_event = Event {
         // Fake id value.
         id: "".to_string(),
-        event_seq: 0,
         msg: EventMsg::SessionConfigured(session_configured),
-        order: None,
     };
     let session_configured_event = match serde_json::to_string(&synthetic_event) {
         Ok(s) => s,

@@ -868,7 +868,7 @@ pub fn parse_command_impl(command: &[String]) -> Vec<ParsedCommand> {
     let parts = if contains_connectors(&normalized) {
         split_on_connectors(&normalized)
     } else {
-        vec![normalized.clone()]
+        vec![normalized]
     };
 
     // Preserve left-to-right execution order for all commands, including bash -c/-lc
@@ -1203,10 +1203,7 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
                                     name,
                                 }
                             } else {
-                                ParsedCommand::Read {
-                                    cmd: cmd.clone(),
-                                    name,
-                                }
+                                ParsedCommand::Read { cmd, name }
                             }
                         } else {
                             ParsedCommand::Read {
@@ -1217,10 +1214,7 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
                     }
                     ParsedCommand::ListFiles { path, cmd, .. } => {
                         if had_connectors {
-                            ParsedCommand::ListFiles {
-                                cmd: cmd.clone(),
-                                path,
-                            }
+                            ParsedCommand::ListFiles { cmd, path }
                         } else {
                             ParsedCommand::ListFiles {
                                 cmd: shlex_join(&script_tokens),
@@ -1232,11 +1226,7 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
                         query, path, cmd, ..
                     } => {
                         if had_connectors {
-                            ParsedCommand::Search {
-                                cmd: cmd.clone(),
-                                query,
-                                path,
-                            }
+                            ParsedCommand::Search { cmd, query, path }
                         } else {
                             ParsedCommand::Search {
                                 cmd: shlex_join(&script_tokens),

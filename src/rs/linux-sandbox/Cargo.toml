@@ -1,24 +1,22 @@
 [package]
 edition = "2024"
-name = "dev-linux-sandbox"
+name = "codex-linux-sandbox"
 version = { workspace = true }
 
 [[bin]]
-name = "dev-linux-sandbox"
+name = "codex-linux-sandbox"
 path = "src/main.rs"
 
 [lib]
-name = "dev_linux_sandbox"
+name = "codex_linux_sandbox"
 path = "src/lib.rs"
 
 [lints]
 workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-dev-common = { path = "../common", features = ["cli"] }
-dev-core = { path = "../core" }
+codex-core = { path = "../core" }
 landlock = "0.4.1"
 libc = "0.2.175"
 seccompiler = "0.5.0"

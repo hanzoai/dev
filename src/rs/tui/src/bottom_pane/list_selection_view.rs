@@ -1,15 +1,12 @@
-#![allow(dead_code)]
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::{Paragraph, Block, Borders, Clear};
-use ratatui::layout::Alignment;
+use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
 use crate::app_event_sender::AppEventSender;
@@ -44,7 +41,7 @@ pub(crate) struct ListSelectionView {
 
 impl ListSelectionView {
     fn dim_prefix_span() -> Span<'static> {
-        Span::styled("▌ ", Style::default().add_modifier(Modifier::DIM))
+        "▌ ".dim()
     }
 
     fn render_dim_prefix_line(area: Rect, buf: &mut Buffer) {
@@ -107,8 +104,8 @@ impl ListSelectionView {
     }
 }
 
-impl BottomPaneView<'_> for ListSelectionView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'_>, key_event: KeyEvent) {
+impl BottomPaneView for ListSelectionView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
                 code: KeyCode::Up, ..
@@ -133,18 +130,19 @@ impl BottomPaneView<'_> for ListSelectionView {
         self.complete
     }
 
-    fn on_ctrl_c(&mut self, _pane: &mut BottomPane<'_>) -> CancellationEvent {
+    fn on_ctrl_c(&mut self, _pane: &mut BottomPane) -> CancellationEvent {
         self.complete = true;
         CancellationEvent::Handled
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
         let rows = (self.items.len()).clamp(1, MAX_POPUP_ROWS);
-        // +1 for the title row, +1 for optional subtitle, +1 for optional footer
-        let mut height = rows as u16 + 1;
+        // +1 for the title row, +1 for a spacer line beneath the header,
+        // +1 for optional subtitle, +1 for optional footer
+        let mut height = rows as u16 + 2;
         if self.subtitle.is_some() {
-            // +1 for subtitle, +1 for a blank spacer line beneath it
-            height = height.saturating_add(2);
+            // +1 for subtitle (the spacer is accounted for above)
+            height = height.saturating_add(1);
         }
         if self.footer_hint.is_some() {
             height = height.saturating_add(2);
@@ -157,41 +155,51 @@ impl BottomPaneView<'_> for ListSelectionView {
             return;
         }
 
-        // Clear and draw a bordered block matching other slash popups
-        Clear.render(area, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .title(self.title.clone())
-            .title_alignment(Alignment::Center);
-        let inner = block.inner(area);
-        block.render(area, buf);
+        let title_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
 
-        // Layout inside the block: optional subtitle header, rows, footer
-        let mut next_y = inner.y;
+        let title_spans: Vec<Span<'static>> =
+            vec![Self::dim_prefix_span(), self.title.clone().bold()];
+        let title_para = Paragraph::new(Line::from(title_spans));
+        title_para.render(title_area, buf);
+
+        let mut next_y = area.y.saturating_add(1);
         if let Some(sub) = &self.subtitle {
-            // Left pad by one column inside the inner area
-            let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
-            let subtitle_spans: Vec<Span<'static>> = vec![
-                Span::styled(sub.clone(), Style::default().fg(crate::colors::text_dim())),
-            ];
-            Paragraph::new(Line::from(subtitle_spans)).render(subtitle_area, buf);
-            next_y = next_y.saturating_add(1);
-
-            // Render a visual spacer line between subtitle and the list
-            let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: inner.width.saturating_sub(1), height: 1 };
-            Self::render_dim_prefix_line(spacer_area, buf);
+            let subtitle_area = Rect {
+                x: area.x,
+                y: next_y,
+                width: area.width,
+                height: 1,
+            };
+            let subtitle_spans: Vec<Span<'static>> =
+                vec![Self::dim_prefix_span(), sub.clone().dim()];
+            let subtitle_para = Paragraph::new(Line::from(subtitle_spans));
+            subtitle_para.render(subtitle_area, buf);
             next_y = next_y.saturating_add(1);
         }
 
-        let footer_reserved = if self.footer_hint.is_some() { 1 } else { 0 };
-        let rows_area = Rect {
-            // Left pad by one column
-            x: inner.x.saturating_add(1),
+        let spacer_area = Rect {
+            x: area.x,
             y: next_y,
-            width: inner.width.saturating_sub(1),
-            height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(footer_reserved),
+            width: area.width,
+            height: 1,
+        };
+        Self::render_dim_prefix_line(spacer_area, buf);
+        next_y = next_y.saturating_add(1);
+
+        let footer_reserved = if self.footer_hint.is_some() { 2 } else { 0 };
+        let rows_area = Rect {
+            x: area.x,
+            y: next_y,
+            width: area.width,
+            height: area
+                .height
+                .saturating_sub(next_y.saturating_sub(area.y))
+                .saturating_sub(footer_reserved),
         };
 
         let rows: Vec<GenericDisplayRow> = self
@@ -200,8 +208,7 @@ impl BottomPaneView<'_> for ListSelectionView {
             .enumerate()
             .map(|(i, it)| {
                 let is_selected = self.state.selected_idx == Some(i);
-                // Use a nicer selector: '›' when selected, otherwise space
-                let prefix = if is_selected { '›' } else { ' ' };
+                let prefix = if is_selected { '>' } else { ' ' };
                 let name_with_marker = if it.is_current {
                     format!("{} (current)", it.name)
                 } else {
@@ -213,28 +220,105 @@ impl BottomPaneView<'_> for ListSelectionView {
                     match_indices: None,
                     is_current: it.is_current,
                     description: it.description.clone(),
-                    name_color: None,
                 }
             })
             .collect();
         if rows_area.height > 0 {
-            render_rows(rows_area, buf, &rows, &self.state, MAX_POPUP_ROWS, true);
+            render_rows(
+                rows_area,
+                buf,
+                &rows,
+                &self.state,
+                MAX_POPUP_ROWS,
+                true,
+                "no matches",
+            );
         }
 
-        if self.footer_hint.is_some() {
-            // Left pad footer by one column
-            let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: inner.width.saturating_sub(1), height: 1 };
-            let line = Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Enter", Style::default().fg(crate::colors::success())),
-                Span::styled(" Select  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-                .render(footer_area, buf);
+        if let Some(hint) = &self.footer_hint {
+            let footer_area = Rect {
+                x: area.x,
+                y: area.y + area.height - 1,
+                width: area.width,
+                height: 1,
+            };
+            let footer_para = Paragraph::new(hint.clone().dim());
+            footer_para.render(footer_area, buf);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BottomPaneView;
+    use super::*;
+    use crate::app_event::AppEvent;
+    use insta::assert_snapshot;
+    use ratatui::layout::Rect;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    fn make_selection_view(subtitle: Option<&str>) -> ListSelectionView {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let items = vec![
+            SelectionItem {
+                name: "Read Only".to_string(),
+                description: Some("Codex can read files".to_string()),
+                is_current: true,
+                actions: vec![],
+            },
+            SelectionItem {
+                name: "Full Access".to_string(),
+                description: Some("Codex can edit files".to_string()),
+                is_current: false,
+                actions: vec![],
+            },
+        ];
+        ListSelectionView::new(
+            "Select Approval Mode".to_string(),
+            subtitle.map(str::to_string),
+            Some("Press Enter to confirm or Esc to go back".to_string()),
+            items,
+            tx,
+        )
+    }
+
+    fn render_lines(view: &ListSelectionView) -> String {
+        let width = 48;
+        let height = BottomPaneView::desired_height(view, width);
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+
+        let lines: Vec<String> = (0..area.height)
+            .map(|row| {
+                let mut line = String::new();
+                for col in 0..area.width {
+                    let symbol = buf[(area.x + col, area.y + row)].symbol();
+                    if symbol.is_empty() {
+                        line.push(' ');
+                    } else {
+                        line.push_str(symbol);
+                    }
+                }
+                line
+            })
+            .collect();
+        lines.join("\n")
+    }
+
+    #[test]
+    fn renders_blank_line_between_title_and_items_without_subtitle() {
+        let view = make_selection_view(None);
+        assert_snapshot!(
+            "list_selection_spacing_without_subtitle",
+            render_lines(&view)
+        );
+    }
+
+    #[test]
+    fn renders_blank_line_between_subtitle_and_items() {
+        let view = make_selection_view(Some("Switch between Codex approval presets"));
+        assert_snapshot!("list_selection_spacing_with_subtitle", render_lines(&view));
     }
 }

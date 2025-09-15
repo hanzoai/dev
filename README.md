@@ -1,43 +1,106 @@
-# Claude Code
+<h1 align="center">Hanzo Dev CLI</h1>
 
-![](https://img.shields.io/badge/Node.js-18%2B-brightgreen?style=flat-square) [![npm]](https://www.npmjs.com/package/@anthropic-ai/claude-code)
+<p align="center"><code>npm i -g @hanzo/dev</code><br />or <code>pip install hanzo-dev</code></p>
 
-[npm]: https://img.shields.io/npm/v/@anthropic-ai/claude-code.svg?style=flat-square
+<p align="center"><strong>Hanzo Dev</strong> is an AI-powered coding agent that runs locally on your computer, based on OpenAI Codex with GPT-5 readiness.
+</br>
+</br>Built by <a href="https://hanzo.ai">Hanzo AI</a> - Advanced AI infrastructure and tooling
+</br>If you want Hanzo Dev in your code editor (VS Code, Cursor, Windsurf), <a href="https://github.com/hanzoai/dev-ide">install in your IDE</a>
+</br>For the cloud-based version, visit <a href="https://hanzo.ai/dev">hanzo.ai/dev</a></p>
 
-Claude Code is an agentic coding tool that lives in your terminal, understands your codebase, and helps you code faster by executing routine tasks, explaining complex code, and handling git workflows -- all through natural language commands. Use it in your terminal, IDE, or tag @claude on Github.
+<p align="center">
+  <img src="./.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
+  </p>
 
-**Learn more in the [official documentation](https://docs.anthropic.com/en/docs/claude-code/overview)**.
+---
 
-<img src="./demo.gif" />
+## Quickstart
 
-## Get started
+### Installing and running Codex CLI
 
-1. Install Claude Code:
+Install globally with your preferred package manager. If you use npm:
 
-```sh
-npm install -g @anthropic-ai/claude-code
+```shell
+npm install -g @hanzo/dev
 ```
 
-2. Navigate to your project directory and run `claude`.
+Alternatively, if you use pip:
 
-## Reporting Bugs
+```shell
+pip install hanzo-dev
+```
 
-We welcome your feedback. Use the `/bug` command to report issues directly within Claude Code, or file a [GitHub issue](https://github.com/anthropics/claude-code/issues).
+Then simply run `hanzo` to get started:
 
-## Connect on Discord
+```shell
+hanzo
+```
 
-Join the [Claude Developers Discord](https://anthropic.com/discord) to connect with other developers using Claude Code. Get help, share feedback, and discuss your projects with the community.
+<details>
+<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
 
-## Data collection, usage, and retention
+Each GitHub Release contains many executables, but in practice, you likely want one of these:
 
-When you use Claude Code, we collect feedback, which includes usage data (such as code acceptance or rejections), associated conversation data, and user feedback submitted via the `/bug` command.
+- macOS
+  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
+  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
+- Linux
+  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
+  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
 
-### How we use your data
+Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
 
-See our [data usage policies](https://docs.anthropic.com/en/docs/claude-code/data-usage).
+</details>
 
-### Privacy safeguards
+### Using Hanzo Dev with your AI provider
 
-We have implemented several safeguards to protect your data, including limited retention periods for sensitive information, restricted access to user session data, and clear policies against using feedback for model training.
+<p align="center">
+  <img src="./.github/hanzo-dev-login.png" alt="Hanzo Dev login" width="80%" />
+  </p>
 
-For full details, please review our [Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms) and [Privacy Policy](https://www.anthropic.com/legal/privacy).
+Run `hanzo` and select **Sign in with your AI provider**. Hanzo Dev supports multiple AI providers including OpenAI (GPT-5 ready), Anthropic Claude, and local models. You can sign in with your ChatGPT account to use as part of your Plus, Pro, Team, Edu, or Enterprise plan.
+
+You can also use Hanzo Dev with an API key from any supported provider. See [authentication documentation](./docs/authentication.md) for setup details. If you're having trouble with login, please visit [our support](https://github.com/hanzoai/dev/issues).
+
+### Model Context Protocol (MCP)
+
+Hanzo Dev supports [MCP servers](./docs/advanced.md#model-context-protocol-mcp) with enhanced capabilities. Enable by adding an `mcp_servers` section to your `~/.hanzo/config.toml`.
+
+
+### Configuration
+
+Hanzo Dev supports a rich set of configuration options, with preferences stored in `~/.hanzo/config.toml`. For full configuration options, see [Configuration](./docs/config.md).
+
+---
+
+### Docs & FAQ
+
+- [**Getting started**](./docs/getting-started.md)
+  - [CLI usage](./docs/getting-started.md#cli-usage)
+  - [Running with a prompt as input](./docs/getting-started.md#running-with-a-prompt-as-input)
+  - [Example prompts](./docs/getting-started.md#example-prompts)
+  - [Memory with AGENTS.md](./docs/getting-started.md#memory-with-agentsmd)
+  - [Configuration](./docs/config.md)
+- [**Sandbox & approvals**](./docs/sandbox.md)
+- [**Authentication**](./docs/authentication.md)
+  - [Auth methods](./docs/authentication.md#forcing-a-specific-auth-method-advanced)
+  - [Login on a "Headless" machine](./docs/authentication.md#connecting-on-a-headless-machine)
+- [**Advanced**](./docs/advanced.md)
+  - [Non-interactive / CI mode](./docs/advanced.md#non-interactive--ci-mode)
+  - [Tracing / verbose logging](./docs/advanced.md#tracing--verbose-logging)
+  - [Model Context Protocol (MCP)](./docs/advanced.md#model-context-protocol-mcp)
+- [**Zero data retention (ZDR)**](./docs/zdr.md)
+- [**Contributing**](./docs/contributing.md)
+- [**Install & build**](./docs/install.md)
+  - [System Requirements](./docs/install.md#system-requirements)
+  - [DotSlash](./docs/install.md#dotslash)
+  - [Build from source](./docs/install.md#build-from-source)
+- [**FAQ**](./docs/faq.md)
+- [**Open source fund**](./docs/open-source-fund.md)
+
+---
+
+## License
+
+This repository is licensed under the [Apache-2.0 License](LICENSE).
+

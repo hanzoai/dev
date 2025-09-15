@@ -1,21 +1,21 @@
 use std::path::Path;
 
-use dev_core::protocol::AskForApproval;
-use dev_core::protocol::SandboxPolicy;
-use dev_core::protocol_config_types::ReasoningEffort;
-use dev_core::protocol_config_types::ReasoningSummary;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use dev_protocol::mcp_protocol::AddConversationListenerParams;
-use dev_protocol::mcp_protocol::AddConversationSubscriptionResponse;
-use dev_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
-use dev_protocol::mcp_protocol::NewConversationParams;
-use dev_protocol::mcp_protocol::NewConversationResponse;
-use dev_protocol::mcp_protocol::RemoveConversationListenerParams;
-use dev_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
-use dev_protocol::mcp_protocol::SendUserMessageParams;
-use dev_protocol::mcp_protocol::SendUserMessageResponse;
-use dev_protocol::mcp_protocol::SendUserTurnParams;
-use dev_protocol::mcp_protocol::SendUserTurnResponse;
+use codex_core::protocol::AskForApproval;
+use codex_core::protocol::SandboxPolicy;
+use codex_core::protocol_config_types::ReasoningEffort;
+use codex_core::protocol_config_types::ReasoningSummary;
+use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::NewConversationResponse;
+use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
+use codex_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserMessageResponse;
+use codex_protocol::mcp_protocol::SendUserTurnParams;
+use codex_protocol::mcp_protocol::SendUserTurnResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::create_final_assistant_message_sse_response;
 use mcp_test_support::create_mock_chat_completions_server;
@@ -32,7 +32,7 @@ use tokio::time::timeout;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_dev_jsonrpc_conversation_flow() {
+async fn test_codex_jsonrpc_conversation_flow() {
     if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
@@ -42,8 +42,8 @@ async fn test_dev_jsonrpc_conversation_flow() {
 
     let tmp = TempDir::new().expect("tmp dir");
     // Temporary Codex home with config pointing at the mock server.
-    let dev_home = tmp.path().join("dev_home");
-    std::fs::create_dir(&dev_home).expect("create codex home dir");
+    let codex_home = tmp.path().join("codex_home");
+    std::fs::create_dir(&codex_home).expect("create codex home dir");
     let working_directory = tmp.path().join("workdir");
     std::fs::create_dir(&working_directory).expect("create working directory");
 
@@ -61,10 +61,10 @@ async fn test_dev_jsonrpc_conversation_flow() {
             .expect("create final assistant message"),
     ];
     let server = create_mock_chat_completions_server(responses).await;
-    create_config_toml(&dev_home, &server.uri()).expect("write config");
+    create_config_toml(&codex_home, &server.uri()).expect("write config");
 
     // Start MCP server and initialize.
-    let mut mcp = McpProcess::new(&dev_home).await.expect("spawn mcp");
+    let mut mcp = McpProcess::new(&codex_home).await.expect("spawn mcp");
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize())
         .await
         .expect("init timeout")
@@ -91,6 +91,7 @@ async fn test_dev_jsonrpc_conversation_flow() {
         conversation_id,
         model,
         reasoning_effort: _,
+        rollout_path: _,
     } = new_conv_resp;
     assert_eq!(model, "mock-model");
 
@@ -114,7 +115,7 @@ async fn test_dev_jsonrpc_conversation_flow() {
     let send_user_id = mcp
         .send_send_user_message_request(SendUserMessageParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "text".to_string(),
             }],
         })
@@ -179,8 +180,8 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     }
 
     let tmp = TempDir::new().expect("tmp dir");
-    let dev_home = tmp.path().join("dev_home");
-    std::fs::create_dir(&dev_home).expect("create codex home dir");
+    let codex_home = tmp.path().join("codex_home");
+    std::fs::create_dir(&codex_home).expect("create codex home dir");
     let working_directory = tmp.path().join("workdir");
     std::fs::create_dir(&working_directory).expect("create working directory");
 
@@ -214,10 +215,10 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
             .expect("create final assistant message 2"),
     ];
     let server = create_mock_chat_completions_server(responses).await;
-    create_config_toml(&dev_home, &server.uri()).expect("write config");
+    create_config_toml(&codex_home, &server.uri()).expect("write config");
 
     // Start MCP server and initialize.
-    let mut mcp = McpProcess::new(&dev_home).await.expect("spawn mcp");
+    let mut mcp = McpProcess::new(&codex_home).await.expect("spawn mcp");
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize())
         .await
         .expect("init timeout")
@@ -264,7 +265,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     let send_user_id = mcp
         .send_send_user_message_request(SendUserMessageParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "run python".to_string(),
             }],
         })
@@ -294,7 +295,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     // Approve so the first turn can complete
     mcp.send_response(
         request.id,
-        serde_json::json!({ "decision": dev_core::protocol::ReviewDecision::Approved }),
+        serde_json::json!({ "decision": codex_core::protocol::ReviewDecision::Approved }),
     )
     .await
     .expect("send approval response");
@@ -312,14 +313,14 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     let send_turn_id = mcp
         .send_send_user_turn_request(SendUserTurnParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "run python again".to_string(),
             }],
             cwd: working_directory.clone(),
             approval_policy: AskForApproval::Never,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             model: "mock-model".to_string(),
-            effort: ReasoningEffort::Medium,
+            effort: Some(ReasoningEffort::Medium),
             summary: ReasoningSummary::Auto,
         })
         .await
@@ -348,8 +349,8 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
 }
 
 // Helper: minimal config.toml pointing at mock provider.
-fn create_config_toml(dev_home: &Path, server_uri: &str) -> std::io::Result<()> {
-    let config_toml = dev_home.join("config.toml");
+fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
         format!(

@@ -392,7 +392,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() {
                 allow_git_writes: false,
             }),
             model: Some("o3".to_string()),
-            effort: Some(ReasoningEffort::High),
+            effort: Some(Some(ReasoningEffort::High)),
             summary: Some(ReasoningSummary::Detailed),
         })
         .await
@@ -432,11 +432,17 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() {
     // After overriding the turn context, the environment context should be emitted again
     // reflecting the new approval policy and sandbox settings. Omit cwd because it did
     // not change.
-    let expected_env_text_2 = r#"<environment_context>
+    let expected_env_text_2 = format!(
+        r#"<environment_context>
   <approval_policy>never</approval_policy>
   <sandbox_mode>workspace-write</sandbox_mode>
   <network_access>enabled</network_access>
-</environment_context>"#;
+  <writable_roots>
+    <root>{}</root>
+  </writable_roots>
+</environment_context>"#,
+        writable.path().to_string_lossy()
+    );
     let expected_env_msg_2 = serde_json::json!({
         "type": "message",
         "id": serde_json::Value::Null,
@@ -521,7 +527,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() {
                 allow_git_writes: false,
             },
             model: "o3".to_string(),
-            effort: ReasoningEffort::High,
+            effort: Some(ReasoningEffort::High),
             summary: ReasoningSummary::Detailed,
         })
         .await

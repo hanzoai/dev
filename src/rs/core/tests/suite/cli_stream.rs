@@ -1,5 +1,7 @@
 use assert_cmd::Command as AssertCommand;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_core::RolloutRecorder;
+use codex_core::protocol::GitInfo;
+use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use std::time::Duration;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -51,7 +53,7 @@ async fn chat_mode_stream_cli() {
     let mut cmd = AssertCommand::new("cargo");
     cmd.arg("run")
         .arg("-p")
-        .arg("codex-cli")
+        .arg("hanzo-dev")
         .arg("--quiet")
         .arg("--")
         .arg("exec")
@@ -77,6 +79,22 @@ async fn chat_mode_stream_cli() {
     assert_eq!(hi_lines, 1, "Expected exactly one line with 'hi'");
 
     server.verify().await;
+
+    // Verify a new session rollout was created and is discoverable via list_conversations
+    let page = RolloutRecorder::list_conversations(home.path(), 10, None)
+        .await
+        .expect("list conversations");
+    assert!(
+        !page.items.is_empty(),
+        "expected at least one session to be listed"
+    );
+    // First line of head must be the SessionMeta payload (id/timestamp)
+    let head0 = page.items[0].head.first().expect("missing head record");
+    assert!(head0.get("id").is_some(), "head[0] missing id");
+    assert!(
+        head0.get("timestamp").is_some(),
+        "head[0] missing timestamp"
+    );
 }
 
 /// Verify that passing `-c experimental_instructions_file=...` to the CLI
@@ -128,7 +146,7 @@ async fn exec_cli_applies_experimental_instructions_file() {
     let mut cmd = AssertCommand::new("cargo");
     cmd.arg("run")
         .arg("-p")
-        .arg("codex-cli")
+        .arg("hanzo-dev")
         .arg("--quiet")
         .arg("--")
         .arg("exec")
@@ -191,7 +209,7 @@ async fn responses_api_stream_cli() {
     let mut cmd = AssertCommand::new("cargo");
     cmd.arg("run")
         .arg("-p")
-        .arg("codex-cli")
+        .arg("hanzo-dev")
         .arg("--quiet")
         .arg("--")
         .arg("exec")
@@ -237,7 +255,7 @@ async fn integration_creates_and_checks_session_file() {
     let mut cmd = AssertCommand::new("cargo");
     cmd.arg("run")
         .arg("-p")
-        .arg("codex-cli")
+        .arg("hanzo-dev")
         .arg("--quiet")
         .arg("--")
         .arg("exec")
@@ -254,7 +272,7 @@ async fn integration_creates_and_checks_session_file() {
     let output = cmd.output().unwrap();
     assert!(
         output.status.success(),
-        "codex-cli exec failed: {}",
+        "hanzo-dev exec failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -297,8 +315,10 @@ async fn integration_creates_and_checks_session_file() {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
-                if item.get("type").and_then(|t| t.as_str()) == Some("message")
-                    && let Some(c) = item.get("content")
+                if item.get("type").and_then(|t| t.as_str()) == Some("response_item")
+                    && let Some(payload) = item.get("payload")
+                    && payload.get("type").and_then(|t| t.as_str()) == Some("message")
+                    && let Some(c) = payload.get("content")
                     && c.to_string().contains(&marker)
                 {
                     matching_path = Some(path.to_path_buf());
@@ -361,9 +381,16 @@ async fn integration_creates_and_checks_session_file() {
         .unwrap_or_else(|_| panic!("missing session meta line"));
     let meta: serde_json::Value = serde_json::from_str(meta_line)
         .unwrap_or_else(|_| panic!("Failed to parse session meta line as JSON"));
-    assert!(meta.get("id").is_some(), "SessionMeta missing id");
+    assert_eq!(
+        meta.get("type").and_then(|v| v.as_str()),
+        Some("session_meta")
+    );
+    let payload = meta
+        .get("payload")
+        .unwrap_or_else(|| panic!("Missing payload in meta line"));
+    assert!(payload.get("id").is_some(), "SessionMeta missing id");
     assert!(
-        meta.get("timestamp").is_some(),
+        payload.get("timestamp").is_some(),
         "SessionMeta missing timestamp"
     );
 
@@ -375,8 +402,10 @@ async fn integration_creates_and_checks_session_file() {
         let Ok(item) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        if item.get("type").and_then(|t| t.as_str()) == Some("message")
-            && let Some(c) = item.get("content")
+        if item.get("type").and_then(|t| t.as_str()) == Some("response_item")
+            && let Some(payload) = item.get("payload")
+            && payload.get("type").and_then(|t| t.as_str()) == Some("message")
+            && let Some(c) = payload.get("content")
             && c.to_string().contains(&marker)
         {
             found_message = true;
@@ -388,36 +417,29 @@ async fn integration_creates_and_checks_session_file() {
         "No message found in session file containing the marker"
     );
 
-    // Second run: resume should create a NEW session file that contains both old and new history.
-    let orig_len = content.lines().count();
+    // Second run: resume should update the existing file.
     let marker2 = format!("integration-resume-{}", Uuid::new_v4());
     let prompt2 = format!("echo {marker2}");
-    // Cross‑platform safe resume override.  On Windows, backslashes in a TOML string must be escaped
-    // or the parse will fail and the raw literal (including quotes) may be preserved all the way down
-    // to Config, which in turn breaks resume because the path is invalid. Normalize to forward slashes
-    // to sidestep the issue.
-    let resume_path_str = path.to_string_lossy().replace('\\', "/");
-    let resume_override = format!("experimental_resume=\"{resume_path_str}\"");
     let mut cmd2 = AssertCommand::new("cargo");
     cmd2.arg("run")
         .arg("-p")
-        .arg("codex-cli")
+        .arg("hanzo-dev")
         .arg("--quiet")
         .arg("--")
         .arg("exec")
         .arg("--skip-git-repo-check")
-        .arg("-c")
-        .arg(&resume_override)
         .arg("-C")
         .arg(env!("CARGO_MANIFEST_DIR"))
-        .arg(&prompt2);
+        .arg(&prompt2)
+        .arg("resume")
+        .arg("--last");
     cmd2.env("CODEX_HOME", home.path())
         .env("OPENAI_API_KEY", "dummy")
         .env("CODEX_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local");
 
     let output2 = cmd2.output().unwrap();
-    assert!(output2.status.success(), "resume codex-cli run failed");
+    assert!(output2.status.success(), "resume hanzo-dev run failed");
 
     // Find the new session file containing the resumed marker.
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -449,8 +471,8 @@ async fn integration_creates_and_checks_session_file() {
     }
 
     let resumed_path = resumed_path.expect("No resumed session file found containing the marker2");
-    // Resume should have written to a new file, not the original one.
-    assert_ne!(
+    // Resume should write to the existing log file.
+    assert_eq!(
         resumed_path, path,
         "resume should create a new session file"
     );
@@ -463,14 +485,6 @@ async fn integration_creates_and_checks_session_file() {
     assert!(
         resumed_content.contains(&marker2),
         "resumed file missing resumed marker"
-    );
-
-    // Original file should remain unchanged.
-    let content_after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(
-        content_after.lines().count(),
-        orig_len,
-        "original rollout file should not change on resume"
     );
 }
 
@@ -553,7 +567,7 @@ async fn integration_git_info_unit_test() {
         .unwrap();
 
     // 3. Test git info collection directly
-    let git_info = dev_core::git_info::collect_git_info(&git_repo).await;
+    let git_info = codex_core::git_info::collect_git_info(&git_repo).await;
 
     // 4. Verify git info is present and contains expected data
     assert!(git_info.is_some(), "Git info should be collected");
@@ -598,7 +612,7 @@ async fn integration_git_info_unit_test() {
 
     // 5. Test serialization to ensure it works in SessionMeta
     let serialized = serde_json::to_string(&git_info).unwrap();
-    let deserialized: dev_core::git_info::GitInfo = serde_json::from_str(&serialized).unwrap();
+    let deserialized: GitInfo = serde_json::from_str(&serialized).unwrap();
 
     assert_eq!(git_info.commit_hash, deserialized.commit_hash);
     assert_eq!(git_info.branch, deserialized.branch);

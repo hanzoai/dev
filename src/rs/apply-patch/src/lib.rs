@@ -40,6 +40,11 @@ pub enum ApplyPatchError {
     /// Error that occurs while computing replacements when applying patch chunks
     #[error("{0}")]
     ComputeReplacements(String),
+    /// A raw patch body was provided without an explicit `apply_patch` invocation.
+    #[error(
+        "patch detected without explicit call to apply_patch. Rerun as [\"apply_patch\", \"<patch>\"]"
+    )]
+    ImplicitInvocation,
 }
 
 impl From<std::io::Error> for ApplyPatchError {
@@ -93,29 +98,19 @@ pub struct ApplyPatchArgs {
 
 pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
     match argv {
+        // Direct invocation: apply_patch <patch>
         [cmd, body] if APPLY_PATCH_COMMANDS.contains(&cmd.as_str()) => match parse_patch(body) {
             Ok(source) => MaybeApplyPatch::Body(source),
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
-        // Handle common shell wrappers: bash/sh/zsh with -lc or -c
-        [shell, flag, script]
-            if {
-                // accept absolute paths too (e.g., /bin/bash, /usr/bin/sh)
-                let shell_name = std::path::Path::new(shell)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                let is_shell = matches!(shell_name, "bash" | "sh" | "zsh");
-                let is_flag = matches!(flag.as_str(), "-lc" | "-c");
-                let starts_with_apply = APPLY_PATCH_COMMANDS
-                    .iter()
-                    .any(|cmd| script.trim_start().starts_with(cmd));
-                is_shell && is_flag && starts_with_apply
-            } =>
-        {
+        // Bash heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
+        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
             match extract_apply_patch_from_bash(script) {
-                Ok((body, _maybe_cd)) => match parse_patch(&body) {
-                    Ok(source) => MaybeApplyPatch::Body(source),
+                Ok((body, workdir)) => match parse_patch(&body) {
+                    Ok(mut source) => {
+                        source.workdir = workdir;
+                        MaybeApplyPatch::Body(source)
+                    }
                     Err(e) => MaybeApplyPatch::PatchParseError(e),
                 },
                 Err(ExtractHeredocError::CommandDidNotStartWithApplyPatch) => {
@@ -219,6 +214,26 @@ impl ApplyPatchAction {
 /// cwd must be an absolute path so that we can resolve relative paths in the
 /// patch.
 pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApplyPatchVerified {
+    // Detect a raw patch body passed directly as the command or as the body of a bash -lc
+    // script. In these cases, report an explicit error rather than applying the patch.
+    match argv {
+        [body] => {
+            if parse_patch(body).is_ok() {
+                return MaybeApplyPatchVerified::CorrectnessError(
+                    ApplyPatchError::ImplicitInvocation,
+                );
+            }
+        }
+        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
+            if parse_patch(script).is_ok() {
+                return MaybeApplyPatchVerified::CorrectnessError(
+                    ApplyPatchError::ImplicitInvocation,
+                );
+            }
+        }
+        _ => {}
+    }
+
     match maybe_parse_apply_patch(argv) {
         MaybeApplyPatch::Body(ApplyPatchArgs {
             patch,
@@ -561,31 +576,21 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
     for hunk in hunks {
         match hunk {
             Hunk::AddFile { path, contents } => {
-                if let Some(parent) = path.parent() {
-                    if !parent.as_os_str().is_empty() {
-                        std::fs::create_dir_all(parent).with_context(|| {
-                            format!("Failed to create parent directories for {}", path.display())
-                        })?;
-                    }
+                if let Some(parent) = path.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("Failed to create parent directories for {}", path.display())
+                    })?;
                 }
                 std::fs::write(path, contents)
                     .with_context(|| format!("Failed to write file {}", path.display()))?;
                 added.push(path.clone());
             }
             Hunk::DeleteFile { path } => {
-                match std::fs::remove_file(path) {
-                    Ok(()) => deleted.push(path.clone()),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        // Treat deleting a non-existent file as success (idempotent delete).
-                        deleted.push(path.clone());
-                    }
-                    Err(e) => {
-                        return Err(anyhow::Error::new(e).context(format!(
-                            "Failed to delete file {}",
-                            path.display()
-                        )));
-                    }
-                }
+                std::fs::remove_file(path)
+                    .with_context(|| format!("Failed to delete file {}", path.display()))?;
+                deleted.push(path.clone());
             }
             Hunk::UpdateFile {
                 path,
@@ -595,27 +600,17 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
                 let AppliedPatch { new_contents, .. } =
                     derive_new_contents_from_chunks(path, chunks)?;
                 if let Some(dest) = move_path {
-                    if let Some(parent) = dest.parent() {
-                        if !parent.as_os_str().is_empty() {
-                            std::fs::create_dir_all(parent).with_context(|| {
-                                format!("Failed to create parent directories for {}", dest.display())
-                            })?;
-                        }
+                    if let Some(parent) = dest.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        std::fs::create_dir_all(parent).with_context(|| {
+                            format!("Failed to create parent directories for {}", dest.display())
+                        })?;
                     }
                     std::fs::write(dest, new_contents)
                         .with_context(|| format!("Failed to write file {}", dest.display()))?;
-                    match std::fs::remove_file(path) {
-                        Ok(()) => (),
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                            // Original already gone; proceed.
-                        }
-                        Err(e) => {
-                            return Err(anyhow::Error::new(e).context(format!(
-                                "Failed to remove original {}",
-                                path.display()
-                            )));
-                        }
-                    }
+                    std::fs::remove_file(path)
+                        .with_context(|| format!("Failed to remove original {}", path.display()))?;
                     modified.push(dest.clone());
                 } else {
                     std::fs::write(path, new_contents)
@@ -637,33 +632,13 @@ struct AppliedPatch {
     new_contents: String,
 }
 
-/// Best-effort read with brief retries for transient NotFound during editor-style atomic renames.
-fn read_to_string_with_retry(path: &Path) -> std::io::Result<String> {
-    use std::io::ErrorKind;
-    const MAX_ATTEMPTS: usize = 5;
-    let mut attempt = 0;
-    loop {
-        match std::fs::read_to_string(path) {
-            Ok(s) => return Ok(s),
-            Err(e) if e.kind() == ErrorKind::NotFound && attempt < MAX_ATTEMPTS => {
-                // Tiny backoff (10ms, 20ms, 40ms, 80ms, 160ms)
-                let delay_ms = 10u64 << attempt;
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                attempt += 1;
-                continue;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-}
-
 /// Return *only* the new file contents (joined into a single `String`) after
 /// applying the chunks to the file at `path`.
 fn derive_new_contents_from_chunks(
     path: &Path,
     chunks: &[UpdateFileChunk],
 ) -> std::result::Result<AppliedPatch, ApplyPatchError> {
-    let original_contents = match read_to_string_with_retry(path) {
+    let original_contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(err) => {
             return Err(ApplyPatchError::IoError(IoError {
@@ -778,9 +753,9 @@ fn compute_replacements(
             line_index = start_idx + pattern.len();
         } else {
             return Err(ApplyPatchError::ComputeReplacements(format!(
-                "Failed to find expected lines {:?} in {}",
-                chunk.old_lines,
-                path.display()
+                "Failed to find expected lines in {}:\n{}",
+                path.display(),
+                chunk.old_lines.join("\n"),
             )));
         }
     }
@@ -924,6 +899,28 @@ mod tests {
         assert!(matches!(
             maybe_parse_apply_patch(&args),
             MaybeApplyPatch::NotApplyPatch
+        ));
+    }
+
+    #[test]
+    fn test_implicit_patch_single_arg_is_error() {
+        let patch = "*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch".to_string();
+        let args = vec![patch];
+        let dir = tempdir().unwrap();
+        assert!(matches!(
+            maybe_parse_apply_patch_verified(&args, dir.path()),
+            MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
+        ));
+    }
+
+    #[test]
+    fn test_implicit_patch_bash_script_is_error() {
+        let script = "*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch";
+        let args = args_bash(script);
+        let dir = tempdir().unwrap();
+        assert!(matches!(
+            maybe_parse_apply_patch_verified(&args, dir.path()),
+            MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
         ));
     }
 
@@ -1268,6 +1265,33 @@ PATCH"#,
 
         let contents = fs::read_to_string(&path).unwrap();
         assert_eq!(contents, "a\nB\nc\nd\nE\nf\ng\n");
+    }
+
+    #[test]
+    fn test_pure_addition_chunk_followed_by_removal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("panic.txt");
+        fs::write(&path, "line1\nline2\nline3\n").unwrap();
+        let patch = wrap_patch(&format!(
+            r#"*** Update File: {}
+@@
++after-context
++second-line
+@@
+ line1
+-line2
+-line3
++line2-replacement"#,
+            path.display()
+        ));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        let contents = fs::read_to_string(path).unwrap();
+        assert_eq!(
+            contents,
+            "line1\nline2-replacement\nafter-context\nsecond-line\n"
+        );
     }
 
     /// Ensure that patches authored with ASCII characters can update lines that
