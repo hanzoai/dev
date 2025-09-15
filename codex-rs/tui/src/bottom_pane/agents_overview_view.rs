@@ -1,0 +1,148 @@
+use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+
+use crate::app_event::AppEvent;
+use crate::app_event_sender::AppEventSender;
+
+use super::bottom_pane_view::BottomPaneView;
+use super::BottomPane;
+
+#[derive(Clone, Debug)]
+pub(crate) struct AgentsOverviewView {
+    agents: Vec<(String, bool /*enabled*/ , bool /*installed*/ , String /*command*/ )>,
+    commands: Vec<String>,
+    selected: usize,
+    is_complete: bool,
+    app_event_tx: AppEventSender,
+}
+
+impl AgentsOverviewView {
+    pub fn new(
+        agents: Vec<(String, bool, bool, String)>,
+        commands: Vec<String>,
+        app_event_tx: AppEventSender,
+    ) -> Self {
+        Self { agents, commands, selected: 0, is_complete: false, app_event_tx }
+    }
+
+    fn total_rows(&self) -> usize { self.agents.len().saturating_add(self.commands.len()).saturating_add(1) /* Add new… */ }
+}
+
+impl<'a> BottomPaneView<'a> for AgentsOverviewView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        match key_event {
+            KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
+            KeyEvent { code: KeyCode::Up, .. } => {
+                if self.total_rows() == 0 { return; }
+                if self.selected == 0 { self.selected = self.total_rows() - 1; } else { self.selected -= 1; }
+            }
+            KeyEvent { code: KeyCode::Down, .. } => {
+                if self.total_rows() == 0 { return; }
+                self.selected = (self.selected + 1) % self.total_rows();
+            }
+            KeyEvent { code: KeyCode::Enter, .. } => {
+                let idx = self.selected;
+                if idx < self.agents.len() {
+                    // Open Agent editor
+                    let (name, _en, _inst, _cmd) = self.agents[idx].clone();
+                    self.app_event_tx.send(AppEvent::ShowAgentEditor { name });
+                    self.is_complete = true;
+                } else {
+                    // Commands region: specific name or Add new…
+                    let cmd_idx = idx - self.agents.len();
+                    if cmd_idx < self.commands.len() {
+                        if let Some(name) = self.commands.get(cmd_idx) {
+                            self.app_event_tx.send(AppEvent::ShowSubagentEditorForName { name: name.clone() });
+                            self.is_complete = true;
+                        }
+                    } else {
+                        self.app_event_tx.send(AppEvent::ShowSubagentEditorNew);
+                        self.is_complete = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn is_complete(&self) -> bool { self.is_complete }
+
+    fn desired_height(&self, _width: u16) -> u16 { 18 }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        Clear.render(area, buf);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .title(" Agents ")
+            .title_alignment(Alignment::Center);
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        // Agents section
+        lines.push(Line::from(Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD))));
+        for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
+            let sel = i == self.selected;
+            // Active = enabled and installed. Show green when truly runnable, otherwise dim.
+            let dot = "•";
+            let dot_style = if *enabled && *installed { Style::default().fg(crate::colors::success()) } else { Style::default().fg(crate::colors::text()) };
+            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
+            let mut spans = vec![
+                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+                Span::styled(dot, dot_style),
+                Span::raw(" "),
+                Span::styled(name.clone(), name_style),
+            ];
+            if sel {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim())));
+            }
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::from(""));
+
+        // Commands section
+        lines.push(Line::from(Span::styled("Commands", Style::default().add_modifier(Modifier::BOLD))));
+        for (j, cmd) in self.commands.iter().enumerate() {
+            let idx = self.agents.len() + j;
+            let sel = idx == self.selected;
+            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
+            let mut spans = vec![
+                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+                Span::styled(format!("/{}", cmd), name_style),
+            ];
+            if sel { spans.push(Span::raw("  ")); spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim()))); }
+            lines.push(Line::from(spans));
+        }
+        // Add new… row
+        let add_idx = self.agents.len() + self.commands.len();
+        let add_sel = add_idx == self.selected;
+        let mut add_spans = vec![
+            Span::styled(if add_sel { "› " } else { "  " }, if add_sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+            Span::styled("Add new…", if add_sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() }),
+        ];
+        if add_sel { add_spans.push(Span::raw("  ")); add_spans.push(Span::styled("(press Enter to add)", Style::default().fg(crate::colors::text_dim()))); }
+        lines.push(Line::from(add_spans));
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+            Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Enter", Style::default().fg(crate::colors::success())),
+            Span::styled(" Configure  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Esc", Style::default().fg(crate::colors::error())),
+            Span::styled(" Close", Style::default().fg(crate::colors::text_dim())),
+        ]));
+
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .render(Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(2), height: inner.height }, buf);
+    }
+}

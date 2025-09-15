@@ -1008,6 +1008,11 @@ impl App<'_> {
                         widget.prepare_agents();
                     }
                 }
+                AppEvent::ShowAgentEditor { name } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_agent_editor_ui(name);
+                    }
+                }
                 AppEvent::UpdateReasoningEffort(new_effort) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_reasoning_effort(new_effort);
@@ -1038,14 +1043,26 @@ impl App<'_> {
                         widget.delete_subagent_by_name(&name);
                     }
                 }
-                AppEvent::ShowAgentsSettings => {
+                // ShowAgentsSettings removed
+                AppEvent::ShowAgentsOverview => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.show_agents_settings_ui();
+                        widget.show_agents_overview_ui();
                     }
                 }
-                AppEvent::ShowSubagentEditor { name, available_agents, existing, is_new } => {
+                // ShowSubagentEditor removed; use ShowSubagentEditorForName/ShowSubagentEditorNew
+                AppEvent::ShowSubagentEditorForName { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.show_subagent_editor_ui(name, available_agents, existing, is_new);
+                        widget.show_subagent_editor_for_name(name);
+                    }
+                }
+                AppEvent::ShowSubagentEditorNew => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_new_subagent_editor();
+                    }
+                }
+                AppEvent::UpdateAgentConfig { name, enabled, args_read_only, args_write, instructions } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_agent_update(&name, enabled, args_read_only, args_write, instructions);
                     }
                 }
                 AppEvent::PrefillComposer(text) => {

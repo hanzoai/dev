@@ -4346,12 +4346,79 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_agents_command(&mut self, _args: String) {
-        // Open interactive Agents settings view (list + per-command editor)
-        self.show_agents_settings_ui();
+        // Open the new overview combining Agents and Commands
+        self.show_agents_overview_ui();
     }
 
-    pub(crate) fn show_agents_settings_ui(&mut self) {
-        use crate::bottom_pane::agents_settings_view::AgentsSettingsView;
+    // Legacy show_agents_settings_ui removed — overview/Direct editors replace it
+
+    pub(crate) fn show_agents_overview_ui(&mut self) {
+        // Agents list with enabled status and install check
+        fn command_exists(cmd: &str) -> bool {
+            if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
+                return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
+            }
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(p) = which::which(cmd) { p.is_file() } else { false }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let Some(path_os) = std::env::var_os("PATH") else { return false; };
+                for dir in std::env::split_paths(&path_os) {
+                    if dir.as_os_str().is_empty() { continue; }
+                    let candidate = dir.join(cmd);
+                    if let Ok(meta) = std::fs::metadata(&candidate) {
+                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) { return true; }
+                    }
+                }
+                false
+            }
+        }
+
+        let mut agent_rows: Vec<(String, bool, bool, String)> = Vec::new();
+        // Desired presentation order for known agents
+        let preferred = ["code", "claude", "gemini", "qwen"];
+        // Name -> config lookup
+        let mut extras: Vec<String> = Vec::new();
+        for a in &self.config.agents { if !preferred.iter().any(|p| a.name.eq_ignore_ascii_case(p)) { extras.push(a.name.to_ascii_lowercase()); } }
+        extras.sort();
+        // Build ordered list of names
+        let mut ordered: Vec<String> = Vec::new();
+        for p in preferred { ordered.push(p.to_string()); }
+        for e in extras { if !ordered.iter().any(|n| n.eq_ignore_ascii_case(&e)) { ordered.push(e); } }
+
+        for name in ordered.iter() {
+            if let Some(cfg) = self.config.agents.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
+                let installed = command_exists(&cfg.command);
+                agent_rows.push((cfg.name.clone(), cfg.enabled, installed, cfg.command.clone()));
+            } else {
+                // Default command = name, enabled=true, installed based on PATH
+                let cmd = name.clone();
+                let installed = command_exists(&cmd);
+                // Keep display name as given (e.g., "code")
+                agent_rows.push((name.clone(), true, installed, cmd));
+            }
+        }
+        // Commands: built-ins followed by custom
+        let mut commands: Vec<String> = vec!["plan".into(), "solve".into(), "code".into()];
+        let custom: Vec<String> = self
+            .config
+            .subagent_commands
+            .iter()
+            .map(|c| c.name.clone())
+            .filter(|n| !commands.iter().any(|b| b.eq_ignore_ascii_case(n)))
+            .collect();
+        commands.extend(custom);
+
+        self.bottom_pane.show_agents_overview(agent_rows, commands);
+    }
+
+    // show_subagent_editor_ui removed; use show_subagent_editor_for_name or show_new_subagent_editor
+
+    pub(crate) fn show_subagent_editor_for_name(&mut self, name: String) {
+        // Build available agents from enabled ones (or sensible defaults)
         let available_agents: Vec<String> = if self.config.agents.is_empty() {
             vec!["claude".into(), "gemini".into(), "qwen".into(), "code".into()]
         } else {
@@ -4362,33 +4429,58 @@ impl ChatWidget<'_> {
                 .map(|a| a.name.clone())
                 .collect()
         };
-        let builtins = vec!["plan".to_string(), "solve".to_string(), "code".to_string()];
-        let custom: Vec<String> = self
-            .config
-            .subagent_commands
-            .iter()
-            .map(|c| c.name.clone())
-            .filter(|n| !builtins.iter().any(|b| b.eq_ignore_ascii_case(n)))
-            .collect();
-        let view = AgentsSettingsView::new(
-            builtins,
-            custom,
-            self.config.subagent_commands.clone(),
-            available_agents,
-            self.app_event_tx.clone(),
-        );
-        self.bottom_pane.show_list_selection(" Agents ".to_string(), None, None, view.into_list_view());
+        let existing = self.config.subagent_commands.clone();
+        self.bottom_pane
+            .show_subagent_editor(name, available_agents, existing, false);
     }
 
-    pub(crate) fn show_subagent_editor_ui(
-        &mut self,
-        name: String,
-        available_agents: Vec<String>,
-        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
-        is_new: bool,
-    ) {
+    pub(crate) fn show_new_subagent_editor(&mut self) {
+        let available_agents: Vec<String> = if self.config.agents.is_empty() {
+            vec!["claude".into(), "gemini".into(), "qwen".into(), "code".into()]
+        } else {
+            self.config
+                .agents
+                .iter()
+                .filter(|a| a.enabled)
+                .map(|a| a.name.clone())
+                .collect()
+        };
+        let existing = self.config.subagent_commands.clone();
         self.bottom_pane
-            .show_subagent_editor(name, available_agents, existing, is_new);
+            .show_subagent_editor(String::new(), available_agents, existing, true);
+    }
+
+    pub(crate) fn show_agent_editor_ui(&mut self, name: String) {
+
+        if let Some(cfg) = self.config.agents.iter().find(|a| a.name.eq_ignore_ascii_case(&name)).cloned() {
+            let ro = if let Some(ref v) = cfg.args_read_only { Some(v.clone()) }
+                else if !cfg.args.is_empty() { Some(cfg.args.clone()) }
+                else { let d = codex_core::agent_defaults::default_params_for(&cfg.name, true /*read_only*/); if d.is_empty() { None } else { Some(d) } };
+            let wr = if let Some(ref v) = cfg.args_write { Some(v.clone()) }
+                else if !cfg.args.is_empty() { Some(cfg.args.clone()) }
+                else { let d = codex_core::agent_defaults::default_params_for(&cfg.name, false /*read_only*/); if d.is_empty() { None } else { Some(d) } };
+            self.bottom_pane.show_agent_editor(
+                cfg.name.clone(),
+                cfg.enabled,
+                ro,
+                wr,
+                cfg.instructions.clone(),
+                cfg.command.clone(),
+            );
+        } else {
+            // Fallback: synthesize defaults
+            let cmd = name.clone();
+            let ro = codex_core::agent_defaults::default_params_for(&name, true /*read_only*/);
+            let wr = codex_core::agent_defaults::default_params_for(&name, false /*read_only*/);
+            self.bottom_pane.show_agent_editor(
+                name,
+                true,
+                if ro.is_empty() { None } else { Some(ro) },
+                if wr.is_empty() { None } else { Some(wr) },
+                None,
+                cmd,
+            );
+        }
     }
 
     pub(crate) fn apply_subagent_update(&mut self, cmd: codex_core::config_types::SubagentCommandConfig) {
@@ -4408,6 +4500,39 @@ impl ChatWidget<'_> {
         self.config
             .subagent_commands
             .retain(|c| !c.name.eq_ignore_ascii_case(name));
+    }
+
+    pub(crate) fn apply_agent_update(
+        &mut self,
+        name: &str,
+        enabled: bool,
+        args_ro: Option<Vec<String>>,
+        args_wr: Option<Vec<String>>,
+        instr: Option<String>,
+    ) {
+        if let Some(slot) = self.config.agents.iter_mut().find(|a| a.name.eq_ignore_ascii_case(name)) {
+            slot.enabled = enabled;
+            slot.args_read_only = args_ro.clone();
+            slot.args_write = args_wr.clone();
+            slot.instructions = instr.clone();
+        }
+        // Persist asynchronously
+        if let Ok(home) = codex_core::config::find_codex_home() {
+            let name_s = name.to_string();
+            let (en2, ro2, wr2, ins2) = (enabled, args_ro, args_wr, instr);
+            tokio::spawn(async move {
+                let _ = codex_core::config_edit::upsert_agent_config(
+                    &home,
+                    &name_s,
+                    Some(en2),
+                    None, // keep plain args as‑is
+                    ro2.as_deref(),
+                    wr2.as_deref(),
+                    ins2.as_deref(),
+                )
+                .await;
+            });
+        }
     }
 
     

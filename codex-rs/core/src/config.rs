@@ -1333,6 +1333,16 @@ impl Config {
             .responses_originator_header_internal_override
             .unwrap_or(DEFAULT_RESPONSES_ORIGINATOR_HEADER.to_owned());
 
+        // Normalize agents: when `command` is missing/empty, default to `name`.
+        let agents: Vec<AgentConfig> = cfg
+            .agents
+            .into_iter()
+            .map(|mut a| {
+                if a.command.trim().is_empty() { a.command = a.name.clone(); }
+                a
+            })
+            .collect();
+
         let config = Self {
             model,
             model_family,
@@ -1353,7 +1363,7 @@ impl Config {
             user_instructions,
             base_instructions,
             mcp_servers: cfg.mcp_servers,
-            agents: cfg.agents,
+            agents,
             model_providers,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             codex_home,

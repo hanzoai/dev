@@ -220,6 +220,120 @@ pub async fn delete_subagent_command(codex_home: &Path, name: &str) -> Result<bo
     Ok(removed)
 }
 
+/// Upsert an `[[agents]]` entry by `name`. If an entry with the same
+/// (case-insensitive) name exists, update selected fields; otherwise append a
+/// new entry with the provided values. Fields not managed by the editor are
+/// preserved when updating.
+pub async fn upsert_agent_config(
+    codex_home: &Path,
+    name: &str,
+    enabled: Option<bool>,
+    args: Option<&[String]>,
+    args_read_only: Option<&[String]>,
+    args_write: Option<&[String]>,
+    instructions: Option<&str>,
+) -> Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+
+    let mut doc = match tokio::fs::read_to_string(&config_path).await {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tokio::fs::create_dir_all(codex_home).await?;
+            DocumentMut::new()
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // Search existing [[agents]] for a case‑insensitive name match
+    let mut found = false;
+    if let Some(item) = doc.as_table().get("agents").cloned() {
+        let Some(arr) = item.as_array_of_tables() else { /* not an array, treat as missing */ return write_new_or_append(doc, codex_home, config_path, name, enabled, args, args_read_only, args_write, instructions).await };
+        let mut new_arr = toml_edit::ArrayOfTables::new();
+        for tbl_ref in arr.iter() {
+            let mut tbl = tbl_ref.clone();
+            let same = tbl
+                .get("name")
+                .and_then(|i| i.as_str())
+                .map(|s| s.eq_ignore_ascii_case(name))
+                .unwrap_or(false);
+            if same {
+                if let Some(val) = enabled { tbl["enabled"] = toml_edit::value(val); }
+                if let Some(a) = args { tbl["args"] = toml_edit::value(toml_edit::Array::from_iter(a.iter().cloned())); }
+                if let Some(ro) = args_read_only {
+                    tbl["args-read-only"] = toml_edit::value(toml_edit::Array::from_iter(ro.iter().cloned()));
+                }
+                if let Some(w) = args_write {
+                    tbl["args-write"] = toml_edit::value(toml_edit::Array::from_iter(w.iter().cloned()));
+                }
+                if let Some(instr) = instructions {
+                    if instr.trim().is_empty() { tbl.remove("instructions"); }
+                    else { tbl["instructions"] = toml_edit::value(instr.to_string()); }
+                }
+                found = true;
+            }
+            new_arr.push(tbl);
+        }
+        doc["agents"] = toml_edit::Item::ArrayOfTables(new_arr);
+    }
+
+    if !found {
+        // Append a new entry safely
+        append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions);
+    }
+
+    // Write back atomically
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
+// Helper: append a single [[agents]] entry (no-alloc fallible path wrapper above)
+fn append_agent_entry(
+    doc: &mut DocumentMut,
+    name: &str,
+    enabled: Option<bool>,
+    args: Option<&[String]>,
+    args_read_only: Option<&[String]>,
+    args_write: Option<&[String]>,
+    instructions: Option<&str>,
+) {
+    let mut t = toml_edit::Table::new();
+    t.set_implicit(true);
+    t["name"] = toml_edit::value(name.to_string());
+    if let Some(val) = enabled { t["enabled"] = toml_edit::value(val); }
+    if let Some(a) = args { t["args"] = toml_edit::value(toml_edit::Array::from_iter(a.iter().cloned())); }
+    if let Some(ro) = args_read_only { t["args-read-only"] = toml_edit::value(toml_edit::Array::from_iter(ro.iter().cloned())); }
+    if let Some(w) = args_write { t["args-write"] = toml_edit::value(toml_edit::Array::from_iter(w.iter().cloned())); }
+    if let Some(instr) = instructions { if !instr.trim().is_empty() { t["instructions"] = toml_edit::value(instr.to_string()); } }
+
+    let mut arr = doc
+        .as_table()
+        .get("agents")
+        .and_then(|i| i.as_array_of_tables().cloned())
+        .unwrap_or_else(toml_edit::ArrayOfTables::new);
+    arr.push(t);
+    doc["agents"] = toml_edit::Item::ArrayOfTables(arr);
+}
+
+async fn write_new_or_append(
+    mut doc: DocumentMut,
+    codex_home: &Path,
+    config_path: std::path::PathBuf,
+    name: &str,
+    enabled: Option<bool>,
+    args: Option<&[String]>,
+    args_read_only: Option<&[String]>,
+    args_write: Option<&[String]>,
+    instructions: Option<&str>,
+) -> Result<()> {
+    append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions);
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

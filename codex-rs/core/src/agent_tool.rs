@@ -441,6 +441,14 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
 
     // Build the full prompt with context
     let mut full_prompt = prompt.clone();
+    // Prepend any per-agent instructions from config when available
+    if let Some(cfg) = config.as_ref() {
+        if let Some(instr) = cfg.instructions.as_ref() {
+            if !instr.trim().is_empty() {
+                full_prompt = format!("{}\n\n{}", instr.trim(), full_prompt);
+            }
+        }
+    }
     if let Some(context) = &context {
         full_prompt = format!("Context: {}\n\nAgent: {}", context, full_prompt);
     }
@@ -593,9 +601,17 @@ async fn execute_model_with_permissions(
             }
         }
 
-        // Add any configured args first
-        for arg in &cfg.args {
-            cmd.arg(arg);
+        // Add any configured args first, preferring mode‑specific values
+        if read_only {
+            if let Some(ro) = cfg.args_read_only.as_ref() {
+                for arg in ro { cmd.arg(arg); }
+            } else {
+                for arg in &cfg.args { cmd.arg(arg); }
+            }
+        } else if let Some(w) = cfg.args_write.as_ref() {
+            for arg in w { cmd.arg(arg); }
+        } else {
+            for arg in &cfg.args { cmd.arg(arg); }
         }
     }
 
@@ -604,57 +620,24 @@ async fn execute_model_with_permissions(
     let model_name = if config.is_some() { command.as_str() } else { model_lower.as_str() };
 
     match model_name {
-        "claude" => {
-            if read_only {
-                cmd.args(&[
-                    "--allowedTools",
-                    "Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch",
-                    "-p",
-                    prompt
-                ]);
-            } else {
-                cmd.args(&["--dangerously-skip-permissions", "-p", prompt]);
-            }
-        }
-        "gemini" => {
-            if read_only {
-                cmd.args(&["-m", "gemini-2.5-pro", "-p", prompt]);
-            } else {
-                cmd.args(&["-m", "gemini-2.5-pro", "-y", "-p", prompt]);
-            }
-        }
-        "qwen" => {
-            // Qwen coder: follow Gemini CLI UX by default, and do not pin a model
-            // unless the user explicitly sets QWEN_MODEL in the environment.
-            // We intentionally omit default "-m" to track the CLI's latest default model.
-            if let Ok(model_override) = std::env::var("QWEN_MODEL") {
-                if !model_override.trim().is_empty() {
-                    if read_only {
-                        cmd.args(&["-m", &model_override, "-p", prompt]);
-                    } else {
-                        cmd.args(&["-m", &model_override, "-y", "-p", prompt]);
-                    }
-                } else if read_only {
-                    cmd.args(&["-p", prompt]);
-                } else {
-                    cmd.args(&["-y", "-p", prompt]);
-                }
-            } else if read_only {
-                cmd.args(&["-p", prompt]);
-            } else {
-                cmd.args(&["-y", "-p", prompt]);
-            }
+        "claude" | "gemini" | "qwen" => {
+            let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+            defaults.push("-p".into());
+            defaults.push(prompt.to_string());
+            cmd.args(defaults);
         }
         "codex" | "code" => {
-            if read_only {
-                cmd.args(&["-s", "read-only", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+            // If config provided explicit args for this mode, do not append defaults.
+            let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
+            if have_mode_args {
+                cmd.arg(prompt);
             } else {
-                cmd.args(&["-s", "workspace-write", "-a", "never", "exec", "--skip-git-repo-check", prompt]);
+                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                defaults.push(prompt.to_string());
+                cmd.args(defaults);
             }
         }
-        _ => {
-            return Err(format!("Unknown model: {}", model));
-        }
+        _ => { return Err(format!("Unknown model: {}", model)); }
     }
 
     // Proactively check for presence of external command before spawn when not
@@ -742,41 +725,38 @@ async fn execute_model_with_permissions(
 
         // Rebuild args exactly as above
         let mut args: Vec<String> = Vec::new();
+        // Include configured args (mode‑specific preferred) first, to mirror the
+        // immediate-Command path above.
+        if let Some(ref cfg) = config {
+            if read_only {
+                if let Some(ro) = cfg.args_read_only.as_ref() {
+                    args.extend(ro.iter().cloned());
+                } else {
+                    args.extend(cfg.args.iter().cloned());
+                }
+            } else if let Some(w) = cfg.args_write.as_ref() {
+                args.extend(w.iter().cloned());
+            } else {
+                args.extend(cfg.args.iter().cloned());
+            }
+        }
+
         match model_name {
-            "claude" => {
-                args.extend(
-                    [
-                        if read_only { "--allowedTools" } else { "--dangerously-skip-permissions" },
-                    ]
-                    .iter()
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
-                );
-                if read_only {
-                    args.push("Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch".to_string());
-                }
-                args.push("-p".to_string());
-                args.push(prompt.to_string());
-            }
-            "gemini" => {
-                args.extend(["-m".to_string(), "gemini-2.5-pro".to_string()]);
-                if !read_only { args.push("-y".to_string()); }
-                args.extend(["-p".to_string(), prompt.to_string()]);
-            }
-            "qwen" => {
-                // Respect QWEN_MODEL override if set in the effective env; otherwise
-                // omit -m to allow the CLI to pick its latest default.
-                if let Some(m) = env.get("QWEN_MODEL").cloned() {
-                    if !m.trim().is_empty() {
-                        args.extend(["-m".to_string(), m]);
-                    }
-                }
-                if !read_only { args.push("-y".to_string()); }
-                args.extend(["-p".to_string(), prompt.to_string()]);
+            "claude" | "gemini" | "qwen" => {
+                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                defaults.push("-p".into());
+                defaults.push(prompt.to_string());
+                args.extend(defaults);
             }
             "codex" | "code" => {
-                args.extend(["-s".to_string(), if read_only { "read-only" } else { "workspace-write" }.to_string()]);
-                args.extend(["-a".to_string(), "never".to_string(), "exec".to_string(), "--skip-git-repo-check".to_string(), prompt.to_string()]);
+                let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
+                if have_mode_args {
+                    args.push(prompt.to_string());
+                } else {
+                    let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                    defaults.push(prompt.to_string());
+                    args.extend(defaults);
+                }
             }
             _ => {}
         }
