@@ -9,73 +9,11 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
 use super::bottom_pane_view::BottomPaneView;
-use super::list_selection_view::{ListSelectionView, SelectionAction, SelectionItem};
+// list_selection_view no longer used (overview replaces the list)
 use super::BottomPane;
 use super::form_text_field::FormTextField;
 
-#[derive(Clone, Debug)]
-pub struct AgentsSettingsView {
-    builtins: Vec<String>,
-    custom: Vec<String>,
-    existing: Vec<codex_core::config_types::SubagentCommandConfig>,
-    available_agents: Vec<String>,
-    app_event_tx: AppEventSender,
-}
-
-impl AgentsSettingsView {
-    pub fn new(
-        builtins: Vec<String>,
-        custom: Vec<String>,
-        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
-        available_agents: Vec<String>,
-        app_event_tx: AppEventSender,
-    ) -> Self {
-        Self { builtins, custom, existing, available_agents, app_event_tx }
-    }
-
-    pub fn into_list_view(self) -> ListSelectionView {
-        // Build items: built-ins first, then custom, then Add New…
-        let mut items: Vec<SelectionItem> = Vec::new();
-        let make_actions = |name: String| -> Vec<SelectionAction> {
-            let name_clone = name.clone();
-            let view_clone = self.clone();
-            vec![Box::new(move |tx: &AppEventSender| {
-                tx.send(AppEvent::ShowSubagentEditor { name: name_clone.clone(), available_agents: view_clone.available_agents.clone(), existing: view_clone.existing.clone(), is_new: false });
-            })]
-        };
-
-        // Built-ins
-        for name in &self.builtins {
-            let desc = Some("(press Enter to configure)".to_string());
-            items.push(SelectionItem { name: format!("/{}", name), description: desc, is_current: false, actions: make_actions(name.clone()) });
-        }
-        // Custom
-        for name in &self.custom {
-            let desc = Some("(press Enter to configure)".to_string());
-            items.push(SelectionItem { name: format!("/{}", name), description: desc, is_current: false, actions: make_actions(name.clone()) });
-        }
-        // Add New…
-        {
-            let view_clone = self.clone();
-            let actions: Vec<SelectionAction> = vec![Box::new(move |tx: &AppEventSender| {
-                tx.send(AppEvent::ShowSubagentEditor { name: String::new(), available_agents: view_clone.available_agents.clone(), existing: view_clone.existing.clone(), is_new: true });
-            })];
-            items.push(SelectionItem { name: "Add new…".to_string(), description: None, is_current: false, actions });
-        }
-
-        // Show all built-ins and Add new…; avoid wrapping constraints
-        let max_rows = items.len().max(4);
-        let subtitle = "Configure which agents run for each command. Press Enter to configure.".to_string();
-        ListSelectionView::new(
-            " Agent Commands ".to_string(),
-            Some(subtitle),
-            Some("Esc cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-            max_rows,
-        )
-    }
-}
+// Removed legacy AgentsSettingsView list. Overview replaces it.
 
 #[derive(Debug)]
 pub struct SubagentEditorView {
@@ -93,18 +31,23 @@ pub struct SubagentEditorView {
 }
 
 impl SubagentEditorView {
-    pub fn new(root: &AgentsSettingsView, name: &str) -> Self {
+    fn build_with(
+        available_agents: Vec<String>,
+        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
+        app_event_tx: AppEventSender,
+        name: &str,
+    ) -> Self {
         let mut me = Self {
             name_field: FormTextField::new_single_line(),
             read_only: if name.is_empty() { false } else { codex_core::slash_commands::default_read_only_for(name) },
             selected_agent_indices: Vec::new(),
             agent_cursor: 0,
             orch_field: FormTextField::new_multi_line(),
-            available_agents: root.available_agents.clone(),
+            available_agents,
             is_new: name.is_empty(),
             field: 0,
             is_complete: false,
-            app_event_tx: root.app_event_tx.clone(),
+            app_event_tx,
             confirm_delete: false,
         };
         // Always seed the name field with the provided name
@@ -112,7 +55,7 @@ impl SubagentEditorView {
         // Restrict ID field to [A-Za-z0-9_-]
         me.name_field.set_filter(super::form_text_field::InputFilter::Id);
         // Seed from existing config if present
-        if let Some(cfg) = root.existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
+        if let Some(cfg) = existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
             me.name_field.set_text(&cfg.name);
             me.read_only = cfg.read_only;
             me.orch_field.set_text(&cfg.orchestrator_instructions.clone().unwrap_or_default());
@@ -145,8 +88,7 @@ impl SubagentEditorView {
         is_new: bool,
         app_event_tx: AppEventSender,
     ) -> Self {
-        let root = AgentsSettingsView { builtins: vec![], custom: vec![], existing, available_agents, app_event_tx };
-        let mut s = Self::new(&root, &name);
+        let mut s = Self::build_with(available_agents, existing, app_event_tx, &name);
         s.is_new = is_new;
         s
     }
@@ -193,9 +135,9 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let last_btn_idx = if show_delete { 6 } else { 5 };
         match key_event {
             KeyEvent { code: KeyCode::Esc, .. } => {
-                // Return to Agents list on first Esc
+                // Return to Agents overview on first Esc
                 self.is_complete = true;
-                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
             }
             KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(last_btn_idx); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
@@ -239,14 +181,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => { self.save(); self.is_complete = true; }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => { self.confirm_delete = true; }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => {
-                // Cancel → return to Agents list
+                // Cancel → return to Agents overview
                 self.is_complete = true;
-                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
             }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && !show_delete && !self.confirm_delete => {
                 // Cancel in 2-button layout
                 self.is_complete = true;
-                self.app_event_tx.send(AppEvent::ShowAgentsSettings);
+                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
             }
             // Confirm phase: 4 = Confirm, 5 = Back (when confirm_delete is true)
             KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
@@ -260,6 +202,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                     self.app_event_tx.send(AppEvent::DeleteSubagentCommand(id));
                 }
                 self.is_complete = true;
+                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
             }
             KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 5 => { self.confirm_delete = false; }
             _ => {}

@@ -53,7 +53,9 @@ pub struct AgentConfig {
     /// Name of the agent (e.g., "claude", "gemini", "gpt-4")
     pub name: String,
 
-    /// Command to execute the agent (e.g., "claude", "gemini")
+    /// Command to execute the agent (e.g., "claude", "gemini").
+    /// If omitted, defaults to the agent `name` during config load.
+    #[serde(default)]
     pub command: String,
 
     /// Optional arguments to pass to the agent command
@@ -75,6 +77,23 @@ pub struct AgentConfig {
     /// Optional environment variables for the agent
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
+
+    /// Optional arguments to pass only when the agent is executed in
+    /// read-only mode. When present, these are preferred over `args` for
+    /// read-only runs.
+    #[serde(default)]
+    pub args_read_only: Option<Vec<String>>,
+
+    /// Optional arguments to pass only when the agent is executed with write
+    /// permissions. When present, these are preferred over `args` for write
+    /// runs.
+    #[serde(default)]
+    pub args_write: Option<Vec<String>>,
+
+    /// Optional per-agent instructions. When set, these are prepended to the
+    /// prompt provided to the agent whenever it runs.
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 fn default_true() -> bool {

@@ -23,6 +23,8 @@ mod file_search_popup;
 mod paste_burst;
 mod live_ring_widget;
 mod popup_consts;
+mod agent_editor_view;
+mod agents_overview_view;
 mod reasoning_selection_view;
 mod scroll_state;
 mod selection_popup_common;
@@ -111,6 +113,44 @@ impl BottomPane<'_> {
             status_view_active: false,
             top_spacer_enabled: true,
         }
+    }
+
+    /// Show Agents overview (Agents + Commands sections)
+    pub fn show_agents_overview(
+        &mut self,
+        agents: Vec<(String, bool, bool, String)>,
+        commands: Vec<String>,
+    ) {
+        use agents_overview_view::AgentsOverviewView;
+        let view = AgentsOverviewView::new(agents, commands, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    /// Show per-agent editor
+    pub fn show_agent_editor(
+        &mut self,
+        name: String,
+        enabled: bool,
+        args_read_only: Option<Vec<String>>,
+        args_write: Option<Vec<String>>,
+        instructions: Option<String>,
+        command: String,
+    ) {
+        use agent_editor_view::AgentEditorView;
+        let view = AgentEditorView::new(
+            name,
+            enabled,
+            args_read_only,
+            args_write,
+            instructions,
+            command,
+            self.app_event_tx.clone(),
+        );
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
     }
 
     pub fn set_has_chat_history(&mut self, has_history: bool) {
