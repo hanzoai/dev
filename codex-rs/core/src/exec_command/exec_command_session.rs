@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::sync::Mutex as StdMutex;
 
 use tokio::sync::broadcast;
@@ -12,9 +11,6 @@ pub(crate) struct ExecCommandSession {
     /// Broadcast stream of output chunks read from the PTY. New subscribers
     /// receive only chunks emitted after they subscribe.
     output_tx: broadcast::Sender<Vec<u8>>,
-    /// Receiver subscribed before the child process starts emitting output so
-    /// the first caller can consume any early data without races.
-    initial_output_rx: StdMutex<Option<broadcast::Receiver<Vec<u8>>>>,
 
     /// Child killer handle for termination on drop (can signal independently
     /// of a thread blocked in `.wait()`).
@@ -28,6 +24,9 @@ pub(crate) struct ExecCommandSession {
 
     /// JoinHandle for the child wait task.
     wait_handle: StdMutex<Option<JoinHandle<()>>>,
+
+    /// Tracks whether the underlying process has exited.
+    exit_status: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ExecCommandSession {
@@ -38,24 +37,21 @@ impl ExecCommandSession {
         reader_handle: JoinHandle<()>,
         writer_handle: JoinHandle<()>,
         wait_handle: JoinHandle<()>,
-    ) -> Self {
-        Self {
-            writer_tx,
-            output_tx,
-            initial_output_rx: StdMutex::new(None),
-            killer: StdMutex::new(Some(killer)),
-            reader_handle: StdMutex::new(Some(reader_handle)),
-            writer_handle: StdMutex::new(Some(writer_handle)),
-            wait_handle: StdMutex::new(Some(wait_handle)),
-        }
-    }
-
-    pub(crate) fn set_initial_output_receiver(&self, receiver: broadcast::Receiver<Vec<u8>>) {
-        if let Ok(mut guard) = self.initial_output_rx.lock()
-            && guard.is_none()
-        {
-            *guard = Some(receiver);
-        }
+        exit_status: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> (Self, broadcast::Receiver<Vec<u8>>) {
+        let initial_output_rx = output_tx.subscribe();
+        (
+            Self {
+                writer_tx,
+                output_tx,
+                killer: StdMutex::new(Some(killer)),
+                reader_handle: StdMutex::new(Some(reader_handle)),
+                writer_handle: StdMutex::new(Some(writer_handle)),
+                wait_handle: StdMutex::new(Some(wait_handle)),
+                exit_status,
+            },
+            initial_output_rx,
+        )
     }
 
     pub(crate) fn writer_sender(&self) -> mpsc::Sender<Vec<u8>> {
@@ -63,40 +59,38 @@ impl ExecCommandSession {
     }
 
     pub(crate) fn output_receiver(&self) -> broadcast::Receiver<Vec<u8>> {
-        if let Ok(mut guard) = self.initial_output_rx.lock()
-            && let Some(receiver) = guard.take()
-        {
-            receiver
-        } else {
-            self.output_tx.subscribe()
-        }
+        self.output_tx.subscribe()
+    }
+
+    pub(crate) fn has_exited(&self) -> bool {
+        self.exit_status.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
 impl Drop for ExecCommandSession {
     fn drop(&mut self) {
         // Best-effort: terminate child first so blocking tasks can complete.
-        if let Ok(mut killer_opt) = self.killer.lock() {
-            if let Some(mut killer) = killer_opt.take() {
-                let _ = killer.kill();
-            }
+        if let Ok(mut killer_opt) = self.killer.lock()
+            && let Some(mut killer) = killer_opt.take()
+        {
+            let _ = killer.kill();
         }
 
         // Abort background tasks; they may already have exited after kill.
-        if let Ok(mut h) = self.reader_handle.lock() {
-            if let Some(handle) = h.take() {
-                handle.abort();
-            }
+        if let Ok(mut h) = self.reader_handle.lock()
+            && let Some(handle) = h.take()
+        {
+            handle.abort();
         }
-        if let Ok(mut h) = self.writer_handle.lock() {
-            if let Some(handle) = h.take() {
-                handle.abort();
-            }
+        if let Ok(mut h) = self.writer_handle.lock()
+            && let Some(handle) = h.take()
+        {
+            handle.abort();
         }
-        if let Ok(mut h) = self.wait_handle.lock() {
-            if let Some(handle) = h.take() {
-                handle.abort();
-            }
+        if let Ok(mut h) = self.wait_handle.lock()
+            && let Some(handle) = h.take()
+        {
+            handle.abort();
         }
     }
 }
