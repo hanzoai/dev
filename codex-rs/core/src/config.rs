@@ -1478,7 +1478,7 @@ impl Config {
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            tui: cfg.tui.unwrap_or_default(),
+            tui: cfg.tui.clone().unwrap_or_default(),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
