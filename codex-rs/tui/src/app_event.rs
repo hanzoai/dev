@@ -92,6 +92,8 @@ pub(crate) enum AppEvent {
     UpdateSubagentCommand(codex_core::config_types::SubagentCommandConfig),
     /// Remove a subagent command from memory (UI already deleted from config.toml)
     DeleteSubagentCommand(String),
+    /// Return to the Agents settings list view
+    ShowAgentsSettings,
     /// Open the subagent editor UI for the given command name
     ShowSubagentEditor {
         name: String,

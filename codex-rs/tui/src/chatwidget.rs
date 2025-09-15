@@ -4350,7 +4350,7 @@ impl ChatWidget<'_> {
         self.show_agents_settings_ui();
     }
 
-    fn show_agents_settings_ui(&mut self) {
+    pub(crate) fn show_agents_settings_ui(&mut self) {
         use crate::bottom_pane::agents_settings_view::AgentsSettingsView;
         let available_agents: Vec<String> = if self.config.agents.is_empty() {
             vec!["claude".into(), "gemini".into(), "qwen".into(), "codex".into()]
