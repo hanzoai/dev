@@ -3,6 +3,13 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::StatefulWidge
 
 use super::textarea::{TextArea, TextAreaState};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputFilter {
+    None,
+    /// Allow only ASCII alphanumeric, '-' and '_'; disallow spaces and newlines
+    Id,
+}
+
 /// Lightweight text field wrapper for bottom‑pane forms.
 ///
 /// - Centralizes key handling (Shift‑modified chars, Enter/newlines, undo, nav)
@@ -15,14 +22,21 @@ pub struct FormTextField {
     textarea: TextArea,
     state: TextAreaState,
     single_line: bool,
+    filter: InputFilter,
 }
 
 impl FormTextField {
     pub fn new_single_line() -> Self {
-        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: true }
+        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: true, filter: InputFilter::None }
     }
     pub fn new_multi_line() -> Self {
-        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: false }
+        Self { textarea: TextArea::new(), state: TextAreaState::default(), single_line: false, filter: InputFilter::None }
+    }
+
+    pub fn set_filter(&mut self, filter: InputFilter) { self.filter = filter; }
+
+    fn id_char_allowed(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '-' || c == '_'
     }
 
     pub fn set_text(&mut self, text: &str) {
@@ -56,6 +70,16 @@ impl FormTextField {
             return false; // let parent handle (e.g., form navigation)
         }
 
+        // If an input filter is active and this is a Char, validate and insert
+        if let KeyCode::Char(c) = key.code {
+            if matches!(self.filter, InputFilter::Id) {
+                if Self::id_char_allowed(c) {
+                    self.textarea.insert_str(&c.to_string());
+                }
+                return true; // consumed either way
+            }
+        }
+
         // Delegate remaining keys to TextArea which already handles:
         // - Shift-modified chars
         // - Enter/newline (multi-line only)
@@ -66,10 +90,22 @@ impl FormTextField {
 
     pub fn handle_paste(&mut self, mut pasted: String) {
         pasted = pasted.replace('\r', "\n");
-        if self.single_line {
-            pasted = pasted.replace('\n', " ");
+        // Remove newlines entirely for ID filter; otherwise normalize
+        match self.filter {
+            InputFilter::Id => {
+                let filtered: String = pasted
+                    .chars()
+                    .filter(|&c| Self::id_char_allowed(c))
+                    .collect();
+                if !filtered.is_empty() { self.textarea.insert_str(&filtered); }
+            }
+            InputFilter::None => {
+                if self.single_line {
+                    pasted = pasted.replace('\n', " ");
+                }
+                self.textarea.insert_str(&pasted);
+            }
         }
-        self.textarea.insert_str(&pasted);
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {

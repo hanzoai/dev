@@ -107,6 +107,8 @@ impl SubagentEditorView {
         };
         // Always seed the name field with the provided name
         if !name.is_empty() { me.name_field.set_text(name); }
+        // Restrict ID field to [A-Za-z0-9_-]
+        me.name_field.set_filter(super::form_text_field::InputFilter::Id);
         // Seed from existing config if present
         if let Some(cfg) = root.existing.iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
             me.name_field.set_text(&cfg.name);
@@ -366,7 +368,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let name_block = Block::default()
             .borders(Borders::ALL)
             .border_style(name_border)
-            .title(Line::from(" Name "));
+            .title(Line::from(" ID "));
         let name_inner = name_block.inner(name_box_rect);
         let name_padded = name_inner.inner(Margin::new(1, 0));
         name_block.render(name_box_rect, buf);
@@ -387,7 +389,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let orch_block = Block::default()
             .borders(Borders::ALL)
             .border_style(orch_border)
-            .title(Line::from(" Command "));
+            .title(Line::from(" Instructions "));
         let orch_inner = orch_block.inner(orch_box_rect);
         let orch_padded = orch_inner.inner(Margin::new(1, 0));
         orch_block.render(orch_box_rect, buf);
