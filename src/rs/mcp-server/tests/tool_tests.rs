@@ -1,5 +1,5 @@
 /// Comprehensive tests for MCP tool registry
-use dev_mcp_server::tool_handlers::unified::{ToolRegistry, ToolError};
+use dev_mcp_server::tool_handlers::{ToolRegistry, ToolError};
 use serde_json::json;
 use tempfile::TempDir;
 use std::fs;

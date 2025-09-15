@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/mcp",
-  "version": "1.6.0",
+  "version": "3.0.0",
   "description": "Model Context Protocol tools for Hanzo Dev",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

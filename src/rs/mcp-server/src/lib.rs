@@ -153,7 +153,7 @@ pub async fn run_main(
 
 /// List available MCP tools
 pub async fn list_tools(category: Option<String>, format: String) -> IoResult<()> {
-    use crate::tool_handlers::unified::ToolRegistry;
+    use crate::tool_handlers::ToolRegistry;
     
     let registry = ToolRegistry::new();
     let tools = if let Some(cat) = category {
@@ -184,7 +184,7 @@ pub async fn list_tools(category: Option<String>, format: String) -> IoResult<()
 
 /// Execute a specific MCP tool
 pub async fn call_tool(tool: String, params: String) -> IoResult<()> {
-    use crate::tool_handlers::unified::ToolRegistry;
+    use crate::tool_handlers::ToolRegistry;
     
     let registry = ToolRegistry::new();
     let params: serde_json::Value = serde_json::from_str(&params)
