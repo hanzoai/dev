@@ -90,7 +90,7 @@ pub async fn run_codex_tool_session(
     running_requests_id_to_codex_uuid
         .lock()
         .await
-        .insert(id.clone(), conversation_id);
+        .insert(id.clone(), conversation_id.into());
     let submission = Submission {
         id: sub_id.clone(),
         op: Op::UserInput {

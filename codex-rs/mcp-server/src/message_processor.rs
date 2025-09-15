@@ -508,7 +508,11 @@ impl MessageProcessor {
         let outgoing = self.outgoing.clone();
         let running_requests_id_to_codex_uuid = self.running_requests_id_to_codex_uuid.clone();
 
-        let codex = match self.conversation_manager.get_conversation(session_id).await {
+        let codex = match self
+            .conversation_manager
+            .get_conversation(codex_protocol::mcp_protocol::ConversationId(session_id))
+            .await
+        {
             Ok(c) => c,
             Err(_) => {
                 tracing::warn!("Session not found for session_id: {session_id}");
@@ -590,7 +594,11 @@ impl MessageProcessor {
         tracing::info!("session_id: {session_id}");
 
         // Obtain the Codex conversation from the server.
-        let codex_arc = match self.conversation_manager.get_conversation(session_id).await {
+        let codex_arc = match self
+            .conversation_manager
+            .get_conversation(codex_protocol::mcp_protocol::ConversationId(session_id))
+            .await
+        {
             Ok(c) => c,
             Err(_) => {
                 tracing::warn!("Session not found for session_id: {session_id}");
