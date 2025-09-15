@@ -707,7 +707,7 @@ impl App<'_> {
                         widget.register_pasted_image(placeholder, path);
                     }
                 }
-                AppEvent::CodexEvent(event) => {
+                AppEvent::CodeEvent(event) => {
                     self.dispatch_codex_event(event);
                 }
                 AppEvent::ExitRequest => {
@@ -785,7 +785,7 @@ impl App<'_> {
                         SlashCommand::Compact => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.clear_token_usage();
-                                self.app_event_tx.send(AppEvent::CodexOp(Op::Compact));
+                                self.app_event_tx.send(AppEvent::CodeOp(Op::Compact));
                             }
                         }
                         SlashCommand::Quit => { break 'main; }
@@ -895,7 +895,7 @@ impl App<'_> {
                             use codex_core::protocol::ApplyPatchApprovalRequestEvent;
                             use codex_core::protocol::FileChange;
 
-                            self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                            self.app_event_tx.send(AppEvent::CodeEvent(Event {
                                 id: "1".to_string(),
                                 event_seq: 0,
                                 // msg: EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
@@ -965,7 +965,7 @@ impl App<'_> {
                     {
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
                         let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
-                        let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                        let _ = self.app_event_tx.send(AppEvent::CodeEvent(Event {
                             id: "switch-cwd".to_string(),
                             event_seq: 0,
                             msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
@@ -1268,7 +1268,7 @@ impl App<'_> {
                         ),
                         order: None,
                     };
-                    self.app_event_tx.send(AppEvent::CodexEvent(ev));
+                    self.app_event_tx.send(AppEvent::CodeEvent(ev));
 
                     // Prefill composer with the edited text
                     if let AppState::Chat { widget } = &mut self.app_state {
