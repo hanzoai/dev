@@ -89,6 +89,7 @@ pub struct SubagentEditorView {
     field: usize, // 0 name, 1 mode, 2 agents, 3 orch, 4 save, 5 cancel
     is_complete: bool,
     app_event_tx: AppEventSender,
+    confirm_delete: bool,
 }
 
 impl SubagentEditorView {
@@ -104,6 +105,7 @@ impl SubagentEditorView {
             field: 0,
             is_complete: false,
             app_event_tx: root.app_event_tx.clone(),
+            confirm_delete: false,
         };
         // Always seed the name field with the provided name
         if !name.is_empty() { me.name_field.set_text(name); }
@@ -194,9 +196,11 @@ impl SubagentEditorView {
 
 impl<'a> BottomPaneView<'a> for SubagentEditorView {
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        let show_delete = !self.is_new && !matches!(self.name_field.text().to_ascii_lowercase().as_str(), "plan" | "solve" | "code");
+        let last_btn_idx = if show_delete { 6 } else { 5 };
         match key_event {
             KeyEvent { code: KeyCode::Esc, .. } => { self.is_complete = true; }
-            KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(5); }
+            KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(last_btn_idx); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
             KeyEvent { code: KeyCode::Up, modifiers, .. } => {
                 if self.field == 3 && modifiers.contains(KeyModifiers::SHIFT) {
@@ -221,14 +225,31 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
             }
-            // Left/Right between Save and Cancel
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => { self.field = 4; }
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 4 => { self.field = 5; }
+            // Left/Right between Save / Delete / Cancel
+            KeyEvent { code: KeyCode::Left, .. } if self.field >= 5 && show_delete => { if self.field > 4 { self.field -= 1; } }
+            KeyEvent { code: KeyCode::Right, .. } if self.field >= 4 && show_delete => { if self.field < 6 { self.field += 1; } }
+            KeyEvent { code: KeyCode::Left, .. } if !show_delete && self.field == 5 => { self.field = 4; }
+            KeyEvent { code: KeyCode::Right, .. } if !show_delete && self.field == 4 => { self.field = 5; }
             // Delegate input to focused text fields (handles Shift‑chars, Enter/newline, undo, etc.)
             ev @ KeyEvent { .. } if self.field == 0 => { let _ = self.name_field.handle_key(ev); }
             ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 => { self.save(); self.is_complete = true; }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 => { self.is_complete = true; }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => { self.save(); self.is_complete = true; }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => { self.confirm_delete = true; }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => { self.is_complete = true; }
+            // Confirm phase: 4 = Confirm, 5 = Back (when confirm_delete is true)
+            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
+                // Delete from disk and in-memory, then close
+                let id = self.name_field.text().to_string();
+                if !id.trim().is_empty() {
+                    if let Ok(home) = codex_core::config::find_codex_home() {
+                        let idc = id.clone();
+                        tokio::spawn(async move { let _ = codex_core::config_edit::delete_subagent_command(&home, &idc).await; });
+                    }
+                    self.app_event_tx.send(AppEvent::DeleteSubagentCommand(id));
+                }
+                self.is_complete = true;
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 5 => { self.confirm_delete = false; }
             _ => {}
         }
     }
@@ -339,14 +360,36 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Spacer between inputs
         lines.push(Line::from(""));
 
-        let save_style = sel(4).fg(crate::colors::success());
-        let cancel_style = sel(5).fg(crate::colors::error());
-        // Style labels without trailing spaces to avoid highlighting the gap between buttons
-        let mut btn_spans: Vec<Span> = Vec::new();
-        btn_spans.push(Span::styled("[ Save ]", save_style));
-        btn_spans.push(Span::raw("  "));
-        btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
-        lines.push(Line::from(btn_spans));
+        // Buttons row
+        let show_delete = !self.is_new && !matches!(self.name_field.text().to_ascii_lowercase().as_str(), "plan" | "solve" | "code");
+        if self.confirm_delete {
+            let confirm_style = sel(4).fg(crate::colors::error()).add_modifier(Modifier::BOLD);
+            let back_style = sel(5).fg(crate::colors::text());
+            let mut btn_spans: Vec<Span> = Vec::new();
+            btn_spans.push(Span::styled("[ Confirm Delete ]", confirm_style));
+            btn_spans.push(Span::raw("  "));
+            btn_spans.push(Span::styled("[ Back ]", back_style));
+            lines.push(Line::from(btn_spans));
+        } else if show_delete {
+            let save_style = sel(4).fg(crate::colors::success());
+            let delete_style = sel(5).fg(crate::colors::error());
+            let cancel_style = sel(6).fg(crate::colors::text());
+            let mut btn_spans: Vec<Span> = Vec::new();
+            btn_spans.push(Span::styled("[ Save ]", save_style));
+            btn_spans.push(Span::raw("  "));
+            btn_spans.push(Span::styled("[ Delete ]", delete_style));
+            btn_spans.push(Span::raw("  "));
+            btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
+            lines.push(Line::from(btn_spans));
+        } else {
+            let save_style = sel(4).fg(crate::colors::success());
+            let cancel_style = sel(5).fg(crate::colors::text());
+            let mut btn_spans: Vec<Span> = Vec::new();
+            btn_spans.push(Span::styled("[ Save ]", save_style));
+            btn_spans.push(Span::raw("  "));
+            btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
+            lines.push(Line::from(btn_spans));
+        }
         // Bottom spacer
         lines.push(Line::from(""));
 
