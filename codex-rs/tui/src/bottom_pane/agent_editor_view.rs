@@ -188,6 +188,53 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
         let mut lines: Vec<Line<'static>> = Vec::new();
+        // Compute a responsive layout that guarantees the buttons are visible
+        // even on small terminals (e.g., 80x24). We cap the instructions box
+        // height to whatever fits after accounting for all fixed rows.
+        let top_block: u16 = 3;        // spacer + title + spacer
+        let enabled_block: u16 = 2;    // row + spacer
+        let ro_label: u16 = 1;
+        let ro_box: u16 = 3;           // single-line input box
+        let ro_spacer: u16 = 1;
+        let wr_label: u16 = 1;
+        let wr_box: u16 = 3;
+        let wr_spacer: u16 = 1;
+        let instr_label: u16 = 1;
+        let spacer_before_buttons: u16 = 1;
+        let buttons_block: u16 = 1;
+        // Footer (optional): blank + key hints; drop if there isn't room.
+        let footer_lines_default: u16 = 2;
+        // Base rows up to (but not including) the instructions box
+        let base_fixed_top = top_block + enabled_block + ro_label + ro_box + ro_spacer + wr_label + wr_box + wr_spacer + instr_label;
+        // Desired instructions inner height (without borders)
+        let instr_inner_width = content.width.saturating_sub(4);
+        let desired_instr_inner = self.instr.desired_height(instr_inner_width).min(8);
+        let desired_instr_box_h = desired_instr_inner.saturating_add(2); // add borders
+
+        // Compute how many rows remain and choose the largest box height that keeps buttons visible.
+        let mut footer_lines = footer_lines_default;
+        let mut ih = desired_instr_box_h;
+        let fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+        if base_fixed_top.saturating_add(ih).saturating_add(fixed_after_box) > content.height {
+            // First, try dropping footer entirely
+            footer_lines = 0;
+        }
+        let fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+        if base_fixed_top.saturating_add(ih).saturating_add(fixed_after_box) > content.height {
+            // Reduce the instructions box height as needed, with a minimum of 3 (borders + 1 line)
+            let min_ih: u16 = 3;
+            let available_for_box = content
+                .height
+                .saturating_sub(base_fixed_top)
+                .saturating_sub(fixed_after_box);
+            ih = ih.min(available_for_box).max(min_ih);
+        }
+        // As a last resort, if even min layout doesn't fit, clamp ih and spacer to keep buttons visible.
+        let mut spacer_before_buttons_actual = spacer_before_buttons;
+        if base_fixed_top.saturating_add(ih).saturating_add(spacer_before_buttons_actual + buttons_block + footer_lines) > content.height {
+            spacer_before_buttons_actual = 0;
+        }
+
         // Top spacer then bold breadcrumb‑style title like the command editor
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(format!("Agents » Edit Agent » {}", self.name), Style::default().add_modifier(Modifier::BOLD))));
@@ -228,28 +275,27 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         for _ in 0..single_box_h { lines.push(Line::from("")); }
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Instructions", label(3))));
-        // Reserve lines for the instructions box based on content
-        let instr_inner_width = content.width.saturating_sub(4);
-        let instr_desired_inner = self.instr.desired_height(instr_inner_width).min(8);
-        let instr_box_reserved = instr_desired_inner.saturating_add(2);
-        for _ in 0..instr_box_reserved { lines.push(Line::from("")); }
-        lines.push(Line::from(""));
+        // Reserve lines for the instructions box based on computed `ih`
+        for _ in 0..ih { lines.push(Line::from("")); }
+        if spacer_before_buttons_actual > 0 { lines.push(Line::from("")); }
 
         // Buttons
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::text());
         lines.push(Line::from(vec![Span::styled("[ Save ]", save_style), Span::raw("  "), Span::styled("[ Cancel ]", cancel_style)]));
 
-        // Footer
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-            Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-            Span::styled("Enter", Style::default().fg(crate::colors::success())),
-            Span::styled(" Save/Close  ", Style::default().fg(crate::colors::text_dim())),
-            Span::styled("Esc", Style::default().fg(crate::colors::error())),
-            Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
-        ]));
+        // Footer (optional, only when room exists)
+        if footer_lines > 0 {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Enter", Style::default().fg(crate::colors::success())),
+                Span::styled(" Save/Close  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Esc", Style::default().fg(crate::colors::error())),
+                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
+            ]));
+        }
 
         Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -260,9 +306,9 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         // Draw input boxes at the same y offsets we reserved above
         let mut y = content.y; // start at top of content
         // Skip top spacer + title + spacer
-        y = y.saturating_add(3);
+        y = y.saturating_add(top_block);
         // Enabled row + spacer
-        y = y.saturating_add(2);
+        y = y.saturating_add(enabled_block);
 
         // RO params box (3 rows)
         let ro_rect = Rect { x: content.x, y, width: content.width, height: single_box_h };
@@ -289,7 +335,6 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
         y = y.saturating_add(single_box_h + 1);
 
         // Instructions (multi-line; height consistent with reserved space above)
-        let ih = instr_box_reserved;
         let instr_rect = Rect { x: content.x, y, width: content.width, height: ih };
         let instr_block = Block::default().borders(Borders::ALL).border_style(if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
         let instr_block = instr_block.title(Line::from(" Instructions "));
