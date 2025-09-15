@@ -6,6 +6,7 @@ use crate::config_types::GithubConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
+use crate::config_types::Notifications;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
@@ -125,6 +126,10 @@ pub struct Config {
     ///
     /// If unset the feature is disabled.
     pub notify: Option<Vec<String>>,
+
+    /// TUI notifications preference. When set, the TUI will send OSC 9 notifications on approvals
+    /// and turn completions when not focused.
+    pub tui_notifications: Notifications,
 
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
@@ -1502,7 +1507,10 @@ impl Config {
             include_apply_patch_tool: include_apply_patch_tool.unwrap_or(false),
             tools_web_search_request,
             tools_web_search_allowed_domains,
-            use_experimental_streamable_shell_tool: false,
+            // Honor upstream opt-in switch name for our experimental streamable shell tool.
+            use_experimental_streamable_shell_tool: cfg
+                .experimental_use_exec_command_tool
+                .unwrap_or(false),
             include_view_image_tool: include_view_image_tool_flag,
             responses_originator_header,
             debug: debug.unwrap_or(false),
@@ -1510,6 +1518,12 @@ impl Config {
             using_chatgpt_auth,
             github: cfg.github.unwrap_or_default(),
             experimental_resume: cfg.experimental_resume,
+            // Surface TUI notifications preference from config when present.
+            tui_notifications: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.notifications.clone())
+                .unwrap_or_default(),
         };
         Ok(config)
     }
@@ -2099,9 +2113,13 @@ model_verbosity = "high"
                 tools_web_search_request: false,
                 tools_web_search_allowed_domains: None,
                 use_experimental_streamable_shell_tool: false,
+                include_view_image_tool: true,
                 responses_originator_header: "codex_cli_rs".to_string(),
                 debug: false,
                 using_chatgpt_auth: false,
+                github: GithubConfig::default(),
+                experimental_resume: None,
+                tui_notifications: Default::default(),
             },
             o3_profile_config
         );
@@ -2158,9 +2176,13 @@ model_verbosity = "high"
             tools_web_search_request: false,
             tools_web_search_allowed_domains: None,
             use_experimental_streamable_shell_tool: false,
+            include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
@@ -2229,12 +2251,16 @@ model_verbosity = "high"
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
-                tools_web_search_request: false,
-                tools_web_search_allowed_domains: None,
-                use_experimental_streamable_shell_tool: false,
+            tools_web_search_request: false,
+            tools_web_search_allowed_domains: None,
+            use_experimental_streamable_shell_tool: false,
+            include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_zdr_profile_config, zdr_profile_config);
@@ -2291,11 +2317,13 @@ model_verbosity = "high"
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             responses_originator_header: "codex_cli_rs".to_string(),
-            preferred_auth_method: AuthMode::ChatGPT,
             use_experimental_streamable_shell_tool: false,
             include_view_image_tool: true,
-            disable_paste_burst: false,
-            use_experimental_reasoning_summary: false,
+            debug: false,
+            using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_gpt5_profile_config, gpt5_profile_config);
@@ -2372,4 +2400,47 @@ trust_level = "trusted"
     }
 
     // No test enforcing the presence of a standalone [projects] header.
+}
+
+#[cfg(test)]
+mod notifications_tests {
+    use crate::config_types::Notifications;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct TuiTomlTest {
+        notifications: Notifications,
+    }
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct RootTomlTest {
+        tui: TuiTomlTest,
+    }
+
+    #[test]
+    fn test_tui_notifications_true() {
+        let toml = r#"
+            [tui]
+            notifications = true
+        "#;
+        let parsed: RootTomlTest = toml::from_str(toml).expect("deserialize notifications=true");
+        assert!(matches!(
+            parsed.tui.notifications,
+            Notifications::Enabled(true)
+        ));
+    }
+
+    #[test]
+    fn test_tui_notifications_custom_array() {
+        let toml = r#"
+            [tui]
+            notifications = ["foo"]
+        "#;
+        let parsed: RootTomlTest =
+            toml::from_str(toml).expect("deserialize notifications=[\"foo\"]");
+        assert!(matches!(
+            parsed.tui.notifications,
+            Notifications::Custom(ref v) if v == &vec!["foo".to_string()]
+        ));
+    }
 }

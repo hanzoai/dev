@@ -126,6 +126,19 @@ pub enum HistoryPersistence {
     None,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum Notifications {
+    Enabled(bool),
+    Custom(Vec<String>),
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Self::Enabled(false)
+    }
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Tui {
@@ -149,6 +162,11 @@ pub struct Tui {
     #[serde(default)]
     pub spinner: SpinnerSelection,
 
+    /// Enable desktop notifications from the TUI when the terminal is unfocused.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub notifications: Notifications,
+
     /// Whether to use the terminal's Alternate Screen (full-screen) mode.
     /// When false, Codex renders nothing and leaves the standard terminal
     /// buffer visible; users can toggle back to Alternate Screen at runtime
@@ -170,6 +188,7 @@ impl Default for Tui {
             show_reasoning: false,
             stream: StreamConfig::default(),
             spinner: SpinnerSelection::default(),
+            notifications: Notifications::default(),
             alternate_screen: true,
         }
     }
