@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect, Margin};
 use ratatui::style::{Modifier, Style};
@@ -196,13 +196,19 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(last_btn_idx); }
             KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
             KeyEvent { code: KeyCode::Up, modifiers, .. } => {
-                if self.field == 3 && modifiers.contains(KeyModifiers::SHIFT) {
-                    let _ = self.orch_field.handle_key(key_event);
+                if self.field == 3 {
+                    // In text: Up scrolls/moves unless at very start, then move to previous input
+                    let at_start = self.orch_field.cursor_is_at_start();
+                    let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Up, modifiers, ..key_event });
+                    if at_start { if self.field > 0 { self.field -= 1; } }
                 } else if self.field > 0 { self.field -= 1; }
             }
             KeyEvent { code: KeyCode::Down, modifiers, .. } => {
-                if self.field == 3 && modifiers.contains(KeyModifiers::SHIFT) {
-                    let _ = self.orch_field.handle_key(key_event);
+                if self.field == 3 {
+                    // In text: Down scrolls/moves unless at end, then move to next input
+                    let at_end = self.orch_field.cursor_is_at_end();
+                    let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Down, modifiers, ..key_event });
+                    if at_end { self.field = (self.field + 1).min(5); }
                 } else { self.field = (self.field + 1).min(5); }
             }
             KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => { self.read_only = !self.read_only; }
