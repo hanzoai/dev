@@ -177,9 +177,6 @@ pub struct Config {
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: String,
 
-    /// Experimental rollout resume path (absolute path to .jsonl; undocumented).
-    pub experimental_resume: Option<PathBuf>,
-
     /// Include an experimental plan tool that the model can use to update its current plan and status of each step.
     pub include_plan_tool: bool,
     /// Include the `apply_patch` tool for models that benefit from invoking
@@ -205,6 +202,11 @@ pub struct Config {
 
     /// GitHub integration configuration.
     pub github: GithubConfig,
+
+    /// Experimental: path to a rollout file to resume a prior session from.
+    /// When set, the core will send this path in the initial ConfigureSession
+    /// so the backend can attempt to resume.
+    pub experimental_resume: Option<PathBuf>,
 }
 
 impl Config {
@@ -994,9 +996,6 @@ pub struct ConfigToml {
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
-    /// Experimental rollout resume path (absolute path to .jsonl; undocumented).
-    pub experimental_resume: Option<PathBuf>,
-
     /// Experimental path to a file whose contents replace the built-in BASE_INSTRUCTIONS.
     pub experimental_instructions_file: Option<PathBuf>,
 
@@ -1022,6 +1021,9 @@ pub struct ConfigToml {
 
     /// GitHub integration configuration.
     pub github: Option<GithubConfig>,
+
+    /// Experimental path to a rollout file to resume from.
+    pub experimental_resume: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -1140,6 +1142,8 @@ pub struct ConfigOverrides {
     pub codex_linux_sandbox_exe: Option<PathBuf>,
     pub base_instructions: Option<String>,
     pub include_plan_tool: Option<bool>,
+    pub include_apply_patch_tool: Option<bool>,
+    pub include_view_image_tool: Option<bool>,
     pub disable_response_storage: Option<bool>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub debug: Option<bool>,
@@ -1168,6 +1172,8 @@ impl Config {
             codex_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
+            include_apply_patch_tool,
+            include_view_image_tool,
             disable_response_storage,
             show_raw_agent_reasoning,
             debug,
@@ -1298,11 +1304,9 @@ impl Config {
             .tools
             .as_ref()
             .and_then(|t| t.web_search_allowed_domains.clone());
-        // View Image tool is enabled by default; can be disabled in config.
-        let include_view_image_tool_flag = cfg
-            .tools
-            .as_ref()
-            .and_then(|t| t.view_image)
+        // View Image tool is enabled by default; can be disabled in config or overrides.
+        let include_view_image_tool_flag = include_view_image_tool
+            .or(cfg.tools.as_ref().and_then(|t| t.view_image))
             .unwrap_or(true);
 
         let model = model
@@ -1327,8 +1331,6 @@ impl Config {
                 .as_ref()
                 .and_then(|info| info.auto_compact_token_limit)
         });
-
-        let experimental_resume = cfg.experimental_resume;
 
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
@@ -1406,10 +1408,8 @@ impl Config {
                 .chatgpt_base_url
                 .or(cfg.chatgpt_base_url)
                 .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
-
-            experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
-            include_apply_patch_tool: false,
+            include_apply_patch_tool: include_apply_patch_tool.unwrap_or(false),
             tools_web_search_request,
             tools_web_search_allowed_domains,
             use_experimental_streamable_shell_tool: false,
@@ -1419,6 +1419,7 @@ impl Config {
             // Already computed before moving codex_home
             using_chatgpt_auth,
             github: cfg.github.unwrap_or_default(),
+            experimental_resume: cfg.experimental_resume,
         };
         Ok(config)
     }
@@ -1963,7 +1964,6 @@ model_verbosity = "high"
                 model_reasoning_summary: ReasoningSummary::Detailed,
                 model_text_verbosity: TextVerbosity::default(),
                 chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-                experimental_resume: None,
                 base_instructions: None,
                 include_plan_tool: false,
                 include_apply_patch_tool: false,
@@ -2023,7 +2023,6 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
@@ -2098,7 +2097,6 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
@@ -2159,7 +2157,6 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::Detailed,
             model_verbosity: Some(Verbosity::High),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,

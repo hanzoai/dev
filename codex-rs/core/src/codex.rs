@@ -418,6 +418,7 @@ use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
+use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
 use crate::exec_command::ExecSessionManager;
 
@@ -1013,7 +1014,7 @@ impl Session {
     }
 
     async fn record_state_snapshot(&self, items: &[ResponseItem]) {
-        let snapshot = { crate::rollout::SessionStateSnapshot {} };
+        let snapshot = { SessionStateSnapshot {} };
 
         let recorder = {
             let guard = self.rollout.lock().unwrap();
