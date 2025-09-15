@@ -4730,7 +4730,7 @@ async fn handle_container_exec_with_params(
     output_index: Option<u32>,
     attempt_req: u64,
 ) -> ResponseInputItem {
-    // Intercept risky git branch-changing commands and require an explicit confirm prefix.
+    // Intercept risky git commands and require an explicit confirm prefix.
     // We support a simple convention: prefix the script with `confirm:` to proceed.
     // The prefix is stripped before execution.
     fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
@@ -4749,12 +4749,16 @@ async fn handle_container_exec_with_params(
         None
     }
 
-    fn looks_like_branch_change(script: &str) -> bool {
-        // Goal: detect branch-changing git invocations while avoiding false
-        // positives from commit messages or other quoted strings. We do a
-        // lightweight scan that strips quoted regions before token analysis.
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    enum SensitiveGitKind { BranchChange, Reset, Revert }
 
-        // 1) Strip single- and double-quoted segments (keep length with spaces).
+    fn detect_sensitive_git(script: &str) -> Option<SensitiveGitKind> {
+        // Goal: detect sensitive git invocations (branch changes, resets) while
+        // avoiding false positives from commit messages or other quoted strings.
+        // We do a lightweight scan that strips quoted regions before token analysis.
+
+        // 1) Strip quote characters but preserve content inside quotes, while
+        // neutralizing control separators to avoid over-splitting tokens.
         let mut cleaned = String::with_capacity(script.len());
         let mut in_squote = false;
         let mut in_dquote = false;
@@ -4768,20 +4772,28 @@ async fn handle_container_exec_with_params(
                 }
                 '\'' if !in_dquote => {
                     in_squote = !in_squote;
-                    emit_space = true;
+                    emit_space = true; // token boundary at quote edges
                     prev_was_backslash = false;
                 }
                 '"' if !in_squote && !prev_was_backslash => {
                     in_dquote = !in_dquote;
-                    emit_space = true;
+                    emit_space = true; // token boundary at quote edges
                     prev_was_backslash = false;
                 }
                 _ => {
                     prev_was_backslash = false;
                 }
             }
-            if in_squote || in_dquote || emit_space {
+            if emit_space {
                 cleaned.push(' ');
+                continue;
+            }
+            if in_squote || in_dquote {
+                if matches!(ch, '|' | '&' | ';' | '\n' | '\r') {
+                    cleaned.push(' ');
+                } else {
+                    cleaned.push(ch);
+                }
             } else {
                 cleaned.push(ch);
             }
@@ -4793,61 +4805,103 @@ async fn handle_container_exec_with_params(
             for part in chunk.split(|c| matches!(c, '|' | '&')) {
                 let s = part.trim();
                 if s.is_empty() { continue; }
-                // Tokenize on whitespace.
-                let mut it = s.split_whitespace();
-                // Skip leading env assignments (FOO=bar) and `env`.
-                let mut first = None;
-                while let Some(tok) = it.next() {
+                // Tokenize on whitespace, skip wrappers and git globals to find the real subcommand.
+                let raw_tokens: Vec<&str> = s.split_whitespace().collect();
+                if raw_tokens.is_empty() { continue; }
+                fn strip_tok(t: &str) -> &str { t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"')) }
+                let mut i = 0usize;
+                // Skip env assignments and lightweight wrappers/keywords.
+                loop {
+                    if i >= raw_tokens.len() { break; }
+                    let tok = strip_tok(raw_tokens[i]);
+                    if tok.is_empty() { i += 1; continue; }
+                    // Skip KEY=val assignments.
                     if tok.contains('=') && !tok.starts_with('=') && !tok.starts_with('-') {
+                        i += 1; continue;
+                    }
+                    // Skip simple wrappers and control keywords.
+                    if matches!(tok, "env" | "sudo" | "command" | "time" | "nohup" | "nice" | "then" | "do" | "{" | "(") {
+                        // Best-effort: skip immediate option-like flags after some wrappers.
+                        i += 1;
+                        while i < raw_tokens.len() {
+                            let peek = strip_tok(raw_tokens[i]);
+                            if peek.starts_with('-') { i += 1; } else { break; }
+                        }
                         continue;
                     }
-                    if tok == "env" { continue; }
-                    first = Some(tok);
                     break;
                 }
-                let Some(cmd) = first else { continue };
-                // Identify `git` executable (allow path prefixes).
+                if i >= raw_tokens.len() { continue; }
+                let cmd = strip_tok(raw_tokens[i]);
                 let is_git = cmd.ends_with("/git") || cmd == "git";
                 if !is_git { continue; }
-                // Next token is the subcommand.
-                let Some(sub) = it.next() else { continue; };
+                i += 1; // advance past git
+                // Skip git global options to find the real subcommand.
+                while i < raw_tokens.len() {
+                    let t = strip_tok(raw_tokens[i]);
+                    if t.is_empty() { i += 1; continue; }
+                    if matches!(t, "-C" | "--git-dir" | "--work-tree" | "-c") {
+                        i += 1; // skip option key
+                        if i < raw_tokens.len() { i += 1; } // skip its value
+                        continue;
+                    }
+                    if t.starts_with("--git-dir=") || t.starts_with("--work-tree=") || t.starts_with("-c") {
+                        i += 1; continue;
+                    }
+                    if t.starts_with('-') { i += 1; continue; }
+                    break;
+                }
+                if i >= raw_tokens.len() { continue; }
+                let sub = strip_tok(raw_tokens[i]);
+                i += 1;
                 match sub {
                     "checkout" => {
                         // If any of the strong branch-changing flags are present, flag it.
                         let mut saw_branch_change_flag = false;
-                        let mut args: Vec<&str> = Vec::new();
-                        for a in it.clone() { args.push(a); }
+                        let args: Vec<&str> = raw_tokens[i..].iter().map(|t| strip_tok(t)).collect();
                         for a in &args {
                             if matches!(*a, "-b" | "-B" | "--orphan" | "--detach") {
                                 saw_branch_change_flag = true;
                                 break;
                             }
                         }
-                        if saw_branch_change_flag { return true; }
+                        if saw_branch_change_flag { return Some(SensitiveGitKind::BranchChange); }
                         // If `--` is present, this is a path checkout, not branch.
                         if args.iter().any(|a| *a == "--") { continue; }
+                        // `git checkout -` switches to previous branch.
+                        if args.first().copied() == Some("-") { return Some(SensitiveGitKind::BranchChange); }
                         // Heuristic: a single non-flag argument likely denotes a branch.
                         // To reduce false positives (e.g. `git checkout .`), only flag
                         // when the first arg does not start with '-' and is not a solitary '.' or '..'.
                         if let Some(first_arg) = args.first() {
                             let a = *first_arg;
                             if !a.starts_with('-') && a != "." && a != ".." {
-                                return true;
+                                return Some(SensitiveGitKind::BranchChange);
                             }
                         }
                     }
                     "switch" => {
                         // `git switch -c <name>` creates; `git switch <name>` changes.
-                        let mut args = it;
                         let mut saw_c = false;
+                        let mut saw_detach = false;
                         let mut first_non_flag: Option<&str> = None;
-                        while let Some(a) = args.next() {
+                        for a in &raw_tokens[i..] {
+                            let a = strip_tok(a);
                             if a == "-c" { saw_c = true; break; }
+                            if a == "--detach" { saw_detach = true; break; }
                             if a.starts_with('-') { continue; }
                             first_non_flag = Some(a);
                             break;
                         }
-                        if saw_c || first_non_flag.is_some() { return true; }
+                        if saw_c || saw_detach || first_non_flag.is_some() { return Some(SensitiveGitKind::BranchChange); }
+                    }
+                    "reset" => {
+                        // Any form of git reset is considered sensitive.
+                        return Some(SensitiveGitKind::Reset);
+                    }
+                    "revert" => {
+                        // Any form of git revert is considered sensitive.
+                        return Some(SensitiveGitKind::Revert);
                     }
                     // Future: consider `git branch -D/-m` as branch‑modifying, but keep
                     // this minimal to avoid over‑blocking normal workflows.
@@ -4855,7 +4909,7 @@ async fn handle_container_exec_with_params(
                 }
             }
         }
-        false
+        None
     }
 
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
@@ -4868,22 +4922,38 @@ async fn handle_container_exec_with_params(
             .iter()
             .any(|p| trimmed.starts_with(p));
 
-        // If no confirm prefix and it looks like a branch change, reject with guidance.
-        if !has_confirm_prefix && looks_like_branch_change(trimmed) {
-            // Provide the exact argv the model should resend with the confirm prefix.
-            let mut argv_confirm = params.command.clone();
-            argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
-            let suggested = serde_json::to_string(&argv_confirm)
-                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
-            let guidance = format!(
-                "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_script: {}\nresend_exact_argv: {}",
-                script,
-                suggested
-            );
-            return ResponseInputItem::FunctionCallOutput {
-                call_id,
-                output: FunctionCallOutputPayload { content: guidance, success: None },
-            };
+        // If no confirm prefix and it looks like a sensitive git command, reject with guidance.
+        if !has_confirm_prefix {
+            if let Some(kind) = detect_sensitive_git(trimmed) {
+                // Provide the exact argv the model should resend with the confirm prefix.
+                let mut argv_confirm = params.command.clone();
+                argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
+                let suggested = serde_json::to_string(&argv_confirm)
+                    .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+
+                let guidance = match kind {
+                    SensitiveGitKind::BranchChange => format!(
+                        "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_script: {}\nresend_exact_argv: {}",
+                        script,
+                        suggested
+                    ),
+                    SensitiveGitKind::Reset => format!(
+                        "git reset is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git reset'.\n\noriginal_script: {}\nresend_exact_argv: {}",
+                        script,
+                        suggested
+                    ),
+                    SensitiveGitKind::Revert => format!(
+                        "git revert modifies history and should only be used when the user explicitly asks. If you are certain this was requested, resend with 'confirm:' to proceed.\n\noriginal_script: {}\nresend_exact_argv: {}",
+                        script,
+                        suggested
+                    ),
+                };
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
         }
 
         // If confirm prefix present, strip it before execution.
@@ -5039,6 +5109,78 @@ async fn handle_container_exec_with_params(
             }
         }
     }
+
+    // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
+    if extract_shell_script_from_wrapper(&params.command).is_none() {
+        fn strip_tok2(t: &str) -> &str { t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"')) }
+        let mut i = 0usize;
+        // Skip env assignments and simple wrappers at the front
+        while i < params.command.len() {
+            let tok = strip_tok2(&params.command[i]);
+            if tok.is_empty() { i += 1; continue; }
+            if tok.contains('=') && !tok.starts_with('=') && !tok.starts_with('-') { i += 1; continue; }
+            if matches!(tok, "env" | "sudo" | "command" | "time" | "nohup" | "nice") {
+                i += 1;
+                while i < params.command.len() && strip_tok2(&params.command[i]).starts_with('-') { i += 1; }
+                continue;
+            }
+            break;
+        }
+        if i < params.command.len() {
+            let cmd = strip_tok2(&params.command[i]);
+            if cmd.ends_with("/git") || cmd == "git" {
+                i += 1;
+                while i < params.command.len() {
+                    let t = strip_tok2(&params.command[i]);
+                    if t.is_empty() { i += 1; continue; }
+                    if matches!(t, "-C" | "--git-dir" | "--work-tree" | "-c") {
+                        i += 1; if i < params.command.len() { i += 1; }
+                        continue;
+                    }
+                    if t.starts_with("--git-dir=") || t.starts_with("--work-tree=") || t.starts_with("-c") { i += 1; continue; }
+                    if t.starts_with('-') { i += 1; continue; }
+                    break;
+                }
+                if i < params.command.len() {
+                    let sub = strip_tok2(&params.command[i]);
+                    let kind = match sub {
+                        "checkout" | "switch" => Some(SensitiveGitKind::BranchChange),
+                        "reset" => Some(SensitiveGitKind::Reset),
+                        "revert" => Some(SensitiveGitKind::Revert),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        let suggested = serde_json::to_string(&vec![
+                            "bash".to_string(),
+                            "-lc".to_string(),
+                            format!("confirm: {}", params.command.join(" ")),
+                        ]).unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+
+                        let guidance = match kind {
+                            SensitiveGitKind::BranchChange => format!(
+                                "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
+                                params.command,
+                                suggested
+                            ),
+                            SensitiveGitKind::Reset => format!(
+                                "git reset is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git reset'.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
+                                params.command,
+                                suggested
+                            ),
+                            SensitiveGitKind::Revert => format!(
+                                "git revert is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git revert'.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
+                                params.command,
+                                suggested
+                            ),
+                        };
+
+                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content: guidance, success: None } };
+                    }
+                }
+            }
+        }
+    }
+
     // check if this was a patch, and apply it if so
     let apply_patch_exec = match maybe_parse_apply_patch_verified(&params.command, &params.cwd) {
         MaybeApplyPatchVerified::Body(changes) => {

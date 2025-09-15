@@ -7,6 +7,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod agent_tool;
+pub mod agent_defaults;
 mod apply_patch;
 pub mod auth;
 mod bash;

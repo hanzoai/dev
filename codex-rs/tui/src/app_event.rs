@@ -93,14 +93,16 @@ pub(crate) enum AppEvent {
     /// Remove a subagent command from memory (UI already deleted from config.toml)
     DeleteSubagentCommand(String),
     /// Return to the Agents settings list view
-    ShowAgentsSettings,
-    /// Open the subagent editor UI for the given command name
-    ShowSubagentEditor {
-        name: String,
-        available_agents: Vec<String>,
-        existing: Vec<codex_core::config_types::SubagentCommandConfig>,
-        is_new: bool,
-    },
+    // ShowAgentsSettings removed; overview replaces it
+    /// Return to the Agents overview (Agents + Commands)
+    ShowAgentsOverview,
+    /// Open the agent editor form for a specific agent name
+    ShowAgentEditor { name: String },
+    // ShowSubagentEditor removed; use ShowSubagentEditorForName or ShowSubagentEditorNew
+    /// Open the subagent editor for a specific command name; ChatWidget supplies data
+    ShowSubagentEditorForName { name: String },
+    /// Open a blank subagent editor to create a new command
+    ShowSubagentEditorNew,
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),
@@ -179,5 +181,13 @@ pub(crate) enum AppEvent {
     /// (clear spinner/status, finalize running exec/tool cells) while the core
     /// continues its own abort/cleanup in parallel.
     CancelRunningTask,
+    /// Add or update an agent's settings (enabled, params, instructions)
+    UpdateAgentConfig {
+        name: String,
+        enabled: bool,
+        args_read_only: Option<Vec<String>>,
+        args_write: Option<Vec<String>>,
+        instructions: Option<String>,
+    },
     
 }
