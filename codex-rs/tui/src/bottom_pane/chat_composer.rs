@@ -735,6 +735,16 @@ impl ChatComposer {
                                 }
                             }
                         }
+                        CommandItem::Subagent(i) => {
+                            if let Some(name) = popup.subagent_name(i) {
+                                let starts_with_cmd = first_line
+                                    .trim_start()
+                                    .starts_with(&format!("/{}", name));
+                                if !starts_with_cmd {
+                                    self.textarea.set_text(&format!("/{} ", name));
+                                }
+                            }
+                        }
                     }
                     // After completing, place the cursor at the end of the
                     // slash command so the user can immediately type args.
@@ -777,6 +787,24 @@ impl ChatComposer {
                             self.active_popup = ActivePopup::None;
                             if let Some(contents) = prompt_content {
                                 return (InputResult::Submitted(contents), true);
+                            }
+                            return (InputResult::None, true);
+                        }
+                        CommandItem::Subagent(i) => {
+                            // Insert the subagent slash with a trailing space for args
+                            if let Some(name) = popup.subagent_name(i) {
+                                let starts_with_cmd = command_text
+                                    .lines()
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim_start()
+                                    .starts_with(&format!("/{}", name));
+                                if !starts_with_cmd {
+                                    self.textarea.set_text(&format!("/{} ", name));
+                                    let new_cursor = self.textarea.text().len();
+                                    self.textarea.set_cursor(new_cursor);
+                                }
+                                return (InputResult::None, true);
                             }
                             return (InputResult::None, true);
                         }
@@ -1364,6 +1392,21 @@ impl ChatComposer {
             _ => {
                 if input_starts_with_slash {
                     let mut command_popup = CommandPopup::new_with_filter(self.using_chatgpt_auth);
+                    // Load saved subagent commands to include in autocomplete (exclude built-ins)
+                    if let Ok(cfg) = codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                        let mut names: Vec<String> = cfg
+                            .subagent_commands
+                            .iter()
+                            .map(|c| c.name.clone())
+                            .filter(|n| {
+                                let l = n.to_ascii_lowercase();
+                                l != "plan" && l != "solve" && l != "code"
+                            })
+                            .collect();
+                        // Stable sort for presentation
+                        names.sort();
+                        command_popup.set_subagent_commands(names);
+                    }
                     command_popup.on_composer_text_change(first_line.to_string());
                     self.active_popup = ActivePopup::Command(command_popup);
                     // Notify app: composer expanded due to slash popup
