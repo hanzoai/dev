@@ -28,7 +28,7 @@ impl<T> fmt::Debug for Redacted<T> {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
-    CodexEvent(Event),
+    CodeEvent(Event),
 
     /// Request a redraw which will be debounced by the [`App`].
     RequestRedraw,
@@ -57,7 +57,7 @@ pub(crate) enum AppEvent {
 
     /// Forward an `Op` to the Agent. Using an `AppEvent` for this avoids
     /// bubbling channels through layers of widgets.
-    CodexOp(codex_core::protocol::Op),
+    CodeOp(codex_core::protocol::Op),
 
     /// Dispatch a recognized slash command from the UI (composer) to the app
     /// layer so it can be handled centrally. Includes the full command text.
