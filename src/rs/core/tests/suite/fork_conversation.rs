@@ -3,7 +3,7 @@ use dev_core::ConversationManager;
 use dev_core::ModelProviderInfo;
 use dev_core::NewConversation;
 use dev_core::built_in_model_providers;
-use dev_core::protocol::ConversationHistoryResponseEvent;
+use dev_protocol::protocol::ConversationHistoryResponseEvent;
 use dev_core::protocol::EventMsg;
 use dev_core::protocol::InputItem;
 use dev_core::protocol::Op;

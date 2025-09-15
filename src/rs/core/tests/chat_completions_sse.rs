@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use dev_core::ContentItem;
+use dev_core::models::ContentItem;
 use dev_core::ModelClient;
 use dev_core::ModelProviderInfo;
 use dev_core::Prompt;

@@ -5977,8 +5977,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn answer_final_then_delta_ignores_late_delta() {
         let mut chat = make_widget();
-        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(), msg: dev_core::protocol::EventMsg::AgentMessage(dev_core::protocol::AgentMessageEvent { message: "hello".into() })});
-        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(), msg: dev_core::protocol::EventMsg::AgentMessageDelta(dev_core::protocol::AgentMessageDeltaEvent { delta: " world".into() })});
+        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(),
+            event_seq: 0,
+            order: 0, msg: dev_core::protocol::EventMsg::AgentMessage(dev_core::protocol::AgentMessageEvent { message: "hello".into() })});
+        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(),
+            event_seq: 0,
+            order: 0, msg: dev_core::protocol::EventMsg::AgentMessageDelta(dev_core::protocol::AgentMessageDeltaEvent { delta: " world".into() })});
         assert_eq!(chat.last_assistant_message.as_deref(), Some("hello"));
         // Late delta should be ignored; closed set contains the id
         assert!(chat.stream_state.closed_answer_ids.contains(&StreamId("ans-1".into())));
@@ -5987,8 +5991,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn reasoning_final_then_delta_ignores_late_delta() {
         let mut chat = make_widget();
-        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(), msg: dev_core::protocol::EventMsg::AgentReasoning(dev_core::protocol::AgentReasoningEvent { text: "think".into() })});
-        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(), msg: dev_core::protocol::EventMsg::AgentReasoningDelta(dev_core::protocol::AgentReasoningDeltaEvent { delta: " harder".into() })});
+        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(),
+            event_seq: 0,
+            order: 0, msg: dev_core::protocol::EventMsg::AgentReasoning(dev_core::protocol::AgentReasoningEvent { text: "think".into() })});
+        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(),
+            event_seq: 0,
+            order: 0, msg: dev_core::protocol::EventMsg::AgentReasoningDelta(dev_core::protocol::AgentReasoningDeltaEvent { delta: " harder".into() })});
         assert!(chat.stream_state.closed_reasoning_ids.contains(&StreamId("r-1".into())));
     }
 }

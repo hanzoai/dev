@@ -539,10 +539,6 @@ impl ToolRegistry {
         tools
     }
     
-    pub fn get_tool(&self, name: &str) -> Option<&ToolInfo> {
-        self.tools.get(name)
-    }
-    
     pub async fn execute(&self, name: &str, params: Value) -> ToolResult {
         // Route to appropriate tool implementation
         match name {

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use dev_core::ContentItem;
-use dev_core::LocalShellAction;
-use dev_core::LocalShellExecAction;
-use dev_core::LocalShellStatus;
-use dev_core::ModelClient;
+use dev_core::models::ContentItem;
+use dev_protocol::models::LocalShellAction;
+use dev_protocol::models::LocalShellExecAction;
+use dev_protocol::models::LocalShellStatus;
+use dev_protocol::models::ModelClient;
 use dev_core::ModelProviderInfo;
-use dev_core::Prompt;
-use dev_core::ReasoningItemContent;
-use dev_core::ResponseItem;
+use dev_protocol::models::Prompt;
+use dev_protocol::models::ReasoningItemContent;
+use dev_protocol::models::ResponseItem;
 use dev_core::WireApi;
 use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;

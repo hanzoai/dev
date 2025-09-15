@@ -580,9 +580,7 @@ index {ZERO_OID}..{right_oid}
         let mut acc = TurnDiffTracker::new();
         let del_changes = HashMap::from([(
             file.clone(),
-            FileChange::Delete {
-                content: "x\n".to_string(),
-            },
+            FileChange::Delete,
         )]);
         acc.on_patch_begin(&del_changes);
 
@@ -748,9 +746,7 @@ index {left_oid}..{right_oid}
         // Next: introduce a brand-new path b.txt into baseline snapshots via a delete change.
         let del_b = HashMap::from([(
             b.clone(),
-            FileChange::Delete {
-                content: "z\n".to_string(),
-            },
+            FileChange::Delete,
         )]);
         acc.on_patch_begin(&del_b);
         // Simulate apply: delete b.txt.

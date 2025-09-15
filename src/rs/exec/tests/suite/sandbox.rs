@@ -58,6 +58,7 @@ async fn python_multiprocessing_lock_works_under_sandbox() {
         network_access: false,
         exclude_tmpdir_env_var: false,
         exclude_slash_tmp: false,
+        allow_git_writes: false,
     };
 
     let python_code = r#"import multiprocessing
