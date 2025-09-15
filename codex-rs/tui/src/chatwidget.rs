@@ -1848,7 +1848,7 @@ impl ChatWidget<'_> {
                 msg: EventMsg::SessionConfigured(session_configured),
                 order: None,
             };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            app_event_tx_clone.send(AppEvent::CodeEvent(event));
 
             let conversation_clone = conversation.clone();
             tokio::spawn(async move {
@@ -1861,7 +1861,7 @@ impl ChatWidget<'_> {
             });
 
             while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+                app_event_tx_clone.send(AppEvent::CodeEvent(event));
             }
         });
 

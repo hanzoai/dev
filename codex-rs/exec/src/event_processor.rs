@@ -16,12 +16,7 @@ pub(crate) trait EventProcessor {
     /// Handle a single event emitted by the agent.
     fn process_event(&mut self, event: Event) -> CodexStatus;
 
-    /// Exit code to use upon completion. Implementations should set a non-zero
-    /// value when a fatal error was encountered (e.g., upstream streaming
-    /// failure).
-    fn exit_code(&self) -> i32 {
-        0
-    }
+    // No exit_code method; CLI controls process exit based on core events.
 }
 
 pub(crate) fn handle_last_message(last_agent_message: Option<&str>, output_file: &Path) {
