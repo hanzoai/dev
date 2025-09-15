@@ -35,8 +35,8 @@ impl Default for HeightManagerConfig {
             hysteresis_n: 2,
             hud_quantum: 2,
             hud_confirm_frames: 2,
-            // Slightly generous default to make compose more comfortable
-            bottom_percent_cap: 35,
+            // Allow taller bottom popups (e.g., editors) when needed
+            bottom_percent_cap: 60,
         }
     }
 }
