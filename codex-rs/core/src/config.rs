@@ -1207,7 +1207,7 @@ impl Config {
 
         let shell_environment_policy = cfg.shell_environment_policy.into();
 
-        let mut resolved_cwd = {
+        let resolved_cwd = {
             use std::env;
 
             match cwd {
@@ -1226,20 +1226,9 @@ impl Config {
             }
         };
 
-        // If launched from inside a Git worktree subdirectory, normalize the
-        // session cwd to the repository root so model-provided relative paths
-        // are resolved from the project root (prevents accidental nesting like
-        // `<repo>/docs/.../server/src` when starting in `docs/`).
-        if let Some(repo_root) = crate::git_info::get_git_repo_root(&resolved_cwd) {
-            if repo_root != resolved_cwd {
-                tracing::info!(
-                    "normalizing cwd to git repo root: {} -> {}",
-                    resolved_cwd.display(),
-                    repo_root.display()
-                );
-                resolved_cwd = repo_root;
-            }
-        }
+        // Do NOT normalize to the Git repository root.
+        // Honor the exact directory the program was started in (or provided via -C/--cd).
+        // Any Git-aware features should resolve the repo root on demand.
 
         // Project-specific overrides based on final resolved cwd (exact match)
         let project_key = resolved_cwd.to_string_lossy().to_string();
