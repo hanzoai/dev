@@ -1142,20 +1142,47 @@ impl ChatWidget<'_> {
 
     fn refresh_reasoning_collapsed_visibility(&mut self) {
         let show = self.config.tui.show_reasoning;
-        let mut marked_visible = false;
-        for cell in self.history_cells.iter().rev() {
-            if let Some(reasoning_cell) = cell
+        let last_explore_idx = self
+            .history_cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, cell)| {
+                if cell
+                    .as_any()
+                    .downcast_ref::<history_cell::ExploreAggregationCell>()
+                    .is_some()
+                {
+                    Some(idx)
+                } else {
+                    None
+                }
+            });
+
+        let mut kept_visible_in_explore = false;
+        for idx in (0..self.history_cells.len()).rev() {
+            if let Some(reasoning_cell) = self.history_cells[idx]
                 .as_any()
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
                 if show {
                     reasoning_cell.set_hide_when_collapsed(false);
-                } else if !marked_visible {
-                    reasoning_cell.set_hide_when_collapsed(false);
-                    marked_visible = true;
-                } else {
-                    reasoning_cell.set_hide_when_collapsed(true);
+                    continue;
                 }
+
+                if let Some(explore_idx) = last_explore_idx {
+                    if idx > explore_idx {
+                        if !kept_visible_in_explore {
+                            reasoning_cell.set_hide_when_collapsed(false);
+                            kept_visible_in_explore = true;
+                        } else {
+                            reasoning_cell.set_hide_when_collapsed(true);
+                        }
+                        continue;
+                    }
+                }
+
+                reasoning_cell.set_hide_when_collapsed(false);
             }
         }
     }
