@@ -429,6 +429,13 @@ impl App<'_> {
                     }
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::InsertBackgroundEventLate(message) => match &mut self.app_state {
+                    AppState::Chat { widget } => {
+                        tracing::debug!("app: InsertBackgroundEventLate len={}", message.len());
+                        widget.insert_background_event_late(message);
+                    }
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
