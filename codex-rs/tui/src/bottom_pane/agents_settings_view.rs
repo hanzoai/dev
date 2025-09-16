@@ -241,7 +241,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             + orch_box_h // orchestrator box
             + 1  // spacer
             + 1; // buttons
-        (content_rows + 2).clamp(8, 50)
+        (content_rows + 1).clamp(8, 50)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {

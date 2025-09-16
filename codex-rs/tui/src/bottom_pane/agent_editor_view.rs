@@ -343,7 +343,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
     fn desired_height(&self, width: u16) -> u16 {
         let content_width = width.saturating_sub(4).max(1);
         let layout = self.layout(content_width, None);
-        layout.lines.len().saturating_add(2) as u16
+        layout.lines.len().saturating_add(1) as u16
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
