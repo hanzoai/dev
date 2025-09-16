@@ -9536,6 +9536,8 @@ impl ChatWidget<'_> {
             let branch_label = format!("{}", branch_name);
             let root_display = git_root.display().to_string();
             let worktree_display = work_cwd.display().to_string();
+            let tx_for_switch = tx.clone();
+            let git_root_for_switch = git_root.clone();
             let send_agent_handoff = |mut reasons: Vec<String>,
                                       extra_note: Option<String>,
                                       worktree_status: String,
@@ -9551,7 +9553,7 @@ impl ChatWidget<'_> {
                 );
                 let _ = tx.send(AppEvent::PrepareAgents);
                 let mut preface = format!(
-                    "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Stage and commit any pending changes (`git add -A` + `git commit -m \"merge {} via /merge\"`) before proceeding.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
+                    "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
                     reason_text,
                     root_display,
                     worktree_display,
@@ -9586,6 +9588,8 @@ impl ChatWidget<'_> {
                     branch_label
                 );
                 let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
+                let _ = tx_for_switch
+                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
             };
 
             if !handoff_reasons.is_empty() {
