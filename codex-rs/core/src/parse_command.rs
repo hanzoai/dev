@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ParsedCommand {
@@ -42,6 +43,18 @@ impl From<ParsedCommand> for codex_protocol::parse_command::ParsedCommand {
 fn shlex_join(tokens: &[String]) -> String {
     shlex_try_join(tokens.iter().map(|s| s.as_str()))
         .unwrap_or_else(|_| "<command included NUL byte>".to_string())
+}
+
+fn is_bash_executable(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
 }
 
 /// DO NOT REVIEW THIS CODE BY HAND
@@ -315,6 +328,22 @@ mod tests {
                 cmd: inner.to_string(),
                 name: "README.md".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn supports_absolute_bash_sed_read() {
+        let args = vec![
+            "/bin/bash".to_string(),
+            "-lc".to_string(),
+            "sed -n '1,5p' README.md".to_string(),
+        ];
+        assert_parsed(
+            &args,
+            vec![ParsedCommand::Read {
+                cmd: "sed -n '1,5p' README.md".to_string(),
+                name: "README.md".to_string(),
+            }],
         );
     }
 
@@ -984,7 +1013,7 @@ fn normalize_tokens(cmd: &[String]) -> Vec<String> {
             // Do not re-shlex already-tokenized input; just drop the prefix.
             rest.to_vec()
         }
-        [bash, flag, script] if bash == "bash" && (flag == "-c" || flag == "-lc") => {
+        [bash, flag, script] if is_bash_executable(bash) && (flag == "-c" || flag == "-lc") => {
             shlex_split(script)
                 .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()])
         }
@@ -1146,7 +1175,7 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
     let [bash, flag, script] = original else {
         return None;
     };
-    if bash != "bash" || flag != "-lc" {
+    if !is_bash_executable(bash) || flag != "-lc" {
         return None;
     }
     if let Some(tree) = try_parse_bash(script) {

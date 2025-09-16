@@ -4754,7 +4754,12 @@ async fn handle_container_exec_with_params(
     }
 
     #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-    enum SensitiveGitKind { BranchChange, Reset, Revert }
+    enum SensitiveGitKind {
+        BranchChange,
+        PathCheckout,
+        Reset,
+        Revert,
+    }
 
     fn detect_sensitive_git(script: &str) -> Option<SensitiveGitKind> {
         // Goal: detect sensitive git invocations (branch changes, resets) while
@@ -4860,9 +4865,14 @@ async fn handle_container_exec_with_params(
                 i += 1;
                 match sub {
                     "checkout" => {
+                        let args: Vec<&str> = raw_tokens[i..].iter().map(|t| strip_tok(t)).collect();
+                        let has_path_delimiter = args.iter().any(|a| *a == "--");
+                        if has_path_delimiter {
+                            return Some(SensitiveGitKind::PathCheckout);
+                        }
+
                         // If any of the strong branch-changing flags are present, flag it.
                         let mut saw_branch_change_flag = false;
-                        let args: Vec<&str> = raw_tokens[i..].iter().map(|t| strip_tok(t)).collect();
                         for a in &args {
                             if matches!(*a, "-b" | "-B" | "--orphan" | "--detach") {
                                 saw_branch_change_flag = true;
@@ -4870,13 +4880,13 @@ async fn handle_container_exec_with_params(
                             }
                         }
                         if saw_branch_change_flag { return Some(SensitiveGitKind::BranchChange); }
-                        // If `--` is present, this is a path checkout, not branch.
-                        if args.iter().any(|a| *a == "--") { continue; }
+
                         // `git checkout -` switches to previous branch.
-                        if args.first().copied() == Some("-") { return Some(SensitiveGitKind::BranchChange); }
+                        if args.first().copied() == Some("-") {
+                            return Some(SensitiveGitKind::BranchChange);
+                        }
+
                         // Heuristic: a single non-flag argument likely denotes a branch.
-                        // To reduce false positives (e.g. `git checkout .`), only flag
-                        // when the first arg does not start with '-' and is not a solitary '.' or '..'.
                         if let Some(first_arg) = args.first() {
                             let a = *first_arg;
                             if !a.starts_with('-') && a != "." && a != ".." {
@@ -4916,6 +4926,35 @@ async fn handle_container_exec_with_params(
         None
     }
 
+    fn guidance_for_sensitive_git(kind: SensitiveGitKind, original_label: &str, original_value: &str, suggested: &str) -> String {
+        match kind {
+            SensitiveGitKind::BranchChange => format!(
+                "Blocked git checkout/switch on a branch. Switching branches can discard or hide in-progress changes. Only continue if the user explicitly requested this branch change. Resend with 'confirm:' if you intend to proceed.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::PathCheckout => format!(
+                "Blocked git checkout -- <paths>. This command overwrites local modifications to the specified files. If you intentionally want to discard those edits, resend the exact command prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::Reset => format!(
+                "Blocked git reset. Reset rewrites the working tree/index and may delete local work. If backups exist and this was explicitly requested, resend prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::Revert => format!(
+                "Blocked git revert. Reverting commits alters history and should only happen when the user asks for it. If that’s the case, resend the command with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+        }
+    }
+
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
     let mut seq_hint_for_exec = seq_hint;
@@ -4935,23 +4974,7 @@ async fn handle_container_exec_with_params(
                 let suggested = serde_json::to_string(&argv_confirm)
                     .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
 
-                let guidance = match kind {
-                    SensitiveGitKind::BranchChange => format!(
-                        "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_script: {}\nresend_exact_argv: {}",
-                        script,
-                        suggested
-                    ),
-                    SensitiveGitKind::Reset => format!(
-                        "git reset is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git reset'.\n\noriginal_script: {}\nresend_exact_argv: {}",
-                        script,
-                        suggested
-                    ),
-                    SensitiveGitKind::Revert => format!(
-                        "git revert modifies history and should only be used when the user explicitly asks. If you are certain this was requested, resend with 'confirm:' to proceed.\n\noriginal_script: {}\nresend_exact_argv: {}",
-                        script,
-                        suggested
-                    ),
-                };
+                let guidance = guidance_for_sensitive_git(kind, "original_script", &script, &suggested);
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
@@ -5147,8 +5170,27 @@ async fn handle_container_exec_with_params(
                 }
                 if i < params.command.len() {
                     let sub = strip_tok2(&params.command[i]);
+                    let args: Vec<&str> = params.command[i + 1..].iter().map(|t| strip_tok2(t)).collect();
                     let kind = match sub {
-                        "checkout" | "switch" => Some(SensitiveGitKind::BranchChange),
+                        "checkout" => {
+                            if args.iter().any(|a| *a == "--") {
+                                Some(SensitiveGitKind::PathCheckout)
+                            } else if args.iter().any(|a| matches!(*a, "-b" | "-B" | "--orphan" | "--detach")) {
+                                Some(SensitiveGitKind::BranchChange)
+                            } else if args.first().copied() == Some("-") {
+                                Some(SensitiveGitKind::BranchChange)
+                            } else if let Some(first_arg) = args.first() {
+                                let a = *first_arg;
+                                if !a.starts_with('-') && a != "." && a != ".." {
+                                    Some(SensitiveGitKind::BranchChange)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        "switch" => Some(SensitiveGitKind::BranchChange),
                         "reset" => Some(SensitiveGitKind::Reset),
                         "revert" => Some(SensitiveGitKind::Revert),
                         _ => None,
@@ -5160,23 +5202,7 @@ async fn handle_container_exec_with_params(
                             format!("confirm: {}", params.command.join(" ")),
                         ]).unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
 
-                        let guidance = match kind {
-                            SensitiveGitKind::BranchChange => format!(
-                                "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
-                                params.command,
-                                suggested
-                            ),
-                            SensitiveGitKind::Reset => format!(
-                                "git reset is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git reset'.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
-                                params.command,
-                                suggested
-                            ),
-                            SensitiveGitKind::Revert => format!(
-                                "git revert is potentially destructive and may overwrite changes you or other agents have made. It should be avoided unless absolutely necessary and code changes have been backed up. If this is the case, please prefix your command with 'confirm:', e.g., 'confirm: git revert'.\n\noriginal_argv: {:?}\nresend_example_argv: {}",
-                                params.command,
-                                suggested
-                            ),
-                        };
+                        let guidance = guidance_for_sensitive_git(kind, "original_argv", &format!("{:?}", params.command), &suggested);
 
                         return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content: guidance, success: None } };
                     }

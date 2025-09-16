@@ -32,6 +32,18 @@ pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_too
 
 const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
 
+fn is_bash_like(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
+
 /// Details about an embedded `apply_patch` heredoc found inside a larger shell script.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmbeddedApplyPatch {
@@ -127,7 +139,7 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
         // Bash heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
+        [bash, flag, script] if is_bash_like(bash) && flag == "-lc" => {
             match extract_apply_patch_from_bash(script) {
                 Ok((body, _maybe_cd)) => match parse_patch(&body) {
                     Ok(source) => MaybeApplyPatch::Body(source),
@@ -244,7 +256,7 @@ pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApp
                 );
             }
         }
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
+        [bash, flag, script] if is_bash_like(bash) && flag == "-lc" => {
             if parse_patch(script).is_ok() {
                 return MaybeApplyPatchVerified::CorrectnessError(
                     ApplyPatchError::ImplicitInvocation,
@@ -959,6 +971,23 @@ mod tests {
         assert!(matches!(
             maybe_parse_apply_patch(&args),
             MaybeApplyPatch::NotApplyPatch
+        ));
+    }
+
+    #[test]
+    fn test_absolute_bash_detects_apply_patch() {
+        let script = heredoc_script("");
+        let args = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
+        match maybe_parse_apply_patch(&args) {
+            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, .. }) => {
+                assert_eq!(hunks, expected_single_add());
+            }
+            other => panic!("expected MaybeApplyPatch::Body got {other:?}"),
+        }
+        let dir = tempdir().unwrap();
+        assert!(matches!(
+            maybe_parse_apply_patch_verified(&args, dir.path()),
+            MaybeApplyPatchVerified::Body(_)
         ));
     }
 
