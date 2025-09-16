@@ -89,6 +89,9 @@ pub(crate) enum AppEvent {
     /// Prefill the composer input with the given text
     PrefillComposer(String),
 
+    /// Submit a message with hidden preface instructions
+    SubmitTextWithPreface { visible: String, preface: String },
+
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)

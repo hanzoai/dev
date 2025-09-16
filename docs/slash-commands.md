@@ -25,7 +25,10 @@ Notes
 - `/init`: create an `AGENTS.md` file with instructions for Codex.
 - `/diff`: show `git diff` (including untracked files).
 - `/branch [task]`: create a worktree branch and switch to it. If a
-  task/description is provided, it is used when naming the branch.
+  task/description is provided, it is used when naming the branch. Must be run
+  from the repository root (not inside another branch worktree).
+- `/merge`: merge the current worktree branch back into the default branch and
+  remove the worktree. Run this from inside the worktree created by `/branch`.
 
 ## UX & Display
 
