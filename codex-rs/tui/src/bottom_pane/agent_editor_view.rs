@@ -393,39 +393,48 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
         // Draw input boxes at the same y offsets we reserved above
         let ro_rect = Rect { x: content.x, y: content.y.saturating_add(ro_offset), width: content.width, height: ro_height };
+        let ro_rect = ro_rect.intersection(*buf.area());
         let ro_block = Block::default()
             .borders(Borders::ALL)
             .title(Line::from(" Read-only Params "))
             .border_style(if self.field == 1 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let ro_inner_rect = ro_block.inner(ro_rect);
-        let ro_inner = ro_inner_rect.inner(Margin::new(1, 0));
-        ro_block.render(ro_rect, buf);
-        Self::clear_rect(buf, ro_inner_rect);
-        self.params_ro.render(ro_inner, buf, self.field == 1);
+        if ro_rect.width > 0 && ro_rect.height > 0 {
+            let ro_inner_rect = ro_block.inner(ro_rect);
+            let ro_inner = ro_inner_rect.inner(Margin::new(1, 0));
+            ro_block.render(ro_rect, buf);
+            Self::clear_rect(buf, ro_inner_rect);
+            self.params_ro.render(ro_inner, buf, self.field == 1);
+        }
 
         // WR params box (3 rows)
         let wr_rect = Rect { x: content.x, y: content.y.saturating_add(wr_offset), width: content.width, height: wr_height };
+        let wr_rect = wr_rect.intersection(*buf.area());
         let wr_block = Block::default()
             .borders(Borders::ALL)
             .title(Line::from(" Write Params "))
             .border_style(if self.field == 2 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let wr_inner_rect = wr_block.inner(wr_rect);
-        let wr_inner = wr_inner_rect.inner(Margin::new(1, 0));
-        wr_block.render(wr_rect, buf);
-        Self::clear_rect(buf, wr_inner_rect);
-        self.params_wr.render(wr_inner, buf, self.field == 2);
+        if wr_rect.width > 0 && wr_rect.height > 0 {
+            let wr_inner_rect = wr_block.inner(wr_rect);
+            let wr_inner = wr_inner_rect.inner(Margin::new(1, 0));
+            wr_block.render(wr_rect, buf);
+            Self::clear_rect(buf, wr_inner_rect);
+            self.params_wr.render(wr_inner, buf, self.field == 2);
+        }
 
         // Instructions (multi-line; height consistent with reserved space above)
         let instr_rect = Rect { x: content.x, y: content.y.saturating_add(instr_offset), width: content.width, height: instr_height };
+        let instr_rect = instr_rect.intersection(*buf.area());
         let instr_block = Block::default()
             .borders(Borders::ALL)
             .title(Line::from(" Instructions "))
             .border_style(if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let instr_inner_rect = instr_block.inner(instr_rect);
-        let instr_inner = instr_inner_rect.inner(Margin::new(1, 0));
-        instr_block.render(instr_rect, buf);
-        Self::clear_rect(buf, instr_inner_rect);
-        self.instr.render(instr_inner, buf, self.field == 3);
+        if instr_rect.width > 0 && instr_rect.height > 0 {
+            let instr_inner_rect = instr_block.inner(instr_rect);
+            let instr_inner = instr_inner_rect.inner(Margin::new(1, 0));
+            instr_block.render(instr_rect, buf);
+            Self::clear_rect(buf, instr_inner_rect);
+            self.instr.render(instr_inner, buf, self.field == 3);
+        }
     }
 }
 
