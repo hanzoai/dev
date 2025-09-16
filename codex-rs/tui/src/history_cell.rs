@@ -4886,7 +4886,7 @@ const STREAMING_EXIT_CODE: i32 = i32::MIN;
 /// Normalize common TTY overwrite sequences within a text block so that
 /// progress lines using carriage returns, backspaces, or ESC[K erase behave as
 /// expected when rendered in a pure-buffered UI (no cursor movement).
-fn normalize_overwrite_sequences(input: &str) -> String {
+pub(crate) fn normalize_overwrite_sequences(input: &str) -> String {
     // Process per line, but keep CR/BS/CSI semantics within logical lines.
     // Treat "\n" as committing a line and resetting the cursor.
     let mut out = String::with_capacity(input.len());
