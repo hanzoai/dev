@@ -942,82 +942,12 @@ impl App<'_> {
                         }
                     }
                 }
-                AppEvent::SwitchCwd(new_cwd, initial_prompt, context_note) => {
-                    let previous_cwd = self.config.cwd.clone();
-                    // Preserve current chat history and ordering before swapping sessions
-                    let carried = match &mut self.app_state {
-                        AppState::Chat { widget } => {
-                            Some(widget.export_history_for_session_swap())
-                        }
-                        _ => None,
-                    };
-
-                    // Rebuild the chat widget bound to a new cwd, preserving
-                    // current configuration and terminal properties.
-                    let mut cfg = self.config.clone();
-                    cfg.cwd = new_cwd.clone();
-                    let mut new_widget = ChatWidget::new(
-                        cfg.clone(),
-                        self.app_event_tx.clone(),
-                        None,
-                        Vec::new(),
-                        self.enhanced_keys_supported,
-                        self.terminal_info.clone(),
-                        self.show_order_overlay,
-                    );
-                    // Adopt prior history so the conversation remains visible.
-                    if let Some(state) = carried {
-                        new_widget.import_history_for_session_swap(state);
-                    }
-                    new_widget.enable_perf(self.timing_enabled);
-                    self.app_state = AppState::Chat { widget: Box::new(new_widget) };
-                    self.config = cfg;
-
-                    // Surface a BackgroundEvent so the user can see the effective cwd
-                    // in the new session.
-                    {
-                        use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                        let msg = format!(
-                            "✅ Working directory changed\n  from: {}\n  to:   {}",
-                            previous_cwd.display(),
-                            new_cwd.display()
-                        );
-                        let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: "switch-cwd".to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                            order: None,
-                        }));
-                    }
-                    // Optionally submit a prompt immediately in the new session
+                AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
+                    let target = new_cwd.clone();
+                    self.config.cwd = target.clone();
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        let worktree_hint = new_cwd
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|name| format!(" (worktree: {})", name))
-                            .unwrap_or_default();
-                        let branch_note = format!(
-                            "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
-                            previous_cwd.display(),
-                            new_cwd.display(),
-                            worktree_hint,
-                            new_cwd.display()
-                        );
-                        widget.queue_agent_note(branch_note);
-                        if let Some(note) = context_note {
-                            widget.queue_agent_note(format!(
-                                "[context] Conversation recap before branch:\n{}",
-                                note
-                            ));
-                        }
-                        if let Some(prompt) = initial_prompt {
-                            if !prompt.is_empty() {
-                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/merge' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
-                                widget.submit_text_message_with_preface(prompt, preface);
-                            }
-                        }
+                        widget.switch_cwd(target, initial_prompt);
                     }
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::ResumeFrom(path) => {
                     // Replace the current chat widget with a new one configured to resume
