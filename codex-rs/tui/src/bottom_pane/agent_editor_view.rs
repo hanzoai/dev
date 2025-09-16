@@ -98,8 +98,8 @@ impl AgentEditorView {
         let mut v = Self {
             name,
             enabled,
-            params_ro: FormTextField::new_single_line(),
-            params_wr: FormTextField::new_single_line(),
+            params_ro: FormTextField::new_multi_line(),
+            params_wr: FormTextField::new_multi_line(),
             instr: FormTextField::new_multi_line(),
             field: 0,
             complete: false,
@@ -124,41 +124,39 @@ impl AgentEditorView {
     }
 
     fn layout(&self, content_width: u16, max_height: Option<u16>) -> AgentEditorLayout {
-        let single_box_h: u16 = 3;
         let instr_inner_width = content_width.saturating_sub(4);
         let desired_instr_inner = self.instr.desired_height(instr_inner_width).min(8);
         let mut instr_box_h = desired_instr_inner.saturating_add(2);
 
+        let ro_inner_width = content_width.saturating_sub(4);
+        let desired_ro_inner = self.params_ro.desired_height(ro_inner_width).min(6);
+        let ro_box_h = desired_ro_inner.saturating_add(2);
+        let desired_wr_inner = self.params_wr.desired_height(ro_inner_width).min(6);
+        let wr_box_h = desired_wr_inner.saturating_add(2);
+
         let top_block: u16 = 3; // blank, title, blank
-        let enabled_block: u16 = 2; // row + spacer
-        let ro_label: u16 = 1;
-        let ro_spacer: u16 = 1;
-        let wr_label: u16 = 1;
-        let wr_spacer: u16 = 1;
-        let instr_label: u16 = 1;
+        let enabled_block: u16 = 2; // toggle row + spacer
+        let instr_desc_lines: u16 = 1; // description row after box
         let spacer_before_buttons: u16 = 1;
         let buttons_block: u16 = 1;
-        let footer_lines_default: u16 = 2;
+        let footer_lines_default: u16 = 0;
 
         let base_fixed_top = top_block
             + enabled_block
-            + ro_label
-            + single_box_h
-            + ro_spacer
-            + wr_label
-            + single_box_h
-            + wr_spacer
-            + instr_label;
+            + ro_box_h
+            + 1 // blank after read-only box
+            + wr_box_h
+            + 1; // blank after write box
 
         let mut footer_lines = footer_lines_default;
-        let mut spacer_after_instr = spacer_before_buttons;
+        let mut include_gap_before_buttons = spacer_before_buttons > 0;
 
         if let Some(height) = max_height {
-            let mut fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            let mut fixed_after_box = instr_desc_lines + spacer_before_buttons + buttons_block + footer_lines;
             if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
                 footer_lines = 0;
             }
-            fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            fixed_after_box = instr_desc_lines + spacer_before_buttons + buttons_block + footer_lines;
             if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
                 let min_ih: u16 = 3;
                 let available_for_box = height
@@ -166,9 +164,9 @@ impl AgentEditorView {
                     .saturating_sub(fixed_after_box);
                 instr_box_h = instr_box_h.min(available_for_box).max(min_ih);
             }
-            fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            fixed_after_box = instr_desc_lines + spacer_before_buttons + buttons_block + footer_lines;
             if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
-                spacer_after_instr = 0;
+                include_gap_before_buttons = false;
             }
         }
 
@@ -181,18 +179,10 @@ impl AgentEditorView {
                 Style::default()
             }
         };
-        let label = |idx: usize| {
-            if self.field == idx {
-                Style::default()
-                    .fg(crate::colors::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            }
-        };
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         let mut cursor: u16 = 0;
+        let desc_style = Style::default().fg(crate::colors::text_dim());
 
         // Top spacer, title, spacer
         lines.push(Line::from(""));
@@ -206,53 +196,75 @@ impl AgentEditorView {
         cursor = cursor.saturating_add(1);
 
         // Enabled toggle + spacer
-        let chk = if self.enabled { "[on ]" } else { "[off]" };
+        let enabled_style = if self.enabled {
+            Style::default()
+                .fg(crate::colors::success())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(crate::colors::text_dim())
+        };
+        let disabled_style = if self.enabled {
+            Style::default().fg(crate::colors::text_dim())
+        } else {
+            Style::default()
+                .fg(crate::colors::error())
+                .add_modifier(Modifier::BOLD)
+        };
+        let label_style = if self.field == 0 {
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(crate::colors::text())
+        };
+        let enabled_text = format!("[{}] Enabled", if self.enabled { 'x' } else { ' ' });
+        let disabled_text = format!("[{}] Disabled", if self.enabled { ' ' } else { 'x' });
         lines.push(Line::from(vec![
-            Span::styled("Enabled:", label(0)),
+            Span::styled("Status:", label_style),
             Span::raw("  "),
-            Span::styled(chk, sel(0)),
+            Span::styled(enabled_text, enabled_style),
+            Span::raw("  "),
+            Span::styled(disabled_text, disabled_style),
         ]));
         cursor = cursor.saturating_add(1);
         lines.push(Line::from(""));
         cursor = cursor.saturating_add(1);
 
-        // Read-only params label and box
-        lines.push(Line::from(Span::styled("Read-only Params", label(1))));
-        cursor = cursor.saturating_add(1);
+        // Read-only params box
         let ro_offset = cursor;
-        for _ in 0..single_box_h {
+        for _ in 0..ro_box_h {
             lines.push(Line::from(""));
             cursor = cursor.saturating_add(1);
         }
         lines.push(Line::from(""));
         cursor = cursor.saturating_add(1);
 
-        // Write params label and box
-        lines.push(Line::from(Span::styled("Write Params", label(2))));
-        cursor = cursor.saturating_add(1);
+        // Write params box
         let wr_offset = cursor;
-        for _ in 0..single_box_h {
+        for _ in 0..wr_box_h {
             lines.push(Line::from(""));
             cursor = cursor.saturating_add(1);
         }
         lines.push(Line::from(""));
         cursor = cursor.saturating_add(1);
 
-        // Instructions label and box
-        lines.push(Line::from(Span::styled("Instructions", label(3))));
-        cursor = cursor.saturating_add(1);
+        // Instructions box
         let instr_offset = cursor;
         for _ in 0..instr_box_h {
             lines.push(Line::from(""));
             cursor = cursor.saturating_add(1);
         }
+        lines.push(Line::from(Span::styled(
+            "Optional guidance prepended to every request sent to the agent.",
+            desc_style,
+        )));
+        cursor = cursor.saturating_add(1);
 
-        if spacer_after_instr > 0 {
+        // Buttons row
+        if include_gap_before_buttons {
             lines.push(Line::from(""));
             cursor = cursor.saturating_add(1);
         }
-
-        // Buttons row
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::text());
         lines.push(Line::from(vec![
@@ -262,19 +274,7 @@ impl AgentEditorView {
         ]));
         cursor = cursor.saturating_add(1);
 
-        if footer_lines > 0 {
-            lines.push(Line::from(""));
-            cursor = cursor.saturating_add(1);
-            lines.push(Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Enter", Style::default().fg(crate::colors::success())),
-                Span::styled(" Save/Close  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
-            ]));
-            cursor = cursor.saturating_add(1);
-        }
+        // No footer hints in the editor form
 
         debug_assert_eq!(cursor as usize, lines.len());
 
@@ -283,8 +283,8 @@ impl AgentEditorView {
             ro_offset,
             wr_offset,
             instr_offset,
-            ro_height: single_box_h,
-            wr_height: single_box_h,
+            ro_height: ro_box_h,
+            wr_height: wr_box_h,
             instr_height: instr_box_h,
         }
     }
@@ -303,7 +303,10 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
             KeyEvent { code: KeyCode::Esc, .. } => { self.complete = true; self.app_event_tx.send(AppEvent::ShowAgentsOverview); },
             KeyEvent { code: KeyCode::Up, .. } => { if self.field > 0 { self.field -= 1; } },
             KeyEvent { code: KeyCode::Down, .. } => { self.field = (self.field + 1).min(5); },
-            KeyEvent { code: KeyCode::Left | KeyCode::Right, .. } if self.field == 0 => { self.enabled = !self.enabled; },
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 0 => { self.enabled = true; },
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 0 => { self.enabled = false; },
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 5 => { self.field = 4; },
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 4 => { self.field = 5; },
             KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 0 => { self.enabled = !self.enabled; },
             ev @ KeyEvent { .. } if self.field == 1 => { let _ = self.params_ro.handle_key(ev); },
             ev @ KeyEvent { .. } if self.field == 2 => { let _ = self.params_wr.handle_key(ev); },
@@ -408,8 +411,10 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
         // Instructions (multi-line; height consistent with reserved space above)
         let instr_rect = Rect { x: content.x, y: content.y.saturating_add(instr_offset), width: content.width, height: instr_height };
-        let instr_block = Block::default().borders(Borders::ALL).border_style(if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let instr_block = instr_block.title(Line::from(" Instructions "));
+        let instr_block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Instructions "))
+            .border_style(if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
         let instr_inner_rect = instr_block.inner(instr_rect);
         let instr_inner = instr_inner_rect.inner(Margin::new(1, 0));
         instr_block.render(instr_rect, buf);
