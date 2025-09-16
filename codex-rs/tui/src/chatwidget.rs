@@ -11,12 +11,15 @@ use std::sync::atomic::Ordering;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 
-use codex_common::model_presets::{builtin_model_presets, ModelPreset};
+use codex_common::model_presets::ModelPreset;
+use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
+use codex_core::config_types::AgentConfig;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
-use codex_core::model_family::{derive_default_model_family, find_family_for_model};
+use codex_core::model_family::derive_default_model_family;
+use codex_core::model_family::find_family_for_model;
 use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
@@ -52,6 +55,7 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
+use codex_core::protocol::ExecOutputStream;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
@@ -151,6 +155,8 @@ struct RunningCommand {
     history_index: Option<usize>,
     // Aggregated exploration entry (history index, entry index) when grouped
     explore_entry: Option<(usize, usize)>,
+    stdout: String,
+    stderr: String,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -300,9 +306,10 @@ pub(crate) struct ChatWidget<'a> {
     /// When true, render without the top status bar and HUD so the normal
     /// terminal scrollback remains usable (Ctrl+T standard terminal mode).
     pub(crate) standard_terminal_mode: bool,
-    // Pending one-shot note about the latest access-mode change to inject into
-    // the agent's conversation history on the next user message.
-    pending_access_note: Option<String>,
+    // Pending system notes to inject into the agent's conversation history
+    // before the next user turn. Each entry is sent in order ahead of the
+    // user's visible prompt.
+    pending_agent_notes: Vec<String>,
 
     // Stable synthetic request bucket for pre‑turn system notices (set on first use)
     synthetic_system_req: Option<u64>,
@@ -459,64 +466,87 @@ enum SystemPlacement {
 }
 
 impl ChatWidget<'_> {
-    /// Export history and ordering state so the UI can swap sessions (e.g., /branch)
-    /// without losing visible conversation. This drains the current widget's history.
-    pub(crate) fn export_history_for_session_swap(
-        &mut self,
-    ) -> (
-        Vec<Box<dyn HistoryCell>>,
-        Vec<(u64, i32, u64)>,
-        Vec<Option<String>>,
-        u64,
-        u64,
-        u64,
-    ) {
-        let history = std::mem::take(&mut self.history_cells);
-        let order_ok = std::mem::take(&mut self.cell_order_seq);
-        let order: Vec<(u64, i32, u64)> = order_ok
-            .into_iter()
-            .map(|o| (o.req, o.out, o.seq))
-            .collect();
-        let order_dbg = std::mem::take(&mut self.cell_order_dbg);
-        (
-            history,
-            order,
-            order_dbg,
-            self.last_seen_request_index,
-            self.current_request_index,
-            self.internal_seq,
-        )
+    fn is_branch_worktree_path(path: &std::path::Path) -> bool {
+        for ancestor in path.ancestors() {
+            if ancestor
+                .file_name()
+                .map(|name| name == std::ffi::OsStr::new("branches"))
+                .unwrap_or(false)
+            {
+                let mut higher = ancestor.parent();
+                while let Some(dir) = higher {
+                    if dir
+                        .file_name()
+                        .map(|name| name == std::ffi::OsStr::new(".code"))
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+                    higher = dir.parent();
+                }
+            }
+        }
+        false
     }
 
-    /// Import prior history and ordering metadata into a fresh widget.
-    pub(crate) fn import_history_for_session_swap(
-        &mut self,
-        state: (
-            Vec<Box<dyn HistoryCell>>,
-            Vec<(u64, i32, u64)>,
-            Vec<Option<String>>,
-            u64,
-            u64,
-            u64,
-        ),
-    ) {
-        let (history, order, order_dbg, last_seen_req, current_req, internal_seq) = state;
-
-        // Replace any starter cells (welcome, etc.) with the carried history
-        self.history_cells = history;
-        self.cell_order_seq = order
-            .into_iter()
-            .map(|(req, out, seq)| OrderKey { req, out, seq })
-            .collect();
-        self.cell_order_dbg = order_dbg;
-        self.last_seen_request_index = last_seen_req;
-        self.current_request_index = current_req;
-        self.internal_seq = internal_seq;
-        self.welcome_shown = true; // avoid duplicating prelude items later
-        self.bottom_pane.set_has_chat_history(true);
-        self.invalidate_height_cache();
-        self.request_redraw();
+    async fn git_short_status(path: &std::path::Path) -> Result<String, String> {
+        use tokio::process::Command;
+        match Command::new("git")
+            .current_dir(path)
+            .args(["status", "--short"])
+            .output()
+            .await
+        {
+            Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+            Ok(out) => {
+                let stderr_s = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let stdout_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !stderr_s.is_empty() {
+                    Err(stderr_s)
+                } else if !stdout_s.is_empty() {
+                    Err(stdout_s)
+                } else {
+                    let code = out
+                        .status
+                        .code()
+                        .map(|c| format!("exit status {c}"))
+                        .unwrap_or_else(|| "terminated by signal".to_string());
+                    Err(format!("git status failed: {}", code))
+                }
+            }
+            Err(err) => Err(err.to_string()),
+        }
     }
+
+    async fn git_diff_stat(path: &std::path::Path) -> Result<String, String> {
+        use tokio::process::Command;
+        match Command::new("git")
+            .current_dir(path)
+            .args(["diff", "--stat"])
+            .output()
+            .await
+        {
+            Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+            Ok(out) => {
+                let stderr_s = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let stdout_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !stderr_s.is_empty() {
+                    Err(stderr_s)
+                } else if !stdout_s.is_empty() {
+                    Err(stdout_s)
+                } else {
+                    let code = out
+                        .status
+                        .code()
+                        .map(|c| format!("exit status {c}"))
+                        .unwrap_or_else(|| "terminated by signal".to_string());
+                    Err(format!("git diff --stat failed: {code}"))
+                }
+            }
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
     /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
     /// creating multiple synthetic request buckets before the first provider turn.
     fn system_order_key(
@@ -1685,18 +1715,10 @@ impl ChatWidget<'_> {
                 Err(e) => {
                     tracing::error!("failed to initialize conversation: {e}");
                     // Surface a visible background event so users see why nothing starts.
-                    let ev = Event {
-                        id: "diagnostic".to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!(
-                                "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
-                                e
-                            ),
-                        }),
-                        order: None,
-                    };
-                    app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+                    app_event_tx_clone.send_background_event(format!(
+                        "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
+                        e
+                    ));
                     return;
                 }
             };
@@ -1717,15 +1739,8 @@ impl ChatWidget<'_> {
                 while let Some(op) = codex_op_rx.recv().await {
                     if let Err(e) = conversation_clone.submit(op).await {
                         tracing::error!("failed to submit op: {e}");
-                        let ev = Event {
-                            id: "diagnostic".to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("⚠️ Failed to submit Op to core: {}", e),
-                            }),
-                            order: None,
-                        };
-                        app_event_tx_submit.send(AppEvent::CodexEvent(ev));
+                        app_event_tx_submit
+                            .send_background_event(format!("⚠️ Failed to submit Op to core: {}", e));
                     }
                 }
             });
@@ -1864,7 +1879,7 @@ impl ChatWidget<'_> {
             show_order_overlay,
             scroll_history_hint_shown: false,
             access_status_idx: None,
-            pending_access_note: None,
+            pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
@@ -2044,7 +2059,7 @@ impl ChatWidget<'_> {
             scroll_history_hint_shown: false,
             access_status_idx: None,
             standard_terminal_mode: !config.tui.alternate_screen,
-            pending_access_note: None,
+            pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
         };
@@ -2121,8 +2136,19 @@ impl ChatWidget<'_> {
 
     /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
     fn format_model_name(&self, model_name: &str) -> String {
-        if model_name.to_lowercase().starts_with("gpt-") {
-            format!("GPT{}", &model_name[3..])
+        if let Some(rest) = model_name.strip_prefix("gpt-") {
+            let formatted_rest = rest
+                .split('-')
+                .map(|segment| {
+                    if segment.eq_ignore_ascii_case("codex") {
+                        "Codex".to_string()
+                    } else {
+                        segment.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("-");
+            format!("GPT-{}", formatted_rest)
         } else {
             model_name.to_string()
         }
@@ -2606,11 +2632,25 @@ impl ChatWidget<'_> {
     /// Insert a background event near the top of the current request so it appears
     /// before imminent provider output (e.g. Exec begin).
     pub(crate) fn insert_background_event_early(&mut self, message: String) {
-        let key = self.near_time_key(None);
-        let _ = self.history_insert_with_key_global_tagged(
-            Box::new(history_cell::new_background_event(message)),
-            key,
-            "background-early",
+        let placement = if self.pending_user_prompts_for_next_turn > 0 {
+            SystemPlacement::EarlyInCurrent
+        } else {
+            SystemPlacement::PrePromptInCurrent
+        };
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            placement,
+            None,
+            None,
+        );
+    }
+    /// Insert a background event at the tail of the current request.
+    pub(crate) fn insert_background_event_late(&mut self, message: String) {
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            SystemPlacement::EndOfCurrent,
+            None,
+            None,
         );
     }
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
@@ -2781,25 +2821,15 @@ impl ChatWidget<'_> {
                 }
                 let fallback_root = anc.to_path_buf();
                 if fallback_root.exists() {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
                     let msg = format!(
                         "⚠️ Worktree directory is missing: {}\nSwitching to repo root: {}",
                         missing.display(),
                         fallback_root.display()
                     );
-                    let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: "cwd-recover".to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                        order: None,
-                    }));
+                    self.app_event_tx.send_background_event(msg);
                     // Re-submit this exact message after switching cwd
-                    self.app_event_tx.send(AppEvent::SwitchCwd(
-                        fallback_root,
-                        Some(display_text.clone()),
-                    ));
+                    self.app_event_tx
+                        .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
                     return;
                 }
             }
@@ -2847,7 +2877,10 @@ impl ChatWidget<'_> {
                     .any(|c| c.name.eq_ignore_ascii_case(cmd_name));
                 // Treat built-ins via the standard path below to preserve existing ack flow,
                 // but allow any other saved subagent command to be executed here.
-                let is_builtin = matches!(cmd_name.to_ascii_lowercase().as_str(), "plan"|"solve"|"code");
+                let is_builtin = matches!(
+                    cmd_name.to_ascii_lowercase().as_str(),
+                    "plan" | "solve" | "code"
+                );
                 if has_custom && !is_builtin {
                     let res = codex_core::slash_commands::format_subagent_command(
                         cmd_name,
@@ -2858,13 +2891,23 @@ impl ChatWidget<'_> {
                     // Acknowledge configuration
                     let mode = if res.read_only { "read-only" } else { "write" };
                     let mut ack: Vec<ratatui::text::Line<'static>> = Vec::new();
-                    ack.push(ratatui::text::Line::from(format!("/{} configured", res.name)));
+                    ack.push(ratatui::text::Line::from(format!(
+                        "/{} configured",
+                        res.name
+                    )));
                     ack.push(ratatui::text::Line::from(format!("mode: {}", mode)));
                     ack.push(ratatui::text::Line::from(format!(
                         "agents: {}",
-                        if res.models.is_empty() { "<none>".to_string() } else { res.models.join(", ") }
+                        if res.models.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            res.models.join(", ")
+                        }
                     )));
-                    ack.push(ratatui::text::Line::from(format!("command: {}", original_text.trim())));
+                    ack.push(ratatui::text::Line::from(format!(
+                        "command: {}",
+                        original_text.trim()
+                    )));
                     self.history_push(crate::history_cell::PlainHistoryCell {
                         lines: ack,
                         kind: crate::history_cell::HistoryCellType::Notice,
@@ -2909,7 +2952,11 @@ impl ChatWidget<'_> {
                     lines.push(Line::from(format!("mode: {}", mode)));
                     lines.push(Line::from(format!(
                         "agents: {}",
-                        if res.models.is_empty() { "<none>".to_string() } else { res.models.join(", ") }
+                        if res.models.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            res.models.join(", ")
+                        }
                     )));
                     lines.push(Line::from(format!("command: {}", original_text.trim())));
                     self.history_push(crate::history_cell::PlainHistoryCell {
@@ -3125,7 +3172,7 @@ impl ChatWidget<'_> {
 
         // If an access-mode change was pending, record it in the agent's
         // conversation history right before the next user turn.
-        if let Some(note) = self.pending_access_note.take() {
+        for note in self.pending_agent_notes.drain(..) {
             let _ = self.codex_op_tx.send(Op::AddToHistory { text: note });
         }
 
@@ -3752,8 +3799,28 @@ impl ChatWidget<'_> {
                     },
                 );
             }
-            EventMsg::ExecCommandOutputDelta(_) => {
-                // TODO
+            EventMsg::ExecCommandOutputDelta(ev) => {
+                let call_id = ExecCallId(ev.call_id.clone());
+                if let Some(running) = self.exec.running_commands.get_mut(&call_id) {
+                    let chunk = String::from_utf8_lossy(&ev.chunk).to_string();
+                    match ev.stream {
+                        ExecOutputStream::Stdout => running.stdout.push_str(&chunk),
+                        ExecOutputStream::Stderr => running.stderr.push_str(&chunk),
+                    }
+                    if let Some(idx) = running.history_index {
+                        if idx < self.history_cells.len() {
+                            if let Some(exec) = self.history_cells[idx]
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::ExecCell>()
+                            {
+                                exec.update_stream_preview(&running.stdout, &running.stderr);
+                            }
+                        }
+                    }
+                    self.invalidate_height_cache();
+                    self.autoscroll_if_near_bottom();
+                    self.request_redraw();
+                }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id: _,
@@ -4275,20 +4342,35 @@ impl ChatWidget<'_> {
         // Show current subagent command configuration summary
         lines.push(Line::from("Subagents configuration".bold()));
         if self.config.subagent_commands.is_empty() {
-            lines.push(Line::from("  • No subagent commands in config (using defaults)"));
+            lines.push(Line::from(
+                "  • No subagent commands in config (using defaults)",
+            ));
         } else {
             for cmd in &self.config.subagent_commands {
                 let mode = if cmd.read_only { "read-only" } else { "write" };
-                let agents = if cmd.agents.is_empty() { "<inherit>".to_string() } else { cmd.agents.join(", ") };
-                lines.push(Line::from(format!("  • {} — {} — [{}]", cmd.name, mode, agents)));
+                let agents = if cmd.agents.is_empty() {
+                    "<inherit>".to_string()
+                } else {
+                    cmd.agents.join(", ")
+                };
+                lines.push(Line::from(format!(
+                    "  • {} — {} — [{}]",
+                    cmd.name, mode, agents
+                )));
             }
         }
         lines.push(Line::from(""));
         lines.push(Line::from("Manage with:".bold()));
-        lines.push(Line::from("  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,code"));
-        lines.push(Line::from("  /agents edit name=<name> [read-only=..] [agents=..] [orchestrator=..] [agent=..]"));
+        lines.push(Line::from(
+            "  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,code",
+        ));
+        lines.push(Line::from(
+            "  /agents edit name=<name> [read-only=..] [agents=..] [orchestrator=..] [agent=..]",
+        ));
         lines.push(Line::from("  /agents delete name=<name>"));
-        lines.push(Line::from("  Values with spaces require quotes in the composer."));
+        lines.push(Line::from(
+            "  Values with spaces require quotes in the composer.",
+        ));
         lines.push(Line::from(""));
 
         // Platform + environment summary to aid debugging
@@ -4435,17 +4517,27 @@ impl ChatWidget<'_> {
             }
             #[cfg(target_os = "windows")]
             {
-                if let Ok(p) = which::which(cmd) { p.is_file() } else { false }
+                if let Ok(p) = which::which(cmd) {
+                    p.is_file()
+                } else {
+                    false
+                }
             }
             #[cfg(not(target_os = "windows"))]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let Some(path_os) = std::env::var_os("PATH") else { return false; };
+                let Some(path_os) = std::env::var_os("PATH") else {
+                    return false;
+                };
                 for dir in std::env::split_paths(&path_os) {
-                    if dir.as_os_str().is_empty() { continue; }
+                    if dir.as_os_str().is_empty() {
+                        continue;
+                    }
                     let candidate = dir.join(cmd);
                     if let Ok(meta) = std::fs::metadata(&candidate) {
-                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) { return true; }
+                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
+                            return true;
+                        }
                     }
                 }
                 false
@@ -4457,17 +4549,37 @@ impl ChatWidget<'_> {
         let preferred = ["code", "claude", "gemini", "qwen"];
         // Name -> config lookup
         let mut extras: Vec<String> = Vec::new();
-        for a in &self.config.agents { if !preferred.iter().any(|p| a.name.eq_ignore_ascii_case(p)) { extras.push(a.name.to_ascii_lowercase()); } }
+        for a in &self.config.agents {
+            if !preferred.iter().any(|p| a.name.eq_ignore_ascii_case(p)) {
+                extras.push(a.name.to_ascii_lowercase());
+            }
+        }
         extras.sort();
         // Build ordered list of names
         let mut ordered: Vec<String> = Vec::new();
-        for p in preferred { ordered.push(p.to_string()); }
-        for e in extras { if !ordered.iter().any(|n| n.eq_ignore_ascii_case(&e)) { ordered.push(e); } }
+        for p in preferred {
+            ordered.push(p.to_string());
+        }
+        for e in extras {
+            if !ordered.iter().any(|n| n.eq_ignore_ascii_case(&e)) {
+                ordered.push(e);
+            }
+        }
 
         for name in ordered.iter() {
-            if let Some(cfg) = self.config.agents.iter().find(|a| a.name.eq_ignore_ascii_case(name)) {
+            if let Some(cfg) = self
+                .config
+                .agents
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case(name))
+            {
                 let installed = command_exists(&cfg.command);
-                agent_rows.push((cfg.name.clone(), cfg.enabled, installed, cfg.command.clone()));
+                agent_rows.push((
+                    cfg.name.clone(),
+                    cfg.enabled,
+                    installed,
+                    cfg.command.clone(),
+                ));
             } else {
                 // Default command = name, enabled=true, installed based on PATH
                 let cmd = name.clone();
@@ -4495,7 +4607,12 @@ impl ChatWidget<'_> {
     pub(crate) fn show_subagent_editor_for_name(&mut self, name: String) {
         // Build available agents from enabled ones (or sensible defaults)
         let available_agents: Vec<String> = if self.config.agents.is_empty() {
-            vec!["claude".into(), "gemini".into(), "qwen".into(), "code".into()]
+            vec![
+                "claude".into(),
+                "gemini".into(),
+                "qwen".into(),
+                "code".into(),
+            ]
         } else {
             self.config
                 .agents
@@ -4511,7 +4628,12 @@ impl ChatWidget<'_> {
 
     pub(crate) fn show_new_subagent_editor(&mut self) {
         let available_agents: Vec<String> = if self.config.agents.is_empty() {
-            vec!["claude".into(), "gemini".into(), "qwen".into(), "code".into()]
+            vec![
+                "claude".into(),
+                "gemini".into(),
+                "qwen".into(),
+                "code".into(),
+            ]
         } else {
             self.config
                 .agents
@@ -4526,14 +4648,33 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_agent_editor_ui(&mut self, name: String) {
-
-        if let Some(cfg) = self.config.agents.iter().find(|a| a.name.eq_ignore_ascii_case(&name)).cloned() {
-            let ro = if let Some(ref v) = cfg.args_read_only { Some(v.clone()) }
-                else if !cfg.args.is_empty() { Some(cfg.args.clone()) }
-                else { let d = codex_core::agent_defaults::default_params_for(&cfg.name, true /*read_only*/); if d.is_empty() { None } else { Some(d) } };
-            let wr = if let Some(ref v) = cfg.args_write { Some(v.clone()) }
-                else if !cfg.args.is_empty() { Some(cfg.args.clone()) }
-                else { let d = codex_core::agent_defaults::default_params_for(&cfg.name, false /*read_only*/); if d.is_empty() { None } else { Some(d) } };
+        if let Some(cfg) = self
+            .config
+            .agents
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(&name))
+            .cloned()
+        {
+            let ro = if let Some(ref v) = cfg.args_read_only {
+                Some(v.clone())
+            } else if !cfg.args.is_empty() {
+                Some(cfg.args.clone())
+            } else {
+                let d = codex_core::agent_defaults::default_params_for(
+                    &cfg.name, true, /*read_only*/
+                );
+                if d.is_empty() { None } else { Some(d) }
+            };
+            let wr = if let Some(ref v) = cfg.args_write {
+                Some(v.clone())
+            } else if !cfg.args.is_empty() {
+                Some(cfg.args.clone())
+            } else {
+                let d = codex_core::agent_defaults::default_params_for(
+                    &cfg.name, false, /*read_only*/
+                );
+                if d.is_empty() { None } else { Some(d) }
+            };
             self.bottom_pane.show_agent_editor(
                 cfg.name.clone(),
                 cfg.enabled,
@@ -4546,7 +4687,8 @@ impl ChatWidget<'_> {
             // Fallback: synthesize defaults
             let cmd = name.clone();
             let ro = codex_core::agent_defaults::default_params_for(&name, true /*read_only*/);
-            let wr = codex_core::agent_defaults::default_params_for(&name, false /*read_only*/);
+            let wr =
+                codex_core::agent_defaults::default_params_for(&name, false /*read_only*/);
             self.bottom_pane.show_agent_editor(
                 name,
                 true,
@@ -4558,7 +4700,10 @@ impl ChatWidget<'_> {
         }
     }
 
-    pub(crate) fn apply_subagent_update(&mut self, cmd: codex_core::config_types::SubagentCommandConfig) {
+    pub(crate) fn apply_subagent_update(
+        &mut self,
+        cmd: codex_core::config_types::SubagentCommandConfig,
+    ) {
         if let Some(slot) = self
             .config
             .subagent_commands
@@ -4585,11 +4730,34 @@ impl ChatWidget<'_> {
         args_wr: Option<Vec<String>>,
         instr: Option<String>,
     ) {
-        if let Some(slot) = self.config.agents.iter_mut().find(|a| a.name.eq_ignore_ascii_case(name)) {
+        let mut updated_existing = false;
+        if let Some(slot) = self
+            .config
+            .agents
+            .iter_mut()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+        {
             slot.enabled = enabled;
             slot.args_read_only = args_ro.clone();
             slot.args_write = args_wr.clone();
             slot.instructions = instr.clone();
+            updated_existing = true;
+        }
+
+        if !updated_existing {
+            let new_cfg = AgentConfig {
+                name: name.to_string(),
+                command: name.to_string(),
+                args: Vec::new(),
+                read_only: false,
+                enabled,
+                description: None,
+                env: None,
+                args_read_only: args_ro.clone(),
+                args_write: args_wr.clone(),
+                instructions: instr.clone(),
+            };
+            self.config.agents.push(new_cfg);
         }
         // Persist asynchronously
         if let Ok(home) = codex_core::config::find_codex_home() {
@@ -4609,8 +4777,6 @@ impl ChatWidget<'_> {
             });
         }
     }
-
-    
 
     pub(crate) fn show_diffs_popup(&mut self) {
         use crate::diff_render::create_diff_details_only;
@@ -4946,7 +5112,9 @@ impl ChatWidget<'_> {
 
         let presets = self.available_model_presets();
         if presets.is_empty() {
-            let message = "No model presets are available. Update your configuration to define models.".to_string();
+            let message =
+                "No model presets are available. Update your configuration to define models."
+                    .to_string();
             self.history_push(history_cell::new_error_event(message));
             return;
         }
@@ -4973,11 +5141,7 @@ impl ChatWidget<'_> {
         );
     }
 
-    pub(crate) fn apply_model_selection(
-        &mut self,
-        model: String,
-        effort: Option<ReasoningEffort>,
-    ) {
+    pub(crate) fn apply_model_selection(&mut self, model: String, effort: Option<ReasoningEffort>) {
         let trimmed = model.trim();
         if trimmed.is_empty() {
             return;
@@ -5020,10 +5184,7 @@ impl ChatWidget<'_> {
 
         let placement = self.ui_placement_for_now();
         self.push_system_cell(
-            history_cell::new_model_output(
-                &self.config.model,
-                self.config.model_reasoning_effort,
-            ),
+            history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort),
             placement,
             Some("ui:model".to_string()),
             None,
@@ -5059,7 +5220,9 @@ impl ChatWidget<'_> {
         } else {
             let presets = self.available_model_presets();
             if presets.is_empty() {
-                let message = "No model presets are available. Update your configuration to define models.".to_string();
+                let message =
+                    "No model presets are available. Update your configuration to define models."
+                        .to_string();
                 self.history_push(history_cell::new_error_event(message));
                 return;
             }
@@ -5562,7 +5725,7 @@ impl ChatWidget<'_> {
             }
             _ => "System: access mode changed to Full Access. Writes and network are allowed.",
         };
-        self.pending_access_note = Some(agent_note.to_string());
+        self.queue_agent_note(agent_note);
     }
 
     /// Insert or replace the access-mode status background event. Uses a near-time
@@ -6738,20 +6901,12 @@ impl ChatWidget<'_> {
                     "[cdp] connect_to_chrome_only timed out after {:?}",
                     connect_deadline
                 );
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!(
-                            "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
-                            connect_deadline.as_secs(), port.unwrap_or(0), port.unwrap_or(0)
-                        ),
-                    }),
-                    order: None,
-                }));
+                app_event_tx.send_background_event(format!(
+                    "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                    connect_deadline.as_secs(),
+                    port.unwrap_or(0),
+                    port.unwrap_or(0)
+                ));
                 // Offer launch options popup to help recover quickly
                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                 return;
@@ -6795,17 +6950,7 @@ impl ChatWidget<'_> {
                     };
 
                     // Immediately notify success (do not block on screenshots)
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: success_msg.clone(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx.send_background_event(success_msg.clone());
 
                     // Persist last connection cache to disk (best-effort)
                     tokio::spawn(async move {
@@ -7024,17 +7169,7 @@ impl ChatWidget<'_> {
                                     }
                                     _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    event_seq: 0,
-                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: success_msg,
-                                    }),
-                                    order: None,
-                                }));
+                                app_event_tx.send_background_event(success_msg);
 
                                 // Persist last connection cache
                                 tokio::spawn(async move {
@@ -7165,15 +7300,10 @@ impl ChatWidget<'_> {
                             }
                             Ok(Err(e2)) => {
                                 tracing::error!("[cdp] Fallback connect failed: {}", e2);
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: format!(
-                                            "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
-                                            e2, err_msg
-                                        ),
-                                    }), order: None }));
+                                app_event_tx.send_background_event(format!(
+                                    "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
+                                    e2, err_msg
+                                ));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -7183,15 +7313,10 @@ impl ChatWidget<'_> {
                                     "[cdp] Fallback connect timed out after {:?}",
                                     retry_deadline
                                 );
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: format!(
-                                            "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
-                                            retry_deadline.as_secs()
-                                        ),
-                                    }), order: None }));
+                                app_event_tx.send_background_event(format!(
+                                    "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
+                                    retry_deadline.as_secs()
+                                ));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -7202,17 +7327,10 @@ impl ChatWidget<'_> {
                             "[cdp] connect_to_chrome_only failed immediately: {}",
                             err_msg
                         );
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to connect to Chrome: {}", err_msg),
-                            }),
-                            order: None,
-                        }));
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to connect to Chrome: {}",
+                            err_msg
+                        ));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -7357,17 +7475,7 @@ impl ChatWidget<'_> {
                     if let Err(e) = browser_manager.set_enabled(false).await {
                         tracing::warn!("[/browser] failed to disable internal browser: {}", e);
                     }
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "🔌 Browser disabled".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx.send_background_event("🔌 Browser disabled".to_string());
                 } else {
                     // Not in internal mode → enable internal and open about:blank
                     // Reuse existing helper (ensures config + start + global manager + screenshot)
@@ -7385,17 +7493,10 @@ impl ChatWidget<'_> {
 
                     if let Err(e) = browser_manager.start().await {
                         tracing::error!("[/browser] failed to start internal browser: {}", e);
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to start internal browser: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to start internal browser: {}",
+                            e
+                        ));
                         return;
                     }
 
@@ -7409,17 +7510,8 @@ impl ChatWidget<'_> {
                     }
 
                     // Emit confirmation
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "✅ Browser enabled (about:blank)".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx
+                        .send_background_event("✅ Browser enabled (about:blank)".to_string());
                 }
             });
             return;
@@ -7608,16 +7700,10 @@ impl ChatWidget<'_> {
                             );
 
                             // Send success message to chat
-                            use codex_core::protocol::BackgroundEventEvent;
-                            use codex_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                event_seq: 0,
-                                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                    message: format!("✅ Internal browser opened: {}", result.url),
-                                }),
-                                order: None,
-                            }));
+                            app_event_tx.send_background_event(format!(
+                                "✅ Internal browser opened: {}",
+                                result.url
+                            ));
 
                             // Capture initial screenshot
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -8197,14 +8283,8 @@ impl ChatWidget<'_> {
             // Explicitly (re)start the internal browser session now
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!("❌ Failed to start internal browser: {}", e),
-                    }),
-                    order: None,
-                }));
+                app_event_tx
+                    .send_background_event(format!("❌ Failed to start internal browser: {}", e));
                 return;
             }
 
@@ -8212,14 +8292,8 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                id: uuid::Uuid::new_v4().to_string(),
-                event_seq: 0,
-                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                    message: "✅ Switched to internal browser mode (reconnected)".to_string(),
-                }),
-                order: None,
-            }));
+            app_event_tx
+                .send_background_event("✅ Switched to internal browser mode (reconnected)".to_string());
 
             // Clear any existing screenshot
             if let Ok(mut screenshot) = latest_screenshot.lock() {
@@ -8329,17 +8403,8 @@ impl ChatWidget<'_> {
                         tracing::warn!("[cdp] failed to stop external Chrome connection: {}", e);
                     }
                     // Notify UI
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "🔌 Disconnected from Chrome".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx
+                        .send_background_event("🔌 Disconnected from Chrome".to_string());
                     let _ = tx.send(true);
                 } else {
                     // Not connected externally; proceed to connect
@@ -8502,7 +8567,10 @@ impl ChatWidget<'_> {
         if !prompt.trim().is_empty() {
             ordered.push(InputItem::Text { text: prompt });
         }
-        let msg = UserMessage { display_text: display, ordered_items: ordered };
+        let msg = UserMessage {
+            display_text: display,
+            ordered_items: ordered,
+        };
         self.submit_user_message(msg);
     }
 
@@ -8527,6 +8595,17 @@ impl ChatWidget<'_> {
             ordered_items: ordered,
         };
         self.submit_user_message(msg);
+    }
+
+    /// Queue a note that will be delivered to the agent as a hidden system
+    /// message immediately before the next user input is sent. Notes are
+    /// drained in FIFO order so multiple updates retain their sequencing.
+    pub(crate) fn queue_agent_note<S: Into<String>>(&mut self, note: S) {
+        let note = note.into();
+        if note.trim().is_empty() {
+            return;
+        }
+        self.pending_agent_notes.push(note);
     }
 
     pub(crate) fn token_usage(&self) -> &TokenUsage {
@@ -9042,23 +9121,25 @@ impl ChatWidget<'_> {
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
     pub(crate) fn handle_branch_command(&mut self, args: String) {
-        let args_trim = args.trim().to_string();
-        if matches!(args_trim.as_str(), "finalize" | "merge") {
-            self.handle_branch_finalize();
+        if Self::is_branch_worktree_path(&self.config.cwd) {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/branch` — already inside a branch worktree; switch to the repo root before creating another branch."
+                    .to_string(),
+            ));
+            self.request_redraw();
             return;
         }
+        let args_trim = args.trim().to_string();
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
-            self.history_push(crate::history_cell::new_background_event(
-                "Creating branch worktree...".to_string(),
-            ));
+            self.insert_background_event_early("Creating branch worktree...".to_string());
         } else {
-            self.history_push(crate::history_cell::new_background_event(format!(
+            self.insert_background_event_early(format!(
                 "Creating branch worktree... Task: {}",
                 args_trim
-            )));
+            ));
         }
         self.request_redraw();
 
@@ -9068,17 +9149,7 @@ impl ChatWidget<'_> {
             let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!("`/branch` — not a git repo: {}", e),
-                        }),
-                        order: None,
-                    }));
+                    tx.send_background_event(format!("`/branch` — not a git repo: {}", e));
                     return;
                 }
             };
@@ -9094,17 +9165,10 @@ impl ChatWidget<'_> {
                 match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
                     Ok((p, b)) => (p, b),
                     Err(e) => {
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("`/branch` — failed to create worktree: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        tx.send_background_event(format!(
+                            "`/branch` — failed to create worktree: {}",
+                            e
+                        ));
                         return;
                     }
                 };
@@ -9115,17 +9179,10 @@ impl ChatWidget<'_> {
                 {
                     Ok(n) => n,
                     Err(e) => {
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("`/branch` — failed to copy changes: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        tx.send_background_event(format!(
+                            "`/branch` — failed to copy changes: {}",
+                            e
+                        ));
                         // Still switch to the branch even if copy fails
                         0
                     }
@@ -9133,7 +9190,7 @@ impl ChatWidget<'_> {
 
             // Attempt to set upstream for the new branch to match the source branch's upstream,
             // falling back to origin/<default> when available. Also ensure origin/HEAD is set.
-            let mut upstream_msg: Option<String> = None;
+            let mut _upstream_msg: Option<String> = None;
             // Discover source branch upstream like 'origin/main'
             let src_upstream = Command::new("git")
                 .current_dir(&git_root)
@@ -9170,12 +9227,12 @@ impl ChatWidget<'_> {
                     .await;
                 if let Ok(o) = set {
                     if o.status.success() {
-                        upstream_msg =
+                        _upstream_msg =
                             Some(format!("Set upstream for '{}' to {}", used_branch, up));
                     } else {
                         let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
                         if !e.is_empty() {
-                            upstream_msg = Some(format!("Upstream not set ({}).", e));
+                            _upstream_msg = Some(format!("Upstream not set ({}).", e));
                         }
                     }
                 }
@@ -9184,32 +9241,22 @@ impl ChatWidget<'_> {
             // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
             let msg = if let Some(task_text) = task_opt {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Task: {task}\n  Switching and starting task...",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Task: {task}\n  Starting task...",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,
-                    up = upstream_msg.clone().unwrap_or_else(|| "".to_string()),
                     task = task_text
                 )
             } else {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Switched to branch. Type your task when ready.",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Type your task when ready.",
                     used = used_branch,
                     path = worktree.display(),
-                    copied = copied,
-                    up = upstream_msg.unwrap_or_else(|| "".to_string())
+                    copied = copied
                 )
             };
             {
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                    order: None,
-                }));
+                tx.send_background_event(msg);
             }
 
             // Switch cwd and optionally submit the task
@@ -9219,69 +9266,234 @@ impl ChatWidget<'_> {
         });
     }
 
-    /// Handle `/branch finalize` to merge the branch back into the default branch
-    /// and remove the worktree. Must be invoked from inside the worktree.
-    pub(crate) fn handle_branch_finalize(&mut self) {
+    pub(crate) fn switch_cwd(&mut self, new_cwd: std::path::PathBuf, initial_prompt: Option<String>) {
+        let previous_cwd = self.config.cwd.clone();
+        self.config.cwd = new_cwd.clone();
+
+        let msg = format!(
+            "✅ Working directory changed\n  from: {}\n  to:   {}",
+            previous_cwd.display(),
+            new_cwd.display()
+        );
+        self.app_event_tx.send_background_event(msg);
+
+        let worktree_hint = new_cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|name| format!(" (worktree: {})", name))
+            .unwrap_or_default();
+        let branch_note = format!(
+            "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
+            previous_cwd.display(),
+            new_cwd.display(),
+            worktree_hint,
+            new_cwd.display()
+        );
+        self.queue_agent_note(branch_note);
+
+        let op = Op::ConfigureSession {
+            provider: self.config.model_provider.clone(),
+            model: self.config.model.clone(),
+            model_reasoning_effort: self.config.model_reasoning_effort,
+            model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: self.config.model_text_verbosity,
+            user_instructions: self.config.user_instructions.clone(),
+            base_instructions: self.config.base_instructions.clone(),
+            approval_policy: self.config.approval_policy.clone(),
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            disable_response_storage: self.config.disable_response_storage,
+            notify: self.config.notify.clone(),
+            cwd: self.config.cwd.clone(),
+            resume_path: None,
+        };
+        self.submit_op(op);
+
+        if let Some(prompt) = initial_prompt {
+            if !prompt.is_empty() {
+                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/merge' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
+                self.submit_text_message_with_preface(prompt, preface);
+            }
+        }
+
+        self.request_redraw();
+    }
+
+    /// Handle `/merge` to merge the current worktree branch back into the
+    /// default branch. Hands off to the agent when the repository state is
+    /// non-trivial.
+    pub(crate) fn handle_merge_command(&mut self) {
+        if !Self::is_branch_worktree_path(&self.config.cwd) {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/merge` — run this command from inside a branch worktree created with '/branch'."
+                    .to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
         let tx = self.app_event_tx.clone();
         let work_cwd = self.config.cwd.clone();
-        // Inform in history
         self.history_push(crate::history_cell::new_background_event(
-            "Finalizing branch: committing, merging to default, and cleaning up...".to_string(),
+            "Evaluating repository state before merging current branch...".to_string(),
         ));
         self.request_redraw();
 
         tokio::spawn(async move {
             use tokio::process::Command;
-            // Resolve the MAIN repository root (not the linked worktree root).
-            // Using git_common_dir avoids attempting to checkout the default branch
-            // inside the temporary worktree, which can fail with
-            // "already checked out in worktree" errors.
+
+            fn send_background(tx: &AppEventSender, message: String) {
+                tx.send_background_event(message);
+            }
+
+            fn send_background_late(tx: &AppEventSender, message: String) {
+                tx.send_background_event_late(message);
+            }
+
             let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
             {
                 Some(p) => p,
                 None => {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "`/branch finalize` — not a git repo".to_string(),
-                        }),
-                        order: None,
-                    }));
-                    return;
-                }
-            };
-            // Determine branch name from HEAD
-            let head = Command::new("git")
-                .current_dir(&work_cwd)
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .output()
-                .await;
-            let branch_name = match head {
-                Ok(out) if out.status.success() => {
-                    String::from_utf8_lossy(&out.stdout).trim().to_string()
-                }
-                _ => {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "`/branch finalize` — failed to detect branch name"
-                                .to_string(),
-                        }),
-                        order: None,
-                    }));
+                    send_background(&tx, "`/merge` — not a git repo".to_string());
                     return;
                 }
             };
 
-            // Commit any pending changes in the worktree
+            let branch_name = match Command::new("git")
+                .current_dir(&work_cwd)
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .output()
+                .await
+            {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                }
+                _ => {
+                    send_background(&tx, "`/merge` — failed to detect branch name".to_string());
+                    return;
+                }
+            };
+
+            let worktree_status_raw = ChatWidget::git_short_status(&work_cwd).await;
+            let worktree_status_for_agent = match &worktree_status_raw {
+                Ok(s) if s.trim().is_empty() => "clean".to_string(),
+                Ok(s) => s.clone(),
+                Err(err) => format!("status unavailable: {}", err),
+            };
+            let worktree_dirty = matches!(&worktree_status_raw, Ok(s) if !s.trim().is_empty());
+
+            let worktree_diff_stat = if worktree_dirty {
+                ChatWidget::git_diff_stat(&work_cwd)
+                    .await
+                    .ok()
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty())
+            } else {
+                None
+            };
+
+            let repo_status_raw = ChatWidget::git_short_status(&git_root).await;
+            let repo_status_for_agent = match &repo_status_raw {
+                Ok(s) if s.trim().is_empty() => "clean".to_string(),
+                Ok(s) => s.clone(),
+                Err(err) => format!("status unavailable: {}", err),
+            };
+            let repo_dirty = matches!(&repo_status_raw, Ok(s) if !s.trim().is_empty());
+
+            let default_branch_opt =
+                codex_core::git_worktree::detect_default_branch(&git_root).await;
+            let default_branch_hint = default_branch_opt
+                .clone()
+                .unwrap_or_else(|| "<detect default branch>".to_string());
+
+            let mut handoff_reasons: Vec<String> = Vec::new();
+            if let Err(err) = &worktree_status_raw {
+                handoff_reasons.push(format!("unable to read worktree status: {}", err));
+            }
+            if worktree_dirty {
+                handoff_reasons.push("worktree has uncommitted changes".to_string());
+            }
+            if let Err(err) = &repo_status_raw {
+                handoff_reasons.push(format!("unable to read repo status: {}", err));
+            }
+            if repo_dirty {
+                handoff_reasons.push("default branch checkout has uncommitted changes".to_string());
+            }
+            if default_branch_opt.is_none() {
+                handoff_reasons.push("could not determine default branch".to_string());
+            }
+
+            let branch_label = format!("{}", branch_name);
+            let root_display = git_root.display().to_string();
+            let worktree_display = work_cwd.display().to_string();
+            let tx_for_switch = tx.clone();
+            let git_root_for_switch = git_root.clone();
+            let send_agent_handoff = |mut reasons: Vec<String>,
+                                      extra_note: Option<String>,
+                                      worktree_status: String,
+                                      repo_status: String,
+                                      worktree_diff: Option<String>| {
+                if reasons.is_empty() {
+                    reasons.push("manual follow-up requested".to_string());
+                }
+                let reason_text = reasons.join(", ");
+                send_background(
+                    &tx,
+                    format!("`/merge` — handing off to agent ({})", reason_text),
+                );
+                let _ = tx.send(AppEvent::PrepareAgents);
+                let mut preface = format!(
+                    "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
+                    reason_text,
+                    root_display,
+                    worktree_display,
+                    branch_label,
+                    default_branch_hint,
+                    worktree_status,
+                    repo_status,
+                    worktree_display,
+                    branch_label,
+                    default_branch_hint,
+                    default_branch_hint,
+                    root_display,
+                    default_branch_hint,
+                    branch_label,
+                    default_branch_hint,
+                    root_display,
+                    branch_label,
+                    worktree_display,
+                    branch_label,
+                    root_display
+                );
+                if let Some(note) = extra_note {
+                    preface.push_str("\n\nAdditional notes:\n");
+                    preface.push_str(&note);
+                }
+                if let Some(diff) = worktree_diff {
+                    preface.push_str("\n\nWorktree diff summary:\n");
+                    preface.push_str(&diff);
+                }
+                let visible = format!(
+                    "Finalize branch '{}' via /merge (agent handoff)",
+                    branch_label
+                );
+                let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
+                let _ = tx_for_switch
+                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
+            };
+
+            if !handoff_reasons.is_empty() {
+                send_agent_handoff(
+                    handoff_reasons,
+                    None,
+                    worktree_status_for_agent.clone(),
+                    repo_status_for_agent.clone(),
+                    worktree_diff_stat.clone(),
+                );
+                return;
+            }
+
+            let default_branch = default_branch_opt.expect("default branch must exist when clean");
+
             let _ = Command::new("git")
                 .current_dir(&work_cwd)
                 .args(["add", "-A"])
@@ -9289,12 +9501,11 @@ impl ChatWidget<'_> {
                 .await;
             let commit_out = Command::new("git")
                 .current_dir(&work_cwd)
-                .args(["commit", "-m", &format!("merge {branch_name} via /branch")])
+                .args(["commit", "-m", &format!("merge {branch_label} via /merge")])
                 .output()
                 .await;
             if let Ok(o) = &commit_out {
                 if !o.status.success() {
-                    // Git prints "nothing to commit, working tree clean" on stdout and exits 1.
                     let stderr_s = String::from_utf8_lossy(&o.stderr);
                     let stdout_s = String::from_utf8_lossy(&o.stdout);
                     let benign = stdout_s.contains("nothing to commit")
@@ -9302,52 +9513,29 @@ impl ChatWidget<'_> {
                         || stderr_s.contains("nothing to commit")
                         || stderr_s.contains("working tree clean");
                     if !benign {
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let detail = if !stderr_s.trim().is_empty() {
-                            stderr_s.trim().to_string()
-                        } else {
-                            stdout_s.trim().to_string()
-                        };
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("`/branch finalize` — commit failed: {}", detail),
-                            }),
-                            order: None,
-                        }));
+                        send_background(
+                            &tx,
+                            format!(
+                                "`/merge` — commit failed before merge: {}",
+                                if !stderr_s.trim().is_empty() {
+                                    stderr_s.trim().to_string()
+                                } else {
+                                    stdout_s.trim().to_string()
+                                }
+                            ),
+                        );
+                        return;
                     }
                 }
             }
 
-            // 1) Try to merge the repository default branch into the worktree branch first
-            //    so conflicts can be resolved locally.
-            let default_branch = match codex_core::git_worktree::detect_default_branch(&git_root)
-                .await
-            {
-                Some(b) => b,
-                None => {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "`/branch finalize` — failed to determine default branch (tried origin/HEAD, main, master)".to_string() }), order: None }));
-                    return;
-                }
-            };
-
-            // Fetch latest default branch; ignore errors
             let _ = Command::new("git")
                 .current_dir(&git_root)
                 .args(["fetch", "origin", &default_branch])
                 .output()
                 .await;
 
-            // Prefer remote tracking ref when available
             let remote_ref = format!("origin/{}", default_branch);
-
-            // Attempt a fast-forward merge of default into the worktree branch
             let ff_only = Command::new("git")
                 .current_dir(&work_cwd)
                 .args(["merge", "--ff-only", &remote_ref])
@@ -9355,7 +9543,6 @@ impl ChatWidget<'_> {
                 .await;
 
             if !matches!(ff_only, Ok(ref o) if o.status.success()) {
-                // Try a non-ff merge without committing to see if conflicts arise
                 let try_merge = Command::new("git")
                     .current_dir(&work_cwd)
                     .args(["merge", "--no-ff", "--no-commit", &remote_ref])
@@ -9363,64 +9550,157 @@ impl ChatWidget<'_> {
                     .await;
                 if let Ok(out) = try_merge {
                     if out.status.success() {
-                        // No conflicts; create a merge commit and continue
                         let _ = Command::new("git")
                             .current_dir(&work_cwd)
                             .args([
                                 "commit",
                                 "-m",
                                 &format!(
-                                    "merge {} into {} before finalize",
-                                    default_branch, branch_name
+                                    "merge {} into {} before merge",
+                                    default_branch, branch_label
                                 ),
                             ])
                             .output()
                             .await;
                     } else {
-                        // Likely conflicts. Detect unmerged paths; if any, surface and ask the agent to resolve.
-                        let status = Command::new("git")
-                            .current_dir(&work_cwd)
-                            .args(["status", "--porcelain"])
-                            .output()
-                            .await;
-                        let has_conflicts = status
+                        let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                            .await
+                            .map(|s| {
+                                if s.trim().is_empty() {
+                                    "clean".to_string()
+                                } else {
+                                    s
+                                }
+                            })
+                            .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                        let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                            .await
                             .ok()
-                            .and_then(|o| String::from_utf8(o.stdout).ok())
-                            .map(|s| s.lines().any(|l| l.starts_with('U') || l.contains("UU ")))
-                            .unwrap_or(false);
-                        if has_conflicts {
-                            use codex_core::protocol::BackgroundEventEvent;
-                            use codex_core::protocol::Event;
-                            use codex_core::protocol::EventMsg;
-                            let _ = tx.send(AppEvent::CodexEvent(Event {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                event_seq: 0,
-                                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                    message: format!(
-                                        "`/branch finalize` — conflicts while merging '{}' into '{}'. Starting agent to help resolve; re-run '/branch finalize' after conflicts are resolved.",
-                                        default_branch, branch_name
-                                    ),
-                                }),
-                                order: None,
-                            }));
-                            // Prefill composer with a resolution task; keep index in conflicted state
-                            let _ = tx.send(AppEvent::SwitchCwd(
-                                work_cwd.clone(),
-                                Some(format!(
-                                    "Resolve the current git merge conflicts by merging '{}' into '{}', preferring the branch's intent where appropriate. Explain changes briefly, then stage and commit with an informative message.",
-                                    default_branch, branch_name
-                                )),
-                            ));
-                            return;
-                        }
+                            .map(|d| d.trim().to_string())
+                            .filter(|d| !d.is_empty())
+                            .or(worktree_diff_stat.clone());
+                        send_agent_handoff(
+                            vec![format!(
+                                "merge conflicts while merging '{}' into '{}'",
+                                default_branch, branch_label
+                            )],
+                            Some(
+                                "The worktree currently has an in-progress merge that needs to be resolved. Please complete it before retrying the final merge.".to_string(),
+                            ),
+                            updated_worktree_status,
+                            repo_status_for_agent.clone(),
+                            updated_diff,
+                        );
+                        return;
                     }
                 }
             }
 
-            // 2) Merge the worktree branch into the default branch at the repo root
+            let local_default_ref = format!("refs/heads/{}", default_branch);
+            let local_default_exists = Command::new("git")
+                .current_dir(&git_root)
+                .args([
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &local_default_ref,
+                ])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
 
-            // Merge branch into default from the main repo root
-            // Skip checkout if already on the default branch
+            if local_default_exists {
+                let ff_local = Command::new("git")
+                    .current_dir(&work_cwd)
+                    .args(["merge", "--ff-only", &local_default_ref])
+                    .output()
+                    .await;
+
+                if !matches!(ff_local, Ok(ref o) if o.status.success()) {
+                    let merge_local = Command::new("git")
+                        .current_dir(&work_cwd)
+                        .args(["merge", "--no-ff", "--no-commit", &local_default_ref])
+                        .output()
+                        .await;
+
+                    if let Ok(out) = merge_local {
+                        if out.status.success() {
+                            let _ = Command::new("git")
+                                .current_dir(&work_cwd)
+                                .args([
+                                    "commit",
+                                    "-m",
+                                    &format!(
+                                        "merge local {} into {} before merge",
+                                        default_branch, branch_label
+                                    ),
+                                ])
+                                .output()
+                                .await;
+                        } else {
+                            let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                                .await
+                                .map(|s| {
+                                    if s.trim().is_empty() {
+                                        "clean".to_string()
+                                    } else {
+                                        s
+                                    }
+                                })
+                                .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                            let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                                .await
+                                .ok()
+                                .map(|d| d.trim().to_string())
+                                .filter(|d| !d.is_empty())
+                                .or(worktree_diff_stat.clone());
+                            send_agent_handoff(
+                                vec![format!(
+                                    "merge conflicts while merging local '{}' into '{}'",
+                                    default_branch, branch_label
+                                )],
+                                Some(
+                                    "The worktree currently has an in-progress merge that needs to be resolved. Please complete it before retrying the final merge.".to_string(),
+                                ),
+                                updated_worktree_status,
+                                repo_status_for_agent.clone(),
+                                updated_diff,
+                            );
+                            return;
+                        }
+                    } else {
+                        let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                            .await
+                            .map(|s| {
+                                if s.trim().is_empty() {
+                                    "clean".to_string()
+                                } else {
+                                    s
+                                }
+                            })
+                            .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                        let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                            .await
+                            .ok()
+                            .map(|d| d.trim().to_string())
+                            .filter(|d| !d.is_empty())
+                            .or(worktree_diff_stat.clone());
+                        send_agent_handoff(
+                            vec![format!(
+                                "failed to merge local '{}' into '{}'",
+                                default_branch, branch_label
+                            )],
+                            None,
+                            updated_worktree_status,
+                            repo_status_for_agent.clone(),
+                            updated_diff,
+                        );
+                        return;
+                    }
+                }
+            }
+
             let on_default = match Command::new("git")
                 .current_dir(&git_root)
                 .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -9434,7 +9714,6 @@ impl ChatWidget<'_> {
             };
 
             if !on_default {
-                // Ensure local default branch exists; if missing, try to fetch and create a tracking branch
                 let has_local = match Command::new("git")
                     .current_dir(&git_root)
                     .args([
@@ -9467,7 +9746,6 @@ impl ChatWidget<'_> {
                         .await;
                 }
 
-                // Try to checkout the default branch and surface errors
                 let co = Command::new("git")
                     .current_dir(&git_root)
                     .args(["checkout", &default_branch])
@@ -9484,7 +9762,13 @@ impl ChatWidget<'_> {
                         })
                         .unwrap_or_else(|| (String::new(), String::new()));
 
-                    // If the branch is checked out in another worktree, hint its path
+                    let mut note = String::new();
+                    if !stderr_s.is_empty() {
+                        note = stderr_s;
+                    } else if !stdout_s.is_empty() {
+                        note = stdout_s;
+                    }
+
                     let mut hint: Option<String> = None;
                     if let Ok(wt) = Command::new("git")
                         .current_dir(&git_root)
@@ -9506,48 +9790,59 @@ impl ChatWidget<'_> {
                                     cur_branch = Some(rest.trim().to_string());
                                 }
                                 if let (Some(p), Some(b)) = (&cur_path, &cur_branch) {
-                                    if b == &format!("refs/heads/{}", default_branch) {
-                                        // Avoid hinting the main repo root
-                                        if std::path::Path::new(p) != git_root.as_path() {
-                                            hint = Some(p.clone());
-                                            break;
-                                        }
+                                    if b == &format!("refs/heads/{}", default_branch)
+                                        && std::path::Path::new(p) != git_root.as_path()
+                                    {
+                                        hint = Some(p.clone());
+                                        break;
                                     }
                                 }
                             }
                         }
                     }
 
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let mut msg = format!(
-                        "`/branch finalize` — failed to checkout default branch '{}'",
-                        default_branch
+                    if let Some(h) = hint {
+                        if note.is_empty() {
+                            note = format!("default branch checked out in worktree: {}", h);
+                        } else {
+                            note = format!("{} (checked out in worktree: {})", note, h);
+                        }
+                    }
+
+                    let updated_repo_status = ChatWidget::git_short_status(&git_root)
+                        .await
+                        .map(|s| {
+                            if s.trim().is_empty() {
+                                "clean".to_string()
+                            } else {
+                                s
+                            }
+                        })
+                        .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                    let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                        .await
+                        .ok()
+                        .map(|d| d.trim().to_string())
+                        .filter(|d| !d.is_empty())
+                        .or(worktree_diff_stat.clone());
+
+                    send_agent_handoff(
+                        vec![format!(
+                            "failed to checkout '{}' in repo root",
+                            default_branch
+                        )],
+                        if note.is_empty() { None } else { Some(note) },
+                        worktree_status_for_agent.clone(),
+                        updated_repo_status,
+                        updated_diff,
                     );
-                    let detail = if !stderr_s.is_empty() {
-                        stderr_s
-                    } else {
-                        stdout_s
-                    };
-                    if !detail.is_empty() {
-                        msg = format!("{}: {}", msg, detail);
-                    }
-                    if let Some(p) = hint {
-                        msg = format!("{} (checked out in worktree: {})", msg, p);
-                    }
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                        order: None,
-                    }));
                     return;
                 }
             }
+
             let merge = Command::new("git")
                 .current_dir(&git_root)
-                .args(["merge", "--no-ff", &branch_name])
+                .args(["merge", "--no-ff", &branch_label])
                 .output()
                 .await;
             if !matches!(merge, Ok(ref o) if o.status.success()) {
@@ -9555,21 +9850,37 @@ impl ChatWidget<'_> {
                     .ok()
                     .and_then(|o| String::from_utf8(o.stderr).ok())
                     .unwrap_or_else(|| "unknown error".to_string());
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!("`/branch finalize` — merge failed: {}", err.trim()),
-                    }),
-                    order: None,
-                }));
+                let updated_repo_status = ChatWidget::git_short_status(&git_root)
+                    .await
+                    .map(|s| {
+                        if s.trim().is_empty() {
+                            "clean".to_string()
+                        } else {
+                            s
+                        }
+                    })
+                    .unwrap_or_else(|e| format!("status unavailable: {}", e));
+                let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                    .await
+                    .ok()
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty())
+                    .or(worktree_diff_stat.clone());
+                send_agent_handoff(
+                    vec![format!(
+                        "merge of '{}' into '{}' failed: {}",
+                        branch_label,
+                        default_branch,
+                        err.trim()
+                    )],
+                    None,
+                    worktree_status_for_agent.clone(),
+                    updated_repo_status,
+                    updated_diff,
+                );
                 return;
             }
 
-            // After a successful merge, remove the worktree and delete the branch
             let _ = Command::new("git")
                 .current_dir(&git_root)
                 .args(["worktree", "remove", work_cwd.to_str().unwrap(), "--force"])
@@ -9577,30 +9888,17 @@ impl ChatWidget<'_> {
                 .await;
             let _ = Command::new("git")
                 .current_dir(&git_root)
-                .args(["branch", "-D", &branch_name])
+                .args(["branch", "-D", &branch_label])
                 .output()
                 .await;
 
-            // Inform user and switch back to git root
             let msg = format!(
                 "Merged '{}' into '{}' and cleaned up worktree. Switching back to {}",
-                branch_name,
+                branch_label,
                 default_branch,
                 git_root.display()
             );
-            {
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: msg.clone(),
-                    }),
-                    order: None,
-                }));
-            }
+            send_background_late(&tx, msg);
             tx.send(AppEvent::SwitchCwd(git_root, None));
         });
     }
@@ -11191,7 +11489,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             .downcast_ref::<crate::history_cell::ExecCell>()
                         {
                             match &exec.output {
-                                None => crate::colors::info(), // Running...
+                                None => crate::colors::text(), // Running...
                                 // On successful completion, turn the gutter arrow solid black
                                 Some(o) if o.exit_code == 0 => ratatui::style::Color::Black, // Ran
                                 Some(_) => crate::colors::error(),
@@ -11208,9 +11506,9 @@ impl WidgetRef for &ChatWidget<'_> {
                                     status: crate::history_cell::ExecStatus::Error,
                                 } => crate::colors::error(),
                                 crate::history_cell::HistoryCellType::Exec { .. } => {
-                                    crate::colors::info()
+                                    crate::colors::text()
                                 }
-                                _ => crate::colors::info(),
+                                _ => crate::colors::text(),
                             }
                         }
                     } else if symbol == "↯" {
@@ -11231,7 +11529,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             _ => crate::colors::primary(),
                         }
                     } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
-                        crate::colors::primary()
+                        crate::colors::success()
                     } else {
                         match symbol {
                             "›" => crate::colors::text(),        // user
