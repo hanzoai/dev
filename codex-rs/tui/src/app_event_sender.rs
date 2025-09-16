@@ -47,4 +47,17 @@ impl AppEventSender {
             tracing::error!("failed to send event: {e}");
         }
     }
+
+    /// Emit a background event initiated by the UI near the top of the current
+    /// request window. This keeps ordering logic in one place (history
+    /// insertion) instead of forging `Event` structs with ad-hoc sequencing.
+    ///
+    /// IMPORTANT: UI code should call this (or other history helpers) rather
+    /// than constructing `Event { event_seq: 0, .. }` manually. Protocol events
+    /// must come from `codex-core` via `Session::make_event` so the per-turn
+    /// sequence stays consistent.
+    pub(crate) fn send_background_event(&self, message: impl Into<String>) {
+        self.send(AppEvent::InsertBackgroundEventEarly(message.into()));
+    }
+
 }
