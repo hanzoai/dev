@@ -942,7 +942,7 @@ impl App<'_> {
                         }
                     }
                 }
-                AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
+                AppEvent::SwitchCwd(new_cwd, initial_prompt, context_note) => {
                     let previous_cwd = self.config.cwd.clone();
                     // Preserve current chat history and ordering before swapping sessions
                     let carried = match &mut self.app_state {
@@ -1004,6 +1004,12 @@ impl App<'_> {
                             new_cwd.display()
                         );
                         widget.queue_agent_note(branch_note);
+                        if let Some(note) = context_note {
+                            widget.queue_agent_note(format!(
+                                "[context] Conversation recap before branch:\n{}",
+                                note
+                            ));
+                        }
                         if let Some(prompt) = initial_prompt {
                             if !prompt.is_empty() {
                                 let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/merge' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
