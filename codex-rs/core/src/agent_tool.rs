@@ -3,6 +3,7 @@ use chrono::Duration;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use uuid::Uuid;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,16 +12,12 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use uuid::Uuid;
 
 use crate::config_types::AgentConfig;
 use crate::openai_tools::JsonSchema;
 use crate::openai_tools::OpenAiTool;
 use crate::openai_tools::ResponsesApiTool;
 use crate::protocol::AgentInfo;
-use crate::protocol::AgentStatusUpdateEvent;
-use crate::protocol::Event;
-use crate::protocol::EventMsg;
 
 // Agent status enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,7 +63,14 @@ lazy_static::lazy_static! {
 pub struct AgentManager {
     agents: HashMap<String, Agent>,
     handles: HashMap<String, JoinHandle<()>>,
-    event_sender: Option<mpsc::UnboundedSender<Event>>,
+    event_sender: Option<mpsc::UnboundedSender<AgentStatusUpdatePayload>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentStatusUpdatePayload {
+    pub agents: Vec<AgentInfo>,
+    pub context: Option<String>,
+    pub task: Option<String>,
 }
 
 impl AgentManager {
@@ -78,7 +82,7 @@ impl AgentManager {
         }
     }
 
-    pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<Event>) {
+    pub fn set_event_sender(&mut self, sender: mpsc::UnboundedSender<AgentStatusUpdatePayload>) {
         self.event_sender = Some(sender);
     }
 
@@ -110,19 +114,8 @@ impl AgentManager {
                 .next()
                 .map(|agent| (agent.context.clone(), agent.output_goal.clone()))
                 .unwrap_or((None, None));
-
-            let event = Event {
-                id: uuid::Uuid::new_v4().to_string(),
-                event_seq: 0,
-                msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
-                    agents,
-                    context,
-                    task,
-                }),
-                order: None,
-            };
-
-            let _ = sender.send(Event { order: None, ..event });
+            let payload = AgentStatusUpdatePayload { agents, context, task };
+            let _ = sender.send(payload);
         }
     }
 

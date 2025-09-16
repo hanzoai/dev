@@ -89,6 +89,9 @@ pub(crate) enum AppEvent {
     /// Prefill the composer input with the given text
     PrefillComposer(String),
 
+    /// Submit a message with hidden preface instructions
+    SubmitTextWithPreface { visible: String, preface: String },
+
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
@@ -142,6 +145,9 @@ pub(crate) enum AppEvent {
     /// Insert a background event near the top of the current request so it
     /// appears above imminent provider output (e.g. above Exec begin).
     InsertBackgroundEventEarly(String),
+    /// Insert a background event at the end of the current request so it
+    /// follows previously rendered content.
+    InsertBackgroundEventLate(String),
 
     #[allow(dead_code)]
     StartCommitAnimation,

@@ -36,15 +36,33 @@ impl AgentsOverviewView {
 
         // Agents section
         lines.push(Line::from(Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD))));
+        let max_name_len = self
+            .agents
+            .iter()
+            .map(|(name, _, _, _)| name.len())
+            .max()
+            .unwrap_or(0);
         for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
             let sel = i == self.selected;
-            let dot_style = if *enabled && *installed { Style::default().fg(crate::colors::success()) } else { Style::default().fg(crate::colors::text()) };
+            let (status_text, status_color) = if !*enabled {
+                ("disabled", crate::colors::error())
+            } else if !*installed {
+                ("not installed", crate::colors::warning())
+            } else {
+                ("enabled", crate::colors::success())
+            };
+            let dot_style = Style::default().fg(status_color);
             let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
             let mut spans = vec![
                 Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+                Span::styled(
+                    format!("{name:<width$}", name = name, width = max_name_len),
+                    name_style,
+                ),
+                Span::raw("  "),
                 Span::styled("•", dot_style),
                 Span::raw(" "),
-                Span::styled(name.clone(), name_style),
+                Span::styled(status_text.to_string(), Style::default().fg(status_color)),
             ];
             if sel {
                 spans.push(Span::raw("  "));

@@ -226,24 +226,20 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let name_box_h: u16 = 3;
         // Orchestrator inner width accounts for borders (2) and left/right padding (2)
         let orch_inner_w = (content_w as u16).saturating_sub(4);
-        // Show up to 8 rows initially; allow scrolling inside the field for more
-        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w);
-        let orch_inner_capped = desired_orch_inner.min(8);
-        let orch_box_h = orch_inner_capped.saturating_add(2);
-        let content_rows: u16 = 1  // top spacer
-            + 1  // title
+        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w).max(1);
+        let orch_box_h = desired_orch_inner.min(8).saturating_add(2).max(3);
+        let base_rows: u16 = 1  // title
             + 1  // spacer after title
             + name_box_h
             + 1  // spacer
             + 1  // mode row
-            + 1  // spacer
+            + 1  // spacer before agents
             + 1  // agents row
-            + 1  // spacer
-            + orch_box_h // orchestrator box
-            + 1  // spacer
-            + 1  // buttons
-            + 1; // bottom spacer
-        (content_rows + 2).clamp(8, 50)
+            + 1; // spacer before instructions box
+        let rows_after_orch: u16 = 1  // spacer after instructions box
+            + 1; // buttons row
+        let total_rows = base_rows + orch_box_h + rows_after_orch;
+        total_rows.saturating_add(2).clamp(8, 50)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -263,8 +259,6 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        // Top spacer
-        lines.push(Line::from(""));
         // Bold title
         lines.push(Line::from(Span::styled("Agents » Edit Command", Style::default().add_modifier(Modifier::BOLD))));
         // Spacer after title
@@ -313,17 +307,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         // Spacer between inputs
         lines.push(Line::from(""));
-        // Reserve rows for the orchestrator box (height = inner + borders)
-        // Clamp to available height so we never overflow the buffer.
-        let desired_orch_inner_h = self
-            .orch_field
-            .desired_height(content_rect.width.saturating_sub(4));
-        // Cap visible inner height to 8 rows; overflow is scrollable via caret moves
-        let desired_orch_box_h = desired_orch_inner_h.min(8).saturating_add(2);
-        let available_h = content_rect.height; // total rows available for all content
-        let base_rows_without_orch: u16 = 14; // all rows except the orch box
-        let max_orch_box_h = available_h.saturating_sub(base_rows_without_orch);
-        let orch_box_h_reserved = desired_orch_box_h.min(max_orch_box_h);
+        // Reserve rows for the instructions box (height = inner + borders)
+        let orch_inner_w = content_rect.width.saturating_sub(4);
+        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w).max(1);
+        let orch_box_h_reserved = desired_orch_inner.min(8).saturating_add(2).max(3);
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
         // Spacer between inputs
         lines.push(Line::from(""));
@@ -358,8 +345,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
             lines.push(Line::from(btn_spans));
         }
-        // Bottom spacer
-        lines.push(Line::from(""));
+        // Remove any trailing blank lines so buttons hug the bottom frame
+        while lines
+            .last()
+            .map(|line| line.spans.iter().all(|s| s.content.trim().is_empty()))
+            .unwrap_or(false)
+        {
+            lines.pop();
+        }
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -371,8 +364,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let content_w = content_rect.width;
         let mut y = content_rect.y;
 
-        // Skip top spacer + title + spacer
-        y = y.saturating_add(3);
+        // Skip title + spacer
+        y = y.saturating_add(2);
         // Row: Name box with title; height fixed (3)
         let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
         let name_border = if self.field == 0 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };
