@@ -30,6 +30,7 @@ use color_eyre::owo_colors::OwoColorize;
 mod app;
 mod app_event;
 mod app_event_sender;
+mod backtrack_helpers;
 mod bottom_pane;
 mod chatwidget;
 mod citation_regex;
@@ -69,6 +70,7 @@ mod util {
 }
 mod spinner;
 mod tui;
+mod ui_consts;
 mod user_approval_widget;
 mod height_manager;
 mod transcript_app;
@@ -97,7 +99,7 @@ pub async fn run_main(
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
-            Some(AskForApproval::OnFailure),
+            Some(AskForApproval::OnRequest),
         )
     } else if cli.dangerously_bypass_approvals_and_sandbox {
         (
@@ -133,6 +135,7 @@ pub async fn run_main(
 
     let overrides = ConfigOverrides {
         model,
+        review_model: None,
         approval_policy,
         sandbox_mode,
         cwd,
@@ -141,6 +144,8 @@ pub async fn run_main(
         codex_linux_sandbox_exe,
         base_instructions: None,
         include_plan_tool: Some(true),
+        include_apply_patch_tool: None,
+        include_view_image_tool: None,
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
@@ -208,7 +213,7 @@ pub async fn run_main(
     // Ensure the file is only readable and writable by the current user.
     // Doing the equivalent to `chmod 600` on Windows is quite a bit more code
     // and requires the Windows API crates, so we can reconsider that when
-    // Codex CLI is officially supported on Windows.
+    // Code CLI is officially supported on Windows.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -513,3 +518,4 @@ fn determine_repo_trust_state(
         Ok(true)
     }
 }
+ 

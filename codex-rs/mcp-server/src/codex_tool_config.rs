@@ -152,6 +152,7 @@ impl CodexToolCallParam {
         // Build the `ConfigOverrides` recognized by codex-core.
         let overrides = codex_core::config::ConfigOverrides {
             model,
+            review_model: None,
             config_profile: profile,
             cwd: cwd.map(PathBuf::from),
             approval_policy: approval_policy.map(Into::into),
@@ -160,6 +161,8 @@ impl CodexToolCallParam {
             codex_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
+            include_apply_patch_tool: None,
+            include_view_image_tool: None,
             disable_response_storage: None,
             show_raw_agent_reasoning: None,
             debug: None,

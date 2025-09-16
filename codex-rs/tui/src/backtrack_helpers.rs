@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use ratatui::text::Line;
 
 /// Convenience: compute the highlight range for the Nth last user message.
