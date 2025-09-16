@@ -385,6 +385,8 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
                         parsed: parsed_command.clone(),
                         history_index: None,
                         explore_entry: Some((idx, entry_idx)),
+                        stdout: String::new(),
+                        stderr: String::new(),
                     },
                 );
                 chat.invalidate_height_cache();
@@ -414,6 +416,8 @@ pub(super) fn handle_exec_begin_now(chat: &mut ChatWidget<'_>, ev: ExecCommandBe
             parsed: parsed_command,
             history_index: Some(idx),
             explore_entry: None,
+            stdout: String::new(),
+            stderr: String::new(),
         },
     );
     if !chat.tools_state.running_web_search.is_empty() {
@@ -451,9 +455,16 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
     let ExecCommandEndEvent { call_id, exit_code, duration: _, stdout, stderr } = ev;
     let cmd = chat.exec.running_commands.remove(&super::ExecCallId(call_id.clone()));
     chat.height_manager.borrow_mut().record_event(HeightEvent::RunEnd);
-    let (command, parsed, history_index, explore_entry) = cmd
-        .map(|cmd| (cmd.command, cmd.parsed, cmd.history_index, cmd.explore_entry))
-        .unwrap_or_else(|| (vec![call_id.clone()], vec![], None, None));
+    let (command, parsed, history_index, explore_entry) = match cmd {
+        Some(super::RunningCommand {
+            command,
+            parsed,
+            history_index,
+            explore_entry,
+            ..
+        }) => (command, parsed, history_index, explore_entry),
+        None => (vec![call_id.clone()], vec![], None, None),
+    };
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
         let action = history_cell::action_enum_from_parsed(&parsed);

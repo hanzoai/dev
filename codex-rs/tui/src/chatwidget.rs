@@ -54,6 +54,7 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
+use codex_core::protocol::ExecOutputStream;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
@@ -153,6 +154,8 @@ struct RunningCommand {
     history_index: Option<usize>,
     // Aggregated exploration entry (history index, entry index) when grouped
     explore_entry: Option<(usize, usize)>,
+    stdout: String,
+    stderr: String,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -3804,8 +3807,28 @@ impl ChatWidget<'_> {
                     },
                 );
             }
-            EventMsg::ExecCommandOutputDelta(_) => {
-                // TODO
+            EventMsg::ExecCommandOutputDelta(ev) => {
+                let call_id = ExecCallId(ev.call_id.clone());
+                if let Some(running) = self.exec.running_commands.get_mut(&call_id) {
+                    let chunk = String::from_utf8_lossy(&ev.chunk).to_string();
+                    match ev.stream {
+                        ExecOutputStream::Stdout => running.stdout.push_str(&chunk),
+                        ExecOutputStream::Stderr => running.stderr.push_str(&chunk),
+                    }
+                    if let Some(idx) = running.history_index {
+                        if idx < self.history_cells.len() {
+                            if let Some(exec) = self.history_cells[idx]
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::ExecCell>()
+                            {
+                                exec.update_stream_preview(&running.stdout, &running.stderr);
+                            }
+                        }
+                    }
+                    self.invalidate_height_cache();
+                    self.autoscroll_if_near_bottom();
+                    self.request_redraw();
+                }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id: _,
@@ -11495,7 +11518,7 @@ impl WidgetRef for &ChatWidget<'_> {
                             .downcast_ref::<crate::history_cell::ExecCell>()
                         {
                             match &exec.output {
-                                None => crate::colors::info(), // Running...
+                                None => crate::colors::text(), // Running...
                                 // On successful completion, turn the gutter arrow solid black
                                 Some(o) if o.exit_code == 0 => ratatui::style::Color::Black, // Ran
                                 Some(_) => crate::colors::error(),
@@ -11512,9 +11535,9 @@ impl WidgetRef for &ChatWidget<'_> {
                                     status: crate::history_cell::ExecStatus::Error,
                                 } => crate::colors::error(),
                                 crate::history_cell::HistoryCellType::Exec { .. } => {
-                                    crate::colors::info()
+                                    crate::colors::text()
                                 }
-                                _ => crate::colors::info(),
+                                _ => crate::colors::text(),
                             }
                         }
                     } else if symbol == "↯" {
