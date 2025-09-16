@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::io::ErrorKind;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
 use toml_edit::Array as TomlArray;
@@ -78,6 +79,9 @@ pub struct Config {
 
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
+
+    /// Name of the active profile, if any, that populated this configuration.
+    pub active_profile: Option<String>,
 
     /// Approval policy for executing commands.
     pub approval_policy: AskForApproval,
@@ -378,6 +382,88 @@ pub fn write_global_mcp_servers(
     let tmp_file = NamedTempFile::new_in(codex_home)?;
     std::fs::write(tmp_file.path(), doc.to_string())?;
     tmp_file.persist(config_path).map_err(|err| err.error)?;
+
+    Ok(())
+}
+
+/// Persist the currently active model selection back to `config.toml` so that it
+/// becomes the default for future sessions.
+pub async fn persist_model_selection(
+    codex_home: &Path,
+    profile: Option<&str>,
+    model: &str,
+    effort: Option<ReasoningEffort>,
+) -> anyhow::Result<()> {
+    use tokio::fs;
+
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let existing = match fs::read_to_string(&config_path).await {
+        Ok(raw) => Some(raw),
+        Err(err) if err.kind() == ErrorKind::NotFound => None,
+        Err(err) => return Err(err.into()),
+    };
+
+    let mut doc = match existing {
+        Some(raw) if raw.trim().is_empty() => DocumentMut::new(),
+        Some(raw) => raw
+            .parse::<DocumentMut>()
+            .map_err(|e| anyhow::anyhow!("failed to parse config.toml: {e}"))?,
+        None => DocumentMut::new(),
+    };
+
+    {
+        let root = doc.as_table_mut();
+        if let Some(profile_name) = profile {
+            let profiles_item = root
+                .entry("profiles")
+                .or_insert_with(|| {
+                    let mut table = TomlTable::new();
+                    table.set_implicit(true);
+                    TomlItem::Table(table)
+                });
+
+            let profiles_table = profiles_item
+                .as_table_mut()
+                .expect("profiles table should be a table");
+
+            let profile_item = profiles_table
+                .entry(profile_name)
+                .or_insert_with(|| {
+                    let mut table = TomlTable::new();
+                    table.set_implicit(false);
+                    TomlItem::Table(table)
+                });
+
+            let profile_table = profile_item
+                .as_table_mut()
+                .expect("profile entry should be a table");
+
+            profile_table["model"] = toml_edit::value(model.to_string());
+
+            if let Some(effort) = effort {
+                profile_table["model_reasoning_effort"] =
+                    toml_edit::value(effort.to_string());
+            } else {
+                profile_table.remove("model_reasoning_effort");
+            }
+        } else {
+            root["model"] = toml_edit::value(model.to_string());
+            match effort {
+                Some(effort) => {
+                    root["model_reasoning_effort"] =
+                        toml_edit::value(effort.to_string());
+                }
+                None => {
+                    root.remove("model_reasoning_effort");
+                }
+            }
+        }
+    }
+
+    fs::create_dir_all(codex_home).await?;
+    let tmp_path = config_path.with_extension("tmp");
+    fs::write(&tmp_path, doc.to_string()).await?;
+    fs::rename(&tmp_path, &config_path).await?;
 
     Ok(())
 }
@@ -1288,19 +1374,23 @@ impl Config {
             tools_web_search_request: override_tools_web_search_request,
         } = overrides;
 
-        let config_profile = match config_profile_key.as_ref().or(cfg.profile.as_ref()) {
-            Some(key) => cfg
-                .profiles
-                .get(key)
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("config profile `{key}` not found"),
-                    )
-                })?
-                .clone(),
-            None => ConfigProfile::default(),
-        };
+        let (active_profile_name, config_profile) =
+            match config_profile_key.as_ref().or(cfg.profile.as_ref()) {
+                Some(key) => {
+                    let profile = cfg
+                        .profiles
+                        .get(key)
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::NotFound,
+                                format!("config profile `{key}` not found"),
+                            )
+                        })?
+                        .clone();
+                    (Some(key.to_string()), profile)
+                }
+                None => (None, ConfigProfile::default()),
+            };
 
         // (removed placeholder) sandbox_policy computed below after resolving project overrides.
 
@@ -1406,10 +1496,19 @@ impl Config {
             .or(cfg.tools.as_ref().and_then(|t| t.view_image))
             .unwrap_or(true);
 
+        // Determine auth mode early so defaults like model selection can depend on it.
+        let using_chatgpt_auth = Self::is_using_chatgpt_auth(&codex_home);
+
+        let default_model_slug = if using_chatgpt_auth {
+            GPT_5_CODEX_MEDIUM_MODEL
+        } else {
+            OPENAI_DEFAULT_MODEL
+        };
+
         let model = model
             .or(config_profile.model)
             .or(cfg.model)
-            .unwrap_or_else(default_model);
+            .unwrap_or_else(|| default_model_slug.to_string());
 
         let model_family =
             find_family_for_model(&model).unwrap_or_else(|| derive_default_model_family(&model));
@@ -1439,9 +1538,6 @@ impl Config {
         let file_base_instructions =
             Self::get_base_instructions(experimental_instructions_path, &resolved_cwd)?;
         let base_instructions = base_instructions.or(file_base_instructions);
-
-        // Check if we're using ChatGPT auth before moving codex_home
-        let using_chatgpt_auth = Self::is_using_chatgpt_auth(&codex_home);
 
         let responses_originator_header: String = cfg
             .responses_originator_header_internal_override
@@ -1506,6 +1602,7 @@ impl Config {
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             tui: cfg.tui.clone().unwrap_or_default(),
             codex_linux_sandbox_exe,
+            active_profile: active_profile_name,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
             show_raw_agent_reasoning: cfg
@@ -1515,7 +1612,7 @@ impl Config {
             model_reasoning_effort: config_profile
                 .model_reasoning_effort
                 .or(cfg.model_reasoning_effort)
-                .unwrap_or_default(),
+                .unwrap_or(ReasoningEffort::Medium),
             model_reasoning_summary: config_profile
                 .model_reasoning_summary
                 .or(cfg.model_reasoning_summary)
@@ -1628,10 +1725,6 @@ impl Config {
             Ok(Some(s))
         }
     }
-}
-
-fn default_model() -> String {
-    OPENAI_DEFAULT_MODEL.to_string()
 }
 
 fn default_review_model() -> String {
@@ -2179,6 +2272,7 @@ model_verbosity = "high"
             model_auto_compact_token_limit: None,
             model_provider_id: "openai-chat-completions".to_string(),
             model_provider: fixture.openai_chat_completions_provider.clone(),
+            active_profile: Some("gpt3".to_string()),
             approval_policy: AskForApproval::UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -2257,6 +2351,7 @@ model_verbosity = "high"
             model_auto_compact_token_limit: None,
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
+            active_profile: Some("zdr".to_string()),
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
@@ -2321,6 +2416,7 @@ model_verbosity = "high"
             model_auto_compact_token_limit: None,
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
+            active_profile: Some("gpt5".to_string()),
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
