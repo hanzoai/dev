@@ -77,9 +77,6 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
-    /// Update the reasoning effort level
-    UpdateReasoningEffort(ReasoningEffort),
-
     /// Update the text verbosity level
     UpdateTextVerbosity(TextVerbosity),
 

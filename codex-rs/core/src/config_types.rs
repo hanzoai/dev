@@ -11,6 +11,95 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 
+/// Configuration for commands that require an explicit `confirm:` prefix.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfirmGuardConfig {
+    /// List of regex patterns applied to the raw command (joined argv or shell script).
+    #[serde(default)]
+    pub patterns: Vec<ConfirmGuardPattern>,
+}
+
+impl Default for ConfirmGuardConfig {
+    fn default() -> Self {
+        Self { patterns: default_confirm_guard_patterns() }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ConfirmGuardPattern {
+    /// ECMA-style regular expression matched against the command string.
+    pub regex: String,
+    /// Optional custom guidance text surfaced when the guard triggers.
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+fn default_confirm_guard_patterns() -> Vec<ConfirmGuardPattern> {
+    vec![
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+reset\b".to_string(),
+            message: Some("Blocked git reset. Reset rewrites the working tree/index and may delete local work. Resend with 'confirm:' if you're certain.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+--\b".to_string(),
+            message: Some("Blocked git checkout -- <paths>. This overwrites local modifications; resend with 'confirm:' to proceed.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+(?:-b|-B|--orphan|--detach)\b".to_string(),
+            message: Some("Blocked git checkout with branch-changing flag. Switching branches can discard or hide in-progress changes.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+-\b".to_string(),
+            message: Some("Blocked git checkout -. Confirm before switching back to the previous branch.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+switch\b.*(?:-c|--detach)".to_string(),
+            message: Some("Blocked git switch creating or detaching a branch. Resend with 'confirm:' if requested.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+switch\s+[^\s-][^\s]*".to_string(),
+            message: Some("Blocked git switch <branch>. Branch changes can discard or hide work; confirm before continuing.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+clean\b.*(?:-f|--force|-x|-X|-d)".to_string(),
+            message: Some("Blocked git clean with destructive flags. This deletes untracked files or build artifacts.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+push\b.*(?:--force|-f)".to_string(),
+            message: Some("Blocked git push --force. Force pushes rewrite remote history; only continue if explicitly requested.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*rf[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -rf targeting a broad path (., .., /, or *). Confirm before destructive delete.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*r[a-z-]*\s+-[a-z-]*f[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -r/-f combination targeting broad paths. Resend with 'confirm:' if you intend to wipe this tree.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*f[a-z-]*\s+-[a-z-]*r[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -f/-r combination targeting broad paths. Confirm before running.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?find\s+\.(?:\s|$).*\s-delete\b".to_string(),
+            message: Some("Blocked find . ... -delete. Recursive deletes require confirmation.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?find\s+\.(?:\s|$).*\s-exec\s+rm\b".to_string(),
+            message: Some("Blocked find . ... -exec rm. Confirm before running recursive rm.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?trash\s+-[a-z-]*r[a-z-]*f[a-z-]*\b".to_string(),
+            message: Some("Blocked trash -rf. Bulk trash operations can delete large portions of the workspace.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?fd\b.*(?:--exec|-x)\s+rm\b".to_string(),
+            message: Some("Blocked fd … --exec rm. Confirm before piping search results into rm.".to_string()),
+        },
+    ]
+}
+
 /// Configuration for a subagent slash command (e.g., plan/solve/code or custom)
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]

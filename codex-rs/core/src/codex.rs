@@ -42,6 +42,60 @@ use codex_protocol::models::WebSearchAction;
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 
+#[derive(Clone, Default)]
+struct ConfirmGuardRuntime {
+    patterns: Vec<ConfirmGuardPatternRuntime>,
+}
+
+#[derive(Clone)]
+struct ConfirmGuardPatternRuntime {
+    regex: regex_lite::Regex,
+    message: Option<String>,
+    raw: String,
+}
+
+impl ConfirmGuardRuntime {
+    fn from_config(config: &crate::config_types::ConfirmGuardConfig) -> Self {
+        let mut patterns = Vec::new();
+        for pattern in &config.patterns {
+            match regex_lite::Regex::new(&pattern.regex) {
+                Ok(regex) => patterns.push(ConfirmGuardPatternRuntime {
+                    regex,
+                    message: pattern.message.clone(),
+                    raw: pattern.regex.clone(),
+                }),
+                Err(err) => {
+                    tracing::warn!("Skipping confirm guard pattern `{}`: {err}", pattern.regex);
+                }
+            }
+        }
+        Self { patterns }
+    }
+
+    fn matched_pattern(&self, input: &str) -> Option<&ConfirmGuardPatternRuntime> {
+        self.patterns.iter().find(|pat| pat.regex.is_match(input))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
+    }
+}
+
+impl ConfirmGuardPatternRuntime {
+    fn guidance(&self, original_label: &str, original_value: &str, suggested: &str) -> String {
+        let header = self
+            .message
+            .clone()
+            .unwrap_or_else(|| {
+                format!(
+                    "Blocked command matching confirm guard pattern `{}`. Resend with 'confirm:' if you intend to proceed.",
+                    self.raw
+                )
+            });
+        format!("{header}\n\n{original_label}: {original_value}\nresend_exact_argv: {suggested}")
+    }
+}
+
 /// Gather ephemeral, per-turn context that should not be persisted to history.
 /// Combines environment info and (when enabled) a live browser snapshot and status.
 struct EphemeralJar {
@@ -602,6 +656,7 @@ pub(crate) struct Session {
     last_system_status: Mutex<Option<String>>,
     /// Track the last screenshot path and hash to detect changes
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
+    confirm_guard: ConfirmGuardRuntime,
 }
 
 #[derive(Debug, Clone)]
@@ -1712,6 +1767,7 @@ async fn submission_loop(
                     pending_browser_screenshots: Mutex::new(Vec::new()),
                     last_system_status: Mutex::new(None),
                     last_screenshot_info: Mutex::new(None),
+                    confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
                 }));
 
                 // Patch restored state into the newly created session.
@@ -4967,6 +5023,23 @@ async fn handle_container_exec_with_params(
 
         // If no confirm prefix and it looks like a sensitive git command, reject with guidance.
         if !has_confirm_prefix {
+            if let Some(pattern) = if sess.confirm_guard.is_empty() {
+                None
+            } else {
+                sess.confirm_guard.matched_pattern(trimmed)
+            } {
+                let mut argv_confirm = params.command.clone();
+                argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
+                let suggested = serde_json::to_string(&argv_confirm)
+                    .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+                let guidance = pattern.guidance("original_script", &script, &suggested);
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
+
             if let Some(kind) = detect_sensitive_git(trimmed) {
                 // Provide the exact argv the model should resend with the confirm prefix.
                 let mut argv_confirm = params.command.clone();
@@ -5139,6 +5212,28 @@ async fn handle_container_exec_with_params(
 
     // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
     if extract_shell_script_from_wrapper(&params.command).is_none() {
+        if !sess.confirm_guard.is_empty() {
+            let joined = params.command.join(" ");
+            if let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
+                let suggested = serde_json::to_string(&vec![
+                    "bash".to_string(),
+                    "-lc".to_string(),
+                    format!("confirm: {}", joined),
+                ])
+                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+                let guidance = pattern.guidance(
+                    "original_argv",
+                    &format!("{:?}", params.command),
+                    &suggested,
+                );
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
+        }
+
         fn strip_tok2(t: &str) -> &str { t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"')) }
         let mut i = 0usize;
         // Skip env assignments and simple wrappers at the front

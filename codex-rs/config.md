@@ -171,6 +171,24 @@ Alternatively, you can have the model run until it is done, and never ask to run
 approval_policy = "never"
 ```
 
+## confirm_guard
+
+Adds custom regular-expression based guards for commands that should require an explicit `confirm:` prefix before running. Each pattern is checked against the raw command string (`argv` joined with spaces or the `bash -lc` script body). When a pattern matches, Codex blocks the command and instructs the model to resend it with `confirm:`.
+
+```toml
+[[confirm_guard.patterns]]
+regex = "^git\s+clean(\s+-[fxd])+"
+message = "Blocked git clean; it deletes untracked files. Resend with 'confirm:' if you're sure."
+
+[[confirm_guard.patterns]]
+regex = "rm\s+-rf\s+node_modules"
+# message is optional; a default explanation referencing the regex is shown when omitted.
+```
+
+Codex ships with built-in guards for destructive Git operations that can wipe working tree changes (`git reset`, `git checkout -- <paths>`, `git clean`, `git push --force`) and for common shell helpers that can recursively delete large portions of the workspace (`rm -rf` against `.`, `..`, `/`, or `*`, `find . … -delete`, `find . … -exec rm`, `trash -rf`, and `fd … --exec rm`). The snippet above shows how to add extra patterns or override the default messaging when needed.
+
+Patterns use the same syntax as the `regex` crate (via `regex-lite`). Invalid regexes cause config loading to fail with an explicit error so they can be corrected quickly.
+
 ## profiles
 
 A _profile_ is a collection of configuration values that can be set together. Multiple profiles can be defined in `config.toml` and you can specify the one you
