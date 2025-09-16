@@ -92,6 +92,8 @@ pub use crate::client_common::Prompt;
 pub use crate::client_common::TextFormat;
 pub use crate::client_common::ResponseEvent;
 pub use crate::client_common::ResponseStream;
+// Upstream also exports REVIEW_PROMPT; include it to preserve compatibility.
+pub use crate::client_common::REVIEW_PROMPT;
 pub use codex_protocol::models::ContentItem;
 pub use codex_protocol::models::ReasoningItemContent;
 pub use codex_protocol::models::ResponseItem;
