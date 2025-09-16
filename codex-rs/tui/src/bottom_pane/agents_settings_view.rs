@@ -226,10 +226,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let name_box_h: u16 = 3;
         // Orchestrator inner width accounts for borders (2) and left/right padding (2)
         let orch_inner_w = (content_w as u16).saturating_sub(4);
-        // Show up to 8 rows initially; allow scrolling inside the field for more
-        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w);
-        let orch_inner_capped = desired_orch_inner.min(8);
-        let orch_box_h = orch_inner_capped.saturating_add(2);
+        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w).max(1);
+        let orch_box_h = desired_orch_inner.min(8).saturating_add(2).max(3);
         let base_rows: u16 = 1  // title
             + 1  // spacer after title
             + name_box_h
@@ -309,25 +307,10 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         // Spacer between inputs
         lines.push(Line::from(""));
-        // Reserve rows for the orchestrator box (height = inner + borders)
-        // Clamp to available height so we never overflow the buffer.
-        let desired_orch_inner_h = self
-            .orch_field
-            .desired_height(content_rect.width.saturating_sub(4));
-        // Cap visible inner height to 8 rows; overflow is scrollable via caret moves
-        let desired_orch_box_h = desired_orch_inner_h.min(8).saturating_add(2);
-        let available_h = content_rect.height; // total rows available for all content
-        let rows_before_orch = lines.len() as u16;
-        let button_row_height: u16 = 1; // buttons rendered on a single line
-        let rows_after_orch = 1 /* spacer */ + button_row_height;
-        let max_orch_box_h = available_h
-            .saturating_sub(rows_before_orch)
-            .saturating_sub(rows_after_orch);
-        let orch_box_h_reserved = if max_orch_box_h >= 3 {
-            desired_orch_box_h.min(max_orch_box_h).max(3)
-        } else {
-            max_orch_box_h
-        };
+        // Reserve rows for the instructions box (height = inner + borders)
+        let orch_inner_w = content_rect.width.saturating_sub(4);
+        let desired_orch_inner = self.orch_field.desired_height(orch_inner_w).max(1);
+        let orch_box_h_reserved = desired_orch_inner.min(8).saturating_add(2).max(3);
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
         // Spacer between inputs
         lines.push(Line::from(""));
