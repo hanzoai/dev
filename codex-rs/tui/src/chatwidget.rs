@@ -1600,7 +1600,7 @@ impl ChatWidget<'_> {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
         let app_event_tx_clone = app_event_tx.clone();
-        // Create the Codex asynchronously so the UI loads as quickly as possible.
+        // Create the Code asynchronously so the UI loads as quickly as possible.
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
             // Use ConversationManager with an AuthManager (API key by default)
@@ -4129,6 +4129,12 @@ impl ChatWidget<'_> {
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
+            // Newer protocol variants we currently ignore in the TUI
+            EventMsg::UserMessage(_) => {}
+            EventMsg::TurnAborted(_) => {}
+            EventMsg::ConversationPath(_) => {}
+            EventMsg::EnteredReviewMode(_) => {}
+            EventMsg::ExitedReviewMode(_) => {}
         }
     }
 

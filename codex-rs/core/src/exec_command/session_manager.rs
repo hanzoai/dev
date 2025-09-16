@@ -92,18 +92,16 @@ impl SessionManager {
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
         );
 
-        let (session, mut exit_rx) =
-            create_exec_command_session(params.clone())
-                .await
-                .map_err(|err| {
-                    format!(
-                        "failed to create exec command session for session id {}: {err}",
-                        session_id.0
-                    )
-                })?;
+        let (session, mut output_rx, mut exit_rx) = create_exec_command_session(params.clone())
+            .await
+            .map_err(|err| {
+                format!(
+                    "failed to create exec command session for session id {}: {err}",
+                    session_id.0
+                )
+            })?;
 
         // Insert into session map.
-        let mut output_rx = session.output_receiver();
         self.sessions.lock().await.insert(session_id, session);
 
         // Collect output until either timeout expires or process exits.
@@ -192,7 +190,11 @@ impl SessionManager {
         let (writer_tx, mut output_rx) = {
             let sessions = self.sessions.lock().await;
             match sessions.get(&session_id) {
-                Some(session) => (session.writer_sender(), session.output_receiver()),
+                Some(session) => {
+                    // Touch exit flag to mark the field as used and enable early checks in the future.
+                    let _exited = session.has_exited();
+                    (session.writer_sender(), session.output_receiver())
+                }
                 None => {
                     return Err(format!("unknown session id {}", session_id.0));
                 }
@@ -251,7 +253,11 @@ impl SessionManager {
 /// Spawn PTY and child process per spawn_exec_command_session logic.
 async fn create_exec_command_session(
     params: ExecCommandParams,
-) -> anyhow::Result<(ExecCommandSession, oneshot::Receiver<i32>)> {
+) -> anyhow::Result<(
+    ExecCommandSession,
+    tokio::sync::broadcast::Receiver<Vec<u8>>,
+    oneshot::Receiver<i32>,
+)> {
     let ExecCommandParams {
         cmd,
         yield_time_ms: _,
@@ -285,7 +291,6 @@ async fn create_exec_command_session(
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
     // Broadcast for streaming PTY output to readers: subscribers receive from subscription time.
     let (output_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
-
     // Reader task: drain PTY and forward chunks to output channel.
     let mut reader = pair.master.try_clone_reader()?;
     let output_tx_clone = output_tx.clone();
@@ -335,24 +340,30 @@ async fn create_exec_command_session(
 
     // Keep the child alive until it exits, then signal exit code.
     let (exit_tx, exit_rx) = oneshot::channel::<i32>();
+    // Track process exit status for concurrent queries.
+    let exit_status = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let exit_status_for_wait = exit_status.clone();
     let wait_handle = tokio::task::spawn_blocking(move || {
         let code = match child.wait() {
             Ok(status) => status.exit_code() as i32,
             Err(_) => -1,
         };
         let _ = exit_tx.send(code);
+        // Mark as exited so readers can stop without waiting on the channel.
+        exit_status_for_wait.store(true, std::sync::atomic::Ordering::SeqCst);
     });
 
     // Create and store the session with channels.
-    let session = ExecCommandSession::new(
+    let (session, initial_output_rx) = ExecCommandSession::new(
         writer_tx,
         output_tx,
         killer,
         reader_handle,
         writer_handle,
         wait_handle,
+        exit_status,
     );
-    Ok((session, exit_rx))
+    Ok((session, initial_output_rx, exit_rx))
 }
 
 /// Truncate the middle of a UTF-8 string to at most `max_bytes` bytes,

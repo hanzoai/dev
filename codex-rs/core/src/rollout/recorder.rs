@@ -213,7 +213,6 @@ impl RolloutRecorder {
 
     pub(crate) async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
         info!("Resuming rollout from {path:?}");
-        tracing::error!("Resuming rollout from {path:?}");
         let text = tokio::fs::read_to_string(path).await?;
         if text.trim().is_empty() {
             return Err(IoError::other("empty session file"));
@@ -250,6 +249,11 @@ impl RolloutRecorder {
                     RolloutItem::EventMsg(_ev) => {
                         items.push(RolloutItem::EventMsg(_ev));
                     }
+                    // Ignore variants not used by this fork when resuming.
+                    RolloutItem::Compacted(_)
+                    | RolloutItem::TurnContext(_) => {
+                        // Skip
+                    }
                 },
                 Err(e) => {
                     warn!("failed to parse rollout line: {v:?}, error: {e}");
@@ -257,7 +261,7 @@ impl RolloutRecorder {
             }
         }
 
-        tracing::error!(
+        info!(
             "Resumed rollout with {} items, conversation ID: {:?}",
             items.len(),
             conversation_id

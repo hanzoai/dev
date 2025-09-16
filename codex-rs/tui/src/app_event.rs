@@ -191,3 +191,5 @@ pub(crate) enum AppEvent {
     },
     
 }
+
+// No helper constructor; use `AppEvent::CodexEvent(ev)` directly to avoid shadowing.

@@ -6,6 +6,7 @@ use crate::config_types::GithubConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
+use crate::config_types::Notifications;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
@@ -14,6 +15,7 @@ use crate::config_types::Tui;
 use crate::config_types::UriBasedFileOpener;
 use crate::git_info::resolve_root_git_project_for_trust;
 use crate::model_family::ModelFamily;
+use crate::model_family::derive_default_model_family;
 use crate::model_family::find_family_for_model;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::built_in_model_providers;
@@ -26,15 +28,20 @@ use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
+use toml_edit::Array as TomlArray;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
+use toml_edit::Table as TomlTable;
 
 const OPENAI_DEFAULT_MODEL: &str = "gpt-5";
+const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5-codex";
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
@@ -51,6 +58,9 @@ pub struct Config {
     /// Optional override of model selection.
     pub model: String,
 
+    /// Model used specifically for review sessions. Defaults to "gpt-5".
+    pub review_model: String,
+
     pub model_family: ModelFamily,
 
     /// Size of the context window for the model, in tokens.
@@ -58,6 +68,9 @@ pub struct Config {
 
     /// Maximum number of output tokens.
     pub model_max_output_tokens: Option<u64>,
+
+    /// Token usage threshold triggering auto-compaction of conversation history.
+    pub model_auto_compact_token_limit: Option<i64>,
 
     /// Key into the model_providers map that specifies which provider to use.
     pub model_provider_id: String,
@@ -114,6 +127,10 @@ pub struct Config {
     /// If unset the feature is disabled.
     pub notify: Option<Vec<String>>,
 
+    /// TUI notifications preference. When set, the TUI will send OSC 9 notifications on approvals
+    /// and turn completions when not focused.
+    pub tui_notifications: Notifications,
+
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
     /// resolved against this path.
@@ -167,9 +184,6 @@ pub struct Config {
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: String,
 
-    /// Experimental rollout resume path (absolute path to .jsonl; undocumented).
-    pub experimental_resume: Option<PathBuf>,
-
     /// Include an experimental plan tool that the model can use to update its current plan and status of each step.
     pub include_plan_tool: bool,
     /// Include the `apply_patch` tool for models that benefit from invoking
@@ -200,6 +214,10 @@ pub struct Config {
     /// If a command with name `plan|solve|code` exists here, it overrides
     /// the built-in defaults for that slash command.
     pub subagent_commands: Vec<crate::config_types::SubagentCommandConfig>,
+    /// Experimental: path to a rollout file to resume a prior session from.
+    /// When set, the core will send this path in the initial ConfigureSession
+    /// so the backend can attempt to resume.
+    pub experimental_resume: Option<PathBuf>,
 }
 
 impl Config {
@@ -279,6 +297,88 @@ pub fn load_config_as_toml(codex_home: &Path) -> std::io::Result<TomlValue> {
     }
 }
 
+pub fn load_global_mcp_servers(
+    codex_home: &Path,
+) -> std::io::Result<BTreeMap<String, McpServerConfig>> {
+    let root_value = load_config_as_toml(codex_home)?;
+    let Some(servers_value) = root_value.get("mcp_servers") else {
+        return Ok(BTreeMap::new());
+    };
+
+    servers_value
+        .clone()
+        .try_into()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+pub fn write_global_mcp_servers(
+    codex_home: &Path,
+    servers: &BTreeMap<String, McpServerConfig>,
+) -> std::io::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let mut doc = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents
+            .parse::<DocumentMut>()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e),
+    };
+
+    doc.as_table_mut().remove("mcp_servers");
+
+    if !servers.is_empty() {
+        let mut table = TomlTable::new();
+        table.set_implicit(true);
+        doc["mcp_servers"] = TomlItem::Table(table);
+
+        for (name, config) in servers {
+            let mut entry = TomlTable::new();
+            entry.set_implicit(false);
+            entry["command"] = toml_edit::value(config.command.clone());
+
+            if !config.args.is_empty() {
+                let mut args = TomlArray::new();
+                for arg in &config.args {
+                    args.push(arg.clone());
+                }
+                entry["args"] = TomlItem::Value(args.into());
+            }
+
+            if let Some(env) = &config.env
+                && !env.is_empty()
+            {
+                let mut env_table = TomlTable::new();
+                env_table.set_implicit(false);
+                let mut pairs: Vec<_> = env.iter().collect();
+                pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                for (key, value) in pairs {
+                    env_table.insert(key, toml_edit::value(value.clone()));
+                }
+                entry["env"] = TomlItem::Table(env_table);
+            }
+
+            if let Some(timeout) = config.startup_timeout_ms {
+                let timeout = i64::try_from(timeout).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "startup_timeout_ms exceeds supported range",
+                    )
+                })?;
+                entry["startup_timeout_ms"] = toml_edit::value(timeout);
+            }
+
+            doc["mcp_servers"][name.as_str()] = TomlItem::Table(entry);
+        }
+    }
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path).map_err(|err| err.error)?;
+
+    Ok(())
+}
+
 /// Patch `CODEX_HOME/config.toml` project state.
 /// Use with caution.
 pub fn set_project_trusted(codex_home: &Path, project_path: &Path) -> anyhow::Result<()> {
@@ -290,6 +390,22 @@ pub fn set_project_trusted(codex_home: &Path, project_path: &Path) -> anyhow::Re
         Err(e) => return Err(e.into()),
     };
 
+    set_project_trusted_inner(&mut doc, project_path)?;
+
+    // ensure codex_home exists
+    std::fs::create_dir_all(codex_home)?;
+
+    // create a tmp_file
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+
+    // atomically move the tmp file into config.toml
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyhow::Result<()> {
     // Ensure we render a human-friendly structure:
     //
     // [projects]
@@ -345,16 +461,6 @@ pub fn set_project_trusted(codex_home: &Path, project_path: &Path) -> anyhow::Re
     };
     proj_tbl.set_implicit(false);
     proj_tbl["trust_level"] = toml_edit::value("trusted");
-
-    // ensure codex_home exists
-    std::fs::create_dir_all(codex_home)?;
-
-    // create a tmp_file
-    let tmp_file = NamedTempFile::new_in(codex_home)?;
-    std::fs::write(tmp_file.path(), doc.to_string())?;
-
-    // atomically move the tmp file into config.toml
-    tmp_file.persist(config_path)?;
 
     Ok(())
 }
@@ -896,6 +1002,8 @@ fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
+    /// Review model override used by the `/review` feature.
+    pub review_model: Option<String>,
 
     /// Provider to use from the model_providers map.
     pub model_provider: Option<String>,
@@ -905,6 +1013,9 @@ pub struct ConfigToml {
 
     /// Maximum number of output tokens.
     pub model_max_output_tokens: Option<u64>,
+
+    /// Token usage threshold triggering auto-compaction of conversation history.
+    pub model_auto_compact_token_limit: Option<i64>,
 
     /// Default approval policy for executing commands.
     pub approval_policy: Option<AskForApproval>,
@@ -984,9 +1095,6 @@ pub struct ConfigToml {
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
-    /// Experimental rollout resume path (absolute path to .jsonl; undocumented).
-    pub experimental_resume: Option<PathBuf>,
-
     /// Experimental path to a file whose contents replace the built-in BASE_INSTRUCTIONS.
     pub experimental_instructions_file: Option<PathBuf>,
 
@@ -1016,6 +1124,8 @@ pub struct ConfigToml {
     /// Configuration for subagent commands (built-ins and custom).
     #[serde(default)]
     pub subagents: Option<crate::config_types::SubagentsToml>,
+    /// Experimental path to a rollout file to resume from.
+    pub experimental_resume: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -1125,6 +1235,7 @@ impl ConfigToml {
 #[derive(Default, Debug, Clone)]
 pub struct ConfigOverrides {
     pub model: Option<String>,
+    pub review_model: Option<String>,
     pub cwd: Option<PathBuf>,
     pub approval_policy: Option<AskForApproval>,
     pub sandbox_mode: Option<SandboxMode>,
@@ -1133,6 +1244,8 @@ pub struct ConfigOverrides {
     pub codex_linux_sandbox_exe: Option<PathBuf>,
     pub base_instructions: Option<String>,
     pub include_plan_tool: Option<bool>,
+    pub include_apply_patch_tool: Option<bool>,
+    pub include_view_image_tool: Option<bool>,
     pub disable_response_storage: Option<bool>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub debug: Option<bool>,
@@ -1152,6 +1265,7 @@ impl Config {
         // Destructure ConfigOverrides fully to ensure all overrides are applied.
         let ConfigOverrides {
             model,
+            review_model: override_review_model,
             cwd,
             approval_policy,
             sandbox_mode,
@@ -1160,6 +1274,8 @@ impl Config {
             codex_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
+            include_apply_patch_tool,
+            include_view_image_tool,
             disable_response_storage,
             show_raw_agent_reasoning,
             debug,
@@ -1279,29 +1395,18 @@ impl Config {
             .tools
             .as_ref()
             .and_then(|t| t.web_search_allowed_domains.clone());
-        // View Image tool is enabled by default; can be disabled in config.
-        let include_view_image_tool_flag = cfg
-            .tools
-            .as_ref()
-            .and_then(|t| t.view_image)
+        // View Image tool is enabled by default; can be disabled in config or overrides.
+        let include_view_image_tool_flag = include_view_image_tool
+            .or(cfg.tools.as_ref().and_then(|t| t.view_image))
             .unwrap_or(true);
 
         let model = model
             .or(config_profile.model)
             .or(cfg.model)
             .unwrap_or_else(default_model);
-        let model_family = find_family_for_model(&model).unwrap_or_else(|| {
-            let supports_reasoning_summaries =
-                cfg.model_supports_reasoning_summaries.unwrap_or(false);
-            ModelFamily {
-                slug: model.clone(),
-                family: model.clone(),
-                needs_special_apply_patch_instructions: false,
-                supports_reasoning_summaries,
-                uses_local_shell_tool: false,
-                apply_patch_tool_type: None,
-            }
-        });
+
+        let model_family =
+            find_family_for_model(&model).unwrap_or_else(|| derive_default_model_family(&model));
 
         let openai_model_info = get_model_info(&model_family);
         let model_context_window = cfg
@@ -1312,8 +1417,11 @@ impl Config {
                 .as_ref()
                 .map(|info| info.max_output_tokens)
         });
-
-        let experimental_resume = cfg.experimental_resume;
+        let model_auto_compact_token_limit = cfg.model_auto_compact_token_limit.or_else(|| {
+            openai_model_info
+                .as_ref()
+                .and_then(|info| info.auto_compact_token_limit)
+        });
 
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
@@ -1343,11 +1451,18 @@ impl Config {
             })
             .collect();
 
+        // Default review model when not set in config; allow CLI override to take precedence.
+        let review_model = override_review_model
+            .or(cfg.review_model)
+            .unwrap_or_else(default_review_model);
+
         let config = Self {
             model,
+            review_model,
             model_family,
             model_context_window,
             model_max_output_tokens,
+            model_auto_compact_token_limit,
             model_provider_id,
             model_provider,
             cwd: resolved_cwd,
@@ -1369,7 +1484,7 @@ impl Config {
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
-            tui: cfg.tui.unwrap_or_default(),
+            tui: cfg.tui.clone().unwrap_or_default(),
             codex_linux_sandbox_exe,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),
@@ -1394,13 +1509,14 @@ impl Config {
                 .chatgpt_base_url
                 .or(cfg.chatgpt_base_url)
                 .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
-
-            experimental_resume,
             include_plan_tool: include_plan_tool.unwrap_or(false),
-            include_apply_patch_tool: false,
+            include_apply_patch_tool: include_apply_patch_tool.unwrap_or(false),
             tools_web_search_request,
             tools_web_search_allowed_domains,
-            use_experimental_streamable_shell_tool: false,
+            // Honor upstream opt-in switch name for our experimental streamable shell tool.
+            use_experimental_streamable_shell_tool: cfg
+                .experimental_use_exec_command_tool
+                .unwrap_or(false),
             include_view_image_tool: include_view_image_tool_flag,
             responses_originator_header,
             debug: debug.unwrap_or(false),
@@ -1410,6 +1526,13 @@ impl Config {
             subagent_commands: cfg
                 .subagents
                 .map(|s| s.commands)
+                .unwrap_or_default(),
+            experimental_resume: cfg.experimental_resume,
+            // Surface TUI notifications preference from config when present.
+            tui_notifications: cfg
+                .tui
+                .as_ref()
+                .map(|t| t.notifications.clone())
                 .unwrap_or_default(),
         };
         Ok(config)
@@ -1489,6 +1612,10 @@ impl Config {
 
 fn default_model() -> String {
     OPENAI_DEFAULT_MODEL.to_string()
+}
+
+fn default_review_model() -> String {
+    OPENAI_DEFAULT_REVIEW_MODEL.to_string()
 }
 
 /// Returns the path to the Code/Codex configuration directory, which can be
@@ -1638,6 +1765,187 @@ exclude_slash_tmp = true
         );
     }
 
+    #[test]
+    fn load_global_mcp_servers_returns_empty_if_missing() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+
+        let servers = load_global_mcp_servers(codex_home.path())?;
+        assert!(servers.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_global_mcp_servers_round_trips_entries() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+
+        let mut servers = BTreeMap::new();
+        servers.insert(
+            "docs".to_string(),
+            McpServerConfig {
+                command: "echo".to_string(),
+                args: vec!["hello".to_string()],
+                env: None,
+                startup_timeout_ms: None,
+            },
+        );
+
+        write_global_mcp_servers(codex_home.path(), &servers)?;
+
+        let loaded = load_global_mcp_servers(codex_home.path())?;
+        assert_eq!(loaded.len(), 1);
+        let docs = loaded.get("docs").expect("docs entry");
+        assert_eq!(docs.command, "echo");
+        assert_eq!(docs.args, vec!["hello".to_string()]);
+
+        let empty = BTreeMap::new();
+        write_global_mcp_servers(codex_home.path(), &empty)?;
+        let loaded = load_global_mcp_servers(codex_home.path())?;
+        assert!(loaded.is_empty());
+
+        Ok(())
+    }
+    #[tokio::test]
+    async fn persist_model_selection_updates_defaults() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+
+        persist_model_selection(
+            codex_home.path(),
+            None,
+            "gpt-5-codex",
+            Some(ReasoningEffort::High),
+        )
+        .await?;
+
+        let serialized =
+            tokio::fs::read_to_string(codex_home.path().join(CONFIG_TOML_FILE)).await?;
+        let parsed: ConfigToml = toml::from_str(&serialized)?;
+
+        assert_eq!(parsed.model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(parsed.model_reasoning_effort, Some(ReasoningEffort::High));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_model_selection_overwrites_existing_model() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+        let config_path = codex_home.path().join(CONFIG_TOML_FILE);
+
+        tokio::fs::write(
+            &config_path,
+            r#"
+model = "gpt-5"
+model_reasoning_effort = "medium"
+
+[profiles.dev]
+model = "gpt-4.1"
+"#,
+        )
+        .await?;
+
+        persist_model_selection(
+            codex_home.path(),
+            None,
+            "o4-mini",
+            Some(ReasoningEffort::High),
+        )
+        .await?;
+
+        let serialized = tokio::fs::read_to_string(config_path).await?;
+        let parsed: ConfigToml = toml::from_str(&serialized)?;
+
+        assert_eq!(parsed.model.as_deref(), Some("o4-mini"));
+        assert_eq!(parsed.model_reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            parsed
+                .profiles
+                .get("dev")
+                .and_then(|profile| profile.model.as_deref()),
+            Some("gpt-4.1"),
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_model_selection_updates_profile() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+
+        persist_model_selection(
+            codex_home.path(),
+            Some("dev"),
+            "gpt-5-codex",
+            Some(ReasoningEffort::Medium),
+        )
+        .await?;
+
+        let serialized =
+            tokio::fs::read_to_string(codex_home.path().join(CONFIG_TOML_FILE)).await?;
+        let parsed: ConfigToml = toml::from_str(&serialized)?;
+        let profile = parsed
+            .profiles
+            .get("dev")
+            .expect("profile should be created");
+
+        assert_eq!(profile.model.as_deref(), Some("gpt-5-codex"));
+        assert_eq!(
+            profile.model_reasoning_effort,
+            Some(ReasoningEffort::Medium)
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn persist_model_selection_updates_existing_profile() -> anyhow::Result<()> {
+        let codex_home = TempDir::new()?;
+        let config_path = codex_home.path().join(CONFIG_TOML_FILE);
+
+        tokio::fs::write(
+            &config_path,
+            r#"
+[profiles.dev]
+model = "gpt-4"
+model_reasoning_effort = "medium"
+
+[profiles.prod]
+model = "gpt-5"
+"#,
+        )
+        .await?;
+
+        persist_model_selection(
+            codex_home.path(),
+            Some("dev"),
+            "o4-high",
+            Some(ReasoningEffort::Medium),
+        )
+        .await?;
+
+        let serialized = tokio::fs::read_to_string(config_path).await?;
+        let parsed: ConfigToml = toml::from_str(&serialized)?;
+
+        let dev_profile = parsed
+            .profiles
+            .get("dev")
+            .expect("dev profile should survive updates");
+        assert_eq!(dev_profile.model.as_deref(), Some("o4-high"));
+        assert_eq!(
+            dev_profile.model_reasoning_effort,
+            Some(ReasoningEffort::Medium)
+        );
+
+        assert_eq!(
+            parsed
+                .profiles
+                .get("prod")
+                .and_then(|profile| profile.model.as_deref()),
+            Some("gpt-5"),
+        );
+
+        Ok(())
+    }
     struct PrecedenceTestFixture {
         cwd: TempDir,
         codex_home: TempDir,
@@ -1781,9 +2089,11 @@ model_verbosity = "high"
         assert_eq!(
             Config {
                 model: "o3".to_string(),
+                review_model: "gpt-5".to_string(),
                 model_family: find_family_for_model("o3").expect("known model slug"),
                 model_context_window: Some(200_000),
                 model_max_output_tokens: Some(100_000),
+                model_auto_compact_token_limit: None,
                 model_provider_id: "openai".to_string(),
                 model_provider: fixture.openai_provider.clone(),
                 approval_policy: AskForApproval::Never,
@@ -1807,16 +2117,19 @@ model_verbosity = "high"
                 model_reasoning_summary: ReasoningSummary::Detailed,
                 model_text_verbosity: TextVerbosity::default(),
                 chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-                experimental_resume: None,
                 base_instructions: None,
                 include_plan_tool: false,
                 include_apply_patch_tool: false,
                 tools_web_search_request: false,
                 tools_web_search_allowed_domains: None,
                 use_experimental_streamable_shell_tool: false,
+                include_view_image_tool: true,
                 responses_originator_header: "codex_cli_rs".to_string(),
                 debug: false,
                 using_chatgpt_auth: false,
+                github: GithubConfig::default(),
+                experimental_resume: None,
+                tui_notifications: Default::default(),
             },
             o3_profile_config
         );
@@ -1839,9 +2152,11 @@ model_verbosity = "high"
         )?;
         let expected_gpt3_profile_config = Config {
             model: "gpt-3.5-turbo".to_string(),
+            review_model: "gpt-5".to_string(),
             model_family: find_family_for_model("gpt-3.5-turbo").expect("known model slug"),
             model_context_window: Some(16_385),
             model_max_output_tokens: Some(4_096),
+            model_auto_compact_token_limit: None,
             model_provider_id: "openai-chat-completions".to_string(),
             model_provider: fixture.openai_chat_completions_provider.clone(),
             approval_policy: AskForApproval::UnlessTrusted,
@@ -1865,16 +2180,19 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             tools_web_search_allowed_domains: None,
             use_experimental_streamable_shell_tool: false,
+            include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
@@ -1912,9 +2230,11 @@ model_verbosity = "high"
         )?;
         let expected_zdr_profile_config = Config {
             model: "o3".to_string(),
+            review_model: "gpt-5".to_string(),
             model_family: find_family_for_model("o3").expect("known model slug"),
             model_context_window: Some(200_000),
             model_max_output_tokens: Some(100_000),
+            model_auto_compact_token_limit: None,
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
             approval_policy: AskForApproval::OnFailure,
@@ -1938,16 +2258,19 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::default(),
             model_text_verbosity: TextVerbosity::default(),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
-                tools_web_search_request: false,
-                tools_web_search_allowed_domains: None,
-                use_experimental_streamable_shell_tool: false,
+            tools_web_search_request: false,
+            tools_web_search_allowed_domains: None,
+            use_experimental_streamable_shell_tool: false,
+            include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_zdr_profile_config, zdr_profile_config);
@@ -1971,9 +2294,11 @@ model_verbosity = "high"
         )?;
         let expected_gpt5_profile_config = Config {
             model: "gpt-5".to_string(),
+            review_model: "gpt-5".to_string(),
             model_family: find_family_for_model("gpt-5").expect("known model slug"),
             model_context_window: Some(400_000),
             model_max_output_tokens: Some(128_000),
+            model_auto_compact_token_limit: None,
             model_provider_id: "openai".to_string(),
             model_provider: fixture.openai_provider.clone(),
             approval_policy: AskForApproval::OnFailure,
@@ -1997,17 +2322,18 @@ model_verbosity = "high"
             model_reasoning_summary: ReasoningSummary::Detailed,
             model_verbosity: Some(Verbosity::High),
             chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            experimental_resume: None,
             base_instructions: None,
             include_plan_tool: false,
             include_apply_patch_tool: false,
             tools_web_search_request: false,
             responses_originator_header: "codex_cli_rs".to_string(),
-            preferred_auth_method: AuthMode::ChatGPT,
             use_experimental_streamable_shell_tool: false,
             include_view_image_tool: true,
-            disable_paste_burst: false,
-            use_experimental_reasoning_summary: false,
+            debug: false,
+            using_chatgpt_auth: false,
+            github: GithubConfig::default(),
+            experimental_resume: None,
+            tui_notifications: Default::default(),
         };
 
         assert_eq!(expected_gpt5_profile_config, gpt5_profile_config);
@@ -2084,4 +2410,47 @@ trust_level = "trusted"
     }
 
     // No test enforcing the presence of a standalone [projects] header.
+}
+
+#[cfg(test)]
+mod notifications_tests {
+    use crate::config_types::Notifications;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct TuiTomlTest {
+        notifications: Notifications,
+    }
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct RootTomlTest {
+        tui: TuiTomlTest,
+    }
+
+    #[test]
+    fn test_tui_notifications_true() {
+        let toml = r#"
+            [tui]
+            notifications = true
+        "#;
+        let parsed: RootTomlTest = toml::from_str(toml).expect("deserialize notifications=true");
+        assert!(matches!(
+            parsed.tui.notifications,
+            Notifications::Enabled(true)
+        ));
+    }
+
+    #[test]
+    fn test_tui_notifications_custom_array() {
+        let toml = r#"
+            [tui]
+            notifications = ["foo"]
+        "#;
+        let parsed: RootTomlTest =
+            toml::from_str(toml).expect("deserialize notifications=[\"foo\"]");
+        assert!(matches!(
+            parsed.tui.notifications,
+            Notifications::Custom(ref v) if v == &vec!["foo".to_string()]
+        ));
+    }
 }

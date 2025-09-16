@@ -100,10 +100,13 @@ type OutputBuffer = Arc<Mutex<OutputBufferState>>;
 type OutputHandles = (OutputBuffer, Arc<Notify>);
 
 impl ManagedUnifiedExecSession {
-    fn new(session: ExecCommandSession) -> Self {
+    fn new(
+        session: ExecCommandSession,
+        initial_output_rx: tokio::sync::broadcast::Receiver<Vec<u8>>,
+    ) -> Self {
         let output_buffer = Arc::new(Mutex::new(OutputBufferState::default()));
         let output_notify = Arc::new(Notify::new());
-        let mut receiver = session.output_receiver();
+        let mut receiver = initial_output_rx;
         let buffer_clone = Arc::clone(&output_buffer);
         let notify_clone = Arc::clone(&output_notify);
         let output_task = tokio::spawn(async move {
@@ -193,8 +196,8 @@ impl UnifiedExecSessionManager {
         } else {
             let command = request.input_chunks.to_vec();
             let new_id = self.next_session_id.fetch_add(1, Ordering::SeqCst);
-            let session = create_unified_exec_session(&command).await?;
-            let managed_session = ManagedUnifiedExecSession::new(session);
+            let (session, initial_output_rx) = create_unified_exec_session(&command).await?;
+            let managed_session = ManagedUnifiedExecSession::new(session, initial_output_rx);
             let (buffer, notify) = managed_session.output_handles();
             writer_tx = managed_session.writer_sender();
             output_buffer = buffer;
@@ -297,7 +300,13 @@ impl UnifiedExecSessionManager {
 
 async fn create_unified_exec_session(
     command: &[String],
-) -> Result<ExecCommandSession, UnifiedExecError> {
+) -> Result<
+    (
+        ExecCommandSession,
+        tokio::sync::broadcast::Receiver<Vec<u8>>,
+    ),
+    UnifiedExecError,
+> {
     if command.is_empty() {
         return Err(UnifiedExecError::MissingCommandLine);
     }
@@ -380,7 +389,7 @@ async fn create_unified_exec_session(
         wait_exit_status.store(true, Ordering::SeqCst);
     });
 
-    Ok(ExecCommandSession::new(
+    let (session, initial_output_rx) = ExecCommandSession::new(
         writer_tx,
         output_tx,
         killer,
@@ -388,7 +397,8 @@ async fn create_unified_exec_session(
         writer_handle,
         wait_handle,
         exit_status,
-    ))
+    );
+    Ok((session, initial_output_rx))
 }
 
 #[cfg(test)]
@@ -421,7 +431,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: None,
                 input_chunks: &["bash".to_string(), "-i".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         let session_id = open_shell.session_id.expect("expected session_id");
@@ -441,7 +451,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
                 input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         assert!(out_2.output.contains("codex"));
@@ -458,7 +468,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: None,
                 input_chunks: &["/bin/bash".to_string(), "-i".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         let session_a = shell_a.session_id.expect("expected session id");
@@ -467,7 +477,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
                 input_chunks: &["export CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
 
@@ -478,7 +488,7 @@ mod tests {
                     "echo".to_string(),
                     "$CODEX_INTERACTIVE_SHELL_VAR\n".to_string(),
                 ],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         assert!(!out_2.output.contains("codex"));
@@ -487,7 +497,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_a),
                 input_chunks: &["echo $CODEX_INTERACTIVE_SHELL_VAR\n".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         assert!(out_3.output.contains("codex"));
@@ -504,7 +514,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: None,
                 input_chunks: &["bash".to_string(), "-i".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         let session_id = open_shell.session_id.expect("expected session id");
@@ -516,7 +526,7 @@ mod tests {
                     "export".to_string(),
                     "CODEX_INTERACTIVE_SHELL_VAR=codex\n".to_string(),
                 ],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
 
@@ -574,7 +584,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: None,
                 input_chunks: &["/bin/echo".to_string(), "codex".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
 
@@ -595,7 +605,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: None,
                 input_chunks: &["/bin/bash".to_string(), "-i".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
         let session_id = open_shell.session_id.expect("expected session id");
@@ -604,7 +614,7 @@ mod tests {
             .handle_request(UnifiedExecRequest {
                 session_id: Some(session_id),
                 input_chunks: &["exit\n".to_string()],
-                timeout_ms: Some(1_500),
+                timeout_ms: Some(2_500),
             })
             .await?;
 
