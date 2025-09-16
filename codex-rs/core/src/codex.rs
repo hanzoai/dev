@@ -2101,6 +2101,7 @@ async fn submission_loop(
     debug!("Agent loop exited");
 }
 
+// Intentionally omit upstream review thread spawning; our fork handles review flows differently.
 /// Takes a user message as input and runs a loop where, at each turn, the model
 /// replies with either:
 ///
@@ -2122,6 +2123,8 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     if sess.tx_event.send(event).await.is_err() {
         return;
     }
+    // Continue with our fork's history and input handling.
+    
 
     // Debug logging for ephemeral images
     let ephemeral_count = input
