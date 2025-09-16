@@ -354,7 +354,14 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
             lines.push(Line::from(btn_spans));
         }
-        // No trailing spacer; buttons sit against bottom frame
+        // Remove any trailing blank lines so buttons hug the bottom frame
+        while lines
+            .last()
+            .map(|line| line.spans.iter().all(|s| s.content.trim().is_empty()))
+            .unwrap_or(false)
+        {
+            lines.pop();
+        }
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)

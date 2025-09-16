@@ -256,12 +256,10 @@ impl AgentEditorView {
             "Optional guidance prepended to every request sent to the agent.",
             desc_style,
         )));
-        cursor = cursor.saturating_add(1);
 
         // Buttons row
         if include_gap_before_buttons {
             lines.push(Line::from(""));
-            cursor = cursor.saturating_add(1);
         }
         let save_style = sel(4).fg(crate::colors::success());
         let cancel_style = sel(5).fg(crate::colors::text());
@@ -270,7 +268,16 @@ impl AgentEditorView {
             Span::raw("  "),
             Span::styled("[ Cancel ]", cancel_style),
         ]));
-        cursor = cursor.saturating_add(1);
+
+        // Trim any trailing blank rows so the button row hugs the bottom border
+        while lines
+            .last()
+            .map(|line| line.spans.iter().all(|s| s.content.trim().is_empty()))
+            .unwrap_or(false)
+        {
+            lines.pop();
+        }
+        cursor = lines.len() as u16;
 
         // No footer hints in the editor form
 
