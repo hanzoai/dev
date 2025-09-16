@@ -18,6 +18,9 @@ use ratatui::widgets::Wrap;
 
 use codex_login::AuthMode;
 
+use codex_core::config::GPT_5_CODEX_MEDIUM_MODEL;
+use codex_core::model_family::{derive_default_model_family, find_family_for_model};
+
 use crate::LoginStatus;
 use crate::app::ChatWidgetArgs;
 use crate::app_event::AppEvent;
@@ -382,6 +385,18 @@ impl AuthModeWidget {
         self.login_status = LoginStatus::AuthMode(AuthMode::ChatGPT);
         if let Ok(mut args) = self.chat_widget_args.lock() {
             args.config.using_chatgpt_auth = true;
+            if args
+                .config
+                .model
+                .eq_ignore_ascii_case("gpt-5")
+            {
+                let new_model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
+                args.config.model = new_model.clone();
+
+                let family = find_family_for_model(&new_model)
+                    .unwrap_or_else(|| derive_default_model_family(&new_model));
+                args.config.model_family = family;
+            }
         }
     }
 }

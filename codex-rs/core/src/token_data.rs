@@ -1,7 +1,9 @@
 use base64::Engine;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use thiserror::Error;
+use tracing::Level;
 
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
@@ -111,7 +113,11 @@ pub fn parse_id_token(id_token: &str) -> Result<IdTokenInfo, IdTokenInfoError> {
     };
 
     let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload_b64)?;
-    let claims: IdClaims = serde_json::from_slice(&payload_bytes)?;
+    let raw_claims: Value = serde_json::from_slice(&payload_bytes)?;
+    if tracing::enabled!(Level::INFO) {
+        tracing::info!(id_token_claims = %raw_claims, "decoded ChatGPT id_token claims");
+    }
+    let claims: IdClaims = serde_json::from_value(raw_claims)?;
 
     Ok(IdTokenInfo {
         email: claims.email,
