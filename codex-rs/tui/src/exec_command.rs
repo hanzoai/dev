@@ -12,12 +12,24 @@ pub(crate) fn strip_bash_lc_and_escape(command: &[String]) -> String {
         // exactly three items
         [first, second, third]
             // first two must be "bash", "-lc"
-            if first == "bash" && second == "-lc" =>
+            if is_bash_like(first) && second == "-lc" =>
         {
             third.clone()        // borrow `third`
         }
         _ => escape_command(command),
     }
+}
+
+fn is_bash_like(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
 }
 
 /// If `path` is absolute and inside $HOME, return the part *after* the home

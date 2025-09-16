@@ -71,6 +71,12 @@ pub(crate) enum AppEvent {
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
     PrepareAgents,
 
+    /// Update the model and optional reasoning effort preset
+    UpdateModelSelection {
+        model: String,
+        effort: Option<ReasoningEffort>,
+    },
+
     /// Update the reasoning effort level
     UpdateReasoningEffort(ReasoningEffort),
 

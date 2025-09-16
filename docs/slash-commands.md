@@ -31,6 +31,7 @@ Notes
 
 - `/theme`: switch between color themes.
 - `/verbosity (high|medium|low)`: change text verbosity.
+- `/model`: choose what model and reasoning effort to use.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.

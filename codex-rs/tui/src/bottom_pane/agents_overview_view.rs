@@ -30,6 +30,75 @@ impl AgentsOverviewView {
     }
 
     fn total_rows(&self) -> usize { self.agents.len().saturating_add(self.commands.len()).saturating_add(1) /* Add new… */ }
+
+    fn build_lines(&self) -> Vec<Line<'static>> {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        // Agents section
+        lines.push(Line::from(Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD))));
+        for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
+            let sel = i == self.selected;
+            let dot_style = if *enabled && *installed { Style::default().fg(crate::colors::success()) } else { Style::default().fg(crate::colors::text()) };
+            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
+            let mut spans = vec![
+                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+                Span::styled("•", dot_style),
+                Span::raw(" "),
+                Span::styled(name.clone(), name_style),
+            ];
+            if sel {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim())));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Spacer between sections (always a single blank row)
+        lines.push(Line::from(""));
+
+        // Commands section
+        lines.push(Line::from(Span::styled("Commands", Style::default().add_modifier(Modifier::BOLD))));
+        for (j, cmd) in self.commands.iter().enumerate() {
+            let idx = self.agents.len() + j;
+            let sel = idx == self.selected;
+            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
+            let mut spans = vec![
+                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+                Span::styled(format!("/{}", cmd), name_style),
+            ];
+            if sel {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim())));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Add new… row
+        let add_idx = self.agents.len() + self.commands.len();
+        let add_sel = add_idx == self.selected;
+        let mut add_spans = vec![
+            Span::styled(if add_sel { "› " } else { "  " }, if add_sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
+            Span::styled("Add new…", if add_sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() }),
+        ];
+        if add_sel {
+            add_spans.push(Span::raw("  "));
+            add_spans.push(Span::styled("(press Enter to add)", Style::default().fg(crate::colors::text_dim())));
+        }
+        lines.push(Line::from(add_spans));
+
+        // Footer with key hints (prefixed by a single blank line)
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+            Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Enter", Style::default().fg(crate::colors::success())),
+            Span::styled(" Configure  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Esc", Style::default().fg(crate::colors::error())),
+            Span::styled(" Close", Style::default().fg(crate::colors::text_dim())),
+        ]));
+
+        lines
+    }
 }
 
 impl<'a> BottomPaneView<'a> for AgentsOverviewView {
@@ -71,7 +140,10 @@ impl<'a> BottomPaneView<'a> for AgentsOverviewView {
 
     fn is_complete(&self) -> bool { self.is_complete }
 
-    fn desired_height(&self, _width: u16) -> u16 { 18 }
+    fn desired_height(&self, _width: u16) -> u16 {
+        let lines = self.build_lines();
+        lines.len().saturating_add(2) as u16
+    }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         Clear.render(area, buf);
@@ -84,62 +156,7 @@ impl<'a> BottomPaneView<'a> for AgentsOverviewView {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        // Agents section
-        lines.push(Line::from(Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD))));
-        for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
-            let sel = i == self.selected;
-            // Active = enabled and installed. Show green when truly runnable, otherwise dim.
-            let dot = "•";
-            let dot_style = if *enabled && *installed { Style::default().fg(crate::colors::success()) } else { Style::default().fg(crate::colors::text()) };
-            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
-            let mut spans = vec![
-                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
-                Span::styled(dot, dot_style),
-                Span::raw(" "),
-                Span::styled(name.clone(), name_style),
-            ];
-            if sel {
-                spans.push(Span::raw("  "));
-                spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim())));
-            }
-            lines.push(Line::from(spans));
-        }
-        lines.push(Line::from(""));
-
-        // Commands section
-        lines.push(Line::from(Span::styled("Commands", Style::default().add_modifier(Modifier::BOLD))));
-        for (j, cmd) in self.commands.iter().enumerate() {
-            let idx = self.agents.len() + j;
-            let sel = idx == self.selected;
-            let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
-            let mut spans = vec![
-                Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
-                Span::styled(format!("/{}", cmd), name_style),
-            ];
-            if sel { spans.push(Span::raw("  ")); spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim()))); }
-            lines.push(Line::from(spans));
-        }
-        // Add new… row
-        let add_idx = self.agents.len() + self.commands.len();
-        let add_sel = add_idx == self.selected;
-        let mut add_spans = vec![
-            Span::styled(if add_sel { "› " } else { "  " }, if add_sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
-            Span::styled("Add new…", if add_sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() }),
-        ];
-        if add_sel { add_spans.push(Span::raw("  ")); add_spans.push(Span::styled("(press Enter to add)", Style::default().fg(crate::colors::text_dim()))); }
-        lines.push(Line::from(add_spans));
-
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-            Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-            Span::styled("Enter", Style::default().fg(crate::colors::success())),
-            Span::styled(" Configure  ", Style::default().fg(crate::colors::text_dim())),
-            Span::styled("Esc", Style::default().fg(crate::colors::error())),
-            Span::styled(" Close", Style::default().fg(crate::colors::text_dim())),
-        ]));
-
+        let lines = self.build_lines();
         Paragraph::new(lines)
             .alignment(Alignment::Left)
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))

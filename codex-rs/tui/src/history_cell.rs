@@ -4388,6 +4388,12 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
+        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Model.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("/resume", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Resume.description())
@@ -6149,6 +6155,22 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
         Line::from(""),
         Line::from("Reasoning Effort").fg(crate::colors::keyword()).bold(),
         Line::from(format!("Value: {}", reasoning_effort)),
+    ];
+    PlainHistoryCell {
+        lines,
+        kind: HistoryCellType::Notice,
+    }
+}
+
+pub(crate) fn new_model_output(
+    model: &str,
+    effort: ReasoningEffort,
+) -> PlainHistoryCell {
+    let lines = vec![
+        Line::from(""),
+        Line::from("Model Selection").fg(crate::colors::keyword()).bold(),
+        Line::from(format!("Model: {}", model)),
+        Line::from(format!("Reasoning Effort: {}", effort)),
     ];
     PlainHistoryCell {
         lines,
