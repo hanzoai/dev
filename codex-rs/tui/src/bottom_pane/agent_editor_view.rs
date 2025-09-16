@@ -256,6 +256,7 @@ impl AgentEditorView {
             "Optional guidance prepended to every request sent to the agent.",
             desc_style,
         )));
+        lines.push(Line::from(""));
 
         // Buttons row
         if include_gap_before_buttons {
