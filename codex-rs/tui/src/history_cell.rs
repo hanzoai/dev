@@ -7707,7 +7707,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     if filled > 0 {
         header.push(Span::styled(
             "█".repeat(filled),
-            Style::default().fg(header_color),
+            Style::default().fg(crate::colors::success()),
         ));
     }
     if empty > 0 {
@@ -7745,12 +7745,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
                 ),
                 StepStatus::InProgress => (
                     Span::raw("□"),
-                    Span::styled(
-                        step,
-                        Style::default()
-                            .fg(crate::colors::text_bright())
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(step, Style::default().fg(crate::colors::info())),
                 ),
                 StepStatus::Pending => (
                     Span::raw("□"),
