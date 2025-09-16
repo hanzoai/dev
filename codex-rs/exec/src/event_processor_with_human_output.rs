@@ -64,6 +64,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     raw_reasoning_started: bool,
     last_message_path: Option<PathBuf>,
     had_error: bool,
+    answer_bullet_filter: LeadingBulletFilter,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -93,6 +94,7 @@ impl EventProcessorWithHumanOutput {
                 raw_reasoning_started: false,
                 last_message_path,
                 had_error: false,
+                answer_bullet_filter: LeadingBulletFilter::default(),
             }
         } else {
             Self {
@@ -112,6 +114,7 @@ impl EventProcessorWithHumanOutput {
                 raw_reasoning_started: false,
                 last_message_path,
                 had_error: false,
+                answer_bullet_filter: LeadingBulletFilter::default(),
             }
         }
     }
@@ -124,6 +127,99 @@ struct ExecCommandBegin {
 struct PatchApplyBegin {
     start_time: Instant,
     auto_approved: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadingBulletState {
+    Pending,
+    Removed,
+    Keep,
+}
+
+impl Default for LeadingBulletState {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+#[derive(Default)]
+struct LeadingBulletFilter {
+    state: LeadingBulletState,
+    buffer: String,
+}
+
+impl LeadingBulletFilter {
+    fn reset(&mut self) {
+        self.state = LeadingBulletState::Pending;
+        self.buffer.clear();
+    }
+
+    fn ingest_delta(&mut self, delta: &str) -> Option<String> {
+        match self.state {
+            LeadingBulletState::Pending => {
+                self.buffer.push_str(delta);
+                self.finalize_pending()
+            }
+            LeadingBulletState::Removed | LeadingBulletState::Keep => Some(delta.to_string()),
+        }
+    }
+
+    fn sanitize_full(&mut self, text: &str) -> String {
+        self.reset();
+        self.buffer.push_str(text);
+        match self.finalize_pending() {
+            Some(out) => out,
+            None => {
+                if self.buffer == "-" {
+                    self.buffer.clear();
+                    self.state = LeadingBulletState::Removed;
+                    String::new()
+                } else {
+                    self.state = LeadingBulletState::Keep;
+                    std::mem::take(&mut self.buffer)
+                }
+            }
+        }
+    }
+
+    fn finalize_pending(&mut self) -> Option<String> {
+        if self.buffer.is_empty() {
+            return Some(String::new());
+        }
+
+        let mut chars = self.buffer.char_indices();
+        let Some((_, first)) = chars.next() else {
+            return Some(String::new());
+        };
+        if first != '-' {
+            self.state = LeadingBulletState::Keep;
+            return Some(std::mem::take(&mut self.buffer));
+        }
+
+        match chars.next() {
+            Some((second_idx, second_char)) => {
+                if matches!(second_char, ' ' | '\t') {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else if matches!(second_char, '\n' | '\r') {
+                    self.buffer.drain(..second_idx);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else if second_char.is_whitespace() {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else {
+                    self.state = LeadingBulletState::Keep;
+                    Some(std::mem::take(&mut self.buffer))
+                }
+            }
+            None => None,
+        }
+    }
 }
 
 // Timestamped println helper. The timestamp is styled with self.dimmed.
@@ -143,11 +239,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     /// screen.
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
         let version = codex_version::version();
-        ts_println!(
-            self,
-            "Code v{}\n--------",
-            version
-        );
+        ts_println!(self, "Code v{}\n--------", version);
 
         let entries = create_config_summary_entries(config);
 
@@ -196,10 +288,15 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if !self.answer_started {
                     ts_println!(self, "{}\n", "codex".style(self.italic).style(self.magenta));
                     self.answer_started = true;
+                    self.answer_bullet_filter.reset();
                 }
-                print!("{delta}");
-                #[expect(clippy::expect_used)]
-                std::io::stdout().flush().expect("could not flush stdout");
+                if let Some(out) = self.answer_bullet_filter.ingest_delta(&delta) {
+                    if !out.is_empty() {
+                        print!("{out}");
+                        #[expect(clippy::expect_used)]
+                        std::io::stdout().flush().expect("could not flush stdout");
+                    }
+                }
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 if !self.show_agent_reasoning {
@@ -255,15 +352,18 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 // if answer_started is false, this means we haven't received any
                 // delta. Thus, we need to print the message as a new answer.
                 if !self.answer_started {
+                    let sanitized = self.answer_bullet_filter.sanitize_full(&message);
                     ts_println!(
                         self,
                         "{}\n{}",
                         "codex".style(self.italic).style(self.magenta),
-                        message,
+                        sanitized,
                     );
+                    self.answer_bullet_filter.reset();
                 } else {
                     println!();
                     self.answer_started = false;
+                    self.answer_bullet_filter.reset();
                 }
             }
             EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
@@ -507,7 +607,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
                 // Suppress noisy full-turn diffs in CI unless explicitly allowed.
                 // Set CODE_SUPPRESS_TURN_DIFF=1 in CI to silence this block.
-                let suppress = std::env::var("CODE_SUPPRESS_TURN_DIFF").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
+                let suppress = std::env::var("CODE_SUPPRESS_TURN_DIFF")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
                 if !suppress {
                     ts_println!(self, "{}", "turn diff:".style(self.magenta));
                     println!("{unified_diff}");
@@ -627,6 +729,42 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     }
 
     // exit_code handled by CLI; suppress unused warnings by omitting method.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_sanitizes_full_message() {
+        let mut filter = LeadingBulletFilter::default();
+        let sanitized = filter.sanitize_full("- Quick summary\nMore");
+        assert_eq!(sanitized, "Quick summary\nMore");
+    }
+
+    #[test]
+    fn filter_handles_multi_delta_stream() {
+        let mut filter = LeadingBulletFilter::default();
+        assert!(
+            filter.ingest_delta("-").is_none(),
+            "first dash should defer"
+        );
+        let out = filter
+            .ingest_delta(" Lead")
+            .expect("delta should produce output");
+        assert_eq!(out, "Lead");
+        let subsequent = filter
+            .ingest_delta("ing continues")
+            .expect("subsequent delta");
+        assert_eq!(subsequent, "ing continues");
+    }
+
+    #[test]
+    fn filter_keeps_non_bullet_prefix() {
+        let mut filter = LeadingBulletFilter::default();
+        let sanitized = filter.sanitize_full("-value remains");
+        assert_eq!(sanitized, "-value remains");
+    }
 }
 
 // Extend trait with exit_code override

@@ -18,6 +18,71 @@ pub(crate) struct MarkdownStreamCollector {
     // When true, insert an extra newline after the next natural newline
     // boundary to force a section separation without cutting a word mid‑line.
     pending_section_break: bool,
+    // Tracks whether we've already evaluated the leading bullet prefix.
+    // None => undecided, Some(true) => removed, Some(false) => left intact.
+    leading_bullet_state: Option<bool>,
+}
+
+#[cfg(test)]
+mod bullet_strip_tests {
+    use super::*;
+    use codex_core::config::{Config, ConfigOverrides, ConfigToml};
+
+    fn test_config() -> Config {
+        codex_core::config::Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            std::env::temp_dir(),
+        )
+        .expect("config")
+    }
+
+    fn lines_to_plain_strings(lines: &[ratatui::text::Line<'_>]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.clone())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn streaming_delta_strips_leading_bullet_first_line() {
+        let cfg = test_config();
+        let mut collector = MarkdownStreamCollector::new_with_bold_first();
+
+        collector.push_delta("- Leading summary\n");
+        let lines = collector.commit_complete_lines(&cfg);
+        let rendered = lines_to_plain_strings(&lines);
+
+        let first = rendered.first().expect("streamed line");
+        assert!(
+            !first.trim_start().starts_with('-'),
+            "expected leading bullet to be stripped, got {first:?}"
+        );
+        assert!(first.contains("Leading summary"));
+    }
+
+    #[test]
+    fn replace_with_strips_leading_bullet_first_line() {
+        let cfg = test_config();
+        let mut collector = MarkdownStreamCollector::new();
+
+        collector.replace_with_and_mark_committed("- Final note\nContinues here\n", 0);
+        let lines = collector.commit_complete_lines(&cfg);
+        let rendered = lines_to_plain_strings(&lines);
+
+        let first = rendered.first().expect("final line");
+        assert!(
+            !first.trim_start().starts_with('-'),
+            "expected leading bullet to be stripped, got {first:?}"
+        );
+        assert!(first.contains("Final note"));
+    }
 }
 
 impl MarkdownStreamCollector {
@@ -27,18 +92,20 @@ impl MarkdownStreamCollector {
             committed_line_count: 0,
             bold_first_sentence: false,
             pending_section_break: false,
+            leading_bullet_state: None,
         }
     }
-    
+
     pub fn new_with_bold_first() -> Self {
         Self {
             buffer: String::new(),
             committed_line_count: 0,
             bold_first_sentence: true,
             pending_section_break: false,
+            leading_bullet_state: None,
         }
     }
-    
+
     pub fn set_bold_first_sentence(&mut self, bold: bool) {
         self.bold_first_sentence = bold;
     }
@@ -54,6 +121,7 @@ impl MarkdownStreamCollector {
         self.committed_line_count = 0;
         // Keep bold_first_sentence setting
         self.pending_section_break = false;
+        self.leading_bullet_state = None;
     }
 
     /// Replace the buffered content and mark that the first `committed_count`
@@ -65,10 +133,13 @@ impl MarkdownStreamCollector {
         // A full replace cancels any pending break; the new content can include
         // its own spacing.
         self.pending_section_break = false;
+        self.leading_bullet_state = None;
+        self.strip_leading_bullet_if_first_line();
     }
 
     pub fn push_delta(&mut self, delta: &str) {
         self.buffer.push_str(delta);
+        self.strip_leading_bullet_if_first_line();
         // If we were asked to insert a section break but the buffer didn't end
         // with a newline at the time, defer adding the extra newline until we
         // naturally hit a newline boundary via streaming. This prevents cutting
@@ -85,7 +156,9 @@ impl MarkdownStreamCollector {
     /// Insert a paragraph/section separator if one is not already present at the
     /// end of the buffer. Ensures the next content starts after a blank line.
     pub fn insert_section_break(&mut self) {
-        if self.buffer.is_empty() { return; }
+        if self.buffer.is_empty() {
+            return;
+        }
         // If we're mid-line, insert a newline immediately so upcoming content
         // (e.g., a bold section title) starts on its own line. Then request an
         // extra blank line at the next natural newline boundary to produce a
@@ -100,6 +173,47 @@ impl MarkdownStreamCollector {
             self.buffer.push('\n');
         }
         self.pending_section_break = false;
+    }
+
+    fn strip_leading_bullet_if_first_line(&mut self) {
+        if self.leading_bullet_state.is_some() || self.committed_line_count > 0 {
+            return;
+        }
+        if self.buffer.is_empty() {
+            return;
+        }
+
+        let mut chars = self.buffer.char_indices();
+        let Some((_, first)) = chars.next() else {
+            return;
+        };
+        if first != '-' {
+            // Mark as processed so we do not keep re-checking on each delta.
+            self.leading_bullet_state = Some(false);
+            return;
+        }
+
+        match chars.next() {
+            Some((second_idx, second_char)) => {
+                if matches!(second_char, ' ' | '\t') {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.leading_bullet_state = Some(true);
+                } else if matches!(second_char, '\n' | '\r') {
+                    self.buffer.drain(..second_idx);
+                    self.leading_bullet_state = Some(true);
+                } else if second_char.is_whitespace() {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.leading_bullet_state = Some(true);
+                } else {
+                    self.leading_bullet_state = Some(false);
+                }
+            }
+            None => {
+                // Only '-' received so far; wait for more context.
+            }
+        }
     }
 
     /// Render the full buffer and return only the newly completed logical lines
@@ -256,7 +370,9 @@ impl MarkdownStreamCollector {
         if relax_list_holdback && end > self.committed_line_count {
             let last = &rendered[end - 1];
             let mut s = String::new();
-            for sp in &last.spans { s.push_str(&sp.content); }
+            for sp in &last.spans {
+                s.push_str(&sp.content);
+            }
             if is_bare_list_marker(&s) {
                 end = end.saturating_sub(1);
             }
@@ -366,15 +482,26 @@ fn is_potentially_volatile_list_line(text: &str) -> bool {
 #[inline]
 fn is_bare_list_marker(text: &str) -> bool {
     let t = text.trim();
-    if t == "-" || t == "-" || t == "*" || t == "*" { return true; }
-    if t == "-" || t == "- " || t == "*" || t == "* " { return true; }
+    if t == "-" || t == "-" || t == "*" || t == "*" {
+        return true;
+    }
+    if t == "-" || t == "- " || t == "*" || t == "* " {
+        return true;
+    }
     // ordered like "1." possibly followed by a single space
     let mut it = t.chars().peekable();
     let mut saw_digit = false;
     while let Some(&ch) = it.peek() {
-        if ch.is_ascii_digit() { saw_digit = true; it.next(); } else { break; }
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            it.next();
+        } else {
+            break;
+        }
     }
-    if !saw_digit { return false; }
+    if !saw_digit {
+        return false;
+    }
     if it.peek() == Some(&'.') {
         it.next();
         return it.peek().is_none() || it.peek() == Some(&' ');
