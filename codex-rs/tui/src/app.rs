@@ -838,6 +838,11 @@ impl App<'_> {
                                 widget.handle_mcp_command(command_args);
                             }
                         }
+                        SlashCommand::Model => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_model_command(command_args);
+                            }
+                        }
                         SlashCommand::Reasoning => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_reasoning_command(command_args);
@@ -1011,6 +1016,11 @@ impl App<'_> {
                 AppEvent::ShowAgentEditor { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_agent_editor_ui(name);
+                    }
+                }
+                AppEvent::UpdateModelSelection { model, effort } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_model_selection(model, effort);
                     }
                 }
                 AppEvent::UpdateReasoningEffort(new_effort) => {

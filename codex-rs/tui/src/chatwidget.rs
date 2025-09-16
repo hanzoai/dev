@@ -11,12 +11,15 @@ use std::sync::atomic::Ordering;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 
+use codex_common::model_presets::{builtin_model_presets, ModelPreset};
 use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
+use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_login::AuthManager;
 use codex_login::AuthMode;
+use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 
 mod diff_handlers;
 mod diff_ui;
@@ -4780,6 +4783,186 @@ impl ChatWidget<'_> {
         } else {
             self.show_help_popup();
         }
+        self.request_redraw();
+    }
+
+    fn available_model_presets(&self) -> Vec<ModelPreset> {
+        let auth_mode = if self.config.using_chatgpt_auth {
+            Some(McpAuthMode::ChatGPT)
+        } else {
+            Some(McpAuthMode::ApiKey)
+        };
+        builtin_model_presets(auth_mode)
+    }
+
+    fn preset_effort_for_model(preset: &ModelPreset) -> ReasoningEffort {
+        preset
+            .effort
+            .map(ReasoningEffort::from)
+            .unwrap_or(ReasoningEffort::Medium)
+    }
+
+    fn find_model_preset(&self, input: &str, presets: &[ModelPreset]) -> Option<ModelPreset> {
+        if presets.is_empty() {
+            return None;
+        }
+
+        let input_lower = input.to_ascii_lowercase();
+        let collapsed_input: String = input_lower
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace() && *c != '-')
+            .collect();
+
+        let mut fallback_medium: Option<ModelPreset> = None;
+        let mut fallback_none: Option<ModelPreset> = None;
+        let mut fallback_first: Option<ModelPreset> = None;
+
+        for &preset in presets.iter() {
+            let preset_effort = Self::preset_effort_for_model(&preset);
+
+            let id_lower = preset.id.to_ascii_lowercase();
+            if Self::candidate_matches(&input_lower, &collapsed_input, &id_lower) {
+                return Some(preset);
+            }
+
+            let label_lower = preset.label.to_ascii_lowercase();
+            if Self::candidate_matches(&input_lower, &collapsed_input, &label_lower) {
+                return Some(preset);
+            }
+
+            let effort_lower = preset_effort.to_string().to_ascii_lowercase();
+            let model_lower = preset.model.to_ascii_lowercase();
+            let spaced = format!("{model_lower} {effort_lower}");
+            if Self::candidate_matches(&input_lower, &collapsed_input, &spaced) {
+                return Some(preset);
+            }
+            let dashed = format!("{model_lower}-{effort_lower}");
+            if Self::candidate_matches(&input_lower, &collapsed_input, &dashed) {
+                return Some(preset);
+            }
+
+            if model_lower == input_lower
+                || Self::candidate_matches(&input_lower, &collapsed_input, &model_lower)
+            {
+                if fallback_medium.is_none() && preset_effort == ReasoningEffort::Medium {
+                    fallback_medium = Some(preset);
+                }
+                if fallback_none.is_none() && preset.effort.is_none() {
+                    fallback_none = Some(preset);
+                }
+                if fallback_first.is_none() {
+                    fallback_first = Some(preset);
+                }
+            }
+        }
+
+        fallback_medium.or(fallback_none).or(fallback_first)
+    }
+
+    fn candidate_matches(input: &str, collapsed_input: &str, candidate: &str) -> bool {
+        let candidate_lower = candidate.to_ascii_lowercase();
+        if candidate_lower == input {
+            return true;
+        }
+        let candidate_collapsed: String = candidate_lower
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace() && *c != '-')
+            .collect();
+        candidate_collapsed == collapsed_input
+    }
+
+    pub(crate) fn handle_model_command(&mut self, command_args: String) {
+        if self.is_task_running() {
+            let message = "'/model' is disabled while a task is in progress.".to_string();
+            self.history_push(history_cell::new_error_event(message));
+            return;
+        }
+
+        let presets = self.available_model_presets();
+        if presets.is_empty() {
+            let message = "No model presets are available. Update your configuration to define models.".to_string();
+            self.history_push(history_cell::new_error_event(message));
+            return;
+        }
+
+        let trimmed = command_args.trim();
+        if !trimmed.is_empty() {
+            if let Some(preset) = self.find_model_preset(trimmed, &presets) {
+                let effort = Self::preset_effort_for_model(&preset);
+                self.apply_model_selection(preset.model.to_string(), Some(effort));
+            } else {
+                let message = format!(
+                    "Unknown model preset: '{}'. Use /model with no arguments to open the selector.",
+                    trimmed
+                );
+                self.history_push(history_cell::new_error_event(message));
+            }
+            return;
+        }
+
+        self.bottom_pane.show_model_selection(
+            presets,
+            self.config.model.clone(),
+            self.config.model_reasoning_effort,
+        );
+    }
+
+    pub(crate) fn apply_model_selection(
+        &mut self,
+        model: String,
+        effort: Option<ReasoningEffort>,
+    ) {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let mut updated = false;
+        if !self.config.model.eq_ignore_ascii_case(trimmed) {
+            self.config.model = trimmed.to_string();
+            let family = find_family_for_model(&self.config.model)
+                .unwrap_or_else(|| derive_default_model_family(&self.config.model));
+            self.config.model_family = family;
+            updated = true;
+        }
+
+        if let Some(new_effort) = effort {
+            if self.config.model_reasoning_effort != new_effort {
+                self.config.model_reasoning_effort = new_effort;
+                updated = true;
+            }
+        }
+
+        if updated {
+            let op = Op::ConfigureSession {
+                provider: self.config.model_provider.clone(),
+                model: self.config.model.clone(),
+                model_reasoning_effort: self.config.model_reasoning_effort,
+                model_reasoning_summary: self.config.model_reasoning_summary,
+                model_text_verbosity: self.config.model_text_verbosity,
+                user_instructions: self.config.user_instructions.clone(),
+                base_instructions: self.config.base_instructions.clone(),
+                approval_policy: self.config.approval_policy.clone(),
+                sandbox_policy: self.config.sandbox_policy.clone(),
+                disable_response_storage: self.config.disable_response_storage,
+                notify: self.config.notify.clone(),
+                cwd: self.config.cwd.clone(),
+                resume_path: None,
+            };
+            self.submit_op(op);
+        }
+
+        let placement = self.ui_placement_for_now();
+        self.push_system_cell(
+            history_cell::new_model_output(
+                &self.config.model,
+                self.config.model_reasoning_effort,
+            ),
+            placement,
+            Some("ui:model".to_string()),
+            None,
+        );
+
         self.request_redraw();
     }
 
