@@ -796,7 +796,9 @@ impl HistoryCell for ExploreAggregationCell {
             .unwrap_or(0)
     }
 
-    fn gutter_symbol(&self) -> Option<&'static str> { None }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 // ==================== PlainHistoryCell ====================
@@ -2114,12 +2116,18 @@ impl HistoryCell for MergedExecCell {
 
         // Build one header line based on exec kind
         let header_line = match self.kind {
-            ExecKind::Read => Some(Line::styled("Read", Style::default().fg(crate::colors::text()))),
+            ExecKind::Read => Some(Line::styled(
+                "Read",
+                Style::default().fg(crate::colors::text()),
+            )),
             ExecKind::Search => Some(Line::styled(
                 "Searched",
                 Style::default().fg(crate::colors::text_dim()),
             )),
-            ExecKind::List => Some(Line::styled("List", Style::default().fg(crate::colors::text()))),
+            ExecKind::List => Some(Line::styled(
+                "List",
+                Style::default().fg(crate::colors::text()),
+            )),
             ExecKind::Run => None,
         };
 
@@ -2428,14 +2436,12 @@ fn exec_render_parts_generic(
         } else {
             String::new()
         };
-        pre.push(
-            Line::styled(
-                format!("Running...{duration_str}"),
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            ),
-        );
+        pre.push(Line::styled(
+            format!("Running...{duration_str}"),
+            Style::default()
+                .fg(crate::colors::info())
+                .add_modifier(Modifier::BOLD),
+        ));
         if let Some(first) = highlighted_cmd.first_mut() {
             if start_time.is_some() {
                 let elapsed = start_time.unwrap().elapsed();
@@ -2449,17 +2455,6 @@ fn exec_render_parts_generic(
     }
 
     if output.is_some() {
-        if let Some(first) = highlighted_cmd.first_mut() {
-            first.spans.insert(
-                0,
-                Span::styled(
-                    "Ran ",
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            );
-        }
         for line in highlighted_cmd.iter_mut() {
             for span in line.spans.iter_mut() {
                 span.style = span.style.fg(crate::colors::text_bright());
@@ -2584,7 +2579,6 @@ fn exec_render_parts_parsed(
     let show_stdout = matches!(action, ExecAction::Run);
     let out = output_lines(output, !show_stdout, false);
     let mut any_content_emitted = false;
-    let mut added_inline_ran = false;
     // Determine allowed label(s) for this cell's primary action
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
@@ -2725,11 +2719,7 @@ fn exec_render_parts_parsed(
                 continue;
             }
             let prefix = if !any_content_emitted {
-                if suppress_run_header {
-                    ""
-                } else {
-                    "└ "
-                }
+                if suppress_run_header { "" } else { "└ " }
             } else if suppress_run_header {
                 ""
             } else {
@@ -2840,15 +2830,6 @@ fn exec_render_parts_parsed(
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
-                        if output.is_some() && !added_inline_ran {
-                            spans.push(Span::styled(
-                                "Ran ",
-                                Style::default()
-                                    .fg(crate::colors::text_bright())
-                                    .add_modifier(Modifier::BOLD),
-                            ));
-                            added_inline_ran = true;
-                        }
                         if output.is_some() {
                             for s in first.spans.drain(..) {
                                 spans.push(Span::styled(
@@ -2860,15 +2841,6 @@ fn exec_render_parts_parsed(
                             spans.extend(first.spans.drain(..));
                         }
                     } else {
-                        if output.is_some() && !added_inline_ran {
-                            spans.push(Span::styled(
-                                "Ran ",
-                                Style::default()
-                                    .fg(crate::colors::text_bright())
-                                    .add_modifier(Modifier::BOLD),
-                            ));
-                            added_inline_ran = true;
-                        }
                         spans.push(Span::styled(
                             line_text.to_string(),
                             Style::default().fg(if output.is_some() {
@@ -5085,6 +5057,20 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Style::default().fg(crate::colors::text_bright()),
     ));
     lines.push(Line::from(vec![
+        Span::styled("/agents", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Agents.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Model.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Chrome.description())
@@ -5115,12 +5101,6 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::styled("/code", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/model", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Model.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
@@ -5503,7 +5483,6 @@ fn new_parsed_command(
     // We'll emit only content lines here; the header above already communicates the action.
     // Use a single leading "└ " for the very first content line, then indent subsequent ones.
     let mut any_content_emitted = false;
-    let mut added_inline_ran = false;
 
     // Restrict displayed entries to the primary action for this cell.
     // For the generic "run" header, allow Run/Test/Lint/Format entries.
@@ -5644,11 +5623,7 @@ fn new_parsed_command(
                 continue;
             }
             let prefix = if !any_content_emitted {
-                if suppress_run_header {
-                    ""
-                } else {
-                    "└ "
-                }
+                if suppress_run_header { "" } else { "└ " }
             } else if suppress_run_header {
                 ""
             } else {
@@ -5769,15 +5744,6 @@ fn new_parsed_command(
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
-                        if output.is_some() && !added_inline_ran {
-                            spans.push(Span::styled(
-                                "Ran ",
-                                Style::default()
-                                    .fg(crate::colors::text_bright())
-                                    .add_modifier(Modifier::BOLD),
-                            ));
-                            added_inline_ran = true;
-                        }
                         if output.is_some() {
                             for s in first.spans.drain(..) {
                                 spans.push(Span::styled(
@@ -5789,15 +5755,6 @@ fn new_parsed_command(
                             spans.extend(first.spans.drain(..));
                         }
                     } else {
-                        if output.is_some() && !added_inline_ran {
-                            spans.push(Span::styled(
-                                "Ran ",
-                                Style::default()
-                                    .fg(crate::colors::text_bright())
-                                    .add_modifier(Modifier::BOLD),
-                            ));
-                            added_inline_ran = true;
-                        }
                         spans.push(Span::styled(
                             line_text.to_string(),
                             Style::default().fg(if output.is_some() {
@@ -5867,14 +5824,12 @@ fn new_exec_command_generic(
         } else {
             String::new()
         };
-        lines.push(
-            Line::styled(
-                format!("Running...{duration_str}"),
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            )
-        );
+        lines.push(Line::styled(
+            format!("Running...{duration_str}"),
+            Style::default()
+                .fg(crate::colors::info())
+                .add_modifier(Modifier::BOLD),
+        ));
     }
 
     if let Some(first) = highlighted_cmd.first_mut() {
@@ -5891,9 +5846,7 @@ fn new_exec_command_generic(
     if output.is_some() {
         for line in highlighted_cmd.iter_mut() {
             for span in line.spans.iter_mut() {
-                span.style = span
-                    .style
-                    .fg(crate::colors::text_bright());
+                span.style = span.style.fg(crate::colors::text_bright());
             }
         }
     }
