@@ -5073,7 +5073,7 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::from(SlashCommand::Model.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
         Span::styled(
-            " Now with GPT-5-Codex!",
+            " NEW with GPT-5-Codex!",
             Style::default().fg(crate::colors::primary()),
         ),
     ]));
@@ -5081,15 +5081,6 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Chrome.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled(
-            "/browser <url>",
-            Style::default().fg(crate::colors::primary()),
-        ),
-        Span::from(" - "),
-        Span::from(SlashCommand::Browser.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
@@ -5108,6 +5099,12 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::styled("/code", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/branch", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Branch.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
@@ -7250,7 +7247,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     header.push(Span::styled(
         "Update plan",
         Style::default()
-            .fg(crate::colors::primary())
+            .fg(crate::colors::success())
             .add_modifier(Modifier::BOLD),
     ));
     header.push(Span::raw(" ["));
@@ -7275,7 +7272,6 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
         let t = s.trim().to_string();
         if t.is_empty() { None } else { Some(t) }
     }) {
-        lines.push(Line::from("note".dim().italic()));
         for l in expl.lines() {
             lines.push(Line::from(l.to_string()).dim());
         }
@@ -7331,7 +7327,7 @@ pub(crate) fn new_patch_event(
 ) -> PatchSummaryCell {
     let title = match event_type {
         PatchEventType::ApprovalRequest => "proposed patch".to_string(),
-        PatchEventType::ApplyBegin { .. } => "Updating...".to_string(),
+        PatchEventType::ApplyBegin { .. } => "Updated".to_string(),
     };
     let kind = match event_type {
         PatchEventType::ApprovalRequest => PatchKind::Proposed,

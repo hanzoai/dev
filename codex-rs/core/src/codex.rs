@@ -5127,6 +5127,10 @@ async fn handle_container_exec_with_params(
                     .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
                 let guidance = pattern.guidance("original_script", &script, &suggested);
 
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance))
+                    .await;
+
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload { content: guidance, success: None },
@@ -5141,6 +5145,10 @@ async fn handle_container_exec_with_params(
                     .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
 
                 let guidance = guidance_for_sensitive_git(kind, "original_script", &script, &suggested);
+
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .await;
 
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
@@ -5320,6 +5328,10 @@ async fn handle_container_exec_with_params(
                     &suggested,
                 );
 
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .await;
+
                 return ResponseInputItem::FunctionCallOutput {
                     call_id,
                     output: FunctionCallOutputPayload { content: guidance, success: None },
@@ -5391,6 +5403,10 @@ async fn handle_container_exec_with_params(
                         ]).unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
 
                         let guidance = guidance_for_sensitive_git(kind, "original_argv", &format!("{:?}", params.command), &suggested);
+
+                        sess
+                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .await;
 
                         return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content: guidance, success: None } };
                     }
