@@ -938,6 +938,7 @@ impl App<'_> {
                     }
                 }
                 AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
+                    let previous_cwd = self.config.cwd.clone();
                     // Preserve current chat history and ordering before swapping sessions
                     let carried = match &mut self.app_state {
                         AppState::Chat { widget } => {
@@ -951,7 +952,7 @@ impl App<'_> {
                     let mut cfg = self.config.clone();
                     cfg.cwd = new_cwd.clone();
                     let mut new_widget = ChatWidget::new(
-                        cfg,
+                        cfg.clone(),
                         self.app_event_tx.clone(),
                         None,
                         Vec::new(),
@@ -965,12 +966,17 @@ impl App<'_> {
                     }
                     new_widget.enable_perf(self.timing_enabled);
                     self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                    self.config = cfg;
 
                     // Surface a BackgroundEvent so the user can see the effective cwd
                     // in the new session.
                     {
                         use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                        let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
+                        let msg = format!(
+                            "✅ Working directory changed\n  from: {}\n  to:   {}",
+                            previous_cwd.display(),
+                            new_cwd.display()
+                        );
                         let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
                             id: "switch-cwd".to_string(),
                             event_seq: 0,
@@ -980,6 +986,19 @@ impl App<'_> {
                     }
                     // Optionally submit a prompt immediately in the new session
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        let worktree_hint = new_cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|name| format!(" (worktree: {})", name))
+                            .unwrap_or_default();
+                        let branch_note = format!(
+                            "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
+                            previous_cwd.display(),
+                            new_cwd.display(),
+                            worktree_hint,
+                            new_cwd.display()
+                        );
+                        widget.queue_agent_note(branch_note);
                         if let Some(prompt) = initial_prompt {
                             if !prompt.is_empty() {
                                 let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/branch finalize' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();

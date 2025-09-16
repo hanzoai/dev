@@ -2455,10 +2455,16 @@ fn exec_render_parts_generic(
     }
 
     if output.is_some() {
-        for line in highlighted_cmd.iter_mut() {
-            for span in line.spans.iter_mut() {
-                span.style = span.style.fg(crate::colors::text_bright());
-            }
+        if let Some(first) = highlighted_cmd.first_mut() {
+            first.spans.insert(
+                0,
+                Span::styled(
+                    "Ran ",
+                    Style::default()
+                        .fg(crate::colors::text_bright())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            );
         }
     }
 
@@ -2579,6 +2585,8 @@ fn exec_render_parts_parsed(
     let show_stdout = matches!(action, ExecAction::Run);
     let out = output_lines(output, !show_stdout, false);
     let mut any_content_emitted = false;
+    let mut added_inline_ran = false;
+    let add_inline_ran = output.is_some() && matches!(action, ExecAction::Run);
     // Determine allowed label(s) for this cell's primary action
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
@@ -2829,25 +2837,21 @@ fn exec_render_parts_parsed(
                     // We highlight the single logical line as bash and append its spans inline.
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    if add_inline_ran && !added_inline_ran {
+                        spans.push(Span::styled(
+                            "Ran ",
+                            Style::default()
+                                .fg(crate::colors::text_bright())
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        added_inline_ran = true;
+                    }
                     if let Some(mut first) = hl.pop() {
-                        if output.is_some() {
-                            for s in first.spans.drain(..) {
-                                spans.push(Span::styled(
-                                    s.content.to_string(),
-                                    Style::default().fg(crate::colors::text_bright()),
-                                ));
-                            }
-                        } else {
-                            spans.extend(first.spans.drain(..));
-                        }
+                        spans.extend(first.spans.drain(..));
                     } else {
                         spans.push(Span::styled(
                             line_text.to_string(),
-                            Style::default().fg(if output.is_some() {
-                                crate::colors::text_bright()
-                            } else {
-                                crate::colors::text()
-                            }),
+                            Style::default().fg(crate::colors::text()),
                         ));
                     }
                 }
@@ -5068,7 +5072,10 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Model.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+        Span::styled(
+            " Now with GPT-5-Codex!",
+            Style::default().fg(crate::colors::primary()),
+        ),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
@@ -5483,6 +5490,8 @@ fn new_parsed_command(
     // We'll emit only content lines here; the header above already communicates the action.
     // Use a single leading "└ " for the very first content line, then indent subsequent ones.
     let mut any_content_emitted = false;
+    let mut added_inline_ran = false;
+    let add_inline_ran = output.is_some() && matches!(action, ExecAction::Run);
 
     // Restrict displayed entries to the primary action for this cell.
     // For the generic "run" header, allow Run/Test/Lint/Format entries.
@@ -5743,25 +5752,21 @@ fn new_parsed_command(
                     // For executed commands (Run/Test/Lint/etc.), use shell syntax highlighting.
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
+                    if add_inline_ran && !added_inline_ran {
+                        spans.push(Span::styled(
+                            "Ran ",
+                            Style::default()
+                                .fg(crate::colors::text_bright())
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        added_inline_ran = true;
+                    }
                     if let Some(mut first) = hl.pop() {
-                        if output.is_some() {
-                            for s in first.spans.drain(..) {
-                                spans.push(Span::styled(
-                                    s.content.to_string(),
-                                    Style::default().fg(crate::colors::text_bright()),
-                                ));
-                            }
-                        } else {
-                            spans.extend(first.spans.drain(..));
-                        }
+                        spans.extend(first.spans.drain(..));
                     } else {
                         spans.push(Span::styled(
                             line_text.to_string(),
-                            Style::default().fg(if output.is_some() {
-                                crate::colors::text_bright()
-                            } else {
-                                crate::colors::text()
-                            }),
+                            Style::default().fg(crate::colors::text()),
                         ));
                     }
                 }
