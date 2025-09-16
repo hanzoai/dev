@@ -2,7 +2,7 @@
 source: tui/src/history_cell.rs
 expression: rendered
 ---
-• Ran seq 1 10 1>&2 && false
+• seq 1 10 1>&2 && false
   └ 1
     2
     3
