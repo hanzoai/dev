@@ -9564,6 +9564,111 @@ impl ChatWidget<'_> {
                 }
             }
 
+            let local_default_ref = format!("refs/heads/{}", default_branch);
+            let local_default_exists = Command::new("git")
+                .current_dir(&git_root)
+                .args([
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    &local_default_ref,
+                ])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if local_default_exists {
+                let ff_local = Command::new("git")
+                    .current_dir(&work_cwd)
+                    .args(["merge", "--ff-only", &local_default_ref])
+                    .output()
+                    .await;
+
+                if !matches!(ff_local, Ok(ref o) if o.status.success()) {
+                    let merge_local = Command::new("git")
+                        .current_dir(&work_cwd)
+                        .args(["merge", "--no-ff", "--no-commit", &local_default_ref])
+                        .output()
+                        .await;
+
+                    if let Ok(out) = merge_local {
+                        if out.status.success() {
+                            let _ = Command::new("git")
+                                .current_dir(&work_cwd)
+                                .args([
+                                    "commit",
+                                    "-m",
+                                    &format!(
+                                        "merge local {} into {} before merge",
+                                        default_branch, branch_label
+                                    ),
+                                ])
+                                .output()
+                                .await;
+                        } else {
+                            let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                                .await
+                                .map(|s| {
+                                    if s.trim().is_empty() {
+                                        "clean".to_string()
+                                    } else {
+                                        s
+                                    }
+                                })
+                                .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                            let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                                .await
+                                .ok()
+                                .map(|d| d.trim().to_string())
+                                .filter(|d| !d.is_empty())
+                                .or(worktree_diff_stat.clone());
+                            send_agent_handoff(
+                                vec![format!(
+                                    "merge conflicts while merging local '{}' into '{}'",
+                                    default_branch, branch_label
+                                )],
+                                Some(
+                                    "The worktree currently has an in-progress merge that needs to be resolved. Please complete it before retrying the final merge.".to_string(),
+                                ),
+                                updated_worktree_status,
+                                repo_status_for_agent.clone(),
+                                updated_diff,
+                            );
+                            return;
+                        }
+                    } else {
+                        let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                            .await
+                            .map(|s| {
+                                if s.trim().is_empty() {
+                                    "clean".to_string()
+                                } else {
+                                    s
+                                }
+                            })
+                            .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                        let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                            .await
+                            .ok()
+                            .map(|d| d.trim().to_string())
+                            .filter(|d| !d.is_empty())
+                            .or(worktree_diff_stat.clone());
+                        send_agent_handoff(
+                            vec![format!(
+                                "failed to merge local '{}' into '{}'",
+                                default_branch, branch_label
+                            )],
+                            None,
+                            updated_worktree_status,
+                            repo_status_for_agent.clone(),
+                            updated_diff,
+                        );
+                        return;
+                    }
+                }
+            }
+
             let on_default = match Command::new("git")
                 .current_dir(&git_root)
                 .args(["rev-parse", "--abbrev-ref", "HEAD"])
