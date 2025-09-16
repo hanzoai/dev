@@ -543,108 +543,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn conversation_context_for_branch(&self) -> Option<String> {
-        const MAX_LINES: usize = 80;
-        const MAX_CHARS: usize = 4000;
-
-        let transcript = self.export_transcript_lines_for_buffer();
-        if transcript.is_empty() {
-            return None;
-        }
-
-        let start = transcript.len().saturating_sub(MAX_LINES);
-        let mut out = String::new();
-        for line in transcript.iter().skip(start) {
-            let mut row = String::new();
-            for span in &line.spans {
-                row.push_str(span.content.as_ref());
-            }
-            let row = row.trim_end();
-            if row.is_empty() {
-                if !out.ends_with('\n') {
-                    out.push('\n');
-                }
-                continue;
-            }
-            if out.len() + row.len() + 1 > MAX_CHARS {
-                // If nothing has been written yet, include as much as possible of this row.
-                if out.is_empty() {
-                    let mut truncated = row.to_string();
-                    truncated.truncate(MAX_CHARS);
-                    out.push_str(truncated.trim_end());
-                }
-                break;
-            }
-            out.push_str(row);
-            out.push('\n');
-        }
-
-        let summary = out.trim().to_string();
-        if summary.is_empty() {
-            None
-        } else {
-            Some(summary)
-        }
-    }
-
-    /// Export history and ordering state so the UI can swap sessions (e.g., /branch)
-    /// without losing visible conversation. This drains the current widget's history.
-    pub(crate) fn export_history_for_session_swap(
-        &mut self,
-    ) -> (
-        Vec<Box<dyn HistoryCell>>,
-        Vec<(u64, i32, u64)>,
-        Vec<Option<String>>,
-        u64,
-        u64,
-        u64,
-    ) {
-        let history = std::mem::take(&mut self.history_cells);
-        let order_ok = std::mem::take(&mut self.cell_order_seq);
-        let order: Vec<(u64, i32, u64)> = order_ok
-            .into_iter()
-            .map(|o| (o.req, o.out, o.seq))
-            .collect();
-        let order_dbg = std::mem::take(&mut self.cell_order_dbg);
-        (
-            history,
-            order,
-            order_dbg,
-            self.last_seen_request_index,
-            self.current_request_index,
-            self.internal_seq,
-        )
-    }
-
-    /// Import prior history and ordering metadata into a fresh widget.
-    pub(crate) fn import_history_for_session_swap(
-        &mut self,
-        state: (
-            Vec<Box<dyn HistoryCell>>,
-            Vec<(u64, i32, u64)>,
-            Vec<Option<String>>,
-            u64,
-            u64,
-            u64,
-        ),
-    ) {
-        let (history, order, order_dbg, last_seen_req, current_req, internal_seq) = state;
-
-        // Replace any starter cells (welcome, etc.) with the carried history
-        self.history_cells = history;
-        self.cell_order_seq = order
-            .into_iter()
-            .map(|(req, out, seq)| OrderKey { req, out, seq })
-            .collect();
-        self.cell_order_dbg = order_dbg;
-        self.last_seen_request_index = last_seen_req;
-        self.current_request_index = current_req;
-        self.internal_seq = internal_seq;
-        self.welcome_shown = true; // avoid duplicating prelude items later
-        self.bottom_pane.set_has_chat_history(true);
-        self.invalidate_height_cache();
-        self.request_redraw();
-    }
     /// Compute an OrderKey for system (non‑LLM) notices in a way that avoids
     /// creating multiple synthetic request buckets before the first provider turn.
     fn system_order_key(
@@ -2935,11 +2833,8 @@ impl ChatWidget<'_> {
                         order: None,
                     }));
                     // Re-submit this exact message after switching cwd
-                    self.app_event_tx.send(AppEvent::SwitchCwd(
-                        fallback_root,
-                        Some(display_text.clone()),
-                        None,
-                    ));
+                    self.app_event_tx
+                        .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
                     return;
                 }
             }
@@ -9302,7 +9197,6 @@ impl ChatWidget<'_> {
         let args_trim = args.trim().to_string();
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
-        let conversation_context = self.conversation_context_for_branch();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
             self.history_push(crate::history_cell::new_background_event(
@@ -9467,8 +9361,68 @@ impl ChatWidget<'_> {
             // Switch cwd and optionally submit the task
             // Prefix the auto-submitted task so it's obvious it started in the new branch
             let initial_prompt = task_opt.map(|s| format!("[branch created] {}", s));
-            let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt, conversation_context));
+            let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
         });
+    }
+
+    pub(crate) fn switch_cwd(&mut self, new_cwd: std::path::PathBuf, initial_prompt: Option<String>) {
+        let previous_cwd = self.config.cwd.clone();
+        self.config.cwd = new_cwd.clone();
+
+        {
+            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+            let msg = format!(
+                "✅ Working directory changed\n  from: {}\n  to:   {}",
+                previous_cwd.display(),
+                new_cwd.display()
+            );
+            let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
+                id: "switch-cwd".to_string(),
+                event_seq: 0,
+                msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
+                order: None,
+            }));
+        }
+
+        let worktree_hint = new_cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|name| format!(" (worktree: {})", name))
+            .unwrap_or_default();
+        let branch_note = format!(
+            "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
+            previous_cwd.display(),
+            new_cwd.display(),
+            worktree_hint,
+            new_cwd.display()
+        );
+        self.queue_agent_note(branch_note);
+
+        let op = Op::ConfigureSession {
+            provider: self.config.model_provider.clone(),
+            model: self.config.model.clone(),
+            model_reasoning_effort: self.config.model_reasoning_effort,
+            model_reasoning_summary: self.config.model_reasoning_summary,
+            model_text_verbosity: self.config.model_text_verbosity,
+            user_instructions: self.config.user_instructions.clone(),
+            base_instructions: self.config.base_instructions.clone(),
+            approval_policy: self.config.approval_policy.clone(),
+            sandbox_policy: self.config.sandbox_policy.clone(),
+            disable_response_storage: self.config.disable_response_storage,
+            notify: self.config.notify.clone(),
+            cwd: self.config.cwd.clone(),
+            resume_path: None,
+        };
+        self.submit_op(op);
+
+        if let Some(prompt) = initial_prompt {
+            if !prompt.is_empty() {
+                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/merge' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
+                self.submit_text_message_with_preface(prompt, preface);
+            }
+        }
+
+        self.request_redraw();
     }
 
     /// Handle `/merge` to merge the current worktree branch back into the
@@ -9635,7 +9589,7 @@ impl ChatWidget<'_> {
                 );
                 let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
                 let _ = tx_for_switch
-                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None, None));
+                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
             };
 
             if !handoff_reasons.is_empty() {
@@ -9951,7 +9905,7 @@ impl ChatWidget<'_> {
                 git_root.display()
             );
             send_background(&tx, msg);
-            tx.send(AppEvent::SwitchCwd(git_root, None, None));
+            tx.send(AppEvent::SwitchCwd(git_root, None));
         });
     }
 }
