@@ -32,6 +32,7 @@ pub enum SlashCommand {
     Perf,
     Agents,
     Branch,
+    Merge,
     Github,
     Mcp,
     Resume,
@@ -66,9 +67,12 @@ impl SlashCommand {
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Theme => "switch between color themes",
             SlashCommand::Prompts => "show example prompts",
-            SlashCommand::Model => "choose model and reasoning effort",
-            SlashCommand::Agents => "configure agents",
-            SlashCommand::Branch => "create a worktree branch and switch (/branch [task])",
+            SlashCommand::Model => "choose model & reasoning effort",
+            SlashCommand::Agents => "create and configure agents",
+            SlashCommand::Branch => {
+                "work in an isolated /branch then /merge when done (great for parallel work)"
+            }
+            SlashCommand::Merge => "merge current worktree branch back to default",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
             SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",

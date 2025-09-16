@@ -429,6 +429,13 @@ impl App<'_> {
                     }
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::InsertBackgroundEventLate(message) => match &mut self.app_state {
+                    AppState::Chat { widget } => {
+                        tracing::debug!("app: InsertBackgroundEventLate len={}", message.len());
+                        widget.insert_background_event_late(message);
+                    }
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
@@ -753,6 +760,11 @@ impl App<'_> {
                                 widget.handle_branch_command(command_args);
                             }
                         }
+                        SlashCommand::Merge => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_merge_command();
+                            }
+                        }
                         SlashCommand::Resume => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.show_resume_picker();
@@ -938,56 +950,11 @@ impl App<'_> {
                     }
                 }
                 AppEvent::SwitchCwd(new_cwd, initial_prompt) => {
-                    // Preserve current chat history and ordering before swapping sessions
-                    let carried = match &mut self.app_state {
-                        AppState::Chat { widget } => {
-                            Some(widget.export_history_for_session_swap())
-                        }
-                        _ => None,
-                    };
-
-                    // Rebuild the chat widget bound to a new cwd, preserving
-                    // current configuration and terminal properties.
-                    let mut cfg = self.config.clone();
-                    cfg.cwd = new_cwd.clone();
-                    let mut new_widget = ChatWidget::new(
-                        cfg,
-                        self.app_event_tx.clone(),
-                        None,
-                        Vec::new(),
-                        self.enhanced_keys_supported,
-                        self.terminal_info.clone(),
-                        self.show_order_overlay,
-                    );
-                    // Adopt prior history so the conversation remains visible.
-                    if let Some(state) = carried {
-                        new_widget.import_history_for_session_swap(state);
-                    }
-                    new_widget.enable_perf(self.timing_enabled);
-                    self.app_state = AppState::Chat { widget: Box::new(new_widget) };
-
-                    // Surface a BackgroundEvent so the user can see the effective cwd
-                    // in the new session.
-                    {
-                        use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-                        let msg = format!("✅ Switched to worktree: {}", new_cwd.display());
-                        let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: "switch-cwd".to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                            order: None,
-                        }));
-                    }
-                    // Optionally submit a prompt immediately in the new session
+                    let target = new_cwd.clone();
+                    self.config.cwd = target.clone();
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        if let Some(prompt) = initial_prompt {
-                            if !prompt.is_empty() {
-                                let preface = "[internal] When you finish this task, ask the user if they want any changes. If they are happy, offer to merge the branch back into the repository's default branch and delete the worktree. Use '/branch finalize' (or an equivalent git worktree remove + switch) rather than deleting the folder directly so the UI can switch back cleanly. Wait for explicit confirmation before merging.".to_string();
-                                widget.submit_text_message_with_preface(prompt, preface);
-                            }
-                        }
+                        widget.switch_cwd(target, initial_prompt);
                     }
-                    self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
                 AppEvent::ResumeFrom(path) => {
                     // Replace the current chat widget with a new one configured to resume
@@ -1073,6 +1040,11 @@ impl App<'_> {
                 AppEvent::PrefillComposer(text) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.insert_str(&text);
+                    }
+                }
+                AppEvent::SubmitTextWithPreface { visible, preface } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.submit_text_message_with_preface(visible, preface);
                     }
                 }
                 AppEvent::DiffResult(text) => {
