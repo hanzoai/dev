@@ -145,6 +145,9 @@ pub(crate) enum AppEvent {
     /// Insert a background event near the top of the current request so it
     /// appears above imminent provider output (e.g. above Exec begin).
     InsertBackgroundEventEarly(String),
+    /// Insert a background event at the end of the current request so it
+    /// follows previously rendered content.
+    InsertBackgroundEventLate(String),
 
     #[allow(dead_code)]
     StartCommitAnimation,

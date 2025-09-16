@@ -2644,6 +2644,15 @@ impl ChatWidget<'_> {
             None,
         );
     }
+    /// Insert a background event at the tail of the current request.
+    pub(crate) fn insert_background_event_late(&mut self, message: String) {
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            SystemPlacement::EndOfCurrent,
+            None,
+            None,
+        );
+    }
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
@@ -9336,6 +9345,10 @@ impl ChatWidget<'_> {
                 tx.send_background_event(message);
             }
 
+            fn send_background_late(tx: &AppEventSender, message: String) {
+                tx.send_background_event_late(message);
+            }
+
             let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
             {
                 Some(p) => p,
@@ -9885,7 +9898,7 @@ impl ChatWidget<'_> {
                 default_branch,
                 git_root.display()
             );
-            send_background(&tx, msg);
+            send_background_late(&tx, msg);
             tx.send(AppEvent::SwitchCwd(git_root, None));
         });
     }

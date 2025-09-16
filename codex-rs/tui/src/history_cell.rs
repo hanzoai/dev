@@ -7706,7 +7706,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
                     Span::styled(
                         step,
                         Style::default()
-                            .fg(crate::colors::success())
+                            .fg(crate::colors::text_bright())
                             .add_modifier(Modifier::BOLD),
                     ),
                 ),
