@@ -323,8 +323,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let max_orch_box_h = available_h
             .saturating_sub(rows_before_orch)
             .saturating_sub(rows_after_orch);
-        let orch_box_h_reserved = if max_orch_box_h >= 2 {
-            desired_orch_box_h.min(max_orch_box_h).max(2)
+        let orch_box_h_reserved = if max_orch_box_h >= 3 {
+            desired_orch_box_h.min(max_orch_box_h).max(3)
         } else {
             max_orch_box_h
         };
