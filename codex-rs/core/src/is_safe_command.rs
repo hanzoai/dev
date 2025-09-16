@@ -1,5 +1,18 @@
 use crate::bash::try_parse_bash;
 use crate::bash::try_parse_word_only_commands_sequence;
+use std::path::Path;
+
+fn is_bash(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
 
 pub fn is_known_safe_command(command: &[String]) -> bool {
     if is_safe_to_call_with_exec(command) {
@@ -13,7 +26,7 @@ pub fn is_known_safe_command(command: &[String]) -> bool {
     // individual command in the script is itself a known‑safe command, then
     // the composite expression is considered safe.
     if let [bash, flag, script] = command {
-        if bash == "bash" && flag == "-lc" {
+        if is_bash(bash) && flag == "-lc" {
             if let Some(tree) = try_parse_bash(script) {
                 if let Some(all_commands) =
                     try_parse_word_only_commands_sequence(&tree, script)
