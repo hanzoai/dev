@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect, Margin};
+use ratatui::layout::{Alignment, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
@@ -11,6 +11,17 @@ use crate::app_event_sender::AppEventSender;
 use super::bottom_pane_view::BottomPaneView;
 use super::form_text_field::FormTextField;
 use super::BottomPane;
+
+#[derive(Debug)]
+struct AgentEditorLayout {
+    lines: Vec<Line<'static>>,
+    ro_offset: u16,
+    wr_offset: u16,
+    instr_offset: u16,
+    ro_height: u16,
+    wr_height: u16,
+    instr_height: u16,
+}
 
 #[derive(Debug)]
 pub(crate) struct AgentEditorView {
@@ -27,6 +38,22 @@ pub(crate) struct AgentEditorView {
 }
 
 impl AgentEditorView {
+    fn clear_rect(buf: &mut Buffer, rect: Rect) {
+        if rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        let style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        for y in rect.y..rect.y.saturating_add(rect.height) {
+            for x in rect.x..rect.x.saturating_add(rect.width) {
+                let cell = &mut buf[(x, y)];
+                cell.set_symbol(" ");
+                cell.set_style(style);
+            }
+        }
+    }
+
     pub fn new(
         name: String,
         enabled: bool,
@@ -95,6 +122,172 @@ impl AgentEditorView {
 
         v
     }
+
+    fn layout(&self, content_width: u16, max_height: Option<u16>) -> AgentEditorLayout {
+        let single_box_h: u16 = 3;
+        let instr_inner_width = content_width.saturating_sub(4);
+        let desired_instr_inner = self.instr.desired_height(instr_inner_width).min(8);
+        let mut instr_box_h = desired_instr_inner.saturating_add(2);
+
+        let top_block: u16 = 3; // blank, title, blank
+        let enabled_block: u16 = 2; // row + spacer
+        let ro_label: u16 = 1;
+        let ro_spacer: u16 = 1;
+        let wr_label: u16 = 1;
+        let wr_spacer: u16 = 1;
+        let instr_label: u16 = 1;
+        let spacer_before_buttons: u16 = 1;
+        let buttons_block: u16 = 1;
+        let footer_lines_default: u16 = 2;
+
+        let base_fixed_top = top_block
+            + enabled_block
+            + ro_label
+            + single_box_h
+            + ro_spacer
+            + wr_label
+            + single_box_h
+            + wr_spacer
+            + instr_label;
+
+        let mut footer_lines = footer_lines_default;
+        let mut spacer_after_instr = spacer_before_buttons;
+
+        if let Some(height) = max_height {
+            let mut fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
+                footer_lines = 0;
+            }
+            fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
+                let min_ih: u16 = 3;
+                let available_for_box = height
+                    .saturating_sub(base_fixed_top)
+                    .saturating_sub(fixed_after_box);
+                instr_box_h = instr_box_h.min(available_for_box).max(min_ih);
+            }
+            fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
+            if base_fixed_top.saturating_add(instr_box_h).saturating_add(fixed_after_box) > height {
+                spacer_after_instr = 0;
+            }
+        }
+
+        let sel = |idx: usize| {
+            if self.field == idx {
+                Style::default()
+                    .bg(crate::colors::selection())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }
+        };
+        let label = |idx: usize| {
+            if self.field == idx {
+                Style::default()
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }
+        };
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut cursor: u16 = 0;
+
+        // Top spacer, title, spacer
+        lines.push(Line::from(""));
+        cursor = cursor.saturating_add(1);
+        lines.push(Line::from(Span::styled(
+            format!("Agents » Edit Agent » {}", self.name),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        cursor = cursor.saturating_add(1);
+        lines.push(Line::from(""));
+        cursor = cursor.saturating_add(1);
+
+        // Enabled toggle + spacer
+        let chk = if self.enabled { "[on ]" } else { "[off]" };
+        lines.push(Line::from(vec![
+            Span::styled("Enabled:", label(0)),
+            Span::raw("  "),
+            Span::styled(chk, sel(0)),
+        ]));
+        cursor = cursor.saturating_add(1);
+        lines.push(Line::from(""));
+        cursor = cursor.saturating_add(1);
+
+        // Read-only params label and box
+        lines.push(Line::from(Span::styled("Read-only Params", label(1))));
+        cursor = cursor.saturating_add(1);
+        let ro_offset = cursor;
+        for _ in 0..single_box_h {
+            lines.push(Line::from(""));
+            cursor = cursor.saturating_add(1);
+        }
+        lines.push(Line::from(""));
+        cursor = cursor.saturating_add(1);
+
+        // Write params label and box
+        lines.push(Line::from(Span::styled("Write Params", label(2))));
+        cursor = cursor.saturating_add(1);
+        let wr_offset = cursor;
+        for _ in 0..single_box_h {
+            lines.push(Line::from(""));
+            cursor = cursor.saturating_add(1);
+        }
+        lines.push(Line::from(""));
+        cursor = cursor.saturating_add(1);
+
+        // Instructions label and box
+        lines.push(Line::from(Span::styled("Instructions", label(3))));
+        cursor = cursor.saturating_add(1);
+        let instr_offset = cursor;
+        for _ in 0..instr_box_h {
+            lines.push(Line::from(""));
+            cursor = cursor.saturating_add(1);
+        }
+
+        if spacer_after_instr > 0 {
+            lines.push(Line::from(""));
+            cursor = cursor.saturating_add(1);
+        }
+
+        // Buttons row
+        let save_style = sel(4).fg(crate::colors::success());
+        let cancel_style = sel(5).fg(crate::colors::text());
+        lines.push(Line::from(vec![
+            Span::styled("[ Save ]", save_style),
+            Span::raw("  "),
+            Span::styled("[ Cancel ]", cancel_style),
+        ]));
+        cursor = cursor.saturating_add(1);
+
+        if footer_lines > 0 {
+            lines.push(Line::from(""));
+            cursor = cursor.saturating_add(1);
+            lines.push(Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Enter", Style::default().fg(crate::colors::success())),
+                Span::styled(" Save/Close  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Esc", Style::default().fg(crate::colors::error())),
+                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
+            ]));
+            cursor = cursor.saturating_add(1);
+        }
+
+        debug_assert_eq!(cursor as usize, lines.len());
+
+        AgentEditorLayout {
+            lines,
+            ro_offset,
+            wr_offset,
+            instr_offset,
+            ro_height: single_box_h,
+            wr_height: single_box_h,
+            instr_height: instr_box_h,
+        }
+    }
 }
 
 impl<'a> BottomPaneView<'a> for AgentEditorView {
@@ -140,35 +333,9 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
     fn is_complete(&self) -> bool { self.complete }
 
     fn desired_height(&self, width: u16) -> u16 {
-        // Match the layout math used in the Command editor so buttons never clip.
-        // inner(width) = width-2 (borders); content = inner-1 (left pad used by Paragraph)
-        let inner_w = width.saturating_sub(2);
-        let content_w = inner_w.saturating_sub(1).max(10);
-        // Single‑line input boxes are 3 rows each (inner 1 + borders 2)
-        let single_box_h: u16 = 3;
-        // Instructions box: compute desired inner height from the field, cap to 8 rows visible
-        let instr_inner_w = content_w.saturating_sub(4); // borders(2) + padding(2)
-        let desired_instr_inner = self.instr.desired_height(instr_inner_w);
-        let instr_box_h = desired_instr_inner.min(8).saturating_add(2);
-        // Total content rows including consistent spacing above/below each section
-        let content_rows: u16 = 1  // top spacer
-            + 1  // title
-            + 1  // spacer after title
-            + 1  // Enabled row
-            + 1  // spacer
-            + 1  // RO label
-            + single_box_h
-            + 1  // spacer
-            + 1  // WR label
-            + single_box_h
-            + 1  // spacer
-            + 1  // Instructions label
-            + instr_box_h
-            + 1  // spacer
-            + 1  // buttons row
-            + 1; // bottom spacer
-        // Add the outer block borders (already counted by area height), but clamp to a sane range
-        content_rows.clamp(12, 60)
+        let content_width = width.saturating_sub(4).max(1);
+        let layout = self.layout(content_width, None);
+        layout.lines.len().saturating_add(2) as u16
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -184,63 +351,8 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
         let content = Rect { x: inner.x.saturating_add(1), y: inner.y, width: inner.width.saturating_sub(2), height: inner.height };
 
-        let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
-        let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        // Compute a responsive layout that guarantees the buttons are visible
-        // even on small terminals (e.g., 80x24). We cap the instructions box
-        // height to whatever fits after accounting for all fixed rows.
-        let top_block: u16 = 3;        // spacer + title + spacer
-        let enabled_block: u16 = 2;    // row + spacer
-        let ro_label: u16 = 1;
-        let ro_box: u16 = 3;           // single-line input box
-        let ro_spacer: u16 = 1;
-        let wr_label: u16 = 1;
-        let wr_box: u16 = 3;
-        let wr_spacer: u16 = 1;
-        let instr_label: u16 = 1;
-        let spacer_before_buttons: u16 = 1;
-        let buttons_block: u16 = 1;
-        // Footer (optional): blank + key hints; drop if there isn't room.
-        let footer_lines_default: u16 = 2;
-        // Base rows up to (but not including) the instructions box
-        let base_fixed_top = top_block + enabled_block + ro_label + ro_box + ro_spacer + wr_label + wr_box + wr_spacer + instr_label;
-        // Desired instructions inner height (without borders)
-        let instr_inner_width = content.width.saturating_sub(4);
-        let desired_instr_inner = self.instr.desired_height(instr_inner_width).min(8);
-        let desired_instr_box_h = desired_instr_inner.saturating_add(2); // add borders
-
-        // Compute how many rows remain and choose the largest box height that keeps buttons visible.
-        let mut footer_lines = footer_lines_default;
-        let mut ih = desired_instr_box_h;
-        let fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
-        if base_fixed_top.saturating_add(ih).saturating_add(fixed_after_box) > content.height {
-            // First, try dropping footer entirely
-            footer_lines = 0;
-        }
-        let fixed_after_box = spacer_before_buttons + buttons_block + footer_lines;
-        if base_fixed_top.saturating_add(ih).saturating_add(fixed_after_box) > content.height {
-            // Reduce the instructions box height as needed, with a minimum of 3 (borders + 1 line)
-            let min_ih: u16 = 3;
-            let available_for_box = content
-                .height
-                .saturating_sub(base_fixed_top)
-                .saturating_sub(fixed_after_box);
-            ih = ih.min(available_for_box).max(min_ih);
-        }
-        // As a last resort, if even min layout doesn't fit, clamp ih and spacer to keep buttons visible.
-        let mut spacer_before_buttons_actual = spacer_before_buttons;
-        if base_fixed_top.saturating_add(ih).saturating_add(spacer_before_buttons_actual + buttons_block + footer_lines) > content.height {
-            spacer_before_buttons_actual = 0;
-        }
-
-        // Top spacer then bold breadcrumb‑style title like the command editor
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(format!("Agents » Edit Agent » {}", self.name), Style::default().add_modifier(Modifier::BOLD))));
-        lines.push(Line::from(""));
-
         if !self.installed {
+            let mut lines: Vec<Line<'static>> = Vec::new();
             lines.push(Line::from(Span::styled("Not installed", Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD))));
             lines.push(Line::from(Span::styled(self.install_hint.clone(), Style::default().fg(crate::colors::text_dim()))));
             lines.push(Line::from(""));
@@ -261,41 +373,8 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
             return;
         }
 
-        // Enabled toggle
-        let chk = if self.enabled { "[on ]" } else { "[off]" };
-        lines.push(Line::from(vec![Span::styled("Enabled:", label(0)), Span::raw("  "), Span::styled(chk, sel(0))]));
-        lines.push(Line::from(""));
-
-        // Reserve single-line boxes for params (3 rows each) with one blank spacer between groups
-        let single_box_h: u16 = 3;
-        lines.push(Line::from(Span::styled("Read-only Params", label(1))));
-        for _ in 0..single_box_h { lines.push(Line::from("")); }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Write Params", label(2))));
-        for _ in 0..single_box_h { lines.push(Line::from("")); }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Instructions", label(3))));
-        // Reserve lines for the instructions box based on computed `ih`
-        for _ in 0..ih { lines.push(Line::from("")); }
-        if spacer_before_buttons_actual > 0 { lines.push(Line::from("")); }
-
-        // Buttons
-        let save_style = sel(4).fg(crate::colors::success());
-        let cancel_style = sel(5).fg(crate::colors::text());
-        lines.push(Line::from(vec![Span::styled("[ Save ]", save_style), Span::raw("  "), Span::styled("[ Cancel ]", cancel_style)]));
-
-        // Footer (optional, only when room exists)
-        if footer_lines > 0 {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Enter", Style::default().fg(crate::colors::success())),
-                Span::styled(" Save/Close  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
-            ]));
-        }
+        let layout = self.layout(content.width, Some(content.height));
+        let AgentEditorLayout { lines, ro_offset, wr_offset, instr_offset, ro_height, wr_height, instr_height } = layout;
 
         Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -304,42 +383,94 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
             .render(content, buf);
 
         // Draw input boxes at the same y offsets we reserved above
-        let mut y = content.y; // start at top of content
-        // Skip top spacer + title + spacer
-        y = y.saturating_add(top_block);
-        // Enabled row + spacer
-        y = y.saturating_add(enabled_block);
-
-        // RO params box (3 rows)
-        let ro_rect = Rect { x: content.x, y, width: content.width, height: single_box_h };
+        let ro_rect = Rect { x: content.x, y: content.y.saturating_add(ro_offset), width: content.width, height: ro_height };
         let ro_block = Block::default()
             .borders(Borders::ALL)
             .title(Line::from(" Read-only Params "))
             .border_style(if self.field == 1 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let ro_inner = ro_block.inner(ro_rect).inner(Margin::new(1, 0));
+        let ro_inner_rect = ro_block.inner(ro_rect);
+        let ro_inner = ro_inner_rect.inner(Margin::new(1, 0));
         ro_block.render(ro_rect, buf);
+        Self::clear_rect(buf, ro_inner_rect);
         self.params_ro.render(ro_inner, buf, self.field == 1);
-        // After RO box + spacer
-        y = y.saturating_add(single_box_h + 1);
 
         // WR params box (3 rows)
-        let wr_rect = Rect { x: content.x, y, width: content.width, height: single_box_h };
+        let wr_rect = Rect { x: content.x, y: content.y.saturating_add(wr_offset), width: content.width, height: wr_height };
         let wr_block = Block::default()
             .borders(Borders::ALL)
             .title(Line::from(" Write Params "))
             .border_style(if self.field == 2 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
-        let wr_inner = wr_block.inner(wr_rect).inner(Margin::new(1, 0));
+        let wr_inner_rect = wr_block.inner(wr_rect);
+        let wr_inner = wr_inner_rect.inner(Margin::new(1, 0));
         wr_block.render(wr_rect, buf);
+        Self::clear_rect(buf, wr_inner_rect);
         self.params_wr.render(wr_inner, buf, self.field == 2);
-        // After WR box + spacer
-        y = y.saturating_add(single_box_h + 1);
 
         // Instructions (multi-line; height consistent with reserved space above)
-        let instr_rect = Rect { x: content.x, y, width: content.width, height: ih };
+        let instr_rect = Rect { x: content.x, y: content.y.saturating_add(instr_offset), width: content.width, height: instr_height };
         let instr_block = Block::default().borders(Borders::ALL).border_style(if self.field == 3 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) });
         let instr_block = instr_block.title(Line::from(" Instructions "));
-        let instr_inner = instr_block.inner(instr_rect).inner(Margin::new(1, 0));
+        let instr_inner_rect = instr_block.inner(instr_rect);
+        let instr_inner = instr_inner_rect.inner(Margin::new(1, 0));
         instr_block.render(instr_rect, buf);
+        Self::clear_rect(buf, instr_inner_rect);
         self.instr.render(instr_inner, buf, self.field == 3);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{buffer::Buffer, layout::Rect};
+    use std::sync::mpsc::channel;
+
+    #[test]
+    fn write_params_margin_stays_clear() {
+        let (high_tx, _high_rx) = channel();
+        let (bulk_tx, _bulk_rx) = channel();
+        let sender = AppEventSender::new_dual(high_tx, bulk_tx);
+        let view = AgentEditorView::new(
+            "claude".into(),
+            true,
+            None,
+            Some(vec!["--dangerously-skip-permissions".into()]),
+            None,
+            "claude".into(),
+            sender,
+        );
+
+        let area = Rect { x: 0, y: 0, width: 80, height: 24 };
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+
+        let preferred_layout = view.layout(area.width.saturating_sub(4), None);
+        assert_eq!(view.desired_height(area.width), preferred_layout.lines.len().saturating_add(2) as u16);
+
+        let spacer_idx = (preferred_layout.instr_offset + preferred_layout.instr_height) as usize;
+        assert!(preferred_layout.lines[spacer_idx].spans.iter().all(|span| span.content.trim().is_empty()));
+        let buttons_idx = spacer_idx + 1;
+        let buttons_line = &preferred_layout.lines[buttons_idx];
+        let buttons_text: String = buttons_line
+            .spans
+            .iter()
+            .map(|span| span.content.clone().into_owned())
+            .collect();
+        assert!(buttons_text.contains("[ Save ]"));
+
+        let mut found = false;
+        for y in area.y..area.y + area.height {
+            let mut row = String::with_capacity(area.width as usize);
+            for x in area.x..area.x + area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if let Some(idx) = row.find("--dangerously-skip-permissions") {
+                assert!(idx > 0, "text unexpectedly starts at column 0");
+                let prev = row[..idx].chars().last();
+                assert_eq!(prev, Some(' '));
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "write params text not found in rendered buffer");
     }
 }
