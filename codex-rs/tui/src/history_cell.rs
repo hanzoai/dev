@@ -414,7 +414,7 @@ impl ExploreEntry {
             ExploreSummary::List { path } => {
                 let target = path.as_ref().cloned().unwrap_or_else(|| "./".to_string());
                 vec![Span::styled(
-                    format!("in {}", target),
+                    format!("{}", target),
                     Style::default().fg(crate::colors::text_dim()),
                 )]
             }
@@ -2613,10 +2613,10 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("List".to_string(), format!("in {}", display_p))
+                        ("List".to_string(), format!("{}", display_p))
                     }
                 }
-                None => ("List".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Make search terms human-readable:
@@ -2877,7 +2877,7 @@ fn exec_render_parts_parsed(
         pre.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                format!("in {display_p}"),
+                format!("{display_p}"),
                 Style::default().fg(crate::colors::text()),
             ),
         ]));
@@ -5519,10 +5519,10 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("List".to_string(), format!("in {display_p}"))
+                        ("List".to_string(), format!("{display_p}"))
                     }
                 }
-                None => ("List".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
@@ -5791,7 +5791,7 @@ fn new_parsed_command(
         lines.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                format!("in {display_p}"),
+                format!("{display_p}"),
                 Style::default().fg(crate::colors::text()),
             ),
         ]));
