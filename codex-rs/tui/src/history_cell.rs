@@ -1,5 +1,8 @@
 use crate::diff_render::create_diff_summary_with_width;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
 use crate::slash_command::SlashCommand;
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
@@ -31,13 +34,14 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::{Component, Path, PathBuf};
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tracing::error;
-use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
 // ==================== Core Types ====================
 
@@ -92,7 +96,9 @@ pub(crate) enum ExecAction {
     Run,
 }
 
-pub(crate) fn action_enum_from_parsed(parsed: &Vec<codex_core::parse_command::ParsedCommand>) -> ExecAction {
+pub(crate) fn action_enum_from_parsed(
+    parsed: &Vec<codex_core::parse_command::ParsedCommand>,
+) -> ExecAction {
     use codex_core::parse_command::ParsedCommand;
     for p in parsed {
         match p {
@@ -262,7 +268,8 @@ pub(crate) trait HistoryCell {
                 }
             }
             HistoryCellType::Patch { .. } => Some("↯"),
-            HistoryCellType::PlanUpdate => Some("◔"), // final glyph will be chosen in header line
+            // Plan updates supply their own gutter glyph dynamically.
+            HistoryCellType::PlanUpdate => None,
             HistoryCellType::BackgroundEvent => Some("»"),
             HistoryCellType::Notice => Some("★"),
             HistoryCellType::Diff => Some("↯"),
@@ -338,15 +345,27 @@ impl HistoryCell for Box<dyn HistoryCell> {
 pub(crate) enum ExploreEntryStatus {
     Running,
     Success,
+    NotFound,
     Error { exit_code: Option<i32> },
 }
 
 #[derive(Clone)]
 enum ExploreSummary {
-    Search { query: Option<String>, path: Option<String> },
-    List { path: Option<String> },
-    Read { display_path: String, annotation: Option<String>, range: Option<(u32, u32)> },
-    Fallback { text: String },
+    Search {
+        query: Option<String>,
+        path: Option<String>,
+    },
+    List {
+        path: Option<String>,
+    },
+    Read {
+        display_path: String,
+        annotation: Option<String>,
+        range: Option<(u32, u32)>,
+    },
+    Fallback {
+        text: String,
+    },
 }
 
 #[derive(Clone)]
@@ -360,7 +379,7 @@ impl ExploreEntry {
     fn label(&self) -> &'static str {
         match self.action {
             ExecAction::Read => "Read",
-            ExecAction::Search => "Searched for",
+            ExecAction::Search => "Searched",
             ExecAction::List => "List",
             ExecAction::Run => "Run",
         }
@@ -372,12 +391,15 @@ impl ExploreEntry {
                 let mut spans = Vec::new();
                 if let Some(q) = query {
                     if !q.is_empty() {
-                        spans.push(Span::styled(q.clone(), Style::default().fg(crate::colors::text())));
+                        spans.push(Span::styled(
+                            q.clone(),
+                            Style::default().fg(crate::colors::text()),
+                        ));
                     }
                 }
                 if let Some(p) = path {
                     spans.push(Span::styled(
-                        format!("in {}", p),
+                        format!(" in {}", p),
                         Style::default().fg(crate::colors::text_dim()),
                     ));
                 }
@@ -390,16 +412,17 @@ impl ExploreEntry {
                 spans
             }
             ExploreSummary::List { path } => {
-                let target = path
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_else(|| "./".to_string());
+                let target = path.as_ref().cloned().unwrap_or_else(|| "./".to_string());
                 vec![Span::styled(
                     format!("in {}", target),
                     Style::default().fg(crate::colors::text_dim()),
                 )]
             }
-            ExploreSummary::Read { display_path, annotation, .. } => {
+            ExploreSummary::Read {
+                display_path,
+                annotation,
+                ..
+            } => {
                 let mut spans = vec![Span::styled(
                     display_path.clone(),
                     Style::default().fg(crate::colors::text()),
@@ -541,7 +564,9 @@ pub(crate) struct ExploreAggregationCell {
 
 impl ExploreAggregationCell {
     pub(crate) fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     pub(crate) fn push_from_parsed(
@@ -556,9 +581,14 @@ impl ExploreAggregationCell {
             ExecAction::Search => parsed.iter().find_map(|p| match p {
                 ParsedCommand::Search { query, path, cmd } => {
                     let formatted_path = format_search_target(path.as_deref(), cwd, session_root);
-                    let pretty_query = query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
-                        if query.is_none() { Some(cmd.clone()) } else { None }
-                    });
+                    let pretty_query =
+                        query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
+                            if query.is_none() {
+                                Some(cmd.clone())
+                            } else {
+                                None
+                            }
+                        });
                     Some(ExploreSummary::Search {
                         query: pretty_query,
                         path: formatted_path,
@@ -602,7 +632,12 @@ impl ExploreAggregationCell {
 
         let summary = summary?;
 
-        if let ExploreSummary::Read { display_path, annotation, range } = &summary {
+        if let ExploreSummary::Read {
+            display_path,
+            annotation,
+            range,
+        } = &summary
+        {
             let path_key = display_path.clone();
             let annot = annotation.clone();
             let range_val = *range;
@@ -618,7 +653,8 @@ impl ExploreAggregationCell {
                             (Some((es, ee)), Some((ns, ne))) => {
                                 if ns <= es && ne >= ee {
                                     *existing_range = Some((ns, ne));
-                                    *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                    *existing_ann =
+                                        annot.clone().or_else(|| annotation_for_range(ns, ne));
                                     true
                                 } else if es <= ns && ee >= ne {
                                     true
@@ -636,7 +672,8 @@ impl ExploreAggregationCell {
                             }
                             (None, Some((ns, ne))) => {
                                 *existing_range = Some((ns, ne));
-                                *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                *existing_ann =
+                                    annot.clone().or_else(|| annotation_for_range(ns, ne));
                                 true
                             }
                             (Some(_), None) => {
@@ -662,7 +699,11 @@ impl ExploreAggregationCell {
             }
         }
 
-        self.entries.push(ExploreEntry { action, summary, status });
+        self.entries.push(ExploreEntry {
+            action,
+            summary,
+            status,
+        });
         Some(self.entries.len().saturating_sub(1))
     }
 
@@ -684,8 +725,12 @@ impl ExploreAggregationCell {
 }
 
 impl HistoryCell for ExploreAggregationCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Exec {
             kind: ExecKind::Search,
@@ -723,6 +768,10 @@ impl HistoryCell for ExploreAggregationCell {
                     "…",
                     Style::default().fg(crate::colors::text_dim()),
                 )),
+                ExploreEntryStatus::NotFound => spans.push(Span::styled(
+                    " (not found)",
+                    Style::default().fg(crate::colors::text_dim()),
+                )),
                 ExploreEntryStatus::Error { exit_code } => {
                     let msg = exit_code
                         .map(|code| format!(" (exit {})", code))
@@ -745,6 +794,10 @@ impl HistoryCell for ExploreAggregationCell {
             .line_count(width)
             .try_into()
             .unwrap_or(0)
+    }
+
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -845,6 +898,33 @@ impl HistoryCell for PlainHistoryCell {
     }
 }
 
+pub(crate) struct PlanUpdateCell {
+    lines: Vec<Line<'static>>,
+    icon: &'static str,
+}
+
+impl HistoryCell for PlanUpdateCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::PlanUpdate
+    }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        Some(self.icon)
+    }
+}
+
 // ==================== ExecCell ====================
 
 pub(crate) struct ExecCell {
@@ -857,12 +937,16 @@ pub(crate) struct ExecCell {
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     // Cached per-width wrap totals (rows) for finalized execs
-    cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>, 
+    cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>,
 }
 
 // Cache of wrapped-row totals for ExecCell at a given width.
 #[derive(Clone, Copy)]
-struct ExecWrapCache { width: u16, pre_total: u16, out_total: u16 }
+struct ExecWrapCache {
+    width: u16,
+    pre_total: u16,
+    out_total: u16,
+}
 
 // ==================== AssistantMarkdownCell ====================
 // Stores raw assistant markdown and rebuilds on demand (e.g., theme/syntax changes)
@@ -875,7 +959,7 @@ pub(crate) struct AssistantMarkdownCell {
     // Pre-rendered lines (first line is a hidden "codex" header)
     pub(crate) lines: Vec<Line<'static>>, // includes hidden header "codex"
     // Cached per-width wrap plan to avoid re-segmentation and re-measure
-    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>, 
+    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>,
 }
 
 impl AssistantMarkdownCell {
@@ -942,25 +1026,47 @@ impl AssistantMarkdownCell {
         let mut iter = self.display_lines_trimmed().into_iter().peekable();
         while let Some(line) = iter.next() {
             if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                if !text_buf.is_empty() {
+                    segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                }
                 let mut chunk = vec![line];
                 while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
+                    if crate::render::line_utils::is_code_block_painted(n) {
+                        chunk.push(iter.next().unwrap());
+                    } else {
+                        break;
+                    }
                 }
                 // Remove language sentinel and trim blank padding rows (as in render)
                 if let Some(first) = chunk.first() {
                     let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    if flat.contains("⟦LANG:") { let _ = chunk.remove(0); }
+                    if flat.contains("⟦LANG:") {
+                        let _ = chunk.remove(0);
+                    }
                 }
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.remove(0); }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.pop(); }
+                while chunk
+                    .first()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    let _ = chunk.remove(0);
+                }
+                while chunk
+                    .last()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    let _ = chunk.pop();
+                }
                 segs.push(AssistantSeg::Code(chunk));
                 continue;
             }
             if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                if !text_buf.is_empty() {
+                    segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                }
                 let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
+                    std::iter::repeat('─')
+                        .take(text_wrap_width as usize)
+                        .collect::<String>(),
                     Style::default().fg(crate::colors::assistant_hr()),
                 ));
                 segs.push(AssistantSeg::Bullet(vec![hr]));
@@ -968,7 +1074,9 @@ impl AssistantMarkdownCell {
             }
             if text_wrap_width > 4 {
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                    if !text_buf.is_empty() {
+                        segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                    }
                     segs.push(AssistantSeg::Bullet(wrap_bullet_line(
                         line,
                         indent_spaces,
@@ -980,7 +1088,9 @@ impl AssistantMarkdownCell {
             }
             text_buf.push(line);
         }
-        if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+        if !text_buf.is_empty() {
+            segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+        }
 
         // Precompute rows per segment and total with top/bottom padding
         let mut seg_rows: Vec<u16> = Vec::with_capacity(segs.len());
@@ -999,7 +1109,12 @@ impl AssistantMarkdownCell {
             total = total.saturating_add(rows);
         }
         total = total.saturating_add(2); // top+bottom padding
-        let cache = AssistantLayoutCache { width, segs, seg_rows, total_rows_with_padding: total };
+        let cache = AssistantLayoutCache {
+            width,
+            segs,
+            seg_rows,
+            total_rows_with_padding: total,
+        };
         *self.cached_layout.borrow_mut() = Some(cache.clone());
         cache
     }
@@ -1059,7 +1174,11 @@ impl HistoryCell for AssistantMarkdownCell {
 
         // Helpers
         #[derive(Debug, Clone)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
+        enum Seg {
+            Text(Vec<Line<'static>>),
+            Bullet(Vec<Line<'static>>),
+            Code(Vec<Line<'static>>),
+        }
         use unicode_width::UnicodeWidthStr as UW;
         let measure_line =
             |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
@@ -1103,11 +1222,21 @@ impl HistoryCell for AssistantMarkdownCell {
                 }
                 Seg::Bullet(lines) => {
                     let total = lines.len() as u16;
-                    if *skip >= total { *skip -= total; return; }
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
+                    if draw_h == 0 {
+                        return;
+                    }
+                    let rect = Rect {
+                        x: area.x,
+                        y: *y,
+                        width: area.width,
+                        height: draw_h,
+                    };
                     let txt = Text::from(lines.clone());
                     Paragraph::new(txt)
                         .block(Block::default().style(bg_style))
@@ -1166,9 +1295,7 @@ impl HistoryCell for AssistantMarkdownCell {
                         bottom_border -= drop;
                     }
                     // Compute drawable height in this pass
-                    let visible = top_border
-                        + (lines.len() as u16 - code_skip)
-                        + bottom_border;
+                    let visible = top_border + (lines.len() as u16 - code_skip) + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
                         return;
@@ -1189,7 +1316,12 @@ impl HistoryCell for AssistantMarkdownCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
+                        .padding(Padding {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                        });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
@@ -1396,7 +1528,9 @@ impl ExecCell {
     fn ensure_wrap_totals(&self, width: u16) -> (u16, u16) {
         if self.output.is_some() {
             if let Some(cache) = self.cached_wrap.borrow().as_ref() {
-                if cache.width == width { return (cache.pre_total, cache.out_total); }
+                if cache.width == width {
+                    return (cache.pre_total, cache.out_total);
+                }
             }
         }
 
@@ -1408,19 +1542,25 @@ impl ExecCell {
         let out_wrap_width = width.saturating_sub(2);
 
         fn ascii_rows(lines: &[Line<'_>], wrap_w: u16) -> Option<u16> {
-            if wrap_w == 0 { return Some(0); }
+            if wrap_w == 0 {
+                return Some(0);
+            }
             let w = wrap_w as usize;
             let mut rows: u64 = 0;
             for line in lines {
                 let mut len = 0usize;
                 for sp in &line.spans {
                     let s = sp.content.as_ref();
-                    if !s.is_ascii() { return None; }
+                    if !s.is_ascii() {
+                        return None;
+                    }
                     len += s.len();
                 }
                 let row = if len == 0 { 1 } else { (len + w - 1) / w };
                 rows = rows.saturating_add(row as u64);
-                if rows > u16::MAX as u64 { return Some(u16::MAX); }
+                if rows > u16::MAX as u64 {
+                    return Some(u16::MAX);
+                }
             }
             Some(rows as u16)
         }
@@ -1441,7 +1581,11 @@ impl ExecCell {
         });
 
         if self.output.is_some() {
-            *self.cached_wrap.borrow_mut() = Some(ExecWrapCache { width, pre_total, out_total });
+            *self.cached_wrap.borrow_mut() = Some(ExecWrapCache {
+                width,
+                pre_total,
+                out_total,
+            });
         }
         (pre_total, out_total)
     }
@@ -1760,16 +1904,31 @@ mod tests {
     #[test]
     fn action_enum_from_parsed_variants() {
         // Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
+        let parsed = vec![ParsedCommand::Read {
+            name: "foo.txt".into(),
+            cmd: "sed -n '1,10p' foo.txt".into(),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Read));
         // Search
-        let parsed = vec![ParsedCommand::Search { query: Some("term".into()), path: Some("src".into()), cmd: "rg term src".into() }];
-        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Search));
-        // List files
-        let parsed = vec![ParsedCommand::ListFiles { cmd: "ls -la".into(), path: Some(".".into()) }];
+        let parsed = vec![ParsedCommand::Search {
+            query: Some("term".into()),
+            path: Some("src".into()),
+            cmd: "rg term src".into(),
+        }];
+        assert!(matches!(
+            action_enum_from_parsed(&parsed),
+            ExecAction::Search
+        ));
+        // Listå
+        let parsed = vec![ParsedCommand::ListFiles {
+            cmd: "ls -la".into(),
+            path: Some(".".into()),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::List));
         // Default → Run
-        let parsed = vec![ParsedCommand::Unknown { cmd: "echo hi".into() }];
+        let parsed = vec![ParsedCommand::Unknown {
+            cmd: "echo hi".into(),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Run));
         // Empty → Run
         let parsed: Vec<ParsedCommand> = vec![];
@@ -1779,16 +1938,27 @@ mod tests {
     #[test]
     fn merged_exec_cell_push_and_kind() {
         // Build two completed ExecCell instances for Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
+        let parsed = vec![ParsedCommand::Read {
+            name: "foo.txt".into(),
+            cmd: "sed -n '1,10p' foo.txt".into(),
+        }];
         let e1 = new_completed_exec_command(
             vec!["sed".into(), "-n".into(), "1,10p".into(), "foo.txt".into()],
             parsed.clone(),
-            CommandOutput { exit_code: 0, stdout: "ok".into(), stderr: String::new() },
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok".into(),
+                stderr: String::new(),
+            },
         );
         let e2 = new_completed_exec_command(
             vec!["sed".into(), "-n".into(), "11,20p".into(), "foo.txt".into()],
             parsed,
-            CommandOutput { exit_code: 0, stdout: "ok2".into(), stderr: String::new() },
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok2".into(),
+                stderr: String::new(),
+            },
         );
         let mut merged = MergedExecCell::from_exec(&e1);
         assert!(matches!(merged.exec_kind(), ExecKind::Read));
@@ -1841,13 +2011,13 @@ impl HistoryCell for MergedExecCell {
     }
     fn desired_height(&self, width: u16) -> u16 {
         // Match custom_render_with_skip exactly:
-        // - Single shared header row (1)
+        // - Shared header row for non-Run kinds (1)
         // - For each segment:
-        //   - Measure preamble after dropping the per-segment header
+        //   - Measure preamble after dropping the per-segment header when present
         //     and normalizing the leading "└ " prefix at full `width`.
         //   - Measure output inside a left-bordered block with left padding,
         //     which reduces the effective wrapping width by 2 columns.
-        let mut total: u16 = 1; // shared header (e.g., "Ran", "Read")
+        let mut total: u16 = if self.kind == ExecKind::Run { 0 } else { 1 };
         let pre_wrap_width = width;
         let out_wrap_width = width.saturating_sub(2);
 
@@ -1874,27 +2044,29 @@ impl HistoryCell for MergedExecCell {
         for (pre_raw, out_raw) in &self.segments {
             // Build preamble like the renderer: trim, drop first header line, ensure prefix
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() {
+            if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
-            if let Some(first) = pre.first_mut() {
-                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                let has_corner = flat.trim_start().starts_with("└ ");
-                let has_spaced_corner = flat.trim_start().starts_with("  └ ");
-                if !added_corner {
-                    if !(has_corner || has_spaced_corner) {
-                        first.spans.insert(
-                            0,
-                            Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
-                        );
-                    }
-                    added_corner = true;
-                } else {
-                    // For subsequent segments, ensure no leading corner; use two spaces instead.
-                    if let Some(sp0) = first.spans.get_mut(0) {
-                        if sp0.content.as_ref() == "└ " {
-                            sp0.content = "  ".into();
-                            sp0.style = sp0.style.add_modifier(Modifier::DIM);
+            if self.kind != ExecKind::Run {
+                if let Some(first) = pre.first_mut() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let has_corner = flat.trim_start().starts_with("└ ");
+                    let has_spaced_corner = flat.trim_start().starts_with("  └ ");
+                    if !added_corner {
+                        if !(has_corner || has_spaced_corner) {
+                            first.spans.insert(
+                                0,
+                                Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
+                            );
+                        }
+                        added_corner = true;
+                    } else {
+                        // For subsequent segments, ensure no leading corner; use two spaces instead.
+                        if let Some(sp0) = first.spans.get_mut(0) {
+                            if sp0.content.as_ref() == "└ " {
+                                sp0.content = "  ".into();
+                                sp0.style = sp0.style.add_modifier(Modifier::DIM);
+                            }
                         }
                     }
                 }
@@ -1931,7 +2103,7 @@ impl HistoryCell for MergedExecCell {
         true
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
-        // Single shared header (e.g., "Ran") then each segment's command + output.
+        // Shared header for non-Run kinds (e.g., "Read") then each segment's command + output.
         let bg = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
@@ -1944,49 +2116,54 @@ impl HistoryCell for MergedExecCell {
 
         // Build one header line based on exec kind
         let header_line = match self.kind {
-            ExecKind::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-            ExecKind::Search => {
-                Line::styled("Searched for", Style::default().fg(crate::colors::text_dim()))
-            }
-            ExecKind::List => {
-                Line::styled("List Files", Style::default().fg(crate::colors::text()))
-            }
-            ExecKind::Run => Line::styled(
-                "Ran",
-                Style::default()
-                    .fg(crate::colors::text_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
+            ExecKind::Read => Some(Line::styled(
+                "Read",
+                Style::default().fg(crate::colors::text()),
+            )),
+            ExecKind::Search => Some(Line::styled(
+                "Searched",
+                Style::default().fg(crate::colors::text_dim()),
+            )),
+            ExecKind::List => Some(Line::styled(
+                "List",
+                Style::default().fg(crate::colors::text()),
+            )),
+            ExecKind::Run => None,
         };
 
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
 
         // Render or skip header line
-        if skip_rows == 0 {
-            if cur_y < end_y {
-                let txt = Text::from(vec![header_line.clone()]);
-                Paragraph::new(txt)
-                    .block(Block::default().style(bg))
-                    .wrap(Wrap { trim: false })
-                    .render(
-                        Rect {
-                            x: area.x,
-                            y: cur_y,
-                            width: area.width,
-                            height: 1,
-                        },
-                        buf,
-                    );
-                cur_y = cur_y.saturating_add(1);
+        if let Some(header_line) = header_line {
+            if skip_rows == 0 {
+                if cur_y < end_y {
+                    let txt = Text::from(vec![header_line]);
+                    Paragraph::new(txt)
+                        .block(Block::default().style(bg))
+                        .wrap(Wrap { trim: false })
+                        .render(
+                            Rect {
+                                x: area.x,
+                                y: cur_y,
+                                width: area.width,
+                                height: 1,
+                            },
+                            buf,
+                        );
+                    cur_y = cur_y.saturating_add(1);
+                }
+            } else {
+                skip_rows = skip_rows.saturating_sub(1);
             }
-        } else {
-            skip_rows = skip_rows.saturating_sub(1);
         }
 
         // Helper: ensure only the very first preamble line across all segments gets the corner
         let mut added_corner: bool = false;
         let mut ensure_prefix = |lines: &mut Vec<Line<'static>>| {
+            if self.kind == ExecKind::Run {
+                return;
+            }
             if let Some(first) = lines.first_mut() {
                 let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                 let has_corner = flat.trim_start().starts_with("└ ");
@@ -2138,7 +2315,7 @@ impl HistoryCell for MergedExecCell {
             }
             // Drop the per-segment header line (first element)
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() {
+            if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
             // Normalize command prefix for generic execs (only on the first segment)
@@ -2246,53 +2423,46 @@ fn exec_render_parts_generic(
     let mut highlighted_cmd: Vec<Line<'static>> =
         crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
 
-    let header_line = match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            Line::styled(
-                "Running...".to_string() + &duration_str,
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-        Some(o) if o.exit_code == 0 => Line::styled(
-            "Ran",
-            Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Some(_) => Line::styled(
-            "Ran",
-            Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-    };
+    let render_running_header = output.is_none();
 
     // Compute output first so we know whether to draw a downward corner on the command.
     let out = output_lines(output, false, false);
     let has_output = !trim_empty_lines(out.clone()).is_empty();
 
-    pre.push(header_line.clone());
-    if let Some(first) = highlighted_cmd.first_mut() {
-        // Append duration (dim) to the first highlighted line when running
-        if output.is_none() && start_time.is_some() {
-            let elapsed = start_time.unwrap().elapsed();
-            let duration_str = format!(" ({})", format_duration(elapsed));
-            first.spans.push(Span::styled(
-                duration_str,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
+    if render_running_header {
+        let duration_str = if let Some(start) = start_time {
+            let elapsed = start.elapsed();
+            format!(" ({})", format_duration(elapsed))
+        } else {
+            String::new()
+        };
+        pre.push(Line::styled(
+            format!("Running...{duration_str}"),
+            Style::default()
+                .fg(crate::colors::info())
+                .add_modifier(Modifier::BOLD),
+        ));
+        if let Some(first) = highlighted_cmd.first_mut() {
+            if start_time.is_some() {
+                let elapsed = start_time.unwrap().elapsed();
+                let duration_str = format!(" ({})", format_duration(elapsed));
+                first.spans.push(Span::styled(
+                    duration_str,
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
+            }
         }
-        // Corner is added on the last command line, not the first
     }
-    if has_output {
+
+    if output.is_some() {
+        for line in highlighted_cmd.iter_mut() {
+            for span in line.spans.iter_mut() {
+                span.style = span.style.fg(crate::colors::text_bright());
+            }
+        }
+    }
+
+    if render_running_header && has_output {
         if let Some(last) = highlighted_cmd.last_mut() {
             last.spans.insert(
                 0,
@@ -2312,74 +2482,91 @@ fn exec_render_parts_parsed(
 ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let action = action_enum_from_parsed(&parsed_commands.to_vec());
     let ctx_path = first_context_path(parsed_commands);
-    let mut pre: Vec<Line<'static>> = vec![match output {
-        None => {
-            match action {
-                // For these informational actions, remove the transient “running” style
-                // and render exactly like the finalized state (no duration, normal text color).
-                ExecAction::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-                ExecAction::Search => Line::styled("Searched for", Style::default().fg(crate::colors::text_dim())),
-                ExecAction::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
-                // Keep rich running header for real Run commands
+    let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
+    let mut pre: Vec<Line<'static>> = Vec::new();
+    if !suppress_run_header {
+        let header_line = match output {
+            None => match action {
+                // For informational actions, render in their finalized style immediately.
+                ExecAction::Read => {
+                    Line::styled("Read", Style::default().fg(crate::colors::text()))
+                }
+                ExecAction::Search => {
+                    Line::styled("Searched", Style::default().fg(crate::colors::text_dim()))
+                }
+                ExecAction::List => {
+                    Line::styled("List", Style::default().fg(crate::colors::text()))
+                }
                 ExecAction::Run => {
                     let duration_str = if let Some(start) = start_time {
                         let elapsed = start.elapsed();
                         format!(" ({})", format_duration(elapsed))
-                    } else { String::new() };
+                    } else {
+                        String::new()
+                    };
                     let header = match &ctx_path {
                         Some(p) => format!("Running... in {}", p),
                         None => "Running...".to_string(),
                     };
                     Line::styled(
                         header + &duration_str,
-                        Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(crate::colors::info())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
+            },
+            Some(o) if o.exit_code == 0 => {
+                let done = match action {
+                    ExecAction::Read => "Read".to_string(),
+                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::List => "List".to_string(),
+                    ExecAction::Run => match &ctx_path {
+                        Some(p) => format!("Ran in {}", p),
+                        None => "Ran".to_string(),
+                    },
+                };
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    Line::styled(done, Style::default().fg(crate::colors::text_dim()))
+                } else {
+                    Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
                     )
                 }
             }
-        }
-        Some(o) if o.exit_code == 0 => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched for".to_string(),
-                ExecAction::List => "List".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {}", p),
-                    None => "Ran".to_string(),
-                },
-            };
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text_dim()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
+            Some(_) => {
+                let done = match action {
+                    ExecAction::Read => "Read".to_string(),
+                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::List => "List".to_string(),
+                    ExecAction::Run => match &ctx_path {
+                        Some(p) => format!("Ran in {}", p),
+                        None => "Ran".to_string(),
+                    },
+                };
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    Line::styled(done, Style::default().fg(crate::colors::text_dim()))
+                } else {
+                    Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
             }
-        }
-        Some(_) => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched for".to_string(),
-                ExecAction::List => "List".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {}", p),
-                    None => "Ran".to_string(),
-                },
-            };
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text_dim()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
-            }
-        }
-    }];
+        };
+        pre.push(header_line);
+    }
 
     // Reuse the same parsed-content rendering as new_parsed_command
     let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -2396,7 +2583,7 @@ fn exec_render_parts_parsed(
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
         ExecAction::Search => Some("Search"),
-        ExecAction::List => Some("List Files"),
+        ExecAction::List => Some("List"),
         ExecAction::Run => None, // run: allow a set of labels
     };
     for parsed in parsed_commands.iter() {
@@ -2418,10 +2605,10 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("List Files".to_string(), format!("in {}", display_p))
+                        ("List".to_string(), format!("in {}", display_p))
                     }
                 }
-                None => ("List Files".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "in ./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Make search terms human-readable:
@@ -2496,7 +2683,7 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("Search".to_string(), format!("in {}", display_p))
+                        ("Search".to_string(), format!(" in {}", display_p))
                     }
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
@@ -2512,9 +2699,8 @@ fn exec_render_parts_parsed(
                 } else {
                     ("Run".to_string(), cmd.clone())
                 }
-            }
-            // Noop variant not present in our core parser
-            // ParsedCommand::Noop { .. } => continue,
+            } // Noop variant not present in our core parser
+              // ParsedCommand::Noop { .. } => continue,
         };
         // Enforce per-action grouping: only keep entries matching this cell's action.
         if let Some(exp) = expected_label {
@@ -2532,11 +2718,20 @@ fn exec_render_parts_parsed(
             if line_text.is_empty() {
                 continue;
             }
-            let prefix = if !any_content_emitted { "└ " } else { "  " };
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::DIM),
-            )];
+            let prefix = if !any_content_emitted {
+                if suppress_run_header { "" } else { "└ " }
+            } else if suppress_run_header {
+                ""
+            } else {
+                "  "
+            };
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
             match label.as_str() {
                 "Search" => {
                     let remaining = line_text.to_string();
@@ -2623,7 +2818,7 @@ fn exec_render_parts_parsed(
                         ));
                     }
                 }
-                "List Files" => {
+                "List" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
@@ -2635,14 +2830,24 @@ fn exec_render_parts_parsed(
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
-                        // `highlight_code_block` returns exactly one line for single-line input.
-                        // Append the highlighted spans inline after the prefix.
-                        spans.extend(first.spans.drain(..));
+                        if output.is_some() {
+                            for s in first.spans.drain(..) {
+                                spans.push(Span::styled(
+                                    s.content.to_string(),
+                                    Style::default().fg(crate::colors::text_bright()),
+                                ));
+                            }
+                        } else {
+                            spans.extend(first.spans.drain(..));
+                        }
                     } else {
-                        // Fallback: plain text if highlighting yields nothing.
                         spans.push(Span::styled(
                             line_text.to_string(),
-                            Style::default().fg(crate::colors::text()),
+                            Style::default().fg(if output.is_some() {
+                                crate::colors::text_bright()
+                            } else {
+                                crate::colors::text()
+                            }),
                         ));
                     }
                 }
@@ -2652,18 +2857,25 @@ fn exec_render_parts_parsed(
         }
     }
 
-    // If this is a List Files cell and nothing emitted (e.g., suppressed due to matching Search path),
+    // If this is a List cell and nothing emitted (e.g., suppressed due to matching Search path),
     // still show a single contextual line so users can see where we listed.
     if matches!(action, ExecAction::List) && !any_content_emitted {
         let display_p = match &ctx_path {
             Some(p) if !p.is_empty() => {
-                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+                if p.ends_with('/') {
+                    p.to_string()
+                } else {
+                    format!("{p}/")
+                }
             }
             _ => "./".to_string(),
         };
         pre.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+            Span::styled(
+                format!("in {display_p}"),
+                Style::default().fg(crate::colors::text()),
+            ),
         ]));
     }
 
@@ -2676,19 +2888,34 @@ fn exec_render_parts_parsed(
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
-    use ratatui::style::{Modifier, Style};
+    use ratatui::style::Modifier;
+    use ratatui::style::Style;
     use ratatui::text::Span;
     // Nothing to do for empty/single line vectors
-    if lines.len() <= 1 { return; }
+    if lines.len() <= 1 {
+        return;
+    }
 
     // Parse a content line of the form
     //   "└ <file> (lines A to B)" or "  <file> (lines A to B)"
     // into (filename, start, end, prefix, original_index).
-    fn parse_read_line_with_index(idx: usize, line: &Line<'_>) -> Option<(String, u32, u32, String, usize)> {
-        if line.spans.is_empty() { return None; }
+    fn parse_read_line_with_index(
+        idx: usize,
+        line: &Line<'_>,
+    ) -> Option<(String, u32, u32, String, usize)> {
+        if line.spans.is_empty() {
+            return None;
+        }
         let prefix = line.spans[0].content.to_string();
-        if !(prefix == "└ " || prefix == "  ") { return None; }
-        let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+        if !(prefix == "└ " || prefix == "  ") {
+            return None;
+        }
+        let rest: String = line
+            .spans
+            .iter()
+            .skip(1)
+            .map(|s| s.content.as_ref())
+            .collect();
         if let Some(i) = rest.rfind(" (lines ") {
             let fname = rest[..i].to_string();
             let tail = &rest[i + 1..];
@@ -2707,7 +2934,11 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
     // Collect read ranges grouped by filename, preserving first-seen order.
     // Also track the earliest prefix to reuse when emitting a single line per file.
     #[derive(Default)]
-    struct FileRanges { prefix: String, first_index: usize, ranges: Vec<(u32, u32)> }
+    struct FileRanges {
+        prefix: String,
+        first_index: usize,
+        ranges: Vec<(u32, u32)>,
+    }
 
     let mut files: Vec<(String, FileRanges)> = Vec::new();
     let mut non_read_lines: Vec<Line<'static>> = Vec::new();
@@ -2718,25 +2949,39 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
             if let Some((_name, fr)) = files.iter_mut().find(|(n, _)| n == &fname) {
                 fr.ranges.push((a.min(b), a.max(b)));
                 // Keep earliest index as stable ordering anchor
-                if orig_idx < fr.first_index { fr.first_index = orig_idx; }
+                if orig_idx < fr.first_index {
+                    fr.first_index = orig_idx;
+                }
             } else {
-                files.push((fname, FileRanges { prefix, first_index: orig_idx, ranges: vec![(a.min(b), a.max(b))] }));
+                files.push((
+                    fname,
+                    FileRanges {
+                        prefix,
+                        first_index: orig_idx,
+                        ranges: vec![(a.min(b), a.max(b))],
+                    },
+                ));
             }
         } else {
             non_read_lines.push(line.clone());
         }
     }
 
-    if files.is_empty() { return; }
+    if files.is_empty() {
+        return;
+    }
 
     // For each file: merge overlapping/touching ranges; then sort ascending and emit one line.
     fn merge_and_sort(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
-        if v.len() <= 1 { return v; }
+        if v.len() <= 1 {
+            return v;
+        }
         v.sort_by_key(|(s, _)| *s);
         let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
         let mut cur = v[0];
         for &(s, e) in v.iter().skip(1) {
-            if s <= cur.1.saturating_add(1) { // touching or overlap
+            if s <= cur.1.saturating_add(1) {
+                // touching or overlap
                 cur.1 = cur.1.max(e);
             } else {
                 out.push(cur);
@@ -2753,7 +2998,12 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
 
     // Heuristic: preserve an initial header line that does not start with a connector.
     if !lines.is_empty() {
-        if lines[0].spans.first().map(|s| s.content.as_ref() != "└ " && s.content.as_ref() != "  ").unwrap_or(false) {
+        if lines[0]
+            .spans
+            .first()
+            .map(|s| s.content.as_ref() != "└ " && s.content.as_ref() != "  ")
+            .unwrap_or(false)
+        {
             rebuilt.push(lines[0].clone());
         }
     }
@@ -2768,7 +3018,9 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
         ann.push_str(" (");
         ann.push_str("lines ");
         for (i, (s, e)) in fr.ranges.iter().enumerate() {
-            if i > 0 { ann.push_str(", "); }
+            if i > 0 {
+                ann.push_str(", ");
+            }
             ann.push_str(&format!("{} to {}", s, e));
         }
         ann.push(')');
@@ -3195,10 +3447,15 @@ impl CollapsibleReasoningCell {
     ///   existing tail (overlap), ignoring ephemeral debug marker lines like
     ///   "[sN ...]" on both sides so markers don't break matching.
     pub fn append_lines_dedup(&mut self, mut new_lines: Vec<Line<'static>>) {
-        if new_lines.is_empty() { return; }
+        if new_lines.is_empty() {
+            return;
+        }
 
         let to_plain = |l: &Line<'_>| -> String {
-            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
         };
         let is_marker = |l: &Line<'_>| -> bool {
             let t = to_plain(l).trim().to_string();
@@ -3226,7 +3483,7 @@ impl CollapsibleReasoningCell {
         let mut overlap = 0usize;
         for k in (1..=max_overlap).rev() {
             if existing_plain.len() >= k && incoming_plain.len() >= k {
-                if existing_plain[existing_plain.len()-k..] == incoming_plain[..k] {
+                if existing_plain[existing_plain.len() - k..] == incoming_plain[..k] {
                     overlap = k;
                     break;
                 }
@@ -3253,7 +3510,9 @@ impl CollapsibleReasoningCell {
                 .last()
                 .map(|last| to_plain(last) == to_plain(&nl))
                 .unwrap_or(false);
-            if !dup { self.lines.push(nl); }
+            if !dup {
+                self.lines.push(nl);
+            }
         }
     }
 
@@ -3268,10 +3527,9 @@ impl CollapsibleReasoningCell {
             // Same rule as extract_section_titles: line is a heading if all spans are bold
             // (ignoring spans that are purely whitespace when trimmed).
             let is_title = !l.spans.is_empty()
-                && l
-                    .spans
-                    .iter()
-                    .all(|s| s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty());
+                && l.spans.iter().all(|s| {
+                    s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty()
+                });
             if is_title {
                 title_idxs.push(i);
                 let mut text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -3279,7 +3537,8 @@ impl CollapsibleReasoningCell {
                 // Reserve 1 col for the ellipsis when truncation occurs.
                 let maxw = 60usize;
                 if text.width() > maxw {
-                    let (prefix, _suffix, _w) = crate::live_wrap::take_prefix_by_width(&text, maxw.saturating_sub(1));
+                    let (prefix, _suffix, _w) =
+                        crate::live_wrap::take_prefix_by_width(&text, maxw.saturating_sub(1));
                     text = format!("{}…", prefix);
                 }
                 title_previews.push(text);
@@ -3288,7 +3547,16 @@ impl CollapsibleReasoningCell {
         let total = lines.len();
         let titles = title_previews.len();
         // Also record final line width to catch cut-offs
-        let lastw = lines.last().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().width()).unwrap_or(0);
+        let lastw = lines
+            .last()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+                    .width()
+            })
+            .unwrap_or(0);
         format!(
             "rtitles={} idx={:?} total_lines={} lastw={} prevs={:?}",
             titles, title_idxs, total, lastw, title_previews
@@ -3412,7 +3680,9 @@ impl CollapsibleReasoningCell {
             for l in lines.iter() {
                 let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
                 let trimmed = text.trim();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
                 titles.push(l.clone());
                 break;
             }
@@ -3495,7 +3765,9 @@ impl HistoryCell for CollapsibleReasoningCell {
         None
     }
 
-    fn has_custom_render(&self) -> bool { true }
+    fn has_custom_render(&self) -> bool {
+        true
+    }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Collapsed path: simple paragraph (titles only), already dimmed by extract_section_titles
@@ -3504,7 +3776,9 @@ impl HistoryCell for CollapsibleReasoningCell {
                 return;
             }
             // Clear background
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
             for y in area.y..area.y.saturating_add(area.height) {
                 for x in area.x..area.x.saturating_add(area.width) {
                     buf[(x, y)].set_char(' ').set_style(bg_style);
@@ -3549,7 +3823,12 @@ impl HistoryCell for CollapsibleReasoningCell {
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(crate::colors::border_dim()).bg(bg))
             .style(Style::default().bg(bg))
-            .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+            .padding(Padding {
+                left: 1,
+                right: 0,
+                top: 0,
+                bottom: 0,
+            });
 
         // Scroll across wrapped content considering reduced inner width (area.width - 2)
         Paragraph::new(text)
@@ -3597,7 +3876,9 @@ impl HistoryCell for StreamingContentCell {
     fn desired_height(&self, width: u16) -> u16 {
         let plan = self.ensure_stream_layout(width);
         let mut total = plan.total_rows_with_padding;
-        if self.show_ellipsis { total = total.saturating_add(1); }
+        if self.show_ellipsis {
+            total = total.saturating_add(1);
+        }
         total
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -3626,17 +3907,21 @@ impl HistoryCell for StreamingContentCell {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis()
-                / 200) as usize % FRAMES.len();
+                / 200) as usize
+                % FRAMES.len();
             let frame = FRAMES[frame_idx];
 
-            segs.push(AssistantSeg::Text(vec![
-                Line::styled(frame.to_string(), Style::default().fg(crate::colors::text_dim())),
-            ]));
-            seg_rows.push(Paragraph::new(Text::from(vec![Line::from(frame)]))
-                .wrap(Wrap { trim: false })
-                .line_count(text_wrap_width)
-                .try_into()
-                .unwrap_or(1));
+            segs.push(AssistantSeg::Text(vec![Line::styled(
+                frame.to_string(),
+                Style::default().fg(crate::colors::text_dim()),
+            )]));
+            seg_rows.push(
+                Paragraph::new(Text::from(vec![Line::from(frame)]))
+                    .wrap(Wrap { trim: false })
+                    .line_count(text_wrap_width)
+                    .try_into()
+                    .unwrap_or(1),
+            );
         }
 
         // Streaming-style top padding row
@@ -3650,7 +3935,11 @@ impl HistoryCell for StreamingContentCell {
 
         // Helpers
         #[derive(Debug, Clone)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
+        enum Seg {
+            Text(Vec<Line<'static>>),
+            Bullet(Vec<Line<'static>>),
+            Code(Vec<Line<'static>>),
+        }
         use unicode_width::UnicodeWidthStr as UW;
         let measure_line =
             |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
@@ -3692,11 +3981,21 @@ impl HistoryCell for StreamingContentCell {
                 }
                 Seg::Bullet(lines) => {
                     let total = lines.len() as u16;
-                    if *skip >= total { *skip -= total; return; }
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
+                    if draw_h == 0 {
+                        return;
+                    }
+                    let rect = Rect {
+                        x: area.x,
+                        y: *y,
+                        width: area.width,
+                        height: draw_h,
+                    };
                     let txt = Text::from(lines.clone());
                     Paragraph::new(txt)
                         .block(Block::default().style(bg_style))
@@ -3755,9 +4054,7 @@ impl HistoryCell for StreamingContentCell {
                         let drop = local_skip.min(bottom_border);
                         bottom_border -= drop;
                     }
-                    let visible = top_border
-                        + (lines.len() as u16 - code_skip)
-                        + bottom_border;
+                    let visible = top_border + (lines.len() as u16 - code_skip) + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
                         return;
@@ -3777,7 +4074,12 @@ impl HistoryCell for StreamingContentCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
+                        .padding(Padding {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                        });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
@@ -3837,13 +4139,22 @@ impl HistoryCell for StreamingContentCell {
         let has_leading_header = self
             .lines
             .first()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
-                .trim()
-                .eq_ignore_ascii_case("codex"))
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+                    .trim()
+                    .eq_ignore_ascii_case("codex")
+            })
             .unwrap_or(false);
 
         if has_leading_header {
-            if self.lines.len() == 1 { Vec::new() } else { self.lines[1..].to_vec() }
+            if self.lines.len() == 1 {
+                Vec::new()
+            } else {
+                self.lines[1..].to_vec()
+            }
         } else {
             self.lines.clone()
         }
@@ -3852,7 +4163,9 @@ impl HistoryCell for StreamingContentCell {
 
 impl StreamingContentCell {
     pub(crate) fn extend_lines(&mut self, mut new_lines: Vec<Line<'static>>) {
-        if new_lines.is_empty() { return; }
+        if new_lines.is_empty() {
+            return;
+        }
         self.lines.append(&mut new_lines);
         // Invalidate cached plan so next render recomputes incrementally for current width
         *self.cached_layout.borrow_mut() = None;
@@ -3951,22 +4264,25 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
     }
     // Fallback: derive from flattened text if span structure is unexpected.
     // This guards against upstream changes that merge or split the bullet/space spans.
-    let flat: String = line
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
+    let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let mut chars = flat.chars().peekable();
     let mut indent_count = 0usize;
-    while matches!(chars.peek(), Some(' ')) { chars.next(); indent_count += 1; }
+    while matches!(chars.peek(), Some(' ')) {
+        chars.next();
+        indent_count += 1;
+    }
     // Capture token up to first whitespace
     let mut token = String::new();
     while let Some(&ch) = chars.peek() {
-        if ch.is_whitespace() { break; }
+        if ch.is_whitespace() {
+            break;
+        }
         token.push(ch);
         chars.next();
         // Limit token length to avoid scanning entire lines on odd inputs
-        if token.len() > 8 { break; }
+        if token.len() > 8 {
+            break;
+        }
     }
     // Require at least one whitespace after the token
     let has_space = matches!(chars.peek(), Some(c) if c.is_whitespace());
@@ -3975,14 +4291,13 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
         if bullets.contains(&token.as_str())
             || (token.len() >= 2
                 && token.ends_with('.')
-                && token[..token.len()-1].chars().all(|c| c.is_ascii_digit()))
+                && token[..token.len() - 1].chars().all(|c| c.is_ascii_digit()))
         {
             return Some((indent_count, token));
         }
     }
     None
 }
-
 
 // Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
 fn wrap_bullet_line(
@@ -4018,14 +4333,15 @@ fn wrap_bullet_line(
     }
     // Consume bullet span and optional following single-space span. Support
     // cases where the bullet span already contains a trailing space (e.g., "☐ ").
-    let bullet_style = if i < spans.len() { spans[i].style } else { Style::default() };
+    let bullet_style = if i < spans.len() {
+        spans[i].style
+    } else {
+        Style::default()
+    };
     if i < spans.len() {
         let bullet_span_text = spans[i].content.as_ref().to_string();
         i += 1; // consume bullet span
-        if !bullet_span_text.ends_with(' ')
-            && i < spans.len()
-            && spans[i].content.as_ref() == " "
-        {
+        if !bullet_span_text.ends_with(' ') && i < spans.len() && spans[i].content.as_ref() == " " {
             i += 1; // consume separate following space span
         }
     }
@@ -4048,7 +4364,8 @@ fn wrap_bullet_line(
     // align perfectly under the start of the sentence.
     let mut leading_content_spaces: usize = 0;
     while leading_content_spaces < clusters.len()
-        && (clusters[leading_content_spaces].0 == " " || clusters[leading_content_spaces].0 == "\u{3000}")
+        && (clusters[leading_content_spaces].0 == " "
+            || clusters[leading_content_spaces].0 == "\u{3000}")
     {
         leading_content_spaces += 1;
     }
@@ -4086,7 +4403,9 @@ fn wrap_bullet_line(
                 break;
             }
             cols += w;
-            if g == " " || g == "\u{3000}" { last_space_idx = Some(pos + taken); }
+            if g == " " || g == "\u{3000}" {
+                last_space_idx = Some(pos + taken);
+            }
             taken += 1;
             if cols == avail_cols {
                 break;
@@ -4153,12 +4472,16 @@ fn wrap_bullet_line(
             if cur_style.map(|cs| cs == *st).unwrap_or(false) {
                 buf.push_str(g);
             } else {
-                if !buf.is_empty() { seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap())); }
+                if !buf.is_empty() {
+                    seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap()));
+                }
                 cur_style = Some(*st);
                 buf.push_str(g);
             }
         }
-        if !buf.is_empty() { seg_spans.push(Span::styled(buf, cur_style.unwrap())); }
+        if !buf.is_empty() {
+            seg_spans.push(Span::styled(buf, cur_style.unwrap()));
+        }
         out.push(ratatui::text::Line::from(seg_spans));
         pos = next_start;
         first = false;
@@ -4525,10 +4848,15 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     let stripped_plain = sanitize_for_tui(
         text,
         SanitizeMode::Plain,
-        SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false },
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
     );
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&stripped_plain) {
-        let pretty = serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| json_val.to_string());
+        let pretty =
+            serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| json_val.to_string());
         let highlighted = crate::syntax_highlight::highlight_code_block(&pretty, Some("json"));
         return select_preview_from_lines(&highlighted, PREVIEW_HEAD_LINES, PREVIEW_TAIL_LINES);
     }
@@ -4536,7 +4864,15 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     // Otherwise, compact valid JSON (without ANSI) to improve wrap, or pass original through.
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let processed = sanitize_for_tui(
+        &processed,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
 
     enum Seg<'a> {
@@ -4548,17 +4884,23 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     } else {
         let mut v: Vec<Seg> = Vec::with_capacity(PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES + 1);
         // Head
-        for i in 0..PREVIEW_HEAD_LINES { v.push(Seg::Line(non_empty[i])); }
+        for i in 0..PREVIEW_HEAD_LINES {
+            v.push(Seg::Line(non_empty[i]));
+        }
         v.push(Seg::Ellipsis);
         // Tail
         let start = non_empty.len().saturating_sub(PREVIEW_TAIL_LINES);
-        for s in &non_empty[start..] { v.push(Seg::Line(s)); }
+        for s in &non_empty[start..] {
+            v.push(Seg::Line(s));
+        }
         v
     };
 
     fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
         let mut ln = ansi_escape_line(s);
-        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        for sp in ln.spans.iter_mut() {
+            sp.style.bg = None;
+        }
         ln
     }
 
@@ -4600,7 +4942,15 @@ fn output_lines(
             format!("Error (exit code {})", exit_code),
             Style::default().fg(crate::colors::error()),
         ));
-        let stderr_norm = sanitize_for_tui(&normalize_overwrite_sequences(stderr), SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+        let stderr_norm = sanitize_for_tui(
+            &normalize_overwrite_sequences(stderr),
+            SanitizeMode::AnsiPreserving,
+            SanitizeOptions {
+                expand_tabs: true,
+                tabstop: 4,
+                debug_markers: false,
+            },
+        );
         for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
@@ -4673,7 +5023,10 @@ pub(crate) fn new_session_info(
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("notice".dim()));
         lines.extend(popular_commands_lines());
-        PlainHistoryCell { lines, kind: HistoryCellType::Notice }
+        PlainHistoryCell {
+            lines,
+            kind: HistoryCellType::Notice,
+        }
     } else if config.model == model {
         PlainHistoryCell {
             lines: Vec::new(),
@@ -4681,9 +5034,9 @@ pub(crate) fn new_session_info(
         }
     } else {
         let lines = vec![
-        Line::from("model changed:")
-            .fg(crate::colors::keyword())
-            .bold(),
+            Line::from("model changed:")
+                .fg(crate::colors::keyword())
+                .bold(),
             Line::from(format!("requested: {}", config.model)),
             Line::from(format!("used: {model}")),
             // No empty line at end - trimming and spacing handled by renderer
@@ -4703,6 +5056,20 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         "Popular commands:",
         Style::default().fg(crate::colors::text_bright()),
     ));
+    lines.push(Line::from(vec![
+        Span::styled("/agents", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Agents.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Model.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
     lines.push(Line::from(vec![
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
@@ -4737,12 +5104,6 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/model", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Model.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
         Span::styled("/resume", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Resume.description())
@@ -4760,7 +5121,10 @@ pub(crate) fn new_popular_commands_notice(_connecting_mcp: bool) -> PlainHistory
     lines.extend(popular_commands_lines());
     // Connecting status is now rendered as a separate BackgroundEvent cell
     // with its own gutter icon and spacing. Keep this notice focused.
-    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
+    PlainHistoryCell {
+        lines,
+        kind: HistoryCellType::Notice,
+    }
 }
 
 /// Background status cell shown during startup while external MCP servers
@@ -4776,7 +5140,10 @@ pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
         "Connecting MCP servers…",
         Style::default().fg(crate::colors::text_dim()),
     )));
-    PlainHistoryCell { lines, kind: HistoryCellType::BackgroundEvent }
+    PlainHistoryCell {
+        lines,
+        kind: HistoryCellType::BackgroundEvent,
+    }
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
@@ -4787,7 +5154,15 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
     // - Parse ANSI sequences into spans so we never emit raw control bytes
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     // Build content lines with ANSI converted to styled spans
     let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
@@ -4813,14 +5188,22 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
     ]));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
-    let content: Vec<Line<'static>> = sanitized
-        .lines()
-        .map(|l| ansi_escape_line(l))
-        .collect();
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
+    let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
     lines.extend(content);
-    PlainHistoryCell { lines, kind: HistoryCellType::User }
+    PlainHistoryCell {
+        lines,
+        kind: HistoryCellType::User,
+    }
 }
 
 /// Expand horizontal tabs to spaces using a fixed tab stop.
@@ -4838,14 +5221,24 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
 }
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell { id: None, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
+    StreamingContentCell {
+        id: None,
+        lines,
+        show_ellipsis: true,
+        cached_layout: std::cell::RefCell::new(None),
+    }
 }
 
 pub(crate) fn new_streaming_content_with_id(
     id: Option<String>,
     lines: Vec<Line<'static>>,
 ) -> StreamingContentCell {
-    StreamingContentCell { id, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
+    StreamingContentCell {
+        id,
+        lines,
+        show_ellipsis: true,
+        cached_layout: std::cell::RefCell::new(None),
+    }
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
@@ -4946,7 +5339,10 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
                 if let Some((a, b)) = core.split_once(',') {
                     if let (Ok(start), Ok(end)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>())
                     {
-                        return (Some(format!("(lines {} to {})", start, end)), Some((start, end)));
+                        return (
+                            Some(format!("(lines {} to {})", start, end)),
+                            Some((start, end)),
+                        );
                     }
                 }
             }
@@ -4997,87 +5393,84 @@ fn new_parsed_command(
 ) -> Vec<Line<'static>> {
     let action = action_enum_from_parsed(&parsed_commands.to_vec());
     let ctx_path = first_context_path(parsed_commands);
-    let mut lines: Vec<Line> = vec![match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            // Running state per action
-            let header = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched for".to_string(),
-                ExecAction::List => "List".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Running... in {p}"),
-                    None => "Running...".to_string(),
-                },
-            };
-            // Use non-bold styling for informational actions; use info color
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(
-                    format!("{header}{duration_str}"),
-                    Style::default().fg(crate::colors::text_dim()),
-                )
-            } else {
-                Line::styled(
-                    format!("{header}{duration_str}"),
-                    Style::default()
-                        .fg(crate::colors::info())
-                        .add_modifier(Modifier::BOLD),
-                )
+    let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
+    let mut lines: Vec<Line> = Vec::new();
+    if !suppress_run_header {
+        let duration_str = if let Some(start) = start_time {
+            let elapsed = start.elapsed();
+            format!(" ({})", format_duration(elapsed))
+        } else {
+            String::new()
+        };
+        let header = match action {
+            ExecAction::Read => "Read".to_string(),
+            ExecAction::Search => "Searched".to_string(),
+            ExecAction::List => "List".to_string(),
+            ExecAction::Run => match &ctx_path {
+                Some(p) => format!("Running... in {p}"),
+                None => "Running...".to_string(),
+            },
+        };
+        let styled_header = match output {
+            None => {
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    Line::styled(
+                        format!("{header}{duration_str}"),
+                        Style::default().fg(crate::colors::text_dim()),
+                    )
+                } else {
+                    Line::styled(
+                        format!("{header}{duration_str}"),
+                        Style::default()
+                            .fg(crate::colors::info())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
             }
-        }
-        Some(o) if o.exit_code == 0 => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched for".to_string(),
-                ExecAction::List => "List".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {p}"),
-                    None => "Ran".to_string(),
-                },
-            };
-            // Color by action: informational (Read/Search/List) use normal text; execution uses primary
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
+            Some(o) if o.exit_code == 0 => {
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    Line::styled(header, Style::default().fg(crate::colors::text()))
+                } else {
+                    let done = match &ctx_path {
+                        Some(p) => format!("Ran in {p}"),
+                        None => "Ran".to_string(),
+                    };
+                    Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
             }
-        }
-        Some(_o) => {
-            // Preserve the action header (e.g., "Searched for") on error so users
-            // can still see what operation was attempted. Error details are
-            // rendered below via `output_lines`.
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched for".to_string(),
-                ExecAction::List => "List".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {p}"),
-                    None => "Ran".to_string(),
-                },
-            };
-            // Use the same styling as success to keep headers stable/recognizable.
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
+            Some(_o) => {
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    Line::styled(header, Style::default().fg(crate::colors::text()))
+                } else {
+                    let done = match &ctx_path {
+                        Some(p) => format!("Ran in {p}"),
+                        None => "Ran".to_string(),
+                    };
+                    Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
             }
-        }
-    }];
+        };
+        lines.push(styled_header);
+    }
 
     // Collect any paths referenced by search commands to suppress redundant directory lines
     let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -5096,7 +5489,7 @@ fn new_parsed_command(
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
         ExecAction::Search => Some("Search"),
-        ExecAction::List => Some("List Files"),
+        ExecAction::List => Some("List"),
         ExecAction::Run => None,
     };
 
@@ -5120,10 +5513,10 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("List Files".to_string(), format!("in {display_p}"))
+                        ("List".to_string(), format!("in {display_p}"))
                     }
                 }
-                None => ("List Files".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "in ./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
@@ -5193,7 +5586,7 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("Search".to_string(), format!("in {}", display_p))
+                        ("Search".to_string(), format!(" in {}", display_p))
                     }
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
@@ -5207,8 +5600,7 @@ fn new_parsed_command(
                 } else {
                     ("Run".to_string(), cmd.clone())
                 }
-            }
-            // ParsedCommand::Noop { .. } => continue,
+            } // ParsedCommand::Noop { .. } => continue,
         };
 
         // Keep only entries that match the primary action grouping.
@@ -5230,11 +5622,20 @@ fn new_parsed_command(
             if line_text.is_empty() {
                 continue;
             }
-            let prefix = if !any_content_emitted { "└ " } else { "  " };
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::DIM),
-            )];
+            let prefix = if !any_content_emitted {
+                if suppress_run_header { "" } else { "└ " }
+            } else if suppress_run_header {
+                ""
+            } else {
+                "  "
+            };
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
 
             match label.as_str() {
                 // Highlight searched terms in normal text color; keep connectors/path dim
@@ -5331,8 +5732,8 @@ fn new_parsed_command(
                         ));
                     }
                 }
-                // List Files: highlight directory names
-                "List Files" => {
+                // List: highlight directory names
+                "List" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
@@ -5343,9 +5744,6 @@ fn new_parsed_command(
                     let mut hl =
                         crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
                     if let Some(mut first) = hl.pop() {
-                        // If the exec has completed ("Ran"), render command in a unified
-                        // completed color to make the state change clear; otherwise keep
-                        // full syntax highlighting while running.
                         if output.is_some() {
                             for s in first.spans.drain(..) {
                                 spans.push(Span::styled(
@@ -5374,19 +5772,26 @@ fn new_parsed_command(
         }
     }
 
-    // If this is a List Files cell and the loop above produced no content (e.g.,
+    // If this is a List cell and the loop above produced no content (e.g.,
     // the list path was suppressed because a Search referenced the same path),
     // emit a single contextual line so the location is always visible.
     if matches!(action, ExecAction::List) && !any_content_emitted {
         let display_p = match &ctx_path {
             Some(p) if !p.is_empty() => {
-                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+                if p.ends_with('/') {
+                    p.to_string()
+                } else {
+                    format!("{p}/")
+                }
             }
             _ => "./".to_string(),
         };
         lines.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+            Span::styled(
+                format!("in {display_p}"),
+                Style::default().fg(crate::colors::text()),
+            ),
         ]));
         // no-op: avoid unused assignment warning; the variable's value is not consumed later
     }
@@ -5411,42 +5816,24 @@ fn new_exec_command_generic(
     let mut highlighted_cmd =
         crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
 
-    let header_line = match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            Line::styled(
-                format!("Running...{duration_str}"),
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-        Some(o) if o.exit_code == 0 => Line::styled(
-            "Ran",
+    let render_running_header = output.is_none();
+    if render_running_header {
+        let duration_str = if let Some(start) = start_time {
+            let elapsed = start.elapsed();
+            format!(" ({})", format_duration(elapsed))
+        } else {
+            String::new()
+        };
+        lines.push(Line::styled(
+            format!("Running...{duration_str}"),
             Style::default()
-                .fg(crate::colors::text_bright())
+                .fg(crate::colors::info())
                 .add_modifier(Modifier::BOLD),
-        ),
-        Some(_o) => {
-            // Preserve the header as "Ran" even on error; detailed error output
-            // (including exit code and stderr) will be shown below by `output_lines`.
-            Line::styled(
-                "Ran",
-                Style::default()
-                    .fg(crate::colors::text_bright())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    };
+        ));
+    }
 
-    lines.push(header_line.clone());
     if let Some(first) = highlighted_cmd.first_mut() {
-        if output.is_none() && start_time.is_some() {
+        if render_running_header && start_time.is_some() {
             let elapsed = start_time.unwrap().elapsed();
             let duration_str = format!(" ({})", format_duration(elapsed));
             first.spans.push(Span::styled(
@@ -5455,6 +5842,15 @@ fn new_exec_command_generic(
             ));
         }
     }
+
+    if output.is_some() {
+        for line in highlighted_cmd.iter_mut() {
+            for span in line.spans.iter_mut() {
+                span.style = span.style.fg(crate::colors::text_bright());
+            }
+        }
+    }
+
     lines.extend(highlighted_cmd);
 
     lines.extend(output_lines(output, false, true));
@@ -5740,20 +6136,35 @@ pub(crate) fn new_completed_web_fetch_tool_call(
     // Fallback: compact preview if JSON parse failed or no markdown present
     if !appended_markdown && !result.is_empty() {
         // Fallback to plain text/JSON preview with ANSI preserved.
-        let mut pv = select_preview_from_plain_text(&result, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+        let mut pv =
+            select_preview_from_plain_text(&result, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
         dim_webfetch_emphasis_and_links(&mut pv);
         body_lines.extend(pv);
     }
 
     // Spacer below header and below body to match exec styling
     pre_lines.push(Line::from(""));
-    if !body_lines.is_empty() { body_lines.push(Line::from("")); }
+    if !body_lines.is_empty() {
+        body_lines.push(Line::from(""));
+    }
 
-    WebFetchToolCell { pre_lines, body_lines, state: if success { ToolState::Success } else { ToolState::Failed } }
+    WebFetchToolCell {
+        pre_lines,
+        body_lines,
+        state: if success {
+            ToolState::Success
+        } else {
+            ToolState::Failed
+        },
+    }
 }
 
 // Helper: choose first `head` and last `tail` non-empty lines from a styled line list
-fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) -> Vec<Line<'static>> {
+fn select_preview_from_lines(
+    lines: &[Line<'static>],
+    head: usize,
+    tail: usize,
+) -> Vec<Line<'static>> {
     fn is_non_empty(l: &Line<'_>) -> bool {
         let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
         !s.trim().is_empty()
@@ -5771,7 +6182,14 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
         out.push(lines[i].clone());
     }
     out.push(Line::from("⋮".dim()));
-    for &i in non_empty_idx.iter().rev().take(tail).collect::<Vec<_>>().iter().rev() {
+    for &i in non_empty_idx
+        .iter()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .iter()
+        .rev()
+    {
         out.push(lines[*i].clone());
     }
     out
@@ -5781,38 +6199,64 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
 fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let processed = sanitize_for_tui(
+        &processed,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
     fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
         let mut ln = ansi_escape_line(s);
-        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        for sp in ln.spans.iter_mut() {
+            sp.style.bg = None;
+        }
         ln
     }
     let mut out: Vec<Line<'static>> = Vec::new();
     if non_empty.len() <= head + tail {
-        for s in non_empty { out.push(ansi_line_with_theme_bg(s)); }
+        for s in non_empty {
+            out.push(ansi_line_with_theme_bg(s));
+        }
         return out;
     }
-    for s in non_empty.iter().take(head) { out.push(ansi_line_with_theme_bg(s)); }
+    for s in non_empty.iter().take(head) {
+        out.push(ansi_line_with_theme_bg(s));
+    }
     out.push(Line::from("⋮".dim()));
     let start = non_empty.len().saturating_sub(tail);
-    for s in &non_empty[start..] { out.push(ansi_line_with_theme_bg(s)); }
+    for s in &non_empty[start..] {
+        out.push(ansi_line_with_theme_bg(s));
+    }
     out
 }
 
 // ==================== WebFetchToolCell ====================
 
 pub(crate) struct WebFetchToolCell {
-    pre_lines: Vec<Line<'static>>,   // header/invocation
-    body_lines: Vec<Line<'static>>,  // bordered, dim preview
+    pre_lines: Vec<Line<'static>>,  // header/invocation
+    body_lines: Vec<Line<'static>>, // bordered, dim preview
     state: ToolState,
 }
 
 impl HistoryCell for WebFetchToolCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
     fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Tool { status: match self.state { ToolState::Running => ToolStatus::Running, ToolState::Success => ToolStatus::Success, ToolState::Failed => ToolStatus::Failed } }
+        HistoryCellType::Tool {
+            status: match self.state {
+                ToolState::Running => ToolStatus::Running,
+                ToolState::Success => ToolStatus::Success,
+                ToolState::Failed => ToolStatus::Failed,
+            },
+        }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual representation used only for measurement outside custom render
@@ -5821,12 +6265,22 @@ impl HistoryCell for WebFetchToolCell {
         v.extend(self.body_lines.clone());
         v
     }
-    fn has_custom_render(&self) -> bool { true }
+    fn has_custom_render(&self) -> bool {
+        true
+    }
     fn desired_height(&self, width: u16) -> u16 {
         let pre_text = Text::from(trim_empty_lines(self.pre_lines.clone()));
         let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
-        let pre_total: u16 = Paragraph::new(pre_text).wrap(Wrap { trim: false }).line_count(width).try_into().unwrap_or(0);
-        let body_total: u16 = Paragraph::new(body_text).wrap(Wrap { trim: false }).line_count(width.saturating_sub(2)).try_into().unwrap_or(0);
+        let pre_total: u16 = Paragraph::new(pre_text)
+            .wrap(Wrap { trim: false })
+            .line_count(width)
+            .try_into()
+            .unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text)
+            .wrap(Wrap { trim: false })
+            .line_count(width.saturating_sub(2))
+            .try_into()
+            .unwrap_or(0);
         pre_total.saturating_add(body_total)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -5835,8 +6289,16 @@ impl HistoryCell for WebFetchToolCell {
         let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
         let pre_wrap_width = area.width;
         let body_wrap_width = area.width.saturating_sub(2);
-        let pre_total: u16 = Paragraph::new(pre_text.clone()).wrap(Wrap { trim: false }).line_count(pre_wrap_width).try_into().unwrap_or(0);
-        let body_total: u16 = Paragraph::new(body_text.clone()).wrap(Wrap { trim: false }).line_count(body_wrap_width).try_into().unwrap_or(0);
+        let pre_total: u16 = Paragraph::new(pre_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(pre_wrap_width)
+            .try_into()
+            .unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(body_wrap_width)
+            .try_into()
+            .unwrap_or(0);
 
         let pre_skip = skip_rows.min(pre_total);
         let body_skip = skip_rows.saturating_sub(pre_total).min(body_total);
@@ -5849,21 +6311,41 @@ impl HistoryCell for WebFetchToolCell {
 
         // Render preamble
         if pre_height > 0 {
-            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+            let pre_area = Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: pre_height,
+            };
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
             for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
                 for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
                     buf[(x, y)].set_char(' ').set_style(bg_style);
                 }
             }
-            let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
-            Paragraph::new(pre_text).block(pre_block).wrap(Wrap { trim: false }).scroll((pre_skip, 0)).style(Style::default().bg(crate::colors::background())).render(pre_area, buf);
+            let pre_block =
+                Block::default().style(Style::default().bg(crate::colors::background()));
+            Paragraph::new(pre_text)
+                .block(pre_block)
+                .wrap(Wrap { trim: false })
+                .scroll((pre_skip, 0))
+                .style(Style::default().bg(crate::colors::background()))
+                .render(pre_area, buf);
         }
 
         // Render body with left border + dim text
         if body_height > 0 {
-            let body_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: body_height };
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim());
+            let body_area = Rect {
+                x: area.x,
+                y: area.y.saturating_add(pre_height),
+                width: area.width,
+                height: body_height,
+            };
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text_dim());
             for y in body_area.y..body_area.y.saturating_add(body_area.height) {
                 for x in body_area.x..body_area.x.saturating_add(body_area.width) {
                     buf[(x, y)].set_char(' ').set_style(bg_style);
@@ -5871,14 +6353,27 @@ impl HistoryCell for WebFetchToolCell {
             }
             let block = Block::default()
                 .borders(Borders::LEFT)
-                .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                .border_style(
+                    Style::default()
+                        .fg(crate::colors::border_dim())
+                        .bg(crate::colors::background()),
+                )
                 .style(Style::default().bg(crate::colors::background()))
-                .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                .padding(Padding {
+                    left: 1,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                });
             Paragraph::new(body_text)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((body_skip, 0))
-                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                .style(
+                    Style::default()
+                        .bg(crate::colors::background())
+                        .fg(crate::colors::text_dim()),
+                )
                 .render(body_area, buf);
         }
     }
@@ -5926,7 +6421,11 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
             // Heading: 1-6 leading # followed by a space
             let mut level = 0usize;
             for ch in trimmed.chars() {
-                if ch == '#' { level += 1; } else { break; }
+                if ch == '#' {
+                    level += 1;
+                } else {
+                    break;
+                }
             }
             if level >= 1 && level <= 6 {
                 if trimmed.chars().nth(level).map_or(false, |c| c == ' ') {
@@ -5939,7 +6438,9 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
 
     // Helper to render a slice of raw markdown lines
     let render_slice = |start: usize, end_excl: usize, out: &mut Vec<Line<'static>>| {
-        if start >= end_excl || start >= lines.len() { return; }
+        if start >= end_excl || start >= lines.len() {
+            return;
+        }
         let end = end_excl.min(lines.len());
         let segment = lines[start..end].join("\n");
         let mut seg_lines: Vec<Line<'static>> = Vec::new();
@@ -5953,18 +6454,26 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
     // First 2 lines
     if !first_non_empty.is_empty() {
         let start = first_non_empty[0];
-        let end = first_non_empty.last().copied().unwrap_or(start).saturating_add(1);
+        let end = first_non_empty
+            .last()
+            .copied()
+            .unwrap_or(start)
+            .saturating_add(1);
         render_slice(start, end, &mut out);
     }
 
     // Sections
     if !section_heads.is_empty() {
-        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
+        if !out.is_empty() {
+            out.push(Line::from("⋮".dim()));
+        }
         for (idx, &h) in section_heads.iter().enumerate() {
             // heading + next 4 lines (total up to 5)
             let end = (h + 5).min(lines.len());
             render_slice(h, end, &mut out);
-            if idx + 1 < section_heads.len() { out.push(Line::from("⋮".dim())); }
+            if idx + 1 < section_heads.len() {
+                out.push(Line::from("⋮".dim()));
+            }
         }
     }
 
@@ -5972,8 +6481,14 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
     if !last_non_empty.is_empty() {
         // Avoid duplicating lines if they overlap with earlier content
         let last_start = *last_non_empty.first().unwrap_or(&0);
-        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
-        let last_end = last_non_empty.last().copied().unwrap_or(last_start).saturating_add(1);
+        if !out.is_empty() {
+            out.push(Line::from("⋮".dim()));
+        }
+        let last_end = last_non_empty
+            .last()
+            .copied()
+            .unwrap_or(last_start)
+            .saturating_add(1);
         render_slice(last_start, last_end, &mut out);
     }
 
@@ -5981,7 +6496,11 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
         // Fallback: if nothing matched, show head/tail preview
         let mut all_md_lines: Vec<Line<'static>> = Vec::new();
         crate::markdown::append_markdown(md, &mut all_md_lines, cfg);
-        return select_preview_from_lines(&all_md_lines, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+        return select_preview_from_lines(
+            &all_md_lines,
+            WEB_FETCH_HEAD_LINES,
+            WEB_FETCH_TAIL_LINES,
+        );
     }
 
     out
@@ -5993,18 +6512,10 @@ fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
     let text_dim = crate::colors::text_dim();
     let code_bg = crate::colors::code_block_bg();
     // Recompute the link color logic used by the markdown renderer to detect link spans
-    let link_fg = crate::colors::mix_toward(
-        crate::colors::text(),
-        crate::colors::primary(),
-        0.35,
-    );
+    let link_fg = crate::colors::mix_toward(crate::colors::text(), crate::colors::primary(), 0.35);
     for line in lines.iter_mut() {
         // Heuristic list detection on the plain text form
-        let s: String = line
-            .spans
-            .iter()
-            .map(|sp| sp.content.as_ref())
-            .collect();
+        let s: String = line.spans.iter().map(|sp| sp.content.as_ref()).collect();
         let t = s.trim_start();
         let is_list = t.starts_with('-')
             || t.starts_with('*')
@@ -6018,7 +6529,9 @@ fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
 
         for sp in line.spans.iter_mut() {
             // Skip code block spans (have a solid code background)
-            if sp.style.bg == Some(code_bg) { continue; }
+            if sp.style.bg == Some(code_bg) {
+                continue;
+            }
             let style = &mut sp.style;
             let is_bold = style.add_modifier.contains(Modifier::BOLD);
             let is_under = style.add_modifier.contains(Modifier::UNDERLINED);
@@ -6506,7 +7019,9 @@ pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
     let lines = vec![
         Line::from(""),
-        Line::from("Reasoning Effort").fg(crate::colors::keyword()).bold(),
+        Line::from("Reasoning Effort")
+            .fg(crate::colors::keyword())
+            .bold(),
         Line::from(format!("Value: {}", reasoning_effort)),
     ];
     PlainHistoryCell {
@@ -6515,13 +7030,12 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
     }
 }
 
-pub(crate) fn new_model_output(
-    model: &str,
-    effort: ReasoningEffort,
-) -> PlainHistoryCell {
+pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainHistoryCell {
     let lines = vec![
         Line::from(""),
-        Line::from("Model Selection").fg(crate::colors::keyword()).bold(),
+        Line::from("Model Selection")
+            .fg(crate::colors::keyword())
+            .bold(),
         Line::from(format!("Model: {}", model)),
         Line::from(format!("Reasoning Effort: {}", effort)),
     ];
@@ -6600,7 +7114,10 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     // 🔐 Authentication
     lines.push(Line::from(vec!["🔐 ".into(), "Authentication".bold()]));
     {
-        use codex_login::{AuthMode, CodexAuth, OPENAI_API_KEY_ENV_VAR, try_read_auth_json};
+        use codex_login::AuthMode;
+        use codex_login::CodexAuth;
+        use codex_login::OPENAI_API_KEY_ENV_VAR;
+        use codex_login::try_read_auth_json;
 
         // Determine effective auth mode the core would choose
         let auth_result = CodexAuth::from_codex_home(
@@ -6613,15 +7130,16 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
             Ok(Some(auth)) => match auth.mode {
                 AuthMode::ApiKey => {
                     // Prefer suffix from auth.json; fall back to env var if needed
-                    let suffix = try_read_auth_json(&codex_login::get_auth_file(&config.codex_home))
-                        .ok()
-                        .and_then(|a| a.openai_api_key)
-                        .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
-                        .map(|k| {
-                            let n = k.len().saturating_sub(4);
-                            k[n..].to_string()
-                        })
-                        .unwrap_or_else(|| "????".to_string());
+                    let suffix =
+                        try_read_auth_json(&codex_login::get_auth_file(&config.codex_home))
+                            .ok()
+                            .and_then(|a| a.openai_api_key)
+                            .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
+                            .map(|k| {
+                                let n = k.len().saturating_sub(4);
+                                k[n..].to_string()
+                            })
+                            .unwrap_or_else(|| "????".to_string());
                     lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
                 }
                 AuthMode::ChatGPT => {
@@ -6689,16 +7207,30 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
     }
 }
 
-pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
+fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
+    if total == 0 || completed == 0 {
+        "○"
+    } else if completed >= total {
+        "●"
+    } else if completed.saturating_mul(3) <= total {
+        "◔"
+    } else if completed.saturating_mul(3) < total.saturating_mul(2) {
+        "◑"
+    } else {
+        "◕"
+    }
+}
+
+pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     let UpdatePlanArgs { explanation, plan } = update;
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    // Header with progress summary
     let total = plan.len();
     let completed = plan
         .iter()
         .filter(|p| matches!(p.status, StepStatus::Completed))
         .count();
+    let icon = plan_progress_icon(total, completed);
 
     let width: usize = 10;
     let filled = if total > 0 {
@@ -6710,13 +7242,8 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
 
     // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
-    let total = plan.len();
-    let completed = plan
-        .iter()
-        .filter(|p| matches!(p.status, StepStatus::Completed))
-        .count();
     header.push(Span::styled(
-        " Update plan",
+        "Update plan",
         Style::default()
             .fg(crate::colors::primary())
             .add_modifier(Modifier::BOLD),
@@ -6790,10 +7317,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
         }
     }
 
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::PlanUpdate,
-    }
+    PlanUpdateCell { lines, icon }
 }
 
 pub(crate) fn new_patch_event(
@@ -6819,12 +7343,22 @@ pub(crate) fn new_patch_event(
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = vec![
-        Line::from("❌ Patch application failed").fg(crate::colors::error()).bold(),
+        Line::from("❌ Patch application failed")
+            .fg(crate::colors::error())
+            .bold(),
         Line::from(""),
     ];
 
     let norm = normalize_overwrite_sequences(&stderr);
-    let norm = sanitize_for_tui(&norm, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let norm = sanitize_for_tui(
+        &norm,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     for line in norm.lines() {
         if !line.is_empty() {
             lines.push(ansi_escape_line(line).fg(crate::colors::error()));
@@ -6851,16 +7385,21 @@ pub(crate) struct PatchSummaryCell {
     pub(crate) kind: PatchKind,
     // Cache width-specific rendered lines to avoid repeated filesystem reads
     // and pre-wrapping work inside create_diff_summary_with_width.
-    cached: std::cell::RefCell<Option<PatchLayoutCache>>, 
+    cached: std::cell::RefCell<Option<PatchLayoutCache>>,
 }
 
 #[derive(Clone)]
-struct PatchLayoutCache { width: u16, lines: Vec<Line<'static>> }
+struct PatchLayoutCache {
+    width: u16,
+    lines: Vec<Line<'static>>,
+}
 
 impl PatchSummaryCell {
     fn ensure_lines(&self, width: u16) -> Vec<Line<'static>> {
         if let Some(c) = self.cached.borrow().as_ref() {
-            if c.width == width { return c.lines.clone(); }
+            if c.width == width {
+                return c.lines.clone();
+            }
         }
         let lines: Vec<Line<'static>> = create_diff_summary_with_width(
             &self.title,
@@ -6870,7 +7409,10 @@ impl PatchSummaryCell {
         )
         .into_iter()
         .collect();
-        *self.cached.borrow_mut() = Some(PatchLayoutCache { width, lines: lines.clone() });
+        *self.cached.borrow_mut() = Some(PatchLayoutCache {
+            width,
+            lines: lines.clone(),
+        });
         lines
     }
 }
@@ -6888,7 +7430,9 @@ impl HistoryCell for PatchSummaryCell {
 
     // We compute lines based on width at render time; provide a conservative
     // default for non-width callers (not normally used in our pipeline).
-    fn display_lines(&self) -> Vec<Line<'static>> { self.ensure_lines(80) }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.ensure_lines(80)
+    }
 
     fn has_custom_render(&self) -> bool {
         true

@@ -217,6 +217,25 @@ fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
     None
 }
 
+fn maybe_update_from_model_info<T: Copy + PartialEq>(
+    field: &mut Option<T>,
+    old_default: Option<T>,
+    new_default: Option<T>,
+) {
+    if field.is_none() {
+        if let Some(new_val) = new_default {
+            *field = Some(new_val);
+        }
+        return;
+    }
+
+    if let (Some(current), Some(old_val)) = (*field, old_default) {
+        if current == old_val {
+            *field = new_default;
+        }
+    }
+}
+
 async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
     let mut jar = EphemeralJar::new();
 
@@ -406,7 +425,7 @@ use crate::client::ModelClient;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
-use crate::config::Config;
+use crate::config::{persist_model_selection, Config};
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
 use crate::error::CodexErr;
@@ -422,6 +441,7 @@ use crate::exec::process_exec_tool_call;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
+use crate::model_family::{derive_default_model_family, find_family_for_model};
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::LocalShellAction;
@@ -430,6 +450,7 @@ use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ShellToolCallParams;
+use crate::openai_model_info::get_model_info;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
 use crate::parse_command::parse_command;
@@ -1569,6 +1590,7 @@ async fn submission_loop(
     rx_sub: Receiver<Submission>,
     tx_event: Sender<Event>,
 ) {
+    let mut config = config;
     let mut sess: Option<Arc<Session>> = None;
     let mut agent_manager_initialized = false;
     // shorthand - send an event when there is no active session
@@ -1624,6 +1646,77 @@ async fn submission_loop(
                     }
                     return;
                 }
+                let current_config = Arc::clone(&config);
+                let mut updated_config = (*current_config).clone();
+
+                let model_changed = !updated_config.model.eq_ignore_ascii_case(&model);
+                let effort_changed = updated_config.model_reasoning_effort != model_reasoning_effort;
+
+                let old_model_family = updated_config.model_family.clone();
+                let old_model_info = get_model_info(&old_model_family);
+
+                updated_config.model = model.clone();
+                updated_config.model_provider = provider.clone();
+                updated_config.model_reasoning_effort = model_reasoning_effort;
+                updated_config.model_reasoning_summary = model_reasoning_summary;
+                updated_config.model_text_verbosity = model_text_verbosity;
+                updated_config.user_instructions = user_instructions.clone();
+                updated_config.base_instructions = base_instructions.clone();
+                updated_config.approval_policy = approval_policy;
+                updated_config.sandbox_policy = sandbox_policy.clone();
+                updated_config.disable_response_storage = disable_response_storage;
+                updated_config.notify = notify.clone();
+                updated_config.cwd = cwd.clone();
+
+                updated_config.model_family = find_family_for_model(&updated_config.model)
+                    .unwrap_or_else(|| derive_default_model_family(&updated_config.model));
+
+                let new_model_info = get_model_info(&updated_config.model_family);
+
+                let old_context_window = old_model_info.as_ref().map(|info| info.context_window);
+                let new_context_window = new_model_info.as_ref().map(|info| info.context_window);
+                let old_max_tokens = old_model_info.as_ref().map(|info| info.max_output_tokens);
+                let new_max_tokens = new_model_info.as_ref().map(|info| info.max_output_tokens);
+                let old_auto_compact = old_model_info
+                    .as_ref()
+                    .and_then(|info| info.auto_compact_token_limit);
+                let new_auto_compact = new_model_info
+                    .as_ref()
+                    .and_then(|info| info.auto_compact_token_limit);
+
+                maybe_update_from_model_info(
+                    &mut updated_config.model_context_window,
+                    old_context_window,
+                    new_context_window,
+                );
+                maybe_update_from_model_info(
+                    &mut updated_config.model_max_output_tokens,
+                    old_max_tokens,
+                    new_max_tokens,
+                );
+                maybe_update_from_model_info(
+                    &mut updated_config.model_auto_compact_token_limit,
+                    old_auto_compact,
+                    new_auto_compact,
+                );
+
+                let new_config = Arc::new(updated_config);
+
+                if model_changed || effort_changed {
+                    if let Err(err) = persist_model_selection(
+                        &new_config.codex_home,
+                        new_config.active_profile.as_deref(),
+                        &new_config.model,
+                        Some(new_config.model_reasoning_effort),
+                    )
+                    .await
+                    {
+                        warn!("failed to persist model selection: {err:#}");
+                    }
+                }
+
+                config = Arc::clone(&new_config);
+
                 // Optionally resume an existing rollout.
                 let mut restored_items: Option<Vec<ResponseItem>> = None;
                 let rollout_recorder: Option<RolloutRecorder> =

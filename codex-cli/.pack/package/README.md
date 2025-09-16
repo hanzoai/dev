@@ -101,6 +101,9 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 # Change reasoning level
 /reasoning low|medium|high
 
+# Switch models or effort presets
+/model
+
 # Start new conversation
 /new
 ```
