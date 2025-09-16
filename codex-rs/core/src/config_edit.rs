@@ -210,38 +210,6 @@ pub async fn upsert_agent_config(
     let mut doc = match tokio::fs::read_to_string(&config_path).await {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-async fn persist_overrides_with_behavior(
-    codex_home: &Path,
-    profile: Option<&str>,
-    overrides: &[(&[&str], Option<&str>)],
-    none_behavior: NoneBehavior,
-) -> Result<()> {
-    if overrides.is_empty() {
-        return Ok(());
-    }
-
-    let should_skip = match none_behavior {
-        NoneBehavior::Skip => overrides.iter().all(|(_, value)| value.is_none()),
-        NoneBehavior::Remove => false,
-    };
-
-    if should_skip {
-        return Ok(());
-    }
-
-    let config_path = codex_home.join(CONFIG_TOML_FILE);
-
-    let read_result = tokio::fs::read_to_string(&config_path).await;
-    let mut doc = match read_result {
-        Ok(contents) => contents.parse::<DocumentMut>()?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if overrides
-                .iter()
-                .all(|(_, value)| value.is_none() && matches!(none_behavior, NoneBehavior::Remove))
-            {
-                return Ok(());
-            }
-
             tokio::fs::create_dir_all(codex_home).await?;
             DocumentMut::new()
         }
@@ -336,6 +304,91 @@ async fn write_new_or_append(
     tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
     tmp_file.persist(config_path)?;
     Ok(())
+}
+
+
+// Internal helper to support persist_* variants above.
+async fn persist_overrides_with_behavior(
+    codex_home: &Path,
+    profile: Option<&str>,
+    overrides: &[(&[&str], Option<&str>)],
+    none_behavior: NoneBehavior,
+) -> Result<()> {
+    if overrides.is_empty() {
+        return Ok(());
+    }
+
+    let should_skip = match none_behavior {
+        NoneBehavior::Skip => overrides.iter().all(|(_, value)| value.is_none()),
+        NoneBehavior::Remove => false,
+    };
+
+    if should_skip {
+        return Ok(());
+    }
+
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_result = tokio::fs::read_to_string(&config_path).await;
+    let mut doc = match read_result {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if overrides.iter().all(|(_, value)| value.is_none() && matches!(none_behavior, NoneBehavior::Remove)) {
+                return Ok(());
+            }
+            tokio::fs::create_dir_all(codex_home).await?;
+            DocumentMut::new()
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    let effective_profile = if let Some(p) = profile { Some(p.to_owned()) } else { doc.get("profile").and_then(|i| i.as_str()).map(|s| s.to_string()) };
+
+    let mut mutated = false;
+    for (segments, value) in overrides.iter().copied() {
+        let mut seg_buf: Vec<&str> = Vec::new();
+        let segments_to_apply: &[&str];
+        if let Some(ref name) = effective_profile {
+            if segments.first().copied() == Some("profiles") {
+                segments_to_apply = segments;
+            } else {
+                seg_buf.reserve(2 + segments.len());
+                seg_buf.push("profiles");
+                seg_buf.push(name.as_str());
+                seg_buf.extend_from_slice(segments);
+                segments_to_apply = seg_buf.as_slice();
+            }
+        } else {
+            segments_to_apply = segments;
+        }
+        match value {
+            Some(v) => {
+                let item_value = toml_edit::value(v);
+                apply_toml_edit_override_segments(&mut doc, segments_to_apply, item_value);
+                mutated = true;
+            }
+            None => {
+                if matches!(none_behavior, NoneBehavior::Remove) && remove_toml_edit_segments(&mut doc, segments_to_apply) {
+                    mutated = true;
+                }
+            }
+        }
+    }
+    if !mutated { return Ok(()); }
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
+    tmp_file.persist(config_path)?;
+    Ok(())
+}
+
+fn remove_toml_edit_segments(doc: &mut DocumentMut, segments: &[&str]) -> bool {
+    use toml_edit::Item;
+    if segments.is_empty() { return false; }
+    let mut current = doc.as_table_mut();
+    for seg in &segments[..segments.len() - 1] {
+        let Some(item) = current.get_mut(seg) else { return false }; 
+        match item { Item::Table(table) => { current = table; } _ => { return false; } }
+    }
+    current.remove(segments[segments.len() - 1]).is_some()
 }
 
 #[cfg(test)]

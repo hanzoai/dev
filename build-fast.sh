@@ -10,7 +10,7 @@ Usage: ./build-fast.sh [env flags]
 Environment flags:
   PROFILE=dev-fast|dev|release-prod   Build profile (default: dev-fast)
   TRACE_BUILD=1                       Print toolchain/env and artifact SHA
-  KEEP_ENV=1                          Do NOT sanitize env (use your current env)
+  KEEP_ENV=0                          Sanitize env for reproducible builds (default skips)
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
@@ -38,6 +38,9 @@ cd "${SCRIPT_DIR}/codex-rs"
 # resolve inside the repository, not its parent. This prevents permission issues on CI
 # where the parent folder may be owned by a different user.
 REPO_ROOT="${SCRIPT_DIR}"
+
+# Default to preserving caller environment unless explicitly disabled
+KEEP_ENV="${KEEP_ENV:-1}"
 
 # Use dev-fast profile by default for quick iteration
 # Can override with: PROFILE=release ./build-fast.sh
@@ -110,9 +113,9 @@ else
   exit 1
 fi
 
-# Canonicalize build environment so everyone shares the same cache by default.
-# Set KEEP_ENV=1 to skip this sanitization.
-if [ "${KEEP_ENV:-}" != "1" ]; then
+# Canonicalize build environment only when requested.
+# Set KEEP_ENV=0 to force sanitization.
+if [ "${KEEP_ENV}" != "1" ]; then
   # Only define RUSTFLAGS via feature flags like DETERMINISTIC=1; otherwise clear.
   if [ -z "${DETERMINISTIC:-}" ]; then
     export RUSTFLAGS=""
@@ -199,7 +202,7 @@ if [ "${TRACE_BUILD:-}" = "1" ]; then
     rustup run "$TOOLCHAIN" rustc -vV || true
     rustup run "$TOOLCHAIN" cargo -vV || true
   fi
-  echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV:-})"
+  echo "CANONICAL_ENV_APPLIED: ${CANONICAL_ENV_APPLIED} (KEEP_ENV=${KEEP_ENV})"
   echo "Filtered env (CARGO|RUST*|PROFILE|CODE_HOME|CODEX_HOME):"
   env | egrep '^(CARGO|RUST|RUSTUP|PROFILE|CODE_HOME|CODEX_HOME)=' | sort || true
   echo "--------------------------------"
