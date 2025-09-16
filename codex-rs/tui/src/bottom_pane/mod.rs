@@ -121,9 +121,10 @@ impl BottomPane<'_> {
         &mut self,
         agents: Vec<(String, bool, bool, String)>,
         commands: Vec<String>,
+        selected_index: usize,
     ) {
         use agents_overview_view::AgentsOverviewView;
-        let view = AgentsOverviewView::new(agents, commands, self.app_event_tx.clone());
+        let view = AgentsOverviewView::new(agents, commands, selected_index, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();

@@ -1,12 +1,14 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -29,6 +31,7 @@ mod diff_ui;
 mod exec_tools;
 mod gh_actions;
 mod help_handlers;
+mod terminal_handlers;
 mod interrupts;
 mod layout_scroll;
 mod message;
@@ -82,7 +85,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
 
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, TerminalAfter, TerminalLaunch};
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
@@ -91,6 +94,7 @@ use crate::bottom_pane::InputResult;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
 use crate::history_cell;
+use crate::history_cell::normalize_overwrite_sequences;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
@@ -98,6 +102,8 @@ use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
 use crate::user_approval_widget::ApprovalRequest;
+use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
+use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::set_github_check_on_push;
@@ -226,6 +232,12 @@ pub(crate) struct ChatWidget<'a> {
 
     // Help overlay state
     help: HelpState,
+
+    // Terminal overlay state
+    terminal: TerminalState,
+
+    // Persisted selection for Agents overview
+    agents_overview_selected_index: usize,
 
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
@@ -1831,6 +1843,8 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            terminal: TerminalState::default(),
+            agents_overview_selected_index: 0,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -2010,6 +2024,8 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            terminal: TerminalState::default(),
+            agents_overview_selected_index: 0,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -2175,6 +2191,9 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if terminal_handlers::handle_terminal_key(self, key_event) {
+            return;
+        }
         // Intercept keys for overlays when active (help first, then diff)
         if help_handlers::handle_help_key(self, key_event) {
             return;
@@ -4599,7 +4618,285 @@ impl ChatWidget<'_> {
             .collect();
         commands.extend(custom);
 
-        self.bottom_pane.show_agents_overview(agent_rows, commands);
+        let total_rows = agent_rows.len().saturating_add(commands.len()).saturating_add(1);
+        let selected = if total_rows == 0 {
+            0
+        } else {
+            self.agents_overview_selected_index.min(total_rows.saturating_sub(1))
+        };
+        self.agents_overview_selected_index = selected;
+        self.bottom_pane
+            .show_agents_overview(agent_rows, commands, selected);
+    }
+
+    pub(crate) fn set_agents_overview_selection(&mut self, index: usize) {
+        self.agents_overview_selected_index = index;
+    }
+
+    fn resolve_agent_install_command(
+        &self,
+        agent_name: &str,
+    ) -> Option<(Vec<String>, String)> {
+        let cmd = self
+            .config
+            .agents
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(agent_name))
+            .map(|cfg| cfg.command.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| agent_name.to_string());
+        if cmd.trim().is_empty() {
+            return None;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!(
+                "if (Get-Command {cmd} -ErrorAction SilentlyContinue) {{ Write-Output \"{cmd} already installed\"; exit 0 }} else {{ Write-Warning \"{cmd} is not installed.\"; Write-Output \"Please install {cmd} via winget, Chocolatey, or the vendor installer.\"; exit 1 }}",
+                cmd = cmd
+            );
+            let command = vec![
+                "powershell.exe".to_string(),
+                "-NoProfile".to_string(),
+                "-ExecutionPolicy".to_string(),
+                "Bypass".to_string(),
+                "-Command".to_string(),
+                script.clone(),
+            ];
+            return Some((command, format!("PowerShell install check for {cmd}")));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let script = format!("brew install {cmd}");
+            let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
+            return Some((command, script));
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let script = format!(
+                "{cmd} --version || (echo \"Please install {cmd} via your package manager\" && false)",
+                cmd = cmd
+            );
+            let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
+            return Some((command, script));
+        }
+
+        #[allow(unreachable_code)]
+        {
+            None
+        }
+    }
+
+    pub(crate) fn launch_agent_install(
+        &mut self,
+        name: String,
+        selected_index: usize,
+    ) -> Option<TerminalLaunch> {
+        self.agents_overview_selected_index = selected_index;
+        let Some((command, display)) = self.resolve_agent_install_command(&name) else {
+            self.history_push(history_cell::new_error_event(format!(
+                "No install command available for agent '{name}' on this platform."
+            )));
+            self.show_agents_overview_ui();
+            return None;
+        };
+        let id = self.terminal.alloc_id();
+        self.terminal.after = Some(TerminalAfter::RefreshAgentsAndClose {
+            selected_index,
+        });
+        Some(TerminalLaunch {
+            id,
+            title: format!("Install {name}"),
+            command,
+            command_display: display,
+        })
+    }
+
+    pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
+        let mut overlay = TerminalOverlay::new(
+            launch.id,
+            launch.title.clone(),
+            launch.command_display.clone(),
+        );
+        let visible = self.terminal.last_visible_rows.get();
+        overlay.visible_rows = visible;
+        overlay.clamp_scroll();
+        self.terminal.overlay = Some(overlay);
+        self.request_redraw();
+    }
+
+    pub(crate) fn terminal_append_chunk(&mut self, id: u64, chunk: &[u8], is_stderr: bool) {
+        let mut needs_redraw = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                if visible != overlay.visible_rows {
+                    overlay.visible_rows = visible;
+                    overlay.clamp_scroll();
+                }
+                overlay.append_chunk(chunk, is_stderr);
+                needs_redraw = true;
+            }
+        }
+        if needs_redraw {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_finalize(
+        &mut self,
+        id: u64,
+        exit_code: Option<i32>,
+        duration: Duration,
+    ) -> Option<TerminalAfter> {
+        let mut success = false;
+        let mut after = None;
+        let mut needs_redraw = false;
+        let mut should_close = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                if visible != overlay.visible_rows {
+                    overlay.visible_rows = visible;
+                    overlay.clamp_scroll();
+                }
+                let was_following = overlay.is_following();
+                overlay.finalize(exit_code, duration);
+                overlay.auto_follow(was_following);
+                needs_redraw = true;
+                if exit_code == Some(0) {
+                    success = true;
+                    after = self.terminal.after.take();
+                    should_close = true;
+                }
+            }
+        }
+        if should_close {
+            self.terminal.overlay = None;
+        }
+        if needs_redraw {
+            self.request_redraw();
+        }
+        if success {
+            after
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn terminal_prepare_rerun(&mut self, id: u64) -> bool {
+        let mut reset = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id && !overlay.running {
+                overlay.reset_for_rerun();
+                overlay.visible_rows = visible;
+                overlay.clamp_scroll();
+                reset = true;
+            }
+        }
+        if reset {
+            self.request_redraw();
+        }
+        reset
+    }
+
+    pub(crate) fn close_terminal_overlay(&mut self) {
+        self.terminal.clear();
+        self.request_redraw();
+    }
+
+    pub(crate) fn terminal_overlay_id(&self) -> Option<u64> {
+        self.terminal.overlay().map(|o| o.id)
+    }
+
+    pub(crate) fn terminal_is_running(&self) -> bool {
+        self.terminal
+            .overlay()
+            .map(|o| o.running)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn terminal_scroll_lines(&mut self, delta: i32) {
+        let mut updated = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            let current = overlay.scroll as i32;
+            let max_scroll = overlay.max_scroll() as i32;
+            let mut next = current + delta;
+            if next < 0 {
+                next = 0;
+            } else if next > max_scroll {
+                next = max_scroll;
+            }
+            if next as u16 != overlay.scroll {
+                overlay.scroll = next as u16;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_scroll_page(&mut self, direction: i32) {
+        let mut delta = None;
+        let visible_value = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            let visible = visible_value.max(1);
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            delta = Some((visible.saturating_sub(1)) as i32 * direction);
+        }
+        if let Some(amount) = delta {
+            self.terminal_scroll_lines(amount);
+        }
+    }
+
+    pub(crate) fn terminal_scroll_to_top(&mut self) {
+        let mut updated = false;
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.scroll != 0 {
+                overlay.scroll = 0;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_scroll_to_bottom(&mut self) {
+        let mut updated = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            let max_scroll = overlay.max_scroll();
+            if overlay.scroll != max_scroll {
+                overlay.scroll = max_scroll;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn handle_terminal_after(&mut self, after: TerminalAfter) {
+        match after {
+            TerminalAfter::RefreshAgentsAndClose { selected_index } => {
+                self.agents_overview_selected_index = selected_index;
+                self.show_agents_overview_ui();
+            }
+        }
     }
 
     // show_subagent_editor_ui removed; use show_subagent_editor_for_name or show_new_subagent_editor
@@ -5974,6 +6271,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.has_active_modal_view()
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
+            || self.terminal.overlay.is_some()
     }
 
     /// Forward an `Op` directly to codex.
@@ -11743,12 +12041,206 @@ impl WidgetRef for &ChatWidget<'_> {
         // The composer has its own layout with hints at the bottom
         (&self.bottom_pane).render(bottom_pane_area, buf);
 
+        if let Some(overlay) = self.terminal.overlay() {
+            let scrim_style = Style::default()
+                .bg(crate::colors::overlay_scrim())
+                .fg(crate::colors::text_dim());
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    buf[(x, y)].set_style(scrim_style);
+                }
+            }
+
+            let padding = 1u16;
+            let window_area = Rect {
+                x: history_area.x + padding,
+                y: history_area.y,
+                width: history_area.width.saturating_sub(padding * 2),
+                height: history_area.height,
+            };
+            Clear.render(window_area, buf);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(
+                        " ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                    ratatui::text::Span::styled(
+                        overlay.title.clone(),
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                ]))
+                .style(Style::default().bg(crate::colors::background()))
+                .border_style(
+                    Style::default()
+                        .fg(crate::colors::border())
+                        .bg(crate::colors::background()),
+                );
+            let inner = block.inner(window_area);
+            block.render(window_area, buf);
+
+            let inner_bg = Style::default().bg(crate::colors::background());
+            for y in inner.y..inner.y + inner.height {
+                for x in inner.x..inner.x + inner.width {
+                    buf[(x, y)].set_style(inner_bg);
+                }
+            }
+
+            let content = inner.inner(ratatui::layout::Margin::new(1, 1));
+            if content.height == 0 || content.width == 0 {
+                self.terminal.last_visible_rows.set(0);
+            } else {
+                let header_area = Rect {
+                    x: content.x,
+                    y: content.y,
+                    width: content.width,
+                    height: 1.min(content.height),
+                };
+                let footer_area = if content.height >= 2 {
+                    Rect {
+                        x: content.x,
+                        y: content.y + content.height.saturating_sub(1),
+                        width: content.width,
+                        height: 1,
+                    }
+                } else {
+                    header_area
+                };
+                let body_height = content
+                    .height
+                    .saturating_sub(if content.height >= 2 { 2 } else { 1 });
+                let body_area = Rect {
+                    x: content.x,
+                    y: header_area.y.saturating_add(header_area.height),
+                    width: content.width,
+                    height: body_height,
+                };
+
+                // Header content
+                let mut status_text = if overlay.running {
+                    "Running…".to_string()
+                } else if let Some(code) = overlay.exit_code {
+                    format!("Exit {code}")
+                } else {
+                    "Idle".to_string()
+                };
+                if let Some(duration) = overlay.duration {
+                    status_text.push(' ');
+                    status_text.push('(');
+                    status_text.push_str(&format_duration_short(duration));
+                    status_text.push(')');
+                }
+                let status_color = if overlay.running {
+                    crate::colors::function()
+                } else if overlay.exit_code == Some(0) {
+                    crate::colors::success()
+                } else if overlay.exit_code.is_some() {
+                    crate::colors::error()
+                } else {
+                    crate::colors::text_dim()
+                };
+                let header_line = ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(
+                        overlay.command_display.clone(),
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                    ratatui::text::Span::raw("  "),
+                    ratatui::text::Span::styled(
+                        status_text,
+                        Style::default().fg(status_color),
+                    ),
+                ]);
+                Paragraph::new(RtText::from(vec![header_line]))
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .render(header_area, buf);
+
+                // Body content
+                self.terminal.last_visible_rows.set(body_area.height);
+                if body_area.height > 0 && body_area.width > 0 {
+                    let mut rows: Vec<RtLine<'static>> = Vec::new();
+                    if overlay.truncated {
+                        rows.push(ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+                            "… output truncated (showing last 10,000 lines)",
+                            Style::default().fg(crate::colors::text_dim()),
+                        )]));
+                    }
+                    rows.extend(overlay.lines.iter().cloned());
+                    let total = rows.len();
+                    let visible = body_area.height as usize;
+                    if visible > 0 {
+                        let max_scroll = total.saturating_sub(visible);
+                        let scroll = (overlay.scroll as usize).min(max_scroll);
+                        let end = (scroll + visible).min(total);
+                        let window = rows.get(scroll..end).unwrap_or(&[]);
+                        Paragraph::new(RtText::from(window.to_vec()))
+                            .wrap(ratatui::widgets::Wrap { trim: false })
+                            .render(body_area, buf);
+                    }
+                }
+
+                // Footer hints
+                let mut footer_spans = vec![
+                    ratatui::text::Span::styled(
+                        "↑↓",
+                        Style::default().fg(crate::colors::function()),
+                    ),
+                    ratatui::text::Span::styled(
+                        " Scroll  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                    ratatui::text::Span::styled(
+                        "PgUp/PgDn",
+                        Style::default().fg(crate::colors::function()),
+                    ),
+                    ratatui::text::Span::styled(
+                        " Page  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                    ratatui::text::Span::styled(
+                        "Esc",
+                        Style::default().fg(crate::colors::error()),
+                    ),
+                    ratatui::text::Span::styled(
+                        " Close  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                ];
+                if overlay.running {
+                    footer_spans.push(ratatui::text::Span::styled(
+                        "Ctrl+C",
+                        Style::default().fg(crate::colors::warning()),
+                    ));
+                    footer_spans.push(ratatui::text::Span::styled(
+                        " Cancel",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                } else {
+                    footer_spans.push(ratatui::text::Span::styled(
+                        "R",
+                        Style::default().fg(crate::colors::primary()),
+                    ));
+                    footer_spans.push(ratatui::text::Span::styled(
+                        " Rerun",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                Paragraph::new(RtText::from(vec![ratatui::text::Line::from(footer_spans)]))
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .render(footer_area, buf);
+            }
+
+            // Terminal overlay takes precedence over other overlays
+        }
+
         // Welcome animation is kept as a normal cell in history; no overlay.
 
         // The welcome animation is no longer rendered as an overlay.
 
-        // Render diff overlay (covering the history area, aligned with padding) if active
-        if let Some(overlay) = &self.diffs.overlay {
+        if self.terminal.overlay().is_none() {
+            // Render diff overlay (covering the history area, aligned with padding) if active
+            if let Some(overlay) = &self.diffs.overlay {
             // Global scrim: dim the whole background to draw focus to the viewer
             // We intentionally do this across the entire widget area rather than just the
             // history area so the viewer stands out even with browser HUD or status bars.
@@ -12090,8 +12582,8 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
 
-        // Render help overlay (covering the history area) if active
-        if let Some(overlay) = &self.help.overlay {
+            // Render help overlay (covering the history area) if active
+            if let Some(overlay) = &self.help.overlay {
             // Global scrim across widget
             let scrim_bg = Style::default()
                 .bg(crate::colors::overlay_scrim())
@@ -12161,6 +12653,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
                 .wrap(ratatui::widgets::Wrap { trim: false });
             ratatui::widgets::Widget::render(paragraph, body, buf);
+            }
         }
         // Finalize widget render timing
         if let Some(t0) = _perf_widget_start {
@@ -12362,6 +12855,244 @@ impl HelpOverlay {
         Self { lines, scroll: 0 }
     }
 }
+
+#[derive(Default)]
+struct TerminalState {
+    overlay: Option<TerminalOverlay>,
+    next_id: u64,
+    after: Option<TerminalAfter>,
+    last_visible_rows: std::cell::Cell<u16>,
+}
+
+impl TerminalState {
+    fn alloc_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        id
+    }
+
+    fn overlay(&self) -> Option<&TerminalOverlay> { self.overlay.as_ref() }
+
+    fn overlay_mut(&mut self) -> Option<&mut TerminalOverlay> { self.overlay.as_mut() }
+
+    fn clear(&mut self) {
+        self.overlay = None;
+        self.after = None;
+    }
+}
+
+const TERMINAL_MAX_LINES: usize = 10_000;
+
+struct TerminalOverlay {
+    id: u64,
+    title: String,
+    command_display: String,
+    lines: VecDeque<RtLine<'static>>,
+    scroll: u16,
+    visible_rows: u16,
+    running: bool,
+    exit_code: Option<i32>,
+    duration: Option<Duration>,
+    truncated: bool,
+    pending_utf8: Vec<u8>,
+    pending_line: String,
+    pending_line_is_stderr: bool,
+}
+
+impl TerminalOverlay {
+    fn new(id: u64, title: String, command_display: String) -> Self {
+        Self {
+            id,
+            title,
+            command_display,
+            lines: VecDeque::new(),
+            scroll: 0,
+            visible_rows: 0,
+            running: true,
+            exit_code: None,
+            duration: None,
+            truncated: false,
+            pending_utf8: Vec::new(),
+            pending_line: String::new(),
+            pending_line_is_stderr: false,
+        }
+    }
+
+    fn total_render_lines(&self) -> usize {
+        let base = self.lines.len();
+        if self.truncated { base.saturating_add(1) } else { base }
+    }
+
+    fn max_scroll(&self) -> u16 {
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        total
+            .saturating_sub(visible)
+            .min(u16::MAX as usize) as u16
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max_scroll = self.max_scroll();
+        if self.scroll > max_scroll {
+            self.scroll = max_scroll;
+        }
+    }
+
+    fn is_following(&self) -> bool {
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        (self.scroll as usize).saturating_add(visible) >= total
+    }
+
+    fn auto_follow(&mut self, was_following: bool) {
+        if !was_following {
+            return;
+        }
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        let max_scroll = total.saturating_sub(visible);
+        self.scroll = max_scroll.min(u16::MAX as usize) as u16;
+    }
+
+    fn reset_for_rerun(&mut self) {
+        self.lines.clear();
+        self.scroll = 0;
+        self.visible_rows = 0;
+        self.running = true;
+        self.exit_code = None;
+        self.duration = None;
+        self.truncated = false;
+        self.pending_utf8.clear();
+        self.pending_line.clear();
+        self.pending_line_is_stderr = false;
+    }
+
+    fn append_chunk(&mut self, chunk: &[u8], is_stderr: bool) {
+        if chunk.is_empty() && self.pending_utf8.is_empty() && self.pending_line.is_empty() {
+            return;
+        }
+        let was_following = self.is_following();
+        let mut appended = false;
+        if self.pending_line_is_stderr != is_stderr && !self.pending_line.is_empty() {
+            appended |= self.flush_pending_line();
+        }
+        self.pending_line_is_stderr = is_stderr;
+        self.pending_utf8.extend_from_slice(chunk);
+
+        loop {
+            match std::str::from_utf8(&self.pending_utf8) {
+                Ok(valid) => {
+                    self.pending_line.push_str(valid);
+                    self.pending_utf8.clear();
+                    break;
+                }
+                Err(err) => {
+                    let valid_up_to = err.valid_up_to();
+                    if valid_up_to > 0 {
+                        if let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to]) {
+                            self.pending_line.push_str(valid);
+                        } else {
+                            let slice = &self.pending_utf8[..valid_up_to];
+                            let owned = String::from_utf8_lossy(slice);
+                            self.pending_line.push_str(&owned);
+                        }
+                        self.pending_utf8.drain(..valid_up_to);
+                    }
+                    if let Some(err_len) = err.error_len() {
+                        self.pending_line.push('�');
+                        let drain_len = err_len.min(self.pending_utf8.len());
+                        self.pending_utf8.drain(..drain_len);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        while let Some(pos) = self.pending_line.find('\n') {
+            let mut segment = self.pending_line[..pos].to_string();
+            self.pending_line.drain(..=pos);
+            segment.push('\n');
+            appended |= self.push_segment(&segment, is_stderr);
+        }
+
+        if appended {
+            self.auto_follow(was_following);
+        }
+    }
+
+    fn flush_pending_line(&mut self) -> bool {
+        let was_following = self.is_following();
+        let mut appended = false;
+        if !self.pending_utf8.is_empty() {
+            if let Ok(valid) = std::str::from_utf8(&self.pending_utf8) {
+                self.pending_line.push_str(valid);
+            } else {
+                let owned = String::from_utf8_lossy(&self.pending_utf8);
+                self.pending_line.push_str(&owned);
+            }
+            self.pending_utf8.clear();
+        }
+        if self.pending_line.is_empty() {
+            return false;
+        }
+        let segment = std::mem::take(&mut self.pending_line);
+        appended |= self.push_segment(&segment, self.pending_line_is_stderr);
+        if appended {
+            self.auto_follow(was_following);
+        }
+        appended
+    }
+
+    fn finalize(&mut self, exit_code: Option<i32>, duration: Duration) {
+        let _ = self.flush_pending_line();
+        self.running = false;
+        self.exit_code = exit_code;
+        self.duration = Some(duration);
+    }
+
+    fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
+        let mut appended = false;
+        let normalized = normalize_overwrite_sequences(segment);
+        for raw_line in normalized.split_inclusive('\n') {
+            let line_text = raw_line.trim_end_matches('\n');
+            let sanitized = sanitize_for_tui(
+                line_text,
+                SanitizeMode::AnsiPreserving,
+                SanitizeOptions { expand_tabs: true, ..Default::default() },
+            );
+            let mut line = ansi_escape_line(&sanitized);
+            if is_stderr {
+                let warn = crate::colors::warning();
+                for span in line.spans.iter_mut() {
+                    if span.style.fg.is_none() {
+                        span.style.fg = Some(warn);
+                    }
+                }
+            }
+            self.lines.push_back(line);
+            appended = true;
+            if self.lines.len() > TERMINAL_MAX_LINES {
+                self.lines.pop_front();
+                self.truncated = true;
+            }
+        }
+        appended
+    }
+}
+
+fn format_duration_short(duration: Duration) -> String {
+    if duration.as_secs() >= 60 {
+        format!("{:.1}m", duration.as_secs_f32() / 60.0)
+    } else if duration.as_secs() >= 1 {
+        format!("{:.1}s", duration.as_secs_f32())
+    } else if duration.as_millis() >= 1 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{}µs", duration.as_micros())
+    }
+}
+
 #[derive(Default)]
 struct PerfState {
     enabled: bool,
