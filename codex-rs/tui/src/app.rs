@@ -1023,11 +1023,6 @@ impl App<'_> {
                         widget.apply_model_selection(model, effort);
                     }
                 }
-                AppEvent::UpdateReasoningEffort(new_effort) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.set_reasoning_effort(new_effort);
-                    }
-                }
                 AppEvent::UpdateTextVerbosity(new_verbosity) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_text_verbosity(new_verbosity);

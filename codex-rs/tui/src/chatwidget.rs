@@ -149,6 +149,8 @@ struct RunningCommand {
     parsed: Vec<ParsedCommand>,
     // Index of the in-history Exec cell for this call, if inserted
     history_index: Option<usize>,
+    // Aggregated exploration entry (history index, entry index) when grouped
+    explore_entry: Option<(usize, usize)>,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -1138,6 +1140,26 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn refresh_reasoning_collapsed_visibility(&mut self) {
+        let show = self.config.tui.show_reasoning;
+        let mut marked_visible = false;
+        for cell in self.history_cells.iter().rev() {
+            if let Some(reasoning_cell) = cell
+                .as_any()
+                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+            {
+                if show {
+                    reasoning_cell.set_hide_when_collapsed(false);
+                } else if !marked_visible {
+                    reasoning_cell.set_hide_when_collapsed(false);
+                    marked_visible = true;
+                } else {
+                    reasoning_cell.set_hide_when_collapsed(true);
+                }
+            }
+        }
+    }
+
     /// Handle streaming delta for both answer and reasoning
     // Legacy helper removed: streaming now requires explicit sequence numbers.
     // Call sites should invoke `streaming::delta_text(self, kind, id, delta, seq)` directly.
@@ -1704,7 +1726,7 @@ impl ChatWidget<'_> {
             last_assistant_message: None,
             exec: ExecState {
                 running_commands: HashMap::new(),
-                running_read_agg_index: None,
+                running_explore_agg_index: None,
                 pending_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
@@ -1885,7 +1907,7 @@ impl ChatWidget<'_> {
             last_assistant_message: None,
             exec: ExecState {
                 running_commands: HashMap::new(),
-                running_read_agg_index: None,
+                running_explore_agg_index: None,
                 pending_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
@@ -2529,6 +2551,7 @@ impl ChatWidget<'_> {
         // Maintain input focus when new history arrives
         self.bottom_pane.ensure_input_focus();
         self.app_event_tx.send(AppEvent::RequestRedraw);
+        self.refresh_reasoning_collapsed_visibility();
         pos
     }
 
@@ -4991,9 +5014,18 @@ impl ChatWidget<'_> {
             };
             self.set_reasoning_effort(new_effort);
         } else {
-            // No parameter - show interactive selection UI
-            self.bottom_pane
-                .show_reasoning_selection(self.config.model_reasoning_effort);
+            let presets = self.available_model_presets();
+            if presets.is_empty() {
+                let message = "No model presets are available. Update your configuration to define models.".to_string();
+                self.history_push(history_cell::new_error_event(message));
+                return;
+            }
+
+            self.bottom_pane.show_model_selection(
+                presets,
+                self.config.model.clone(),
+                self.config.model_reasoning_effort,
+            );
             return;
         }
     }
@@ -5806,6 +5838,7 @@ impl ChatWidget<'_> {
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
+                                self.refresh_reasoning_collapsed_visibility();
                                 return;
                             }
                         }
@@ -5833,6 +5866,7 @@ impl ChatWidget<'_> {
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
+                                self.refresh_reasoning_collapsed_visibility();
                                 return;
                             }
                         } else {
@@ -6390,6 +6424,7 @@ impl ChatWidget<'_> {
             self.bottom_pane
                 .update_status_text("No reasoning to toggle".to_string());
         }
+        self.refresh_reasoning_collapsed_visibility();
         // Collapsed state changes affect heights; clear cache
         self.invalidate_height_cache();
         self.request_redraw();
@@ -11909,7 +11944,7 @@ fn coalesce_read_ranges_in_lines(lines: &mut Vec<ratatui::text::Line<'static>>) 
 #[derive(Default)]
 struct ExecState {
     running_commands: HashMap<ExecCallId, RunningCommand>,
-    running_read_agg_index: Option<usize>,
+    running_explore_agg_index: Option<usize>,
     // Pairing map for out-of-order exec events. If an ExecEnd arrives before
     // ExecBegin, we stash it briefly and either pair it when Begin arrives or
     // flush it after a short timeout to show a fallback cell.

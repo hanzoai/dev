@@ -25,7 +25,6 @@ mod live_ring_widget;
 mod popup_consts;
 mod agent_editor_view;
 mod agents_overview_view;
-mod reasoning_selection_view;
 mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
@@ -55,7 +54,6 @@ use codex_common::model_presets::ModelPreset;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
-use reasoning_selection_view::ReasoningSelectionView;
 use model_selection_view::ModelSelectionView;
 use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
@@ -458,15 +456,6 @@ impl BottomPane<'_> {
         current_effort: ReasoningEffort,
     ) {
         let view = ModelSelectionView::new(presets, current_model, current_effort, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        // Status shown in composer title now
-        self.status_view_active = false;
-        self.request_redraw()
-    }
-
-    /// Show the reasoning selection UI
-    pub fn show_reasoning_selection(&mut self, current_effort: ReasoningEffort) {
-        let view = ReasoningSelectionView::new(current_effort, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         // Status shown in composer title now
         self.status_view_active = false;
