@@ -300,9 +300,10 @@ pub(crate) struct ChatWidget<'a> {
     /// When true, render without the top status bar and HUD so the normal
     /// terminal scrollback remains usable (Ctrl+T standard terminal mode).
     pub(crate) standard_terminal_mode: bool,
-    // Pending one-shot note about the latest access-mode change to inject into
-    // the agent's conversation history on the next user message.
-    pending_access_note: Option<String>,
+    // Pending system notes to inject into the agent's conversation history
+    // before the next user turn. Each entry is sent in order ahead of the
+    // user's visible prompt.
+    pending_agent_notes: Vec<String>,
 
     // Stable synthetic request bucket for pre‑turn system notices (set on first use)
     synthetic_system_req: Option<u64>,
@@ -1864,7 +1865,7 @@ impl ChatWidget<'_> {
             show_order_overlay,
             scroll_history_hint_shown: false,
             access_status_idx: None,
-            pending_access_note: None,
+            pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
@@ -2044,7 +2045,7 @@ impl ChatWidget<'_> {
             scroll_history_hint_shown: false,
             access_status_idx: None,
             standard_terminal_mode: !config.tui.alternate_screen,
-            pending_access_note: None,
+            pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
         };
@@ -2121,8 +2122,19 @@ impl ChatWidget<'_> {
 
     /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
     fn format_model_name(&self, model_name: &str) -> String {
-        if model_name.to_lowercase().starts_with("gpt-") {
-            format!("GPT{}", &model_name[3..])
+        if let Some(rest) = model_name.strip_prefix("gpt-") {
+            let formatted_rest = rest
+                .split('-')
+                .map(|segment| {
+                    if segment.eq_ignore_ascii_case("codex") {
+                        "Codex".to_string()
+                    } else {
+                        segment.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("-");
+            format!("GPT-{}", formatted_rest)
         } else {
             model_name.to_string()
         }
@@ -3125,7 +3137,7 @@ impl ChatWidget<'_> {
 
         // If an access-mode change was pending, record it in the agent's
         // conversation history right before the next user turn.
-        if let Some(note) = self.pending_access_note.take() {
+        for note in self.pending_agent_notes.drain(..) {
             let _ = self.codex_op_tx.send(Op::AddToHistory { text: note });
         }
 
@@ -5562,7 +5574,7 @@ impl ChatWidget<'_> {
             }
             _ => "System: access mode changed to Full Access. Writes and network are allowed.",
         };
-        self.pending_access_note = Some(agent_note.to_string());
+        self.queue_agent_note(agent_note);
     }
 
     /// Insert or replace the access-mode status background event. Uses a near-time
@@ -8529,6 +8541,17 @@ impl ChatWidget<'_> {
         self.submit_user_message(msg);
     }
 
+    /// Queue a note that will be delivered to the agent as a hidden system
+    /// message immediately before the next user input is sent. Notes are
+    /// drained in FIFO order so multiple updates retain their sequencing.
+    pub(crate) fn queue_agent_note<S: Into<String>>(&mut self, note: S) {
+        let note = note.into();
+        if note.trim().is_empty() {
+            return;
+        }
+        self.pending_agent_notes.push(note);
+    }
+
     pub(crate) fn token_usage(&self) -> &TokenUsage {
         &self.total_token_usage
     }
@@ -9184,7 +9207,7 @@ impl ChatWidget<'_> {
             // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
             let msg = if let Some(task_text) = task_opt {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Task: {task}\n  Switching and starting task...",
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Task: {task}\n  Notifying model about new cwd and starting task...",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,
@@ -9193,7 +9216,7 @@ impl ChatWidget<'_> {
                 )
             } else {
                 format!(
-                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Switched to branch. Type your task when ready.",
+                    "• Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  {up}\n  Notifying model about new cwd. Type your task when ready.",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,

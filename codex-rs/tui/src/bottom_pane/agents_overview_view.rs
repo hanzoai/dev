@@ -38,7 +38,13 @@ impl AgentsOverviewView {
         lines.push(Line::from(Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD))));
         for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
             let sel = i == self.selected;
-            let dot_style = if *enabled && *installed { Style::default().fg(crate::colors::success()) } else { Style::default().fg(crate::colors::text()) };
+            let dot_style = Style::default().fg(if !*enabled {
+                crate::colors::error()
+            } else if !*installed {
+                crate::colors::warning()
+            } else {
+                crate::colors::success()
+            });
             let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
             let mut spans = vec![
                 Span::styled(if sel { "› " } else { "  " }, if sel { Style::default().fg(crate::colors::primary()) } else { Style::default() }),
