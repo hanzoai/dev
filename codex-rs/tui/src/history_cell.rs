@@ -5640,10 +5640,14 @@ fn emphasize_shell_command_name(line: &mut Line<'static>) {
             rebuilt.push(Span::styled(before.to_string(), style));
         }
 
-        let bright_style = style
-            .fg(crate::colors::text_bright())
-            .add_modifier(Modifier::BOLD);
-        rebuilt.push(Span::styled(token.to_string(), bright_style));
+        if token.chars().count() <= 4 {
+            rebuilt.push(Span::styled(token.to_string(), style));
+        } else {
+            let bright_style = style
+                .fg(crate::colors::text_bright())
+                .add_modifier(Modifier::BOLD);
+            rebuilt.push(Span::styled(token.to_string(), bright_style));
+        }
 
         if !after.is_empty() {
             rebuilt.push(Span::styled(after.to_string(), style));
