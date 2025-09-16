@@ -165,17 +165,17 @@ impl BottomPane<'_> {
             .map(|r| r.desired_height(width))
             .unwrap_or(0);
 
-        let view_height = if let Some(view) = self.active_view.as_ref() {
-            view.desired_height(width)
+        let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
+            (view.desired_height(width), 0)
         } else {
             // Optionally add 1 for the empty line above the composer
             let spacer = if self.top_spacer_enabled { 1 } else { 0 };
-            spacer + self.composer.desired_height(width)
+            (spacer + self.composer.desired_height(width), Self::BOTTOM_PAD_LINES)
         };
 
         ring_h
             .saturating_add(view_height)
-            .saturating_add(Self::BOTTOM_PAD_LINES)
+            .saturating_add(pad_lines)
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -735,7 +735,11 @@ impl WidgetRef for &BottomPane<'_> {
                 if y_offset < area.height {
                     // Reserve bottom padding lines; keep at least 1 line for the view.
                     let avail = area.height - y_offset;
-                    let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
+                    let pad = if self.active_view.is_some() {
+                        0
+                    } else {
+                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
+                    };
                     // Add horizontal padding (2 chars on each side) for views
                     let horizontal_padding = 1u16;
                     let view_rect = Rect {
