@@ -60,4 +60,10 @@ impl AppEventSender {
         self.send(AppEvent::InsertBackgroundEventEarly(message.into()));
     }
 
+    /// Emit a background event appended to the current request window so it
+    /// shows up after previously rendered content.
+    pub(crate) fn send_background_event_late(&self, message: impl Into<String>) {
+        self.send(AppEvent::InsertBackgroundEventLate(message.into()));
+    }
+
 }
