@@ -35,6 +35,7 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 use crate::CodexAuth;
+use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
@@ -821,7 +822,7 @@ impl Session {
     }
 
     /// Create a stamped Event with a per-turn sequence number.
-    fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
         let mut state = self.state.lock().unwrap();
         let seq = match msg {
             EventMsg::TaskStarted => {
@@ -1801,14 +1802,14 @@ async fn submission_loop(
                 let writable_roots = get_writable_roots(&cwd);
 
                 // Error messages to dispatch after SessionConfigured is sent.
-                let mut mcp_connection_errors = Vec::<Event>::new();
+                let mut mcp_connection_errors = Vec::<String>::new();
                 let (mcp_connection_manager, failed_clients) =
                     match McpConnectionManager::new(config.mcp_servers.clone()).await {
                         Ok((mgr, failures)) => (mgr, failures),
                         Err(e) => {
                             let message = format!("Failed to create MCP connection manager: {e:#}");
                             error!("{message}");
-                            mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
+                            mcp_connection_errors.push(message);
                             (McpConnectionManager::default(), Default::default())
                         }
                     };
@@ -1819,7 +1820,7 @@ async fn submission_loop(
                         let message =
                             format!("MCP client for `{server_name}` failed to start: {err:#}");
                         error!("{message}");
-                        mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
+                        mcp_connection_errors.push(message);
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
@@ -1876,18 +1877,19 @@ async fn submission_loop(
                     crate::message_history::history_metadata(&config).await;
 
                 // ack
-                let events = std::iter::once(Event {
-                    id: INITIAL_SUBMIT_ID.to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                let sess_arc = sess.as_ref().expect("session initialized");
+                let events = std::iter::once(sess_arc.make_event(
+                    INITIAL_SUBMIT_ID,
+                    EventMsg::SessionConfigured(SessionConfiguredEvent {
                         session_id,
                         model,
                         history_log_id,
                         history_entry_count,
                     }),
-                    order: None,
-                })
-                .chain(mcp_connection_errors.into_iter());
+                ))
+                .chain(mcp_connection_errors.into_iter().map(|message| {
+                    sess_arc.make_event(&sub.id, EventMsg::Error(ErrorEvent { message }))
+                }));
                 for event in events {
                     if let Err(e) = tx_event.send(event).await {
                         error!("failed to send event: {e:?}");
@@ -1895,7 +1897,10 @@ async fn submission_loop(
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
                 if let Some(items) = restored_items {
-                    let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }), order: None };
+                    let event = sess_arc.make_event(
+                        &sub.id,
+                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }),
+                    );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
                     }
@@ -1904,14 +1909,24 @@ async fn submission_loop(
                 // Initialize agent manager after SessionConfigured is sent
                 if !agent_manager_initialized {
                     let mut manager = AGENT_MANAGER.write().await;
-                    let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let (agent_tx, mut agent_rx) =
+                        tokio::sync::mpsc::unbounded_channel::<AgentStatusUpdatePayload>();
                     manager.set_event_sender(agent_tx);
                     drop(manager);
 
+                    let sess_for_agents = sess.as_ref().expect("session active").clone();
                     // Forward agent events to the main event channel
                     let tx_event_clone = tx_event.clone();
                     tokio::spawn(async move {
-                        while let Some(event) = agent_rx.recv().await {
+                        while let Some(payload) = agent_rx.recv().await {
+                            let event = sess_for_agents.make_event(
+                                "agent_status",
+                                EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                                    agents: payload.agents.clone(),
+                                    context: payload.context.clone(),
+                                    task: payload.task.clone(),
+                                }),
+                            );
                             let _ = tx_event_clone.send(event).await;
                         }
                     });
@@ -2050,19 +2065,32 @@ async fn submission_loop(
 
                 // Gracefully flush and shutdown rollout recorder on session end so tests
                 // that inspect the rollout file do not race with the background writer.
-                if let Some(sess_arc) = sess {
+                if let Some(ref sess_arc) = sess {
                     let recorder_opt = sess_arc.rollout.lock().unwrap().take();
                     if let Some(rec) = recorder_opt {
                         if let Err(e) = rec.shutdown().await {
                             warn!("failed to shutdown rollout recorder: {e}");
-                            let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: "Failed to shutdown rollout recorder".to_string() }), order: None };
+                            let event = sess_arc.make_event(
+                                &sub.id,
+                                EventMsg::Error(ErrorEvent {
+                                    message: "Failed to shutdown rollout recorder".to_string(),
+                                }),
+                            );
                             if let Err(e) = tx_event.send(event).await {
                                 warn!("failed to send error message: {e:?}");
                             }
                         }
                     }
                 }
-                let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ShutdownComplete, order: None };
+                let event = match sess {
+                    Some(ref sess_arc) => sess_arc.make_event(&sub.id, EventMsg::ShutdownComplete),
+                    None => Event {
+                        id: sub.id.clone(),
+                        event_seq: 0,
+                        msg: EventMsg::ShutdownComplete,
+                        order: None,
+                    },
+                };
                 if let Err(e) = tx_event.send(event).await {
                     warn!("failed to send Shutdown event: {e}");
                 }
@@ -2287,7 +2315,10 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
+                let event = sess.make_event(
+                    &sub_id,
+                    EventMsg::Error(ErrorEvent { message: e.to_string() }),
+                );
                 sess.tx_event.send(event).await.ok();
                 // let the user continue the conversation
                 break;
@@ -2295,7 +2326,12 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         }
     }
     sess.remove_agent(&sub_id);
-    let event = Event { id: sub_id, event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: last_task_message }), order: None };
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: last_task_message,
+        }),
+    );
     match &event.msg {
         EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: Some(m) }) => {
             tracing::info!("core.emit TaskComplete last_agent_message.len={}", m.len());
@@ -2834,10 +2870,16 @@ async fn run_compact_agent(
                     tokio::time::sleep(delay).await;
                     continue;
                 } else {
-                    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
+                    let event = sess.make_event(
+                        &sub_id,
+                        EventMsg::Error(ErrorEvent { message: e.to_string() }),
+                    );
                     sess.send_event(event).await;
                     // Ensure the UI is released from running state even on errors.
-                    let done = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }), order: None };
+                    let done = sess.make_event(
+                        &sub_id,
+                        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+                    );
                     sess.send_event(done).await;
                     return;
                 }
@@ -2846,7 +2888,12 @@ async fn run_compact_agent(
     }
 
     sess.remove_agent(&sub_id);
-    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::AgentMessage(AgentMessageEvent { message: "Compact agent completed".to_string() }), order: None };
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Compact agent completed".to_string(),
+        }),
+    );
     sess.send_event(event).await;
     let event = sess.make_event(
         &sub_id,
@@ -4805,7 +4852,10 @@ async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String
                     running_count,
                     if running_count != 1 { "s" } else { "" }
                 );
-    let event = Event { id: "agent-status".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: status_msg }), order: None };
+                let event = sess.make_event(
+                    "agent-status",
+                    EventMsg::BackgroundEvent(BackgroundEventEvent { message: status_msg }),
+                );
                 let _ = sess.tx_event.send(event).await;
             }
 
@@ -5584,6 +5634,7 @@ async fn handle_container_exec_with_params(
                         sub_id: sub_id.clone(),
                         call_id: call_id.clone(),
                         tx_event: sess.tx_event.clone(),
+                        session: None,
                     })
                 },
             },
@@ -5724,6 +5775,7 @@ async fn handle_sandbox_error(
                                 sub_id: sub_id.clone(),
                                 call_id: call_id.clone(),
                                 tx_event: sess.tx_event.clone(),
+                                session: None,
                             })
                         },
                     },
@@ -6013,16 +6065,14 @@ async fn send_agent_status_update(sess: &Session) {
         })
         .collect();
 
-    let event = Event {
-        id: "agent_status".to_string(),
-        event_seq: 0,
-        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+    let event = sess.make_event(
+        "agent_status",
+        EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
             agents,
             context: None,
             task: None,
         }),
-        order: None,
-    };
+    );
 
     // Send event asynchronously
     let tx_event = sess.tx_event.clone();
@@ -6039,15 +6089,13 @@ fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String)
     tracing::info!("Captured screenshot; updating UI and using per-turn injection");
 
     // Also send an immediate event to update the TUI display
-    let event = Event {
-        id: "browser_screenshot".to_string(),
-        event_seq: 0,
-        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+    let event = sess.make_event(
+        "browser_screenshot",
+        EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
             screenshot_path,
             url,
         }),
-        order: None,
-    };
+    );
 
     // Send event asynchronously to avoid blocking
     let tx_event = sess.tx_event.clone();

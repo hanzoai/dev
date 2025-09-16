@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::time::Duration;
 use std::time::Instant;
+use std::sync::Arc;
 
 use async_channel::Sender;
 use tokio::io::AsyncRead;
@@ -14,6 +15,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
 
+use crate::codex::Session;
 use crate::error::CodexErr;
 use crate::error::Result;
 use crate::error::SandboxErr;
@@ -80,6 +82,7 @@ pub struct StdoutStream {
     pub sub_id: String,
     pub call_id: String,
     pub tx_event: Sender<Event>,
+    pub(crate) session: Option<Arc<Session>>,
 }
 
 pub async fn process_exec_tool_call(
@@ -387,20 +390,24 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
 
         if let Some(stream) = &stream {
             if emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL {
-            let chunk = tmp[..n].to_vec();
-            let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
-                call_id: stream.call_id.clone(),
-                stream: if is_stderr {
-                    ExecOutputStream::Stderr
+                let chunk = tmp[..n].to_vec();
+                let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+                    call_id: stream.call_id.clone(),
+                    stream: if is_stderr {
+                        ExecOutputStream::Stderr
+                    } else {
+                        ExecOutputStream::Stdout
+                    },
+                    chunk: ByteBuf::from(chunk),
+                });
+                let event = if let Some(sess) = &stream.session {
+                    sess.make_event(&stream.sub_id, msg)
                 } else {
-                    ExecOutputStream::Stdout
-                },
-                chunk: ByteBuf::from(chunk),
-            });
-            let event = Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: None };
-            #[allow(clippy::let_unit_value)]
-            let _ = stream.tx_event.send(event).await;
-            emitted_deltas += 1;
+                    Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: None }
+                };
+                #[allow(clippy::let_unit_value)]
+                let _ = stream.tx_event.send(event).await;
+                emitted_deltas += 1;
             }
         }
 
