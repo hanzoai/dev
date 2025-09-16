@@ -230,8 +230,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let desired_orch_inner = self.orch_field.desired_height(orch_inner_w);
         let orch_inner_capped = desired_orch_inner.min(8);
         let orch_box_h = orch_inner_capped.saturating_add(2);
-        let content_rows: u16 = 1  // top spacer
-            + 1  // title
+        let content_rows: u16 = 1  // title
             + 1  // spacer after title
             + name_box_h
             + 1  // spacer
@@ -241,8 +240,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             + 1  // spacer
             + orch_box_h // orchestrator box
             + 1  // spacer
-            + 1  // buttons
-            + 1; // bottom spacer
+            + 1; // buttons
         (content_rows + 2).clamp(8, 50)
     }
 
@@ -263,8 +261,6 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let sel = |idx: usize| if self.field == idx { Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD) } else { Style::default() };
         let label = |idx: usize| if self.field == idx { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
 
-        // Top spacer
-        lines.push(Line::from(""));
         // Bold title
         lines.push(Line::from(Span::styled("Agents » Edit Command", Style::default().add_modifier(Modifier::BOLD))));
         // Spacer after title
@@ -358,8 +354,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
             btn_spans.push(Span::styled("[ Cancel ]", cancel_style));
             lines.push(Line::from(btn_spans));
         }
-        // Bottom spacer
-        lines.push(Line::from(""));
+        // No trailing spacer; buttons sit against bottom frame
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
@@ -371,8 +366,8 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let content_w = content_rect.width;
         let mut y = content_rect.y;
 
-        // Skip top spacer + title + spacer
-        y = y.saturating_add(3);
+        // Skip title + spacer
+        y = y.saturating_add(2);
         // Row: Name box with title; height fixed (3)
         let name_box_rect = Rect { x: content_rect.x, y, width: content_w, height: name_box_h };
         let name_border = if self.field == 0 { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default().fg(crate::colors::border()) };

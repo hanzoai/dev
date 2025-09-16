@@ -184,9 +184,7 @@ impl AgentEditorView {
         let mut cursor: u16 = 0;
         let desc_style = Style::default().fg(crate::colors::text_dim());
 
-        // Top spacer, title, spacer
-        lines.push(Line::from(""));
-        cursor = cursor.saturating_add(1);
+        // Title, spacer
         lines.push(Line::from(Span::styled(
             format!("Agents » Edit Agent » {}", self.name),
             Style::default().add_modifier(Modifier::BOLD),
