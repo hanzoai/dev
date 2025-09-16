@@ -543,6 +543,50 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn conversation_context_for_branch(&self) -> Option<String> {
+        const MAX_LINES: usize = 80;
+        const MAX_CHARS: usize = 4000;
+
+        let transcript = self.export_transcript_lines_for_buffer();
+        if transcript.is_empty() {
+            return None;
+        }
+
+        let start = transcript.len().saturating_sub(MAX_LINES);
+        let mut out = String::new();
+        for line in transcript.iter().skip(start) {
+            let mut row = String::new();
+            for span in &line.spans {
+                row.push_str(span.content.as_ref());
+            }
+            let row = row.trim_end();
+            if row.is_empty() {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                continue;
+            }
+            if out.len() + row.len() + 1 > MAX_CHARS {
+                // If nothing has been written yet, include as much as possible of this row.
+                if out.is_empty() {
+                    let mut truncated = row.to_string();
+                    truncated.truncate(MAX_CHARS);
+                    out.push_str(truncated.trim_end());
+                }
+                break;
+            }
+            out.push_str(row);
+            out.push('\n');
+        }
+
+        let summary = out.trim().to_string();
+        if summary.is_empty() {
+            None
+        } else {
+            Some(summary)
+        }
+    }
+
     /// Export history and ordering state so the UI can swap sessions (e.g., /branch)
     /// without losing visible conversation. This drains the current widget's history.
     pub(crate) fn export_history_for_session_swap(
@@ -2894,6 +2938,7 @@ impl ChatWidget<'_> {
                     self.app_event_tx.send(AppEvent::SwitchCwd(
                         fallback_root,
                         Some(display_text.clone()),
+                        None,
                     ));
                     return;
                 }
@@ -9257,6 +9302,7 @@ impl ChatWidget<'_> {
         let args_trim = args.trim().to_string();
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
+        let conversation_context = self.conversation_context_for_branch();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
             self.history_push(crate::history_cell::new_background_event(
@@ -9421,7 +9467,7 @@ impl ChatWidget<'_> {
             // Switch cwd and optionally submit the task
             // Prefix the auto-submitted task so it's obvious it started in the new branch
             let initial_prompt = task_opt.map(|s| format!("[branch created] {}", s));
-            let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt));
+            let _ = tx.send(AppEvent::SwitchCwd(worktree, initial_prompt, conversation_context));
         });
     }
 
@@ -9589,7 +9635,7 @@ impl ChatWidget<'_> {
                 );
                 let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
                 let _ = tx_for_switch
-                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
+                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None, None));
             };
 
             if !handoff_reasons.is_empty() {
@@ -9905,7 +9951,7 @@ impl ChatWidget<'_> {
                 git_root.display()
             );
             send_background(&tx, msg);
-            tx.send(AppEvent::SwitchCwd(git_root, None));
+            tx.send(AppEvent::SwitchCwd(git_root, None, None));
         });
     }
 }
