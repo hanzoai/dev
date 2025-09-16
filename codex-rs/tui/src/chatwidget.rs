@@ -11827,7 +11827,18 @@ impl WidgetRef for &ChatWidget<'_> {
                             _ => crate::colors::primary(),
                         }
                     } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
-                        crate::colors::success()
+                        if let Some(plan_cell) = item
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
+                        {
+                            if plan_cell.is_complete() {
+                                crate::colors::success()
+                            } else {
+                                crate::colors::info()
+                            }
+                        } else {
+                            crate::colors::success()
+                        }
                     } else {
                         match symbol {
                             "›" => crate::colors::text(),        // user

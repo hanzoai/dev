@@ -901,6 +901,13 @@ impl HistoryCell for PlainHistoryCell {
 pub(crate) struct PlanUpdateCell {
     lines: Vec<Line<'static>>,
     icon: &'static str,
+    is_complete: bool,
+}
+
+impl PlanUpdateCell {
+    pub(crate) fn is_complete(&self) -> bool {
+        self.is_complete
+    }
 }
 
 impl HistoryCell for PlanUpdateCell {
@@ -7644,6 +7651,12 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
         .filter(|p| matches!(p.status, StepStatus::Completed))
         .count();
     let icon = plan_progress_icon(total, completed);
+    let is_complete = total > 0 && completed >= total;
+    let header_color = if is_complete {
+        crate::colors::success()
+    } else {
+        crate::colors::info()
+    };
 
     let width: usize = 10;
     let filled = if total > 0 {
@@ -7658,14 +7671,14 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     header.push(Span::styled(
         "Plan",
         Style::default()
-            .fg(crate::colors::success())
+            .fg(header_color)
             .add_modifier(Modifier::BOLD),
     ));
     header.push(Span::raw(" ["));
     if filled > 0 {
         header.push(Span::styled(
             "█".repeat(filled),
-            Style::default().fg(crate::colors::success()),
+            Style::default().fg(header_color),
         ));
     }
     if empty > 0 {
@@ -7729,7 +7742,11 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
         }
     }
 
-    PlanUpdateCell { lines, icon }
+    PlanUpdateCell {
+        lines,
+        icon,
+        is_complete,
+    }
 }
 
 pub(crate) fn new_patch_event(
