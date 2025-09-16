@@ -456,17 +456,20 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
         .unwrap_or_else(|| (vec![call_id.clone()], vec![], None, None));
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
+        let action = history_cell::action_enum_from_parsed(&parsed);
+        let status = match (exit_code, action) {
+            (0, _) => history_cell::ExploreEntryStatus::Success,
+            (1, history_cell::ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
+            _ => history_cell::ExploreEntryStatus::Error {
+                exit_code: Some(exit_code),
+            },
+        };
         if agg_idx < chat.history_cells.len() {
             if let Some(agg) = chat.history_cells[agg_idx]
                 .as_any_mut()
                 .downcast_mut::<history_cell::ExploreAggregationCell>()
             {
-                let status = if exit_code == 0 {
-                    history_cell::ExploreEntryStatus::Success
-                } else {
-                    history_cell::ExploreEntryStatus::Error { exit_code: Some(exit_code) }
-                };
-                agg.update_status(entry_idx, status);
+                agg.update_status(entry_idx, status.clone());
             }
         }
         if !chat
@@ -479,17 +482,19 @@ pub(super) fn handle_exec_end_now(chat: &mut ChatWidget<'_>, ev: ExecCommandEndE
         }
         chat.invalidate_height_cache();
         chat.request_redraw();
-        if exit_code == 0 {
-            chat.bottom_pane.update_status_text(match history_cell::action_enum_from_parsed(&parsed) {
+        let status_text = match status {
+            history_cell::ExploreEntryStatus::Success => match action {
                 history_cell::ExecAction::Read => "files read".to_string(),
                 _ => "exploration updated".to_string(),
-            });
-        } else {
-            chat.bottom_pane.update_status_text(match history_cell::action_enum_from_parsed(&parsed) {
-                history_cell::ExecAction::Read => format!("read failed (exit {})", exit_code),
-                _ => format!("exploration failed (exit {})", exit_code),
-            });
-        }
+            },
+            history_cell::ExploreEntryStatus::NotFound => "no matches found".to_string(),
+            history_cell::ExploreEntryStatus::Error { .. } => match action {
+                history_cell::ExecAction::Read => format!("read failed (exit {exit_code})"),
+                _ => format!("exploration failed (exit {exit_code})"),
+            },
+            history_cell::ExploreEntryStatus::Running => "exploring…".to_string(),
+        };
+        chat.bottom_pane.update_status_text(status_text);
         chat.maybe_hide_spinner();
         return;
     }

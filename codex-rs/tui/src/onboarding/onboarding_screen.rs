@@ -70,6 +70,8 @@ impl OnboardingScreen {
             show_login_screen,
             login_status,
         } = args;
+        let shared_chat_args = Arc::new(Mutex::new(chat_widget_args));
+
         let mut steps: Vec<Step> = vec![Step::Welcome(WelcomeWidget {
             is_logged_in: !matches!(login_status, LoginStatus::NotAuthenticated),
         })];
@@ -82,6 +84,7 @@ impl OnboardingScreen {
                 codex_home: codex_home.clone(),
                 login_status,
                 preferred_auth_method: codex_login::AuthMode::ApiKey,
+                chat_widget_args: shared_chat_args.clone(),
             }))
         }
         let is_git_repo = get_git_repo_root(&cwd).is_some();
@@ -93,7 +96,6 @@ impl OnboardingScreen {
         };
         // Share ChatWidgetArgs between steps so changes in the TrustDirectory step
         // are reflected when continuing to chat.
-        let shared_chat_args = Arc::new(Mutex::new(chat_widget_args));
         if show_trust_screen {
             steps.push(Step::TrustDirectory(TrustDirectoryWidget {
                 cwd,
@@ -118,6 +120,7 @@ impl OnboardingScreen {
         if let Some(Step::Auth(state)) = current_step {
             match result {
                 Ok(()) => {
+                    state.apply_chatgpt_login_side_effects();
                     state.sign_in_state = SignInState::ChatGptSuccessMessage;
                     self.event_tx.send(AppEvent::RequestRedraw);
                     let tx1 = self.event_tx.clone();
