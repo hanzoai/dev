@@ -47,10 +47,13 @@ impl StatusIndicatorWidget {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        // Status line + wrapped queued messages (up to 3 lines per message)
+        // Status line + optional blank line + wrapped queued messages (up to 3 lines per message)
         // + optional ellipsis line per truncated message + 1 spacer line
         let inner_width = width.max(1) as usize;
         let mut total: u16 = 1; // status line
+        if !self.queued_messages.is_empty() {
+            total = total.saturating_add(1); // blank line between status and queued messages
+        }
         let text_width = inner_width.saturating_sub(3); // account for " ↳ " prefix
         if text_width > 0 {
             let opts = TwOptions::new(text_width)
@@ -137,6 +140,9 @@ impl WidgetRef for StatusIndicatorWidget {
         // Build lines: status, then queued messages, then spacer.
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(spans));
+        if !self.queued_messages.is_empty() {
+            lines.push(Line::from(""));
+        }
         // Wrap queued messages using textwrap and show up to the first 3 lines per message.
         let text_width = area.width.saturating_sub(3); // " ↳ " prefix
         let opts = TwOptions::new(text_width as usize)
@@ -181,6 +187,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use tokio::sync::mpsc::unbounded_channel;
 
+    // no extra tests added from upstream for elapsed formatting; our widget uses simple seconds
     #[test]
     fn renders_with_working_header() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();

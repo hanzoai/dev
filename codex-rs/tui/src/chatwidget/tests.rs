@@ -140,6 +140,17 @@ fn make_chatwidget_manual() -> (
     (widget, rx, op_rx)
 }
 
+pub(crate) fn make_chatwidget_manual_with_sender() -> (
+    ChatWidget,
+    AppEventSender,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    let (widget, rx, op_rx) = make_chatwidget_manual();
+    let app_event_tx = widget.app_event_tx.clone();
+    (widget, app_event_tx, rx, op_rx)
+}
+
 fn drain_insert_history(
     rx: &std::sync::mpsc::Receiver<AppEvent>,
 ) -> Vec<Vec<ratatui::text::Line<'static>>> {
@@ -411,7 +422,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
         lines.pop();
     }
     // Compare only after the last session banner marker, and start at the next 'thinking' line.
-    const MARKER_PREFIX: &str = ">_ You are using OpenAI Codex in ";
+    const MARKER_PREFIX: &str = ">_ You are using OpenAI Code in ";
     let last_marker_line_idx = lines
         .iter()
         .rposition(|l| l.starts_with(MARKER_PREFIX))
@@ -443,7 +454,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
 //
 // Snapshot test: command approval modal
 //
-// Synthesizes a Codex ExecApprovalRequest event to trigger the approval modal
+// Synthesizes a Code ExecApprovalRequest event to trigger the approval modal
 // and snapshots the visual output using the ratatui TestBackend.
 #[test]
 fn approval_modal_exec_snapshot() {
@@ -622,7 +633,7 @@ fn status_widget_and_approval_modal_snapshot() {
         call_id: "call-approve-exec".into(),
         command: vec!["echo".into(), "hello world".into()],
         cwd: std::path::PathBuf::from("/tmp"),
-        reason: Some("Codex wants to run a command".into()),
+        reason: Some("Code wants to run a command".into()),
     };
     chat.handle_codex_event(Event {
         id: "sub-approve-exec".into(),
