@@ -230,18 +230,18 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let desired_orch_inner = self.orch_field.desired_height(orch_inner_w);
         let orch_inner_capped = desired_orch_inner.min(8);
         let orch_box_h = orch_inner_capped.saturating_add(2);
-        let content_rows: u16 = 1  // title
+        let base_rows: u16 = 1  // title
             + 1  // spacer after title
             + name_box_h
             + 1  // spacer
             + 1  // mode row
-            + 1  // spacer
+            + 1  // spacer before agents
             + 1  // agents row
-            + 1  // spacer
-            + orch_box_h // orchestrator box
-            + 1  // spacer
-            + 1; // buttons
-        (content_rows + 1).clamp(8, 50)
+            + 1; // spacer before instructions box
+        let rows_after_orch: u16 = 1  // spacer after instructions box
+            + 1; // buttons row
+        let total_rows = base_rows + orch_box_h + rows_after_orch;
+        (total_rows + 1).clamp(8, 50)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -317,9 +317,17 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         // Cap visible inner height to 8 rows; overflow is scrollable via caret moves
         let desired_orch_box_h = desired_orch_inner_h.min(8).saturating_add(2);
         let available_h = content_rect.height; // total rows available for all content
-        let base_rows_without_orch: u16 = 14; // all rows except the orch box
-        let max_orch_box_h = available_h.saturating_sub(base_rows_without_orch);
-        let orch_box_h_reserved = desired_orch_box_h.min(max_orch_box_h);
+        let rows_before_orch = lines.len() as u16;
+        let button_row_height: u16 = 1; // buttons rendered on a single line
+        let rows_after_orch = 1 /* spacer */ + button_row_height;
+        let max_orch_box_h = available_h
+            .saturating_sub(rows_before_orch)
+            .saturating_sub(rows_after_orch);
+        let orch_box_h_reserved = if max_orch_box_h >= 2 {
+            desired_orch_box_h.min(max_orch_box_h).max(2)
+        } else {
+            max_orch_box_h
+        };
         for _ in 0..orch_box_h_reserved { lines.push(Line::from("")); }
         // Spacer between inputs
         lines.push(Line::from(""));
