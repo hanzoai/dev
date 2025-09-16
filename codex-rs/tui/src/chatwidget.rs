@@ -1714,18 +1714,10 @@ impl ChatWidget<'_> {
                 Err(e) => {
                     tracing::error!("failed to initialize conversation: {e}");
                     // Surface a visible background event so users see why nothing starts.
-                    let ev = Event {
-                        id: "diagnostic".to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!(
-                                "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
-                                e
-                            ),
-                        }),
-                        order: None,
-                    };
-                    app_event_tx_clone.send(AppEvent::CodexEvent(ev));
+                    app_event_tx_clone.send_background_event(format!(
+                        "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
+                        e
+                    ));
                     return;
                 }
             };
@@ -1746,15 +1738,8 @@ impl ChatWidget<'_> {
                 while let Some(op) = codex_op_rx.recv().await {
                     if let Err(e) = conversation_clone.submit(op).await {
                         tracing::error!("failed to submit op: {e}");
-                        let ev = Event {
-                            id: "diagnostic".to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("⚠️ Failed to submit Op to core: {}", e),
-                            }),
-                            order: None,
-                        };
-                        app_event_tx_submit.send(AppEvent::CodexEvent(ev));
+                        app_event_tx_submit
+                            .send_background_event(format!("⚠️ Failed to submit Op to core: {}", e));
                     }
                 }
             });
@@ -2646,11 +2631,16 @@ impl ChatWidget<'_> {
     /// Insert a background event near the top of the current request so it appears
     /// before imminent provider output (e.g. Exec begin).
     pub(crate) fn insert_background_event_early(&mut self, message: String) {
-        let key = self.near_time_key(None);
-        let _ = self.history_insert_with_key_global_tagged(
-            Box::new(history_cell::new_background_event(message)),
-            key,
-            "background-early",
+        let placement = if self.pending_user_prompts_for_next_turn > 0 {
+            SystemPlacement::EarlyInCurrent
+        } else {
+            SystemPlacement::PrePromptInCurrent
+        };
+        self.push_system_cell(
+            history_cell::new_background_event(message),
+            placement,
+            None,
+            None,
         );
     }
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
@@ -2821,20 +2811,12 @@ impl ChatWidget<'_> {
                 }
                 let fallback_root = anc.to_path_buf();
                 if fallback_root.exists() {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
                     let msg = format!(
                         "⚠️ Worktree directory is missing: {}\nSwitching to repo root: {}",
                         missing.display(),
                         fallback_root.display()
                     );
-                    let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: "cwd-recover".to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                        order: None,
-                    }));
+                    self.app_event_tx.send_background_event(msg);
                     // Re-submit this exact message after switching cwd
                     self.app_event_tx
                         .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
@@ -6891,20 +6873,12 @@ impl ChatWidget<'_> {
                     "[cdp] connect_to_chrome_only timed out after {:?}",
                     connect_deadline
                 );
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!(
-                            "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
-                            connect_deadline.as_secs(), port.unwrap_or(0), port.unwrap_or(0)
-                        ),
-                    }),
-                    order: None,
-                }));
+                app_event_tx.send_background_event(format!(
+                    "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                    connect_deadline.as_secs(),
+                    port.unwrap_or(0),
+                    port.unwrap_or(0)
+                ));
                 // Offer launch options popup to help recover quickly
                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                 return;
@@ -6948,17 +6922,7 @@ impl ChatWidget<'_> {
                     };
 
                     // Immediately notify success (do not block on screenshots)
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: success_msg.clone(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx.send_background_event(success_msg.clone());
 
                     // Persist last connection cache to disk (best-effort)
                     tokio::spawn(async move {
@@ -7177,17 +7141,7 @@ impl ChatWidget<'_> {
                                     }
                                     _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    event_seq: 0,
-                                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: success_msg,
-                                    }),
-                                    order: None,
-                                }));
+                                app_event_tx.send_background_event(success_msg);
 
                                 // Persist last connection cache
                                 tokio::spawn(async move {
@@ -7318,15 +7272,10 @@ impl ChatWidget<'_> {
                             }
                             Ok(Err(e2)) => {
                                 tracing::error!("[cdp] Fallback connect failed: {}", e2);
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: format!(
-                                            "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
-                                            e2, err_msg
-                                        ),
-                                    }), order: None }));
+                                app_event_tx.send_background_event(format!(
+                                    "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
+                                    e2, err_msg
+                                ));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -7336,15 +7285,10 @@ impl ChatWidget<'_> {
                                     "[cdp] Fallback connect timed out after {:?}",
                                     retry_deadline
                                 );
-                                use codex_core::protocol::BackgroundEventEvent;
-                                use codex_core::protocol::Event;
-                                use codex_core::protocol::EventMsg;
-                                let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                        message: format!(
-                                            "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
-                                            retry_deadline.as_secs()
-                                        ),
-                                    }), order: None }));
+                                app_event_tx.send_background_event(format!(
+                                    "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
+                                    retry_deadline.as_secs()
+                                ));
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -7355,17 +7299,10 @@ impl ChatWidget<'_> {
                             "[cdp] connect_to_chrome_only failed immediately: {}",
                             err_msg
                         );
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to connect to Chrome: {}", err_msg),
-                            }),
-                            order: None,
-                        }));
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to connect to Chrome: {}",
+                            err_msg
+                        ));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -7510,17 +7447,7 @@ impl ChatWidget<'_> {
                     if let Err(e) = browser_manager.set_enabled(false).await {
                         tracing::warn!("[/browser] failed to disable internal browser: {}", e);
                     }
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "🔌 Browser disabled".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx.send_background_event("🔌 Browser disabled".to_string());
                 } else {
                     // Not in internal mode → enable internal and open about:blank
                     // Reuse existing helper (ensures config + start + global manager + screenshot)
@@ -7538,17 +7465,10 @@ impl ChatWidget<'_> {
 
                     if let Err(e) = browser_manager.start().await {
                         tracing::error!("[/browser] failed to start internal browser: {}", e);
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("❌ Failed to start internal browser: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to start internal browser: {}",
+                            e
+                        ));
                         return;
                     }
 
@@ -7562,17 +7482,8 @@ impl ChatWidget<'_> {
                     }
 
                     // Emit confirmation
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "✅ Browser enabled (about:blank)".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx
+                        .send_background_event("✅ Browser enabled (about:blank)".to_string());
                 }
             });
             return;
@@ -7761,16 +7672,10 @@ impl ChatWidget<'_> {
                             );
 
                             // Send success message to chat
-                            use codex_core::protocol::BackgroundEventEvent;
-                            use codex_core::protocol::EventMsg;
-                            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                event_seq: 0,
-                                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                    message: format!("✅ Internal browser opened: {}", result.url),
-                                }),
-                                order: None,
-                            }));
+                            app_event_tx.send_background_event(format!(
+                                "✅ Internal browser opened: {}",
+                                result.url
+                            ));
 
                             // Capture initial screenshot
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -8350,14 +8255,8 @@ impl ChatWidget<'_> {
             // Explicitly (re)start the internal browser session now
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
-                let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                        message: format!("❌ Failed to start internal browser: {}", e),
-                    }),
-                    order: None,
-                }));
+                app_event_tx
+                    .send_background_event(format!("❌ Failed to start internal browser: {}", e));
                 return;
             }
 
@@ -8365,14 +8264,8 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                id: uuid::Uuid::new_v4().to_string(),
-                event_seq: 0,
-                msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                    message: "✅ Switched to internal browser mode (reconnected)".to_string(),
-                }),
-                order: None,
-            }));
+            app_event_tx
+                .send_background_event("✅ Switched to internal browser mode (reconnected)".to_string());
 
             // Clear any existing screenshot
             if let Ok(mut screenshot) = latest_screenshot.lock() {
@@ -8482,17 +8375,8 @@ impl ChatWidget<'_> {
                         tracing::warn!("[cdp] failed to stop external Chrome connection: {}", e);
                     }
                     // Notify UI
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: "🔌 Disconnected from Chrome".to_string(),
-                        }),
-                        order: None,
-                    }));
+                    app_event_tx
+                        .send_background_event("🔌 Disconnected from Chrome".to_string());
                     let _ = tx.send(true);
                 } else {
                     // Not connected externally; proceed to connect
@@ -9222,14 +9106,12 @@ impl ChatWidget<'_> {
         let tx = self.app_event_tx.clone();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
-            self.history_push(crate::history_cell::new_background_event(
-                "Creating branch worktree...".to_string(),
-            ));
+            self.insert_background_event_early("Creating branch worktree...".to_string());
         } else {
-            self.history_push(crate::history_cell::new_background_event(format!(
+            self.insert_background_event_early(format!(
                 "Creating branch worktree... Task: {}",
                 args_trim
-            )));
+            ));
         }
         self.request_redraw();
 
@@ -9239,17 +9121,7 @@ impl ChatWidget<'_> {
             let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
-                    use codex_core::protocol::BackgroundEventEvent;
-                    use codex_core::protocol::Event;
-                    use codex_core::protocol::EventMsg;
-                    let _ = tx.send(AppEvent::CodexEvent(Event {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        event_seq: 0,
-                        msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                            message: format!("`/branch` — not a git repo: {}", e),
-                        }),
-                        order: None,
-                    }));
+                    tx.send_background_event(format!("`/branch` — not a git repo: {}", e));
                     return;
                 }
             };
@@ -9265,17 +9137,10 @@ impl ChatWidget<'_> {
                 match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
                     Ok((p, b)) => (p, b),
                     Err(e) => {
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("`/branch` — failed to create worktree: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        tx.send_background_event(format!(
+                            "`/branch` — failed to create worktree: {}",
+                            e
+                        ));
                         return;
                     }
                 };
@@ -9286,17 +9151,10 @@ impl ChatWidget<'_> {
                 {
                     Ok(n) => n,
                     Err(e) => {
-                        use codex_core::protocol::BackgroundEventEvent;
-                        use codex_core::protocol::Event;
-                        use codex_core::protocol::EventMsg;
-                        let _ = tx.send(AppEvent::CodexEvent(Event {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            event_seq: 0,
-                            msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
-                                message: format!("`/branch` — failed to copy changes: {}", e),
-                            }),
-                            order: None,
-                        }));
+                        tx.send_background_event(format!(
+                            "`/branch` — failed to copy changes: {}",
+                            e
+                        ));
                         // Still switch to the branch even if copy fails
                         0
                     }
@@ -9370,15 +9228,7 @@ impl ChatWidget<'_> {
                 )
             };
             {
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                    order: None,
-                }));
+                tx.send_background_event(msg);
             }
 
             // Switch cwd and optionally submit the task
@@ -9392,20 +9242,12 @@ impl ChatWidget<'_> {
         let previous_cwd = self.config.cwd.clone();
         self.config.cwd = new_cwd.clone();
 
-        {
-            use codex_core::protocol::{BackgroundEventEvent, Event, EventMsg};
-            let msg = format!(
-                "✅ Working directory changed\n  from: {}\n  to:   {}",
-                previous_cwd.display(),
-                new_cwd.display()
-            );
-            let _ = self.app_event_tx.send(AppEvent::CodexEvent(Event {
-                id: "switch-cwd".to_string(),
-                event_seq: 0,
-                msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: msg }),
-                order: None,
-            }));
-        }
+        let msg = format!(
+            "✅ Working directory changed\n  from: {}\n  to:   {}",
+            previous_cwd.display(),
+            new_cwd.display()
+        );
+        self.app_event_tx.send_background_event(msg);
 
         let worktree_hint = new_cwd
             .file_name()
@@ -9472,15 +9314,7 @@ impl ChatWidget<'_> {
             use tokio::process::Command;
 
             fn send_background(tx: &AppEventSender, message: String) {
-                use codex_core::protocol::BackgroundEventEvent;
-                use codex_core::protocol::Event;
-                use codex_core::protocol::EventMsg;
-                let _ = tx.send(AppEvent::CodexEvent(Event {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message }),
-                    order: None,
-                }));
+                tx.send_background_event(message);
             }
 
             let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
