@@ -19,12 +19,15 @@ use ratatui::widgets::Wrap;
 use codex_login::AuthMode;
 
 use crate::LoginStatus;
+use crate::app::ChatWidgetArgs;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::shimmer::shimmer_spans;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use super::onboarding_screen::StepState;
 // no additional imports
@@ -98,6 +101,7 @@ pub(crate) struct AuthModeWidget {
     pub codex_home: PathBuf,
     pub login_status: LoginStatus,
     pub preferred_auth_method: AuthMode,
+    pub chat_widget_args: Arc<Mutex<ChatWidgetArgs>>,
 }
 
 impl AuthModeWidget {
@@ -323,6 +327,7 @@ impl AuthModeWidget {
         // If we're already authenticated with ChatGPT, don't start a new login –
         // just proceed to the success message flow.
         if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ChatGPT)) {
+            self.apply_chatgpt_login_side_effects();
             self.sign_in_state = SignInState::ChatGptSuccess;
             self.event_tx.send(AppEvent::RequestRedraw);
             return;
@@ -371,6 +376,13 @@ impl AuthModeWidget {
         }
 
         self.event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    pub(crate) fn apply_chatgpt_login_side_effects(&mut self) {
+        self.login_status = LoginStatus::AuthMode(AuthMode::ChatGPT);
+        if let Ok(mut args) = self.chat_widget_args.lock() {
+            args.config.using_chatgpt_auth = true;
+        }
     }
 }
 

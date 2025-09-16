@@ -1142,47 +1142,63 @@ impl ChatWidget<'_> {
 
     fn refresh_reasoning_collapsed_visibility(&mut self) {
         let show = self.config.tui.show_reasoning;
-        let last_explore_idx = self
-            .history_cells
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(idx, cell)| {
-                if cell
+        if show {
+            for cell in &self.history_cells {
+                if let Some(reasoning_cell) = cell
                     .as_any()
-                    .downcast_ref::<history_cell::ExploreAggregationCell>()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                {
+                    reasoning_cell.set_hide_when_collapsed(false);
+                }
+            }
+            return;
+        }
+
+        use std::collections::HashSet;
+        let mut hide_indices: HashSet<usize> = HashSet::new();
+        let len = self.history_cells.len();
+        let mut idx = 0usize;
+        while idx < len {
+            let is_explore = self.history_cells[idx]
+                .as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .is_some();
+            if !is_explore {
+                idx += 1;
+                continue;
+            }
+            let mut reasoning_indices: Vec<usize> = Vec::new();
+            let mut j = idx + 1;
+            while j < len {
+                if self.history_cells[j]
+                    .as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                     .is_some()
                 {
-                    Some(idx)
-                } else {
-                    None
+                    reasoning_indices.push(j);
+                    j += 1;
+                    continue;
                 }
-            });
+                break;
+            }
+            if reasoning_indices.len() > 1 {
+                for &ri in &reasoning_indices[..reasoning_indices.len() - 1] {
+                    hide_indices.insert(ri);
+                }
+            }
+            idx = j;
+        }
 
-        let mut kept_visible_in_explore = false;
-        for idx in (0..self.history_cells.len()).rev() {
-            if let Some(reasoning_cell) = self.history_cells[idx]
+        for (i, cell) in self.history_cells.iter().enumerate() {
+            if let Some(reasoning_cell) = cell
                 .as_any()
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
-                if show {
+                if hide_indices.contains(&i) {
+                    reasoning_cell.set_hide_when_collapsed(true);
+                } else {
                     reasoning_cell.set_hide_when_collapsed(false);
-                    continue;
                 }
-
-                if let Some(explore_idx) = last_explore_idx {
-                    if idx > explore_idx {
-                        if !kept_visible_in_explore {
-                            reasoning_cell.set_hide_when_collapsed(false);
-                            kept_visible_in_explore = true;
-                        } else {
-                            reasoning_cell.set_hide_when_collapsed(true);
-                        }
-                        continue;
-                    }
-                }
-
-                reasoning_cell.set_hide_when_collapsed(false);
             }
         }
     }
@@ -11214,6 +11230,8 @@ impl WidgetRef for &ChatWidget<'_> {
                             } => crate::colors::error(),
                             _ => crate::colors::primary(),
                         }
+                    } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
+                        crate::colors::primary()
                     } else {
                         match symbol {
                             "›" => crate::colors::text(),        // user
