@@ -13,6 +13,7 @@ use crate::config_types::ShellEnvironmentPolicyToml;
 use crate::config_types::TextVerbosity;
 use crate::config_types::Tui;
 use crate::config_types::UriBasedFileOpener;
+use crate::config_types::ConfirmGuardConfig;
 use crate::git_info::resolve_root_git_project_for_trust;
 use crate::model_family::ModelFamily;
 use crate::model_family::derive_default_model_family;
@@ -84,6 +85,8 @@ pub struct Config {
     pub sandbox_policy: SandboxPolicy,
 
     pub shell_environment_policy: ShellEnvironmentPolicy,
+    /// Patterns requiring an explicit confirm prefix before running.
+    pub confirm_guard: ConfirmGuardConfig,
 
     /// When `true`, `AgentReasoning` events emitted by the backend will be
     /// suppressed from the frontend output. This can reduce visual noise when
@@ -1029,6 +1032,9 @@ pub struct ConfigToml {
     /// Sandbox configuration to apply if `sandbox` is `WorkspaceWrite`.
     pub sandbox_workspace_write: Option<SandboxWorkspaceWrite>,
 
+    #[serde(default)]
+    pub confirm_guard: Option<ConfirmGuardConfig>,
+
     /// Disable server-side response storage (sends the full conversation
     /// context with every request). Currently necessary for OpenAI customers
     /// who have opted into Zero Data Retention (ZDR).
@@ -1451,6 +1457,19 @@ impl Config {
             })
             .collect();
 
+        let mut confirm_guard = ConfirmGuardConfig::default();
+        if let Some(mut user_guard) = cfg.confirm_guard {
+            confirm_guard.patterns.extend(user_guard.patterns.drain(..));
+        }
+        for pattern in &confirm_guard.patterns {
+            if let Err(err) = regex_lite::Regex::new(&pattern.regex) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid confirm_guard pattern `{}`: {err}", pattern.regex),
+                ));
+            }
+        }
+
         // Default review model when not set in config; allow CLI override to take precedence.
         let review_model = override_review_model
             .or(cfg.review_model)
@@ -1469,6 +1488,7 @@ impl Config {
             approval_policy: effective_approval,
             sandbox_policy,
             shell_environment_policy,
+            confirm_guard,
             disable_response_storage: config_profile
                 .disable_response_storage
                 .or(cfg.disable_response_storage)

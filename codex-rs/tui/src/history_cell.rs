@@ -31,7 +31,7 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -330,74 +330,415 @@ impl HistoryCell for Box<dyn HistoryCell> {
     }
 }
 
-// ==================== ReadAggregationCell ====================
-// Aggregates multiple Read preamble entries into a single history cell while
-// commands are still running, then flips to a finalized state without changing
-// position in the history. This prevents flicker where multiple transient
-// "Read" sections appear and later merge.
+// ==================== ExploreAggregationCell ====================
+// Collapses consecutive Read/Search/List commands into a single "Exploring" cell
+// while commands are executing, updating the entry status once the command finishes.
 
-pub(crate) struct ReadAggregationCell {
-    // Aggregated preamble lines (each line typically starts with "└ " or two spaces)
-    lines: Vec<Line<'static>>,
-    // When true, render as a finalized "Read" section (ExecStatus::Success);
-    // otherwise render with a running header style (ExecStatus::Running).
-    finalized: bool,
+#[derive(Clone)]
+pub(crate) enum ExploreEntryStatus {
+    Running,
+    Success,
+    Error { exit_code: Option<i32> },
 }
 
-impl ReadAggregationCell {
+#[derive(Clone)]
+enum ExploreSummary {
+    Search { query: Option<String>, path: Option<String> },
+    List { path: Option<String> },
+    Read { display_path: String, annotation: Option<String>, range: Option<(u32, u32)> },
+    Fallback { text: String },
+}
+
+#[derive(Clone)]
+struct ExploreEntry {
+    action: ExecAction,
+    summary: ExploreSummary,
+    status: ExploreEntryStatus,
+}
+
+impl ExploreEntry {
+    fn label(&self) -> &'static str {
+        match self.action {
+            ExecAction::Read => "Read",
+            ExecAction::Search => "Searched for",
+            ExecAction::List => "List",
+            ExecAction::Run => "Run",
+        }
+    }
+
+    fn summary_spans(&self) -> Vec<Span<'static>> {
+        match &self.summary {
+            ExploreSummary::Search { query, path } => {
+                let mut spans = Vec::new();
+                if let Some(q) = query {
+                    if !q.is_empty() {
+                        spans.push(Span::styled(q.clone(), Style::default().fg(crate::colors::text())));
+                    }
+                }
+                if let Some(p) = path {
+                    spans.push(Span::styled(
+                        format!("in {}", p),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                if spans.is_empty() {
+                    spans.push(Span::styled(
+                        "search".to_string(),
+                        Style::default().fg(crate::colors::text()),
+                    ));
+                }
+                spans
+            }
+            ExploreSummary::List { path } => {
+                let target = path
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| "./".to_string());
+                vec![Span::styled(
+                    format!("in {}", target),
+                    Style::default().fg(crate::colors::text_dim()),
+                )]
+            }
+            ExploreSummary::Read { display_path, annotation, .. } => {
+                let mut spans = vec![Span::styled(
+                    display_path.clone(),
+                    Style::default().fg(crate::colors::text()),
+                )];
+                if let Some(ann) = annotation {
+                    spans.push(Span::styled(
+                        format!(" {}", ann),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                spans
+            }
+            ExploreSummary::Fallback { text } => vec![Span::styled(
+                text.clone(),
+                Style::default().fg(crate::colors::text()),
+            )],
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        matches!(self.status, ExploreEntryStatus::Running)
+    }
+
+    fn is_error(&self) -> bool {
+        matches!(self.status, ExploreEntryStatus::Error { .. })
+    }
+}
+
+fn normalize_separators(mut value: String) -> String {
+    if value.is_empty() {
+        return value;
+    }
+    if std::path::MAIN_SEPARATOR != '/' {
+        value = value.replace(std::path::MAIN_SEPARATOR, "/");
+    }
+    value
+}
+
+fn ensure_dir_suffix(mut value: String) -> String {
+    if value.is_empty() {
+        value.push('.');
+    }
+    value = normalize_separators(value);
+    if !value.ends_with('/') {
+        value.push('/');
+    }
+    value
+}
+
+fn format_cwd_display(cwd: &Path, session_root: &Path) -> String {
+    if let Ok(rel) = cwd.strip_prefix(session_root) {
+        if rel.as_os_str().is_empty() {
+            return "./".to_string();
+        }
+        let mut parts: Vec<String> = Vec::new();
+        for comp in rel.components() {
+            match comp {
+                Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+                Component::ParentDir => parts.push("..".to_string()),
+                Component::CurDir => {}
+                _ => {}
+            }
+        }
+        if parts.is_empty() {
+            "./".to_string()
+        } else {
+            ensure_dir_suffix(parts.join("/"))
+        }
+    } else {
+        ensure_dir_suffix(cwd.display().to_string())
+    }
+}
+
+fn format_list_target(path: Option<&str>, cwd: &Path, session_root: &Path) -> Option<String> {
+    let trimmed = path.and_then(|p| {
+        let t = p.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+
+    let display = match trimmed {
+        Some(".") | Some("./") => format_cwd_display(cwd, session_root),
+        Some("/") => normalize_separators("/".to_string()),
+        Some(raw) => {
+            let stripped = raw.trim_end_matches('/');
+            let base = if stripped.is_empty() { raw } else { stripped };
+            ensure_dir_suffix(base.to_string())
+        }
+        None => format_cwd_display(cwd, session_root),
+    };
+
+    Some(display)
+}
+
+fn format_search_target(path: Option<&str>, cwd: &Path, session_root: &Path) -> Option<String> {
+    let trimmed = path.and_then(|p| {
+        let t = p.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    trimmed.map(|p| format_read_target(p, cwd, session_root))
+}
+
+fn format_read_target(name: &str, cwd: &Path, session_root: &Path) -> String {
+    let trimmed = name.trim();
+    let path = Path::new(trimmed);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+
+    let normalized = if let Ok(rel) = resolved.strip_prefix(session_root) {
+        if rel.as_os_str().is_empty() {
+            trimmed.to_string()
+        } else {
+            normalize_separators(rel.display().to_string())
+        }
+    } else {
+        normalize_separators(resolved.display().to_string())
+    };
+
+    if normalized.is_empty() {
+        trimmed.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn annotation_for_range(start: u32, end: u32) -> Option<String> {
+    if end == u32::MAX {
+        Some(format!("(from {} to end)", start))
+    } else {
+        Some(format!("(lines {} to {})", start, end))
+    }
+}
+
+pub(crate) struct ExploreAggregationCell {
+    entries: Vec<ExploreEntry>,
+}
+
+impl ExploreAggregationCell {
     pub(crate) fn new() -> Self {
-        Self { lines: Vec::new(), finalized: false }
+        Self { entries: Vec::new() }
     }
 
-    pub(crate) fn push_lines(&mut self, mut more: Vec<Line<'static>>) {
-        // Trim completely empty prefix/suffix lines from the chunk to keep the block compact
-        more = trim_empty_lines(more);
-        if more.is_empty() { return; }
-        self.lines.extend(more);
-    }
+    pub(crate) fn push_from_parsed(
+        &mut self,
+        parsed: &[ParsedCommand],
+        status: ExploreEntryStatus,
+        cwd: &Path,
+        session_root: &Path,
+    ) -> Option<usize> {
+        let action = action_enum_from_parsed(&parsed.to_vec());
+        let summary = match action {
+            ExecAction::Search => parsed.iter().find_map(|p| match p {
+                ParsedCommand::Search { query, path, cmd } => {
+                    let formatted_path = format_search_target(path.as_deref(), cwd, session_root);
+                    let pretty_query = query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
+                        if query.is_none() { Some(cmd.clone()) } else { None }
+                    });
+                    Some(ExploreSummary::Search {
+                        query: pretty_query,
+                        path: formatted_path,
+                    })
+                }
+                _ => None,
+            }),
+            ExecAction::List => parsed.iter().find_map(|p| match p {
+                ParsedCommand::ListFiles { path, .. } => {
+                    let display = format_list_target(path.as_deref(), cwd, session_root);
+                    Some(ExploreSummary::List { path: display })
+                }
+                _ => None,
+            }),
+            ExecAction::Read => parsed.iter().find_map(|p| match p {
+                ParsedCommand::Read { name, cmd, .. } => {
+                    let (annotation, range) = parse_read_line_annotation_with_range(cmd);
+                    let display_path = format_read_target(name, cwd, session_root);
+                    Some(ExploreSummary::Read {
+                        display_path,
+                        annotation,
+                        range,
+                    })
+                }
+                _ => None,
+            }),
+            ExecAction::Run => None,
+        };
 
-    pub(crate) fn finalize(&mut self) { self.finalized = true; }
+        let summary = summary.or_else(|| {
+            let text = parsed
+                .iter()
+                .map(|p| match p {
+                    ParsedCommand::Unknown { cmd } => cmd.clone(),
+                    _ => String::new(),
+                })
+                .find(|s| !s.is_empty())
+                .unwrap_or_else(|| "exec".to_string());
+            Some(ExploreSummary::Fallback { text })
+        });
 
-    // Build a normalized copy of aggregated lines where only the very first
-    // visible line uses the corner connector "└ "; subsequent lines use two
-    // spaces. Also coalesce adjacent read ranges for the same file.
-    fn normalized_lines(&self) -> Vec<Line<'static>> {
-        let mut v = self.lines.clone();
-        // Ensure only the first content line shows the corner
-        let mut seen_first = false;
-        for line in v.iter_mut() {
-            if let Some(sp0) = line.spans.get_mut(0) {
-                let s = sp0.content.as_ref();
-                if s == "└ " || s == "  └ " {
-                    if seen_first {
-                        sp0.content = "  ".into();
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                    } else {
-                        // First occurrence keeps the corner but dim it consistently
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                        seen_first = true;
+        let summary = summary?;
+
+        if let ExploreSummary::Read { display_path, annotation, range } = &summary {
+            let path_key = display_path.clone();
+            let annot = annotation.clone();
+            let range_val = *range;
+            for idx in (0..self.entries.len()).rev() {
+                if let ExploreSummary::Read {
+                    display_path: existing_path,
+                    annotation: existing_ann,
+                    range: existing_range,
+                } = &mut self.entries[idx].summary
+                {
+                    if *existing_path == path_key {
+                        let reuse = match (*existing_range, range_val) {
+                            (Some((es, ee)), Some((ns, ne))) => {
+                                if ns <= es && ne >= ee {
+                                    *existing_range = Some((ns, ne));
+                                    *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                    true
+                                } else if es <= ns && ee >= ne {
+                                    true
+                                } else {
+                                    let start = es.min(ns);
+                                    let end = if ee == u32::MAX || ne == u32::MAX {
+                                        u32::MAX
+                                    } else {
+                                        ee.max(ne)
+                                    };
+                                    *existing_range = Some((start, end));
+                                    *existing_ann = annotation_for_range(start, end);
+                                    true
+                                }
+                            }
+                            (None, Some((ns, ne))) => {
+                                *existing_range = Some((ns, ne));
+                                *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                true
+                            }
+                            (Some(_), None) => {
+                                if annot.is_some() {
+                                    *existing_ann = annot.clone();
+                                }
+                                true
+                            }
+                            (None, None) => {
+                                if annot.is_some() {
+                                    *existing_ann = annot.clone();
+                                }
+                                true
+                            }
+                        };
+
+                        if reuse {
+                            self.entries[idx].status = status;
+                            return Some(idx);
+                        }
                     }
                 }
             }
         }
-        // Merge overlapping/touching ranges per file to keep the list succinct
-        coalesce_read_ranges_in_lines_local(&mut v);
-        v
+
+        self.entries.push(ExploreEntry { action, summary, status });
+        Some(self.entries.len().saturating_sub(1))
+    }
+
+    pub(crate) fn update_status(&mut self, idx: usize, status: ExploreEntryStatus) {
+        if let Some(entry) = self.entries.get_mut(idx) {
+            entry.status = status;
+        }
+    }
+
+    fn current_exec_status(&self) -> ExecStatus {
+        if self.entries.iter().any(|e| e.is_running()) {
+            ExecStatus::Running
+        } else if self.entries.iter().any(|e| e.is_error()) {
+            ExecStatus::Error
+        } else {
+            ExecStatus::Success
+        }
     }
 }
 
-impl HistoryCell for ReadAggregationCell {
+impl HistoryCell for ExploreAggregationCell {
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn kind(&self) -> HistoryCellType { HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } } }
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        let mut out: Vec<Line<'static>> = Vec::new();
-        // Always render a stable, completed-style header to avoid flicker
-        let header = Line::styled("Read", Style::default().fg(crate::colors::text()));
-        out.push(header);
-        out.extend(self.normalized_lines());
-        out
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Exec {
+            kind: ExecKind::Search,
+            status: self.current_exec_status(),
+        }
     }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        if self.entries.is_empty() {
+            return vec![Line::styled(
+                "Exploring",
+                Style::default().fg(crate::colors::text()),
+            )];
+        }
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::styled(
+            "Exploring",
+            Style::default().fg(crate::colors::text()),
+        ));
+
+        for (idx, entry) in self.entries.iter().enumerate() {
+            let prefix = if idx == 0 { "└ " } else { "  " };
+            let mut spans: Vec<Span<'static>> = vec![Span::styled(
+                prefix,
+                Style::default().add_modifier(Modifier::DIM),
+            )];
+            spans.push(Span::styled(
+                format!("{} ", entry.label()),
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            spans.extend(entry.summary_spans());
+            match entry.status {
+                ExploreEntryStatus::Running => spans.push(Span::styled(
+                    "…",
+                    Style::default().fg(crate::colors::text_dim()),
+                )),
+                ExploreEntryStatus::Error { exit_code } => {
+                    let msg = exit_code
+                        .map(|code| format!(" (exit {})", code))
+                        .unwrap_or_else(|| " (failed)".to_string());
+                    spans.push(Span::styled(
+                        msg,
+                        Style::default().fg(crate::colors::error()),
+                    ));
+                }
+                ExploreEntryStatus::Success => {}
+            }
+            lines.push(Line::from(spans));
+        }
+        lines
+    }
+
     fn desired_height(&self, width: u16) -> u16 {
         Paragraph::new(Text::from(self.display_lines_trimmed()))
             .wrap(Wrap { trim: false })
@@ -1605,7 +1946,7 @@ impl HistoryCell for MergedExecCell {
         let header_line = match self.kind {
             ExecKind::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
             ExecKind::Search => {
-                Line::styled("Searched", Style::default().fg(crate::colors::text()))
+                Line::styled("Searched for", Style::default().fg(crate::colors::text_dim()))
             }
             ExecKind::List => {
                 Line::styled("List Files", Style::default().fg(crate::colors::text()))
@@ -1977,7 +2318,7 @@ fn exec_render_parts_parsed(
                 // For these informational actions, remove the transient “running” style
                 // and render exactly like the finalized state (no duration, normal text color).
                 ExecAction::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-                ExecAction::Search => Line::styled("Searched", Style::default().fg(crate::colors::text())),
+                ExecAction::Search => Line::styled("Searched for", Style::default().fg(crate::colors::text_dim())),
                 ExecAction::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
                 // Keep rich running header for real Run commands
                 ExecAction::Run => {
@@ -1999,15 +2340,15 @@ fn exec_render_parts_parsed(
         Some(o) if o.exit_code == 0 => {
             let done = match action {
                 ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
+                ExecAction::Search => "Searched for".to_string(),
+                ExecAction::List => "List".to_string(),
                 ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {}", p),
                     None => "Ran".to_string(),
                 },
             };
             if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
+                Line::styled(done, Style::default().fg(crate::colors::text_dim()))
             } else {
                 Line::styled(
                     done,
@@ -2020,15 +2361,15 @@ fn exec_render_parts_parsed(
         Some(_) => {
             let done = match action {
                 ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
+                ExecAction::Search => "Searched for".to_string(),
+                ExecAction::List => "List".to_string(),
                 ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {}", p),
                     None => "Ran".to_string(),
                 },
             };
             if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
+                Line::styled(done, Style::default().fg(crate::colors::text_dim()))
             } else {
                 Line::styled(
                     done,
@@ -2834,6 +3175,7 @@ pub(crate) struct CollapsibleReasoningCell {
     pub(crate) in_progress: std::cell::Cell<bool>,
     // Optional stream id to anchor routing of deltas/finals
     pub(crate) id: Option<String>,
+    hide_when_collapsed: std::cell::Cell<bool>,
 }
 
 impl CollapsibleReasoningCell {
@@ -2843,6 +3185,7 @@ impl CollapsibleReasoningCell {
             collapsed: std::cell::Cell::new(true), // Default to collapsed
             in_progress: std::cell::Cell::new(false),
             id,
+            hide_when_collapsed: std::cell::Cell::new(false),
         }
     }
 
@@ -2967,6 +3310,10 @@ impl CollapsibleReasoningCell {
 
     pub fn set_in_progress(&self, in_progress: bool) {
         self.in_progress.set(in_progress);
+    }
+
+    pub fn set_hide_when_collapsed(&self, hide: bool) {
+        self.hide_when_collapsed.set(hide);
     }
 
     /// Normalize reasoning content lines by splitting any line that begins
@@ -3112,22 +3459,27 @@ impl HistoryCell for CollapsibleReasoningCell {
         let start_idx = 0;
 
         if self.collapsed.get() {
+            if self.hide_when_collapsed.get() {
+                return Vec::new();
+            }
             // When collapsed, show extracted section titles (or at least one summary)
             let mut titles = self.extract_section_titles();
-            if self.in_progress.get() {
+            let collapsed_line = if self.in_progress.get() {
                 if let Some(last) = titles.pop() {
                     let mut spans = last.spans;
                     spans.push(Span::styled(
                         "…",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
-                    titles.push(Line::from(spans));
+                    Some(Line::from(spans))
                 } else {
-                    // No title yet — show a dim ellipsis placeholder
-                    titles.push(Line::from("…".dim()));
+                    Some(Line::from("…".dim()))
                 }
-            }
-            titles
+            } else {
+                titles.pop()
+            };
+
+            collapsed_line.into_iter().collect()
         } else {
             // When expanded, show all lines; append an ellipsis if in progress
             let mut out = normalized[start_idx..].to_vec();
@@ -3148,6 +3500,9 @@ impl HistoryCell for CollapsibleReasoningCell {
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Collapsed path: simple paragraph (titles only), already dimmed by extract_section_titles
         if self.collapsed.get() {
+            if self.hide_when_collapsed.get() {
+                return;
+            }
             // Clear background
             let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
             for y in area.y..area.y.saturating_add(area.height) {
@@ -4382,12 +4737,6 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/reasoning", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Reasoning.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
         Span::styled("/model", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Model.description())
@@ -4585,7 +4934,7 @@ fn first_context_path(parsed_commands: &[ParsedCommand]) -> Option<String> {
     None
 }
 
-fn parse_read_line_annotation(cmd: &str) -> Option<String> {
+fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(u32, u32)>) {
     let lower = cmd.to_lowercase();
     // Try sed -n '<start>,<end>p'
     if lower.contains("sed") && lower.contains("-n") {
@@ -4597,7 +4946,7 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                 if let Some((a, b)) = core.split_once(',') {
                     if let (Ok(start), Ok(end)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>())
                     {
-                        return Some(format!("(lines {} to {})", start, end));
+                        return (Some(format!("(lines {} to {})", start, end)), Some((start, end)));
                     }
                 }
             }
@@ -4613,7 +4962,7 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                     .trim_matches('\'')
                     .parse::<u32>()
                 {
-                    return Some(format!("(lines 1 to {})", n));
+                    return (Some(format!("(lines 1 to {})", n)), Some((1, n)));
                 }
             }
         }
@@ -4626,15 +4975,19 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                 let val = parts[i + 1].trim_matches('"').trim_matches('\'');
                 if let Some(rest) = val.strip_prefix('+') {
                     if let Ok(k) = rest.parse::<u32>() {
-                        return Some(format!("(from {} to end)", k));
+                        return (Some(format!("(from {} to end)", k)), Some((k, u32::MAX)));
                     }
                 } else if let Ok(n) = val.parse::<u32>() {
-                    return Some(format!("(last {} lines)", n));
+                    return (Some(format!("(last {} lines)", n)), None);
                 }
             }
         }
     }
-    None
+    (None, None)
+}
+
+fn parse_read_line_annotation(cmd: &str) -> Option<String> {
+    parse_read_line_annotation_with_range(cmd).0
 }
 
 fn new_parsed_command(
@@ -4655,8 +5008,8 @@ fn new_parsed_command(
             // Running state per action
             let header = match action {
                 ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
+                ExecAction::Search => "Searched for".to_string(),
+                ExecAction::List => "List".to_string(),
                 ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Running... in {p}"),
                     None => "Running...".to_string(),
@@ -4666,7 +5019,7 @@ fn new_parsed_command(
             if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
                 Line::styled(
                     format!("{header}{duration_str}"),
-                    Style::default().fg(crate::colors::info()),
+                    Style::default().fg(crate::colors::text_dim()),
                 )
             } else {
                 Line::styled(
@@ -4680,8 +5033,8 @@ fn new_parsed_command(
         Some(o) if o.exit_code == 0 => {
             let done = match action {
                 ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
+                ExecAction::Search => "Searched for".to_string(),
+                ExecAction::List => "List".to_string(),
                 ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {p}"),
                     None => "Ran".to_string(),
@@ -4700,13 +5053,13 @@ fn new_parsed_command(
             }
         }
         Some(_o) => {
-            // Preserve the action header (e.g., "Searched") on error so users
+            // Preserve the action header (e.g., "Searched for") on error so users
             // can still see what operation was attempted. Error details are
             // rendered below via `output_lines`.
             let done = match action {
                 ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
+                ExecAction::Search => "Searched for".to_string(),
+                ExecAction::List => "List".to_string(),
                 ExecAction::Run => match &ctx_path {
                     Some(p) => format!("Ran in {p}"),
                     None => "Ran".to_string(),
