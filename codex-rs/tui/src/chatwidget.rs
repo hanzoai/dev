@@ -11788,8 +11788,8 @@ impl WidgetRef for &ChatWidget<'_> {
                         {
                             match &exec.output {
                                 None => crate::colors::text(), // Running...
-                                // On successful completion, turn the gutter arrow solid black
-                                Some(o) if o.exit_code == 0 => ratatui::style::Color::Black, // Ran
+                                // Successful runs use the theme success color so the arrow stays visible on all themes
+                                Some(o) if o.exit_code == 0 => crate::colors::success(),
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
@@ -11798,7 +11798,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
                                     status: crate::history_cell::ExecStatus::Success,
-                                } => ratatui::style::Color::Black,
+                                } => crate::colors::success(),
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
                                     status: crate::history_cell::ExecStatus::Error,
