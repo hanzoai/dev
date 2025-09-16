@@ -15,6 +15,7 @@ use codex_common::model_presets::ModelPreset;
 use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
+use codex_core::config_types::AgentConfig;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::model_family::derive_default_model_family;
@@ -4775,6 +4776,7 @@ impl ChatWidget<'_> {
         args_wr: Option<Vec<String>>,
         instr: Option<String>,
     ) {
+        let mut updated_existing = false;
         if let Some(slot) = self
             .config
             .agents
@@ -4785,6 +4787,23 @@ impl ChatWidget<'_> {
             slot.args_read_only = args_ro.clone();
             slot.args_write = args_wr.clone();
             slot.instructions = instr.clone();
+            updated_existing = true;
+        }
+
+        if !updated_existing {
+            let new_cfg = AgentConfig {
+                name: name.to_string(),
+                command: name.to_string(),
+                args: Vec::new(),
+                read_only: false,
+                enabled,
+                description: None,
+                env: None,
+                args_read_only: args_ro.clone(),
+                args_write: args_wr.clone(),
+                instructions: instr.clone(),
+            };
+            self.config.agents.push(new_cfg);
         }
         // Persist asynchronously
         if let Ok(home) = codex_core::config::find_codex_home() {
