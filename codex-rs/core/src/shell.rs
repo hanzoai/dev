@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use shlex;
+use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -123,12 +124,24 @@ fn strip_bash_lc(command: &Vec<String>) -> Option<String> {
         // exactly three items
         [first, second, third]
             // first two must be "bash", "-lc"
-            if first == "bash" && second == "-lc" =>
+            if is_bash_like(first) && second == "-lc" =>
         {
             Some(third.clone())
         }
         _ => None,
     }
+}
+
+fn is_bash_like(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
 }
 
 #[cfg(unix)]
