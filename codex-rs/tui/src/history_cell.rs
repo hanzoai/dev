@@ -1442,7 +1442,8 @@ impl HistoryCell for ExecCell {
         // Prepare texts and total heights (after wrapping).
         let pre_text = Text::from(pre_lines.clone());
         let out_text = Text::from(out_lines.clone());
-        let (pre_total, out_block_total, out_total_with_status) = self.ensure_wrap_totals(area.width);
+        let (pre_total, out_block_total, out_total_with_status) =
+            self.ensure_wrap_totals(area.width);
         let status_extra = out_total_with_status.saturating_sub(out_block_total);
 
         // Compute how many rows to skip from the preamble, then from the output block and status row.
@@ -1460,15 +1461,17 @@ impl HistoryCell for ExecCell {
         let block_height = block_remaining.min(remaining_height);
         remaining_height = remaining_height.saturating_sub(block_height);
 
-        let status_line_to_render = if status_extra > 0
-            && after_block_skip == 0
-            && remaining_height > 0
-        {
-            status_line.as_ref().cloned()
+        let status_line_to_render =
+            if status_extra > 0 && after_block_skip == 0 && remaining_height > 0 {
+                status_line.as_ref().cloned()
+            } else {
+                None
+            };
+        let status_height = if status_line_to_render.is_some() {
+            1
         } else {
-            None
+            0
         };
-        let status_height = if status_line_to_render.is_some() { 1 } else { 0 };
 
         // Render preamble (scrolled) if any space. Do not strip or offset the
         // leading "└ ": render at the left edge so the angle is visible.
@@ -1558,9 +1561,7 @@ impl HistoryCell for ExecCell {
                 };
                 let bg_style = Style::default().bg(crate::colors::background());
                 for x in status_area.x..status_area.x.saturating_add(status_area.width) {
-                    buf[(x, status_area.y)]
-                        .set_char(' ')
-                        .set_style(bg_style);
+                    buf[(x, status_area.y)].set_char(' ').set_style(bg_style);
                 }
                 Paragraph::new(Text::from(vec![line]))
                     .wrap(Wrap { trim: false })
@@ -1578,7 +1579,11 @@ impl ExecCell {
         if self.output.is_some() {
             if let Some(cache) = self.cached_wrap.borrow().as_ref() {
                 if cache.width == width {
-                    return (cache.pre_total, cache.out_block_total, cache.out_total_with_status);
+                    return (
+                        cache.pre_total,
+                        cache.out_block_total,
+                        cache.out_total_with_status,
+                    );
                 }
             }
         }
@@ -1643,7 +1648,13 @@ impl ExecCell {
         (pre_total, out_block_total, out_total_with_status)
     }
     // Build separate segments: (preamble lines, output lines)
-    fn exec_render_parts(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>, Option<Line<'static>>) {
+    fn exec_render_parts(
+        &self,
+    ) -> (
+        Vec<Line<'static>>,
+        Vec<Line<'static>>,
+        Option<Line<'static>>,
+    ) {
         // For completed executions, cache pre/output segments since they are immutable.
         if let (true, Some(pre), Some(out)) = (
             self.output.is_some(),
@@ -2501,7 +2512,11 @@ fn exec_render_parts_generic(
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>, Option<Line<'static>>) {
+) -> (
+    Vec<Line<'static>>,
+    Vec<Line<'static>>,
+    Option<Line<'static>>,
+) {
     let mut pre: Vec<Line<'static>> = Vec::new();
     let command_escaped = strip_bash_lc_and_escape(command);
     let normalized = normalize_shell_command_display(&command_escaped);
@@ -2516,10 +2531,7 @@ fn exec_render_parts_generic(
         if idx > 0 {
             line.spans.insert(
                 0,
-                Span::styled(
-                    "  ",
-                    Style::default().fg(crate::colors::text()),
-                ),
+                Span::styled("  ", Style::default().fg(crate::colors::text())),
             );
         }
     }
@@ -2570,7 +2582,11 @@ fn exec_render_parts_parsed(
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>, Option<Line<'static>>) {
+) -> (
+    Vec<Line<'static>>,
+    Vec<Line<'static>>,
+    Option<Line<'static>>,
+) {
     let action = action_enum_from_parsed(&parsed_commands.to_vec());
     let ctx_path = first_context_path(parsed_commands);
     let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
@@ -2679,8 +2695,7 @@ fn exec_render_parts_parsed(
         ExecAction::List => Some("List"),
         ExecAction::Run => None, // run: allow a set of labels
     };
-    let use_content_connectors =
-        !(matches!(action, ExecAction::Run) && output.is_none());
+    let use_content_connectors = !(matches!(action, ExecAction::Run) && output.is_none());
 
     for parsed in parsed_commands.iter() {
         let (label, content) = match parsed {
@@ -5211,6 +5226,7 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Branch.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/resume", Style::default().fg(crate::colors::primary())),
@@ -5527,10 +5543,7 @@ fn insert_line_breaks_after_double_ampersand(cmd: &str) -> String {
     let mut in_double = false;
 
     while i < cmd.len() {
-        let ch = cmd[i..]
-            .chars()
-            .next()
-            .expect("valid char boundary");
+        let ch = cmd[i..].chars().next().expect("valid char boundary");
         let ch_len = ch.len_utf8();
 
         match ch {
@@ -5555,10 +5568,7 @@ fn insert_line_breaks_after_double_ampersand(cmd: &str) -> String {
                             result.push('&');
                             i = next_idx + next_ch.len_utf8();
                             while i < cmd.len() {
-                                let ahead = cmd[i..]
-                                    .chars()
-                                    .next()
-                                    .expect("valid char boundary");
+                                let ahead = cmd[i..].chars().next().expect("valid char boundary");
                                 if ahead.is_whitespace() {
                                     i += ahead.len_utf8();
                                     continue;
@@ -5651,15 +5661,8 @@ fn emphasize_shell_command_name(line: &mut Line<'static>) {
 
 fn running_status_line(message: String) -> Line<'static> {
     Line::from(vec![
-        Span::styled(
-            "└ ",
-            Style::default()
-                .fg(crate::colors::border_dim()),
-        ),
-        Span::styled(
-            message,
-            Style::default().fg(crate::colors::text_dim()),
-        ),
+        Span::styled("└ ", Style::default().fg(crate::colors::border_dim())),
+        Span::styled(message, Style::default().fg(crate::colors::text_dim())),
     ])
 }
 
@@ -5775,8 +5778,7 @@ fn new_parsed_command(
     // Use a single leading "└ " for the very first content line, then indent subsequent ones,
     // except when we're showing an inline running status for ExecAction::Run.
     let mut any_content_emitted = false;
-    let use_content_connectors =
-        !(matches!(action, ExecAction::Run) && output.is_none());
+    let use_content_connectors = !(matches!(action, ExecAction::Run) && output.is_none());
 
     // Restrict displayed entries to the primary action for this cell.
     // For the generic "run" header, allow Run/Test/Lint/Format entries.
@@ -6126,10 +6128,7 @@ fn new_exec_command_generic(
         if idx > 0 {
             line.spans.insert(
                 0,
-                Span::styled(
-                    "  ",
-                    Style::default().fg(crate::colors::text()),
-                ),
+                Span::styled("  ", Style::default().fg(crate::colors::text())),
             );
         }
     }
