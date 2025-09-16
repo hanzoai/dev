@@ -239,7 +239,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
         let rows_after_orch: u16 = 1  // spacer after instructions box
             + 1; // buttons row
         let total_rows = base_rows + orch_box_h + rows_after_orch;
-        (total_rows + 1).clamp(8, 50)
+        total_rows.saturating_add(2).clamp(8, 50)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
