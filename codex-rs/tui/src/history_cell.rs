@@ -940,6 +940,7 @@ pub(crate) struct ExecCell {
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     // Cached per-width wrap totals (rows) for finalized execs
     cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>,
+    has_bold_command: bool,
 }
 
 // Cache of wrapped-row totals for ExecCell at a given width.
@@ -1402,6 +1403,24 @@ impl HistoryCell for ExecCell {
             Some(_) => ExecStatus::Error,
         };
         HistoryCellType::Exec { kind, status }
+    }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        match self.kind() {
+            HistoryCellType::Exec {
+                kind: ExecKind::Run,
+                status,
+            } => {
+                if matches!(status, ExecStatus::Error) {
+                    Some("✖")
+                } else if self.has_bold_command {
+                    Some("❯")
+                } else {
+                    None
+                }
+            }
+            HistoryCellType::Exec { .. } => None,
+            _ => None,
+        }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual representation (used for height measurement only when custom rendering).
@@ -5397,6 +5416,20 @@ pub(crate) fn new_completed_exec_command(
     new_exec_cell(command, parsed, Some(output))
 }
 
+fn command_has_bold_token(command: &[String]) -> bool {
+    let command_escaped = strip_bash_lc_and_escape(command);
+    let normalized = normalize_shell_command_display(&command_escaped);
+    let trimmed = normalized.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed
+        .chars()
+        .take_while(|ch| !ch.is_whitespace())
+        .count()
+        > 4
+}
+
 fn new_exec_cell(
     command: Vec<String>,
     parsed: Vec<ParsedCommand>,
@@ -5407,6 +5440,7 @@ fn new_exec_cell(
     } else {
         None
     };
+    let has_bold_command = command_has_bold_token(&command);
     ExecCell {
         command,
         parsed,
@@ -5418,6 +5452,7 @@ fn new_exec_cell(
         cached_pre_lines: std::cell::RefCell::new(None),
         cached_out_lines: std::cell::RefCell::new(None),
         cached_wrap: std::cell::RefCell::new(None),
+        has_bold_command,
     }
 }
 

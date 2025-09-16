@@ -2,6 +2,7 @@ use std::io::Result;
 use std::io::Stdout;
 use std::io::stdout;
 use std::io::BufWriter;
+use std::io::Write;
 
 use codex_core::config::Config;
 use crossterm::cursor::MoveTo;
@@ -76,6 +77,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     crate::syntax_highlight::init_highlight_from_config(&config.tui.highlight);
 
     execute!(stdout(), EnableBracketedPaste)?;
+    enable_alternate_scroll_mode()?;
     // Enable focus change events so we can detect when the terminal window/tab
     // regains focus and proactively repaint the UI (helps terminals that clear
     // their alt‑screen buffer while unfocused). However, certain environments
@@ -247,6 +249,7 @@ pub fn restore() -> Result<()> {
         let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
+    disable_alternate_scroll_mode()?;
     execute!(stdout(), DisableBracketedPaste)?;
     // Best‑effort: disable focus change notifications if supported.
     let _ = execute!(stdout(), DisableFocusChange);
@@ -270,6 +273,7 @@ pub fn leave_alt_screen_only() -> Result<()> {
     // being echoed into the normal buffer by some terminals.
     let _ = execute!(stdout(), DisableBracketedPaste);
     let _ = execute!(stdout(), DisableFocusChange);
+    let _ = disable_alternate_scroll_mode();
     // Pop keyboard enhancement flags so keys like Enter/Arrows don't emit
     // enhanced escape sequences (e.g., kitty/xterm modifyOtherKeys) into the buffer.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
@@ -299,6 +303,7 @@ pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui:
         let _ = execute!(stdout(), EnableFocusChange);
     }
     let _ = execute!(stdout(), EnableBracketedPaste);
+    let _ = enable_alternate_scroll_mode();
     execute!(
         stdout(),
         crossterm::terminal::EnterAlternateScreen,
@@ -308,6 +313,20 @@ pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui:
         crossterm::terminal::SetTitle("Code"),
         crossterm::terminal::EnableLineWrap
     )?;
+    Ok(())
+}
+
+fn enable_alternate_scroll_mode() -> Result<()> {
+    let mut handle = stdout();
+    handle.write_all(b"\x1b[?1007h")?;
+    handle.flush()?;
+    Ok(())
+}
+
+fn disable_alternate_scroll_mode() -> Result<()> {
+    let mut handle = stdout();
+    handle.write_all(b"\x1b[?1007l")?;
+    handle.flush()?;
     Ok(())
 }
 
