@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.149] - 2025-09-16
+
+- TUI/Agents: redesign editor and list; keep Save/Cancel visible, add Delete, better navigation and scrolling. (eb024bee, 8c2caf76, 647fed36)
+- TUI/Model: restore /model selector and presets; persist model defaults; default local agent is "code". (84fbdda1, 85159d1f, 60408ab1)
+- TUI/Reasoning: show reasoning level in header; keep reasoning cell visible; polish run cells and log claims. (d7d9d96d, 2f471aee, 8efe4723)
+- Exec/Resume: detect absolute bash and flag risky paths; fix race in unified exec; show abort and header when resuming. (4744c220, d555b684, 50262a44, 6581da9b)
+- UX: skip animations on small terminals, update splash, and refine onboarding messaging. (934d7289, 9baa5c33, 5c583fe8)
+
 ## [0.2.148] - 2025-09-14
 
 - Core/Agents: mirror Qwen/DashScope API vars; respect QWEN_MODEL; add qwen examples in config.toml.example. (8a935c18)
