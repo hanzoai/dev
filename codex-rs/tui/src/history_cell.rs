@@ -363,6 +363,9 @@ enum ExploreSummary {
         annotation: Option<String>,
         range: Option<(u32, u32)>,
     },
+    Command {
+        command: String,
+    },
     Fallback {
         text: String,
     },
@@ -377,6 +380,9 @@ struct ExploreEntry {
 
 impl ExploreEntry {
     fn label(&self) -> &'static str {
+        if matches!(self.summary, ExploreSummary::Command { .. }) {
+            return "Ran";
+        }
         match self.action {
             ExecAction::Read => "Read",
             ExecAction::Search => "Searched",
@@ -435,6 +441,7 @@ impl ExploreEntry {
                 }
                 spans
             }
+            ExploreSummary::Command { command } => highlight_command_summary(command),
             ExploreSummary::Fallback { text } => vec![Span::styled(
                 text.clone(),
                 Style::default().fg(crate::colors::text()),
@@ -448,6 +455,21 @@ impl ExploreEntry {
 
     fn is_error(&self) -> bool {
         matches!(self.status, ExploreEntryStatus::Error { .. })
+    }
+}
+
+fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
+    let normalized = normalize_shell_command_display(command);
+    let display_line = insert_line_breaks_after_double_ampersand(&normalized);
+    let highlighted = crate::syntax_highlight::highlight_code_block(&display_line, Some("bash"));
+    if let Some(mut first) = highlighted.into_iter().next() {
+        emphasize_shell_command_name(&mut first);
+        first.spans
+    } else {
+        vec![Span::styled(
+            display_line,
+            Style::default().fg(crate::colors::text()),
+        )]
     }
 }
 
@@ -615,7 +637,12 @@ impl ExploreAggregationCell {
                 }
                 _ => None,
             }),
-            ExecAction::Run => None,
+            ExecAction::Run => parsed.iter().find_map(|p| match p {
+                ParsedCommand::ReadCommand { cmd } => Some(ExploreSummary::Command {
+                    command: cmd.clone(),
+                }),
+                _ => None,
+            }),
         };
 
         let summary = summary.or_else(|| {
@@ -2887,6 +2914,7 @@ fn exec_render_parts_parsed(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream variants not present in our core parser are ignored or treated as generic runs
             ParsedCommand::Unknown { cmd } => {
                 // Suppress separator helpers like `echo ---` which are used
@@ -5991,6 +6019,7 @@ fn new_parsed_command(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream-only variants handled as generic runs in this fork
             ParsedCommand::Unknown { cmd } => {
                 let t = cmd.trim();
