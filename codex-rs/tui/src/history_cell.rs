@@ -1592,6 +1592,10 @@ impl HistoryCell for ExecCell {
 }
 
 impl ExecCell {
+    #[cfg(test)]
+    fn has_bold_command(&self) -> bool {
+        self.has_bold_command
+    }
     /// Compute wrapped row totals for the preamble and the output at the given width.
     /// Uses an ASCII fast path when all spans are ASCII; caches totals for finalized execs.
     fn ensure_wrap_totals(&self, width: u16) -> (u16, u16, u16) {
@@ -2108,6 +2112,64 @@ mod tests {
         );
         // Unrelated command
         assert_eq!(parse_read_line_annotation("cat foo.txt"), None);
+    }
+
+    #[test]
+    fn bold_detection_sets_flag_for_long_commands() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert!(cell.has_bold_command());
+    }
+
+    #[test]
+    fn short_commands_do_not_set_bold_flag() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "ls".into()],
+            vec![ParsedCommand::Unknown { cmd: "ls".into() }],
+        );
+        assert!(!cell.has_bold_command());
+    }
+
+    #[test]
+    fn gutter_symbol_shows_for_long_run_commands() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
+    }
+
+    #[test]
+    fn completed_exec_preserves_gutter_symbol_for_long_commands() {
+        let cell = new_completed_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok".into(),
+                stderr: String::new(),
+            },
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
+    }
+
+    #[test]
+    fn shell_wrappers_still_preserve_gutter_symbol() {
+        let cell = new_active_exec_command(
+            vec!["/bin/sh".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
     }
 }
 
@@ -5423,11 +5485,7 @@ fn command_has_bold_token(command: &[String]) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    trimmed
-        .chars()
-        .take_while(|ch| !ch.is_whitespace())
-        .count()
-        > 4
+    trimmed.chars().take_while(|ch| !ch.is_whitespace()).count() > 4
 }
 
 fn new_exec_cell(
@@ -7598,7 +7656,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
     header.push(Span::styled(
-        "Update plan",
+        "Plan",
         Style::default()
             .fg(crate::colors::success())
             .add_modifier(Modifier::BOLD),
@@ -7648,7 +7706,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
                     Span::styled(
                         step,
                         Style::default()
-                            .fg(crate::colors::info())
+                            .fg(crate::colors::success())
                             .add_modifier(Modifier::BOLD),
                     ),
                 ),
