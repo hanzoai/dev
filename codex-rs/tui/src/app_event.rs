@@ -49,6 +49,9 @@ pub(crate) enum AppEvent {
     /// Actually draw the next frame.
     Redraw,
 
+    /// Update the terminal title override. `None` restores the default title.
+    SetTerminalTitle { title: Option<String> },
+
     /// Schedule a one-shot animation frame roughly after the given duration.
     /// Multiple requests are coalesced by the central frame scheduler.
     ScheduleFrameIn(Duration),
