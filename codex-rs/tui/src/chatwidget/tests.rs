@@ -962,7 +962,7 @@ fn apply_patch_request_shows_diff_summary() {
 fn plan_update_renders_history_cell() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
     let update = UpdatePlanArgs {
-        explanation: Some("Adapting plan".to_string()),
+        name: Some("Feature rollout plan".to_string()),
         plan: vec![
             PlanItemArg {
                 step: "Explore codebase".into(),
@@ -986,7 +986,7 @@ fn plan_update_renders_history_cell() {
     assert!(!cells.is_empty(), "expected plan update cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Update plan"),
+        blob.contains("Feature rollout plan"),
         "missing plan header: {blob:?}"
     );
     assert!(blob.contains("Explore codebase"));
