@@ -589,22 +589,23 @@ impl ChatWidget<'_> {
         }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
-        match placement {
-            SystemPlacement::EarlyInCurrent => OrderKey {
-                req,
-                out: i32::MIN + 2,
-                seq: self.internal_seq,
-            },
-            SystemPlacement::EndOfCurrent => OrderKey {
-                req,
-                out: i32::MAX,
-                seq: self.internal_seq,
-            },
-            SystemPlacement::PrePromptInCurrent => OrderKey {
-                req,
-                out: i32::MIN,
-                seq: self.internal_seq,
-            },
+        let mut out = match placement {
+            SystemPlacement::EarlyInCurrent => i32::MIN + 2,
+            SystemPlacement::EndOfCurrent => i32::MAX,
+            SystemPlacement::PrePromptInCurrent => i32::MIN,
+        };
+
+        if order.is_none()
+            && self.pending_user_prompts_for_next_turn > 0
+            && matches!(placement, SystemPlacement::EarlyInCurrent)
+        {
+            out = i32::MIN;
+        }
+
+        OrderKey {
+            req,
+            out,
+            seq: self.internal_seq,
         }
     }
 
@@ -9774,9 +9775,9 @@ impl ChatWidget<'_> {
                     "Finalize branch '{}' via /merge (agent handoff)",
                     branch_label
                 );
-                let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
                 let _ = tx_for_switch
                     .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
+                let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
             };
 
             if !handoff_reasons.is_empty() {
