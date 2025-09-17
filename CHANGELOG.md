@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.151] - 2025-09-16
+
+- TUI/History: append merge completion banner for clearer post-merge status. (736293a9)
+- TUI: add intersection checks for parameter inputs in AgentEditorView. (6d1775cf)
+
 ## [0.2.150] - 2025-09-16
 
 - TUI/Branch: add /merge command and show diff summary in merge handoff. (eb4c2bc0, 0f254d9e, b19b2d16)
