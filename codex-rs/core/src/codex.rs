@@ -5134,13 +5134,13 @@ async fn handle_container_exec_with_params(
                 suggested
             ),
             SensitiveGitKind::PathCheckout => format!(
-                "Blocked git checkout -- <paths>. This command overwrites local modifications to the specified files. If you intentionally want to discard those edits, resend the exact command prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                "Blocked git checkout -- <paths>. This command overwrites local modifications to the specified files. Consider backing up the files first. If you intentionally want to discard those edits, resend the exact command prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
                 original_label,
                 original_value,
                 suggested
             ),
             SensitiveGitKind::Reset => format!(
-                "Blocked git reset. Reset rewrites the working tree/index and may delete local work. If backups exist and this was explicitly requested, resend prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                "Blocked git reset. Reset rewrites the working tree/index and may delete local work. Consider backing up the files first. If backups exist and this was explicitly requested, resend prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
                 original_label,
                 original_value,
                 suggested
