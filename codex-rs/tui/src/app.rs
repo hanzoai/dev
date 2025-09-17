@@ -133,6 +133,8 @@ pub(crate) struct App<'a> {
     alt_screen_active: bool,
 
     terminal_runs: HashMap<u64, TerminalRunState>,
+
+    terminal_title_override: Option<String>,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -149,6 +151,8 @@ pub(crate) struct ChatWidgetArgs {
 }
 
 impl App<'_> {
+    const DEFAULT_TERMINAL_TITLE: &'static str = "Code";
+
     pub(crate) fn new(
         config: Config,
         initial_prompt: Option<String>,
@@ -317,7 +321,19 @@ impl App<'_> {
             timing: TimingStats::default(),
             alt_screen_active: start_in_alt,
             terminal_runs: HashMap::new(),
+            terminal_title_override: None,
         }
+    }
+
+    fn apply_terminal_title(&self) {
+        let title = self
+            .terminal_title_override
+            .as_deref()
+            .unwrap_or(Self::DEFAULT_TERMINAL_TITLE);
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::SetTitle(title.to_string())
+        );
     }
 
 
@@ -1236,6 +1252,10 @@ impl App<'_> {
                         widget.set_github_watcher(enabled);
                     }
                 }
+                AppEvent::SetTerminalTitle { title } => {
+                    self.terminal_title_override = title;
+                    self.apply_terminal_title();
+                }
                 AppEvent::UpdateMcpServer { name, enable } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.toggle_mcp_server(&name, enable);
@@ -1314,9 +1334,9 @@ impl App<'_> {
                         )),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
                         crossterm::cursor::MoveTo(0, 0),
-                        crossterm::terminal::SetTitle("Code"),
                         crossterm::terminal::EnableLineWrap
                     );
+                    self.apply_terminal_title();
 
                     // Update config and save to file
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1355,9 +1375,9 @@ impl App<'_> {
                         )),
                         crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
                         crossterm::cursor::MoveTo(0, 0),
-                        crossterm::terminal::SetTitle("Code"),
                         crossterm::terminal::EnableLineWrap
                     );
+                    self.apply_terminal_title();
 
                     // Retint pre-rendered history cells so the preview reflects immediately
                     if let AppState::Chat { widget } = &mut self.app_state {
