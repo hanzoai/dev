@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.152] - 2025-09-17
+
+- TUI: add terminal overlay and agent install flow. (104a5f9f, c678d670)
+- TUI/Explore: enrich run summaries with pipeline context; polish explore labels. (e25f8faa, d7ce1345)
+- Core/Exec: enforce dry-run guard for formatter commands. (360fbf94)
+- Explore: support read-only git commands. (b6b9fc41)
+- TUI: add plan names and sync terminal title. (29eda799)
+
 ## [0.2.151] - 2025-09-16
 
 - TUI/History: append merge completion banner for clearer post-merge status. (736293a9)
