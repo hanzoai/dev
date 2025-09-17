@@ -7789,7 +7789,7 @@ fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
 }
 
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
-    let UpdatePlanArgs { explanation, plan } = update;
+    let UpdatePlanArgs { name, plan } = update;
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let total = plan.len();
@@ -7815,8 +7815,13 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
 
     // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
+    let title = name
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Plan");
     header.push(Span::styled(
-        "Plan",
+        title.to_string(),
         Style::default()
             .fg(header_color)
             .add_modifier(Modifier::BOLD),
@@ -7837,16 +7842,6 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     header.push(Span::raw("] "));
     header.push(Span::raw(format!("{completed}/{total}")));
     lines.push(Line::from(header));
-
-    // Optional explanation/note from the model
-    if let Some(expl) = explanation.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    }) {
-        for l in expl.lines() {
-            lines.push(Line::from(l.to_string()).dim());
-        }
-    }
 
     // Steps styled as checkbox items
     if plan.is_empty() {

@@ -114,6 +114,7 @@ use codex_core::config::set_github_check_on_push;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::plan_tool::StepStatus;
 use ratatui::style::Stylize;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use ratatui::text::Text as RtText;
@@ -214,6 +215,7 @@ pub(crate) struct ChatWidget<'a> {
     agent_context: Option<String>,
     agent_task: Option<String>,
     overall_task_status: String,
+    active_plan_title: Option<String>,
     // Sparkline data for showing agent activity (using RefCell for interior mutability)
     // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
     sparkline_data: std::cell::RefCell<Vec<(u64, bool)>>,
@@ -810,6 +812,15 @@ impl ChatWidget<'_> {
                 rc.set_in_progress(true);
             }
         }
+    }
+
+    fn apply_plan_terminal_title(&mut self, title: Option<String>) {
+        if self.active_plan_title == title {
+            return;
+        }
+        self.active_plan_title = title.clone();
+        self.app_event_tx
+            .send(AppEvent::SetTerminalTitle { title });
     }
     // Allocate a new synthetic key for internal (non-LLM) messages at the bottom of the
     // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
@@ -1827,6 +1838,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             overall_task_status: "preparing".to_string(),
+            active_plan_title: None,
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -2008,6 +2020,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             overall_task_status: "preparing".to_string(),
+            active_plan_title: None,
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -3775,6 +3788,22 @@ impl ChatWidget<'_> {
                 self.on_error(message);
             }
             EventMsg::PlanUpdate(update) => {
+                let (plan_title, plan_active) = {
+                    let title = update
+                        .name
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string());
+                    let total = update.plan.len();
+                    let completed = update
+                        .plan
+                        .iter()
+                        .filter(|p| matches!(p.status, StepStatus::Completed))
+                        .count();
+                    let active = total > 0 && completed < total;
+                    (title, active)
+                };
                 // Insert plan updates at the time they occur. If the provider
                 // supplied OrderMeta, honor it. Otherwise, derive a key within
                 // the current (last-seen) request — do NOT advance to the next
@@ -3787,6 +3816,12 @@ impl ChatWidget<'_> {
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
+                let desired_title = if plan_active {
+                    Some(plan_title.unwrap_or_else(|| "Plan".to_string()))
+                } else {
+                    None
+                };
+                self.apply_plan_terminal_title(desired_title);
             }
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
