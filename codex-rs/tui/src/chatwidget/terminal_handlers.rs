@@ -35,7 +35,7 @@ pub(super) fn handle_terminal_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         }
         KeyCode::Esc => {
             if chat.terminal_is_running() {
-                // Ignore Esc while running; cancellation is managed via Ctrl+C.
+                chat.request_terminal_cancel(id);
                 true
             } else {
                 chat.close_terminal_overlay();
@@ -64,4 +64,3 @@ pub(super) fn handle_terminal_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         _ => false,
     }
 }
-

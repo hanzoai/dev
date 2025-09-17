@@ -27,6 +27,7 @@ use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 
 mod diff_handlers;
+mod agent_install;
 mod diff_ui;
 mod exec_tools;
 mod gh_actions;
@@ -38,6 +39,7 @@ mod perf;
 mod streaming;
 mod terminal_handlers;
 mod tools;
+use self::agent_install::start_agent_install_session;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -80,14 +82,13 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
 use std::cell::RefCell;
+use std::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
 
-use crate::app_event::AppEvent;
-use crate::app_event::TerminalAfter;
-use crate::app_event::TerminalLaunch;
+use crate::app_event::{AppEvent, TerminalAfter, TerminalLaunch, TerminalRunController};
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
@@ -4705,7 +4706,7 @@ impl ChatWidget<'_> {
         selected_index: usize,
     ) -> Option<TerminalLaunch> {
         self.agents_overview_selected_index = selected_index;
-        let Some((command, display)) = self.resolve_agent_install_command(&name) else {
+        let Some((_, default_command)) = self.resolve_agent_install_command(&name) else {
             self.history_push(history_cell::new_error_event(format!(
                 "No install command available for agent '{name}' on this platform."
             )));
@@ -4714,11 +4715,30 @@ impl ChatWidget<'_> {
         };
         let id = self.terminal.alloc_id();
         self.terminal.after = Some(TerminalAfter::RefreshAgentsAndClose { selected_index });
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        self.history_push(history_cell::new_background_event(format!(
+            "Starting guided install for agent '{name}'"
+        )));
+        start_agent_install_session(
+            self.app_event_tx.clone(),
+            id,
+            name.clone(),
+            default_command.clone(),
+            Some(cwd),
+            controller.clone(),
+            controller_rx,
+            selected_index,
+            self.config.debug,
+        );
         Some(TerminalLaunch {
             id,
             title: format!("Install {name}"),
-            command,
-            command_display: display,
+            command: Vec::new(),
+            command_display: "Preparing install assistant…".to_string(),
+            controller: Some(controller),
+            auto_close_on_success: false,
         })
     }
 
@@ -4727,6 +4747,7 @@ impl ChatWidget<'_> {
             launch.id,
             launch.title.clone(),
             launch.command_display.clone(),
+            launch.auto_close_on_success,
         );
         let visible = self.terminal.last_visible_rows.get();
         overlay.visible_rows = visible;
@@ -4753,6 +4774,30 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn request_terminal_cancel(&self, id: u64) {
+        self.app_event_tx.send(AppEvent::TerminalCancel { id });
+    }
+
+    pub(crate) fn terminal_update_message(&mut self, id: u64, message: String) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.command_display = message;
+                self.request_redraw();
+            }
+        }
+    }
+
+    pub(crate) fn terminal_mark_running(&mut self, id: u64) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.running = true;
+                overlay.exit_code = None;
+                overlay.duration = None;
+                self.request_redraw();
+            }
+        }
+    }
+
     pub(crate) fn terminal_finalize(
         &mut self,
         id: u64,
@@ -4763,6 +4808,7 @@ impl ChatWidget<'_> {
         let mut after = None;
         let mut needs_redraw = false;
         let mut should_close = false;
+        let mut take_after = false;
         let visible = self.terminal.last_visible_rows.get();
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
@@ -4776,10 +4822,15 @@ impl ChatWidget<'_> {
                 needs_redraw = true;
                 if exit_code == Some(0) {
                     success = true;
-                    after = self.terminal.after.take();
-                    should_close = true;
+                    take_after = true;
+                    if overlay.auto_close_on_success {
+                        should_close = true;
+                    }
                 }
             }
+        }
+        if take_after {
+            after = self.terminal.after.take();
         }
         if should_close {
             self.terminal.overlay = None;
@@ -4808,6 +4859,11 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn close_terminal_overlay(&mut self) {
+        if let Some(overlay) = self.terminal.overlay() {
+            if overlay.running {
+                self.app_event_tx.send(AppEvent::TerminalCancel { id: overlay.id });
+            }
+        }
         self.terminal.clear();
         self.request_redraw();
     }
@@ -12917,10 +12973,11 @@ struct TerminalOverlay {
     pending_utf8: Vec<u8>,
     pending_line: String,
     pending_line_is_stderr: bool,
+    auto_close_on_success: bool,
 }
 
 impl TerminalOverlay {
-    fn new(id: u64, title: String, command_display: String) -> Self {
+    fn new(id: u64, title: String, command_display: String, auto_close_on_success: bool) -> Self {
         Self {
             id,
             title,
@@ -12935,6 +12992,7 @@ impl TerminalOverlay {
             pending_utf8: Vec::new(),
             pending_line: String::new(),
             pending_line_is_stderr: false,
+            auto_close_on_success,
         }
     }
 
