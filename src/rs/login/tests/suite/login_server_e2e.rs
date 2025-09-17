@@ -4,8 +4,8 @@ use std::net::TcpListener;
 use std::thread;
 
 use base64::Engine;
-use codex_login::ServerOptions;
-use codex_login::run_login_server;
+use dev_login::ServerOptions;
+use dev_login::run_login_server;
 use tempfile::tempdir;
 
 // See spawn.rs for details
@@ -95,7 +95,7 @@ async fn end_to_end_login_flow_persists_auth_json() {
 
     let opts = ServerOptions {
         codex_home: server_home,
-        client_id: codex_login::CLIENT_ID.to_string(),
+        client_id: dev_login::CLIENT_ID.to_string(),
         issuer,
         port: 0,
         open_browser: false,
@@ -154,7 +154,7 @@ async fn creates_missing_codex_home_dir() {
     let server_home = codex_home.clone();
     let opts = ServerOptions {
         codex_home: server_home,
-        client_id: codex_login::CLIENT_ID.to_string(),
+        client_id: dev_login::CLIENT_ID.to_string(),
         issuer,
         port: 0,
         open_browser: false,

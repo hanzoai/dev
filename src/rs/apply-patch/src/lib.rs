@@ -46,7 +46,9 @@ pub struct EmbeddedApplyPatch {
 /// Find the first `apply_patch <<'EOF' ... EOF` redirected statement anywhere in a bash/sh/zsh script.
 /// Also supports the form `cd <path> && apply_patch <<'EOF' ...`.
 /// Returns `None` when not present.
-pub fn find_embedded_apply_patch(script: &str) -> Result<Option<EmbeddedApplyPatch>, ExtractHeredocError> {
+pub fn find_embedded_apply_patch(
+    script: &str,
+) -> Result<Option<EmbeddedApplyPatch>, ExtractHeredocError> {
     // Defer to the fast textual scanner; map unit error to a benign None.
     match tree_sitter_utils::find_embedded_apply_patch(script) {
         Ok(v) => Ok(v),

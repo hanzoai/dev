@@ -1,0 +1,143 @@
+# Hanzo Node API Configuration for CLI Integration
+# This configuration enables the CLI to communicate with the Hanzo Node
+# running on localhost with Qwen3 model support
+
+[api]
+base_url = "http://localhost:3690"
+version = "v2"
+timeout = 30000  # milliseconds
+
+[endpoints]
+# Core API endpoints
+chat = "/v1/chat/completions"
+embeddings = "/v1/embeddings"
+rerank = "/v1/rerank"
+models = "/v1/models"
+health = "/health"
+metrics = "/metrics"
+
+# Swagger documentation
+swagger_ui = "/v2/swagger-ui/"
+openapi_spec = "/v2/openapi.json"
+
+[models.qwen3]
+# Qwen3 model configurations
+models = [
+    "qwen3-8b",
+    "qwen3-14b", 
+    "qwen3-30b-a3b",
+    "qwen3-72b",
+    "qwen3-235b"
+]
+
+# Qwen3 Embedding model
+embedding_model = "qwen3-embedding-8b"
+embedding_dimensions = 4096
+embedding_max_tokens = 32768
+
+# Qwen3 Reranker model  
+reranker_model = "qwen3-reranker-4b"
+reranker_max_documents = 100
+
+[models.capabilities]
+# Model capabilities
+thinking = true  # Hybrid reasoning with thinking
+function_calling = true
+vision = true
+audio = false
+streaming = true
+batch_processing = true
+
+[authentication]
+# Authentication configuration
+enabled = false  # Set to true to enable API key authentication
+api_key_header = "X-API-Key"
+api_key = "${HANZO_API_KEY}"  # Set via environment variable
+
+[networking]
+# P2P networking configuration
+p2p_enabled = true
+p2p_port = 3691
+bootstrap_nodes = [
+    "/ip4/127.0.0.1/tcp/3691/p2p/12D3KooWExample1",
+    "/ip4/127.0.0.1/tcp/3692/p2p/12D3KooWExample2"
+]
+
+[providers]
+# Provider fallback chain
+# Priority order: local -> cloud
+priority = [
+    "hanzo-engine",    # Local Hanzo Engine (port 36900)
+    "lm-studio",       # LM Studio local models
+    "ollama",          # Ollama local models
+    "openai",          # OpenAI API
+    "anthropic",       # Claude API
+    "together",        # Together AI
+    "dashscope"        # Alibaba Cloud DashScope
+]
+
+[providers.hanzo-engine]
+enabled = true
+url = "http://localhost:36900"
+models = ["qwen3-8b", "qwen3-14b", "qwen3-72b"]
+check_endpoint = "/health"
+
+[providers.lm-studio]
+enabled = true
+url = "http://localhost:1234"
+check_endpoint = "/v1/models"
+
+[providers.ollama]
+enabled = true
+url = "http://localhost:11434"
+check_endpoint = "/api/tags"
+
+[providers.openai]
+enabled = "${OPENAI_API_KEY:+true}"
+url = "https://api.openai.com"
+api_key = "${OPENAI_API_KEY}"
+
+[providers.anthropic]
+enabled = "${ANTHROPIC_API_KEY:+true}"
+url = "https://api.anthropic.com"
+api_key = "${ANTHROPIC_API_KEY}"
+
+[cli]
+# CLI-specific settings
+default_model = "qwen3-8b"
+max_context_length = 32768
+temperature = 0.7
+top_p = 0.95
+stream = true
+format = "markdown"
+
+[cli.commands]
+# Custom CLI commands for node interaction
+node_status = "hanzo node status"
+node_models = "hanzo node models"
+node_chat = "hanzo node chat"
+node_embed = "hanzo node embed"
+node_rerank = "hanzo node rerank"
+
+[monitoring]
+# Monitoring and logging
+metrics_enabled = true
+metrics_port = 9090
+log_level = "info"
+log_format = "json"
+log_file = "/tmp/hanzo-node.log"
+
+[cache]
+# Caching configuration for better performance
+enabled = true
+type = "redis"
+redis_url = "redis://localhost:6379"
+ttl = 3600  # seconds
+max_size = "1GB"
+
+[rate_limiting]
+# Rate limiting configuration
+enabled = false
+requests_per_minute = 60
+requests_per_hour = 1000
+burst = 10

@@ -17,10 +17,11 @@ async-channel = "2.3.1"
 base64 = "0.22"
 bytes = "1.10.1"
 chrono = { version = "0.4", features = ["serde"] }
-codex-apply-patch = { path = "../apply-patch" }
-codex-browser = { path = "../browser" }
+dev-apply-patch = { path = "../apply-patch" }
+dev-browser = { path = "../browser" }
+dev-file-search = { path = "../file-search" }
 codex-mcp-client = { path = "../mcp-client" }
-codex-protocol = { path = "../protocol" }
+dev-protocol = { path = "../protocol" }
 dirs = "6"
 env-flags = "0.1.1"
 eventsource-stream = "0.2.3"
@@ -63,7 +64,7 @@ tree-sitter = "0.25.8"
 tree-sitter-bash = "0.25.0"
 uuid = { version = "1", features = ["serde", "v4"] }
 wildmatch = "2.4.0"
-codex-version = { path = "../codex-version" }
+dev-version = { path = "../version" }
 serde_bytes = "0.11"
 
 

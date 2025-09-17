@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use codex_core::config::set_project_trusted;
 use codex_core::config::set_project_access_mode;
-use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
+use dev_protocol::config_types::SandboxMode as SandboxModeCfg;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use crossterm::event::KeyCode;

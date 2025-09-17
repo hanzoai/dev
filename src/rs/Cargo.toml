@@ -4,6 +4,7 @@ members = [
     "apply-patch",
     "arg0",
     "browser",
+    "chatgpt",
     "cli",
     "common",
     "core",
@@ -14,13 +15,12 @@ members = [
     "login",
     "mcp-client",
     "mcp-server",
-    "mcp-test-server",
-    "mcp-smoke",
     "mcp-types",
-    "protocol",
     "ollama",
+    "protocol",
     "protocol-ts",
     "tui",
+    "version",
 ]
 resolver = "2"
 

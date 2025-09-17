@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 anyhow = "1"
 dev-apply-patch = { path = "../apply-patch" }
-dev-core = { path = "../core" }
+codex-core = { path = "../core" }
 dev-linux-sandbox = { path = "../linux-sandbox" }
 dotenvy = "0.15.7"
 tempfile = "3"

@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use codex_core::config::ConfigToml;
-use codex_protocol::mcp_protocol::SetDefaultModelParams;
-use codex_protocol::mcp_protocol::SetDefaultModelResponse;
+use dev_protocol::mcp_protocol::SetDefaultModelParams;
+use dev_protocol::mcp_protocol::SetDefaultModelResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::to_response;
 use mcp_types::JSONRPCResponse;

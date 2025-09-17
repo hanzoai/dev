@@ -9,8 +9,8 @@ path = "lib.rs"
 [dependencies]
 anyhow = "1"
 assert_cmd = "2"
-dev-core = { path = "../../../core" }
-dev-mcp-server = { path = "../.." }
+codex-core = { path = "../../../core" }
+codex-mcp-server = { path = "../.." }
 dev-protocol = { path = "../../../protocol" }
 mcp-types = { path = "../../../mcp-types" }
 os_info = "3.12.0"

@@ -11,6 +11,24 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 
+/// GitHub configuration
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct GithubConfig {
+    pub token: Option<String>,
+    pub api_url: Option<String>,
+}
+
+/// Reasoning summary format
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum ReasoningSummaryFormat {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "brief")]
+    Brief,
+    #[serde(rename = "detailed")]
+    Detailed,
+}
+
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]

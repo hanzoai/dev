@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+
+// Hanzo MCP CLI
+// Direct implementation that calls hanzo-tools
+
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Use the server script
+const serverPath = path.join(__dirname, 'hanzo-mcp-server');
+const args = process.argv.slice(2);
+
+try {
+    execSync(`node ${serverPath} ${args.join(' ')}`, {
+        stdio: 'inherit'
+    });
+} catch (error) {
+    process.exit(error.status || 1);
+}

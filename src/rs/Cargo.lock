@@ -271,19 +271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-compression"
-version = "0.4.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "977eb15ea9efd848bb8a4a1a2500347ed7f0bf794edf0dc3ddcf439f43d36b23"
-dependencies = [
- "compression-codecs",
- "compression-core",
- "futures-core",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -721,133 +708,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9b18233253483ce2f65329a24072ec414db782531bdbb7d0bbc4bd2ce6b7e21"
 
 [[package]]
-name = "codex-ansi-escape"
-version = "0.0.0"
-dependencies = [
- "ansi-to-tui",
- "ratatui",
- "tracing",
-]
-
-[[package]]
-name = "codex-apply-patch"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "once_cell",
- "pretty_assertions",
- "similar",
- "tempfile",
- "thiserror 2.0.16",
- "tree-sitter",
- "tree-sitter-bash",
-]
-
-[[package]]
-name = "codex-arg0"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "codex-apply-patch",
- "codex-core",
- "codex-linux-sandbox",
- "dotenvy",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "codex-browser"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "chromiumoxide",
- "chromiumoxide_types",
- "chrono",
- "futures",
- "image 0.25.8",
- "once_cell",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.16",
- "tokio",
- "tokio-test",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "codex-chatgpt"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "codex-common",
  "codex-core",
- "codex-protocol",
+ "dev-common",
+ "dev-protocol",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "codex-cli"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "clap_complete",
- "codex-arg0",
- "codex-chatgpt",
- "codex-common",
- "codex-core",
- "codex-exec",
- "codex-login",
- "codex-mcp-server",
- "codex-protocol",
- "codex-protocol-ts",
- "codex-tui",
- "codex-version",
- "flate2",
- "futures",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tar",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "which",
- "zip",
-]
-
-[[package]]
-name = "codex-common"
-version = "0.0.0"
-dependencies = [
- "clap",
- "codex-core",
- "codex-protocol",
- "serde",
- "toml 0.9.5",
 ]
 
 [[package]]
 name = "codex-core"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -855,12 +732,13 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "codex-apply-patch",
- "codex-browser",
  "codex-mcp-client",
- "codex-protocol",
- "codex-version",
  "core_test_support",
+ "dev-apply-patch",
+ "dev-browser",
+ "dev-file-search",
+ "dev-protocol",
+ "dev-version",
  "dirs",
  "env-flags",
  "eventsource-stream",
@@ -911,105 +789,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-exec"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "codex-arg0",
- "codex-common",
- "codex-core",
- "codex-ollama",
- "codex-protocol",
- "codex-version",
- "core_test_support",
- "libc",
- "owo-colors",
- "predicates",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "wiremock",
-]
-
-[[package]]
-name = "codex-execpolicy"
-version = "0.0.0"
-dependencies = [
- "allocative",
- "anyhow",
- "clap",
- "derive_more 2.0.1",
- "env_logger",
- "log",
- "multimap",
- "path-absolutize",
- "regex-lite",
- "serde",
- "serde_json",
- "serde_with",
- "starlark",
- "tempfile",
-]
-
-[[package]]
-name = "codex-file-search"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "ignore",
- "nucleo-matcher",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "codex-linux-sandbox"
-version = "0.0.0"
-dependencies = [
- "clap",
- "codex-core",
- "landlock",
- "libc",
- "seccompiler",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "codex-login"
-version = "0.0.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "codex-core",
- "codex-protocol",
- "rand 0.8.5",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tiny_http",
- "tokio",
- "url",
- "urlencoding",
- "webbrowser",
-]
-
-[[package]]
 name = "codex-mcp-client"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
- "codex-version",
+ "dev-version",
  "mcp-types",
  "serde",
  "serde_json",
@@ -1020,16 +804,15 @@ dependencies = [
 
 [[package]]
 name = "codex-mcp-server"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "codex-arg0",
- "codex-common",
  "codex-core",
- "codex-login",
- "codex-protocol",
- "codex-version",
+ "dev-arg0",
+ "dev-common",
+ "dev-login",
+ "dev-protocol",
  "mcp-types",
  "mcp_test_support",
  "os_info",
@@ -1048,25 +831,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-mcp-smoke"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "codex-core",
- "tokio",
-]
-
-[[package]]
-name = "codex-mcp-test-server"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "codex-ollama"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "async-stream",
  "bytes",
@@ -1080,59 +846,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-protocol"
-version = "0.0.0"
-dependencies = [
- "base64 0.22.1",
- "icu_decimal",
- "icu_locale_core",
- "mcp-types",
- "mime_guess",
- "pretty_assertions",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_with",
- "strum 0.27.2",
- "strum_macros 0.27.2",
- "sys-locale",
- "tracing",
- "ts-rs",
- "uuid",
-]
-
-[[package]]
 name = "codex-protocol-ts"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "codex-protocol",
+ "dev-protocol",
  "mcp-types",
  "ts-rs",
 ]
 
 [[package]]
 name = "codex-tui"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "arboard",
  "base64 0.22.1",
  "chrono",
  "clap",
- "codex-ansi-escape",
- "codex-arg0",
- "codex-browser",
- "codex-common",
  "codex-core",
- "codex-file-search",
- "codex-login",
  "codex-ollama",
- "codex-protocol",
- "codex-version",
  "color-eyre",
  "crossterm",
+ "dev-ansi-escape",
+ "dev-arg0",
+ "dev-browser",
+ "dev-common",
+ "dev-file-search",
+ "dev-login",
+ "dev-protocol",
+ "dev-version",
  "diffy",
  "futures",
  "image 0.25.8",
@@ -1171,10 +915,6 @@ dependencies = [
  "vt100",
  "which",
 ]
-
-[[package]]
-name = "codex-version"
-version = "0.0.0"
 
 [[package]]
 name = "color-eyre"
@@ -1240,23 +980,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compression-codecs"
-version = "0.4.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "485abf41ac0c8047c07c87c72c8fb3eb5197f6e9d7ded615dfd1a00ae00a0f64"
-dependencies = [
- "compression-core",
- "flate2",
- "memchr",
-]
-
-[[package]]
-name = "compression-core"
-version = "0.4.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e47641d3deaf41fb1538ac1f54735925e275eaf3bf4d55c81b137fba797e5cbb"
-
-[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1304,7 +1027,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_test_support"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "codex-core",
  "serde_json",
@@ -1548,6 +1271,229 @@ dependencies = [
  "syn 2.0.106",
  "unicode-xid",
 ]
+
+[[package]]
+name = "dev-ansi-escape"
+version = "3.0.0"
+dependencies = [
+ "ansi-to-tui",
+ "ratatui",
+ "tracing",
+]
+
+[[package]]
+name = "dev-apply-patch"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "once_cell",
+ "pretty_assertions",
+ "similar",
+ "tempfile",
+ "thiserror 2.0.16",
+ "tree-sitter",
+ "tree-sitter-bash",
+]
+
+[[package]]
+name = "dev-arg0"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "codex-core",
+ "dev-apply-patch",
+ "dev-linux-sandbox",
+ "dotenvy",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "dev-browser"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chromiumoxide",
+ "chromiumoxide_types",
+ "chrono",
+ "futures",
+ "image 0.25.8",
+ "once_cell",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.16",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "dev-cli"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "codex-chatgpt",
+ "codex-core",
+ "codex-mcp-server",
+ "codex-protocol-ts",
+ "codex-tui",
+ "dev-arg0",
+ "dev-common",
+ "dev-exec",
+ "dev-login",
+ "dev-protocol",
+ "dev-version",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "dev-common"
+version = "3.0.0"
+dependencies = [
+ "clap",
+ "codex-core",
+ "dev-protocol",
+ "serde",
+ "toml 0.9.5",
+]
+
+[[package]]
+name = "dev-exec"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "codex-core",
+ "codex-ollama",
+ "core_test_support",
+ "dev-arg0",
+ "dev-common",
+ "dev-protocol",
+ "libc",
+ "owo-colors",
+ "predicates",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
+ "wiremock",
+]
+
+[[package]]
+name = "dev-execpolicy"
+version = "3.0.0"
+dependencies = [
+ "allocative",
+ "anyhow",
+ "clap",
+ "derive_more 2.0.1",
+ "env_logger",
+ "log",
+ "multimap",
+ "path-absolutize",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "starlark",
+ "tempfile",
+]
+
+[[package]]
+name = "dev-file-search"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ignore",
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "dev-linux-sandbox"
+version = "3.0.0"
+dependencies = [
+ "clap",
+ "codex-core",
+ "landlock",
+ "libc",
+ "seccompiler",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "dev-login"
+version = "3.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "codex-core",
+ "dev-protocol",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tiny_http",
+ "tokio",
+ "url",
+ "urlencoding",
+ "webbrowser",
+]
+
+[[package]]
+name = "dev-protocol"
+version = "3.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "icu_decimal",
+ "icu_locale_core",
+ "mcp-types",
+ "mime_guess",
+ "pretty_assertions",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "serde_with",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "sys-locale",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "dev-version"
+version = "3.0.0"
 
 [[package]]
 name = "diff"
@@ -1942,18 +1888,6 @@ dependencies = [
  "libc",
  "thiserror 1.0.69",
  "winapi",
-]
-
-[[package]]
-name = "filetime"
-version = "0.2.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0505cd1b6fa6580283f6bdf70a73fcf4aba1184038c90902b92b3dd0df63ed"
-dependencies = [
- "cfg-if",
- "libc",
- "libredox",
- "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3220,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-types"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3229,13 +3163,13 @@ dependencies = [
 
 [[package]]
 name = "mcp_test_support"
-version = "0.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
  "codex-core",
  "codex-mcp-server",
- "codex-protocol",
+ "dev-protocol",
  "mcp-types",
  "os_info",
  "pretty_assertions",
@@ -4347,7 +4281,6 @@ version = "0.12.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d429f34c8092b2d42c7c93cec323bb4adeb7c67698f70839adec842ec10c7ceb"
 dependencies = [
- "async-compression",
  "base64 0.22.1",
  "bytes",
  "futures-channel",
@@ -5263,17 +5196,6 @@ dependencies = [
  "pkg-config",
  "toml 0.8.23",
  "version-compare",
-]
-
-[[package]]
-name = "tar"
-version = "0.4.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
-dependencies = [
- "filetime",
- "libc",
- "xattr",
 ]
 
 [[package]]
@@ -6867,16 +6789,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
-name = "xattr"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af3a19837351dc82ba89f8a125e22a3c475f05aba604acc023d62b2739ae2909"
-dependencies = [
- "libc",
- "rustix 1.0.8",
-]
-
-[[package]]
 name = "xml5ever"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7004,18 +6916,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "zip"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "760394e246e4c28189f19d488c058bf16f564016aefac5d32bb1f3b51d5e9261"
-dependencies = [
- "byteorder",
- "crc32fast",
- "crossbeam-utils",
- "flate2",
 ]
 
 [[package]]

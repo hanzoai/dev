@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Dev CLI Wrapper - Integrates hanzod with Rust dev binary
+# Manages background daemon, model preloading, and session persistence
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HANZOD="$SCRIPT_DIR/hanzod"
+HANZOD_HOME="${HANZOD_HOME:-$HOME/.hanzod}"
+DEV_BIN="$SCRIPT_DIR/target/release/dev"
+
+# Ensure hanzod is running
+ensure_daemon() {
+    if [ ! -f "$HANZOD_HOME/hanzod.pid" ] || ! ps -p $(cat "$HANZOD_HOME/hanzod.pid" 2>/dev/null) > /dev/null 2>&1; then
+        echo -e "${BLUE}Starting background services...${NC}"
+        $HANZOD start > /dev/null 2>&1
+        sleep 2
+        
+        # Check if models are loaded
+        if [ -f "$HANZOD_HOME/state.json" ]; then
+            local model_status=$(jq -r '.model_qwen2_5_7b // "not_loaded"' "$HANZOD_HOME/state.json")
+            if [ "$model_status" = "loaded" ]; then
+                echo -e "${GREEN}✓ Models preloaded and ready${NC}"
+            fi
+        fi
+    fi
+}
+
+# Get session from hanzod
+get_session() {
+    if [ -z "$HANZOD_SESSION_ID" ]; then
+        local session_id=$($HANZOD connect 2>/dev/null | tail -1)
+        export HANZOD_SESSION_ID="$session_id"
+    fi
+}
+
+# Check if Rust dev binary exists
+check_dev_binary() {
+    if [ ! -f "$DEV_BIN" ]; then
+        echo -e "${YELLOW}Building Rust dev binary...${NC}"
+        echo -e "${BLUE}This is a one-time setup${NC}"
+        (cd "$SCRIPT_DIR" && cargo build --release --bin dev)
+        
+        if [ ! -f "$DEV_BIN" ]; then
+            echo -e "${RED}Failed to build dev binary${NC}"
+            echo -e "${YELLOW}Falling back to CLI mode${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Set provider environment
+setup_provider() {
+    if [ -f "$HANZOD_HOME/state.json" ]; then
+        local engine=$(jq -r '.engine // "none"' "$HANZOD_HOME/state.json" 2>/dev/null)
+        local ollama=$(jq -r '.ollama // "none"' "$HANZOD_HOME/state.json" 2>/dev/null)
+        
+        if [ "$engine" = "native" ]; then
+            export HANZO_PROVIDER="native"
+            export HANZO_API_URL="http://localhost:36900"
+            export HANZO_MODEL="qwen2.5-7b"
+        elif [ "$ollama" = "running" ]; then
+            export HANZO_PROVIDER="ollama"
+            export HANZO_API_URL="http://localhost:11434"
+            export HANZO_MODEL="qwen2.5:7b"
+        fi
+    fi
+}
+
+# Main execution
+main() {
+    # Quick commands that don't need daemon
+    case "${1:-}" in
+        --version|-v)
+            echo "Hanzo Dev v3.0"
+            echo "Rust integration with hanzod daemon"
+            exit 0
+            ;;
+        --help|-h|help)
+            if check_dev_binary; then
+                $DEV_BIN --help
+            else
+                echo "Hanzo Dev CLI"
+                echo ""
+                echo "Usage: dev [options] [command]"
+                echo ""
+                echo "Options:"
+                echo "  --help, -h     Show help"
+                echo "  --version, -v  Show version"
+                echo "  --status       Show daemon status"
+                echo ""
+                echo "Commands are passed to the Rust dev binary"
+            fi
+            exit 0
+            ;;
+        --status)
+            $HANZOD status
+            exit 0
+            ;;
+        --stop)
+            $HANZOD stop
+            exit 0
+            ;;
+    esac
+    
+    # For actual dev commands, ensure daemon and binary
+    ensure_daemon
+    get_session
+    setup_provider
+    
+    # Show brief status on first run
+    if [ ! -f "$HANZOD_HOME/.shown_welcome" ]; then
+        echo -e "${GREEN}✓ Hanzo Dev ready${NC}"
+        echo -e "${BLUE}Provider: ${HANZO_PROVIDER:-ollama}${NC}"
+        echo -e "${BLUE}Session: ${HANZOD_SESSION_ID}${NC}"
+        touch "$HANZOD_HOME/.shown_welcome"
+    fi
+    
+    # Pass through to Rust dev binary
+    if check_dev_binary; then
+        exec $DEV_BIN "$@"
+    else
+        # Fallback to simple CLI
+        ./hanzo-dev "$@"
+    fi
+}
+
+# Handle interrupts gracefully
+trap 'echo -e "\n${YELLOW}Session saved to ~/.hanzod/sessions/${HANZOD_SESSION_ID}${NC}"' INT TERM
+
+main "$@"

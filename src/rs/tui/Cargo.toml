@@ -27,20 +27,20 @@ anyhow = "1"
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-codex-ansi-escape = { path = "../ansi-escape" }
-codex-arg0 = { path = "../arg0" }
-codex-browser = { path = "../browser" }
-codex-common = { path = "../common", features = [
+dev-ansi-escape = { path = "../ansi-escape" }
+dev-arg0 = { path = "../arg0" }
+dev-browser = { path = "../browser" }
+dev-common = { path = "../common", features = [
     "cli",
     "elapsed",
     "sandbox_summary",
 ] }
 codex-core = { path = "../core" }
-codex-file-search = { path = "../file-search" }
-codex-login = { path = "../login" }
+dev-file-search = { path = "../file-search" }
+dev-login = { path = "../login" }
 codex-ollama = { path = "../ollama" }
-codex-protocol = { path = "../protocol" }
-codex-version = { path = "../codex-version" }
+dev-protocol = { path = "../protocol" }
+dev-version = { path = "../version" }
 color-eyre = "0.6.3"
 crossterm = { version = "0.28.1", features = ["bracketed-paste"] }
 diffy = "0.4.2"

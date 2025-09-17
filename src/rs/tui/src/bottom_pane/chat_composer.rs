@@ -24,7 +24,7 @@ use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::paste_burst::PasteBurst;
 use crate::slash_command::SlashCommand;
-use codex_protocol::custom_prompts::CustomPrompt;
+use dev_protocol::custom_prompts::CustomPrompt;
 
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::textarea::TextArea;

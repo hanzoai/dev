@@ -4,7 +4,7 @@ use crate::pager_overlay::Overlay;
 use crate::tui;
 use crate::tui::TuiEvent;
 use codex_core::protocol::ConversationHistoryResponseEvent;
-use codex_protocol::mcp_protocol::ConversationId;
+use dev_protocol::mcp_protocol::ConversationId;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -301,7 +301,7 @@ impl App {
     /// Thin wrapper around ConversationManager::fork_conversation.
     async fn perform_fork(
         &self,
-        entries: Vec<codex_protocol::models::ResponseItem>,
+        entries: Vec<dev_protocol::models::ResponseItem>,
         drop_count: usize,
         cfg: codex_core::config::Config,
     ) -> codex_core::error::Result<codex_core::NewConversation> {

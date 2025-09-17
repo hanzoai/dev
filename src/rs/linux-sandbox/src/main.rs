@@ -2,5 +2,5 @@
 /// to `execv`, so the caller is responsible for ensuring those values are
 /// correct.
 fn main() -> ! {
-    dev_linux_sandbox::run_main()
+    codex_linux_sandbox::run_main()
 }

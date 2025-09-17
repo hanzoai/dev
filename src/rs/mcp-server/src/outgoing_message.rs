@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
 use codex_core::protocol::Event;
-use codex_protocol::mcp_protocol::ServerNotification;
+use dev_protocol::mcp_protocol::ServerNotification;
 use mcp_types::JSONRPC_VERSION;
 use mcp_types::JSONRPCError;
 use mcp_types::JSONRPCErrorError;

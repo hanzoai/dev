@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Hanzo Dev CLI with Daemon Integration
+# Uses hanzod for background process management and connects to Rust dev
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+HANZOD_HOME="${HANZOD_HOME:-$HOME/.hanzod}"
+DEV_BIN="${DEV_BIN:-/Users/z/work/hanzo/dev/target/release/dev}"
+HANZOD_BIN="${HANZOD_BIN:-./hanzod}"
+
+# Check if hanzod is running
+check_hanzod() {
+    if [ -f "$HANZOD_HOME/hanzod.pid" ]; then
+        local pid=$(cat "$HANZOD_HOME/hanzod.pid")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Start hanzod if not running
+ensure_hanzod() {
+    if ! check_hanzod; then
+        echo -e "${BLUE}Starting hanzod daemon...${NC}"
+        $HANZOD_BIN start
+        sleep 2
+    else
+        echo -e "${GREEN}✓ Hanzod already running${NC}"
+    fi
+}
+
+# Connect to hanzod and get session
+connect_hanzod() {
+    local session_id=$($HANZOD_BIN connect | tail -1)
+    export HANZOD_SESSION_ID="$session_id"
+    echo -e "${GREEN}✓ Connected to hanzod (session: $session_id)${NC}"
+}
+
+# Get current provider from hanzod
+get_provider() {
+    if [ -f "$HANZOD_HOME/state.json" ]; then
+        local engine=$(jq -r '.engine // "none"' "$HANZOD_HOME/state.json" 2>/dev/null)
+        if [ "$engine" = "native" ]; then
+            echo "native"
+        elif [ "$(jq -r '.ollama // "none"' "$HANZOD_HOME/state.json" 2>/dev/null)" = "running" ]; then
+            echo "ollama"
+        else
+            echo "none"
+        fi
+    else
+        echo "none"
+    fi
+}
+
+# Call Rust dev with proper configuration
+call_rust_dev() {
+    local prompt="$1"
+    
+    # Check if Rust dev binary exists
+    if [ ! -f "$DEV_BIN" ]; then
+        echo -e "${YELLOW}Building Rust dev...${NC}"
+        (cd /Users/z/work/hanzo/dev && cargo build --release)
+    fi
+    
+    # Get provider from hanzod
+    local provider=$(get_provider)
+    
+    # Set environment for Rust dev
+    export HANZO_PROVIDER="$provider"
+    export HANZO_SESSION_ID="$HANZOD_SESSION_ID"
+    
+    if [ "$provider" = "native" ]; then
+        export HANZO_API_URL="http://localhost:36900"
+    elif [ "$provider" = "ollama" ]; then
+        export HANZO_API_URL="http://localhost:11434"
+    fi
+    
+    # Call Rust dev
+    if [ -f "$DEV_BIN" ]; then
+        echo "$prompt" | $DEV_BIN --model qwen2.5:7b
+    else
+        echo -e "${RED}Rust dev binary not found${NC}"
+        return 1
+    fi
+}
+
+# Main function
+main() {
+    local command="${1:-help}"
+    shift || true
+    
+    case "$command" in
+        start)
+            ensure_hanzod
+            connect_hanzod
+            echo -e "${GREEN}✓ Ready for development${NC}"
+            echo -e "${BLUE}Provider: $(get_provider)${NC}"
+            ;;
+            
+        chat)
+            ensure_hanzod
+            connect_hanzod
+            
+            local prompt="$*"
+            if [ -z "$prompt" ]; then
+                echo "Usage: hanzo-dev-daemon chat <prompt>"
+                exit 1
+            fi
+            
+            echo -e "${BLUE}Processing...${NC}"
+            call_rust_dev "$prompt"
+            ;;
+            
+        status)
+            $HANZOD_BIN status
+            ;;
+            
+        stop)
+            $HANZOD_BIN stop
+            ;;
+            
+        dev)
+            # Direct pass-through to Rust dev
+            ensure_hanzod
+            connect_hanzod
+            
+            if [ -f "$DEV_BIN" ]; then
+                $DEV_BIN "$@"
+            else
+                echo -e "${RED}Rust dev not found. Building...${NC}"
+                (cd /Users/z/work/hanzo/dev && cargo build --release)
+                $DEV_BIN "$@"
+            fi
+            ;;
+            
+        help|*)
+            echo "Hanzo Dev with Daemon Integration"
+            echo ""
+            echo "Usage: hanzo-dev-daemon <command> [options]"
+            echo ""
+            echo "Commands:"
+            echo "  start       Start hanzod and connect"
+            echo "  chat        Send prompt to AI via Rust dev"
+            echo "  status      Show daemon status"
+            echo "  stop        Stop hanzod daemon"
+            echo "  dev         Direct access to Rust dev CLI"
+            echo "  help        Show this help"
+            echo ""
+            echo "The daemon manages:"
+            echo "  - Background processes (native engine, Ollama)"
+            echo "  - Model preloading and caching"
+            echo "  - Session persistence"
+            echo "  - Provider fallback chain"
+            ;;
+    esac
+}
+
+main "$@"

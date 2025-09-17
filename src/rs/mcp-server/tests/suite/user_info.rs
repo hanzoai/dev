@@ -8,7 +8,7 @@ use codex_core::auth::get_auth_file;
 use codex_core::auth::write_auth_json;
 use codex_core::token_data::IdTokenInfo;
 use codex_core::token_data::TokenData;
-use codex_protocol::mcp_protocol::UserInfoResponse;
+use dev_protocol::mcp_protocol::UserInfoResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::to_response;
 use mcp_types::JSONRPCResponse;

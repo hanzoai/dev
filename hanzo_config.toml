@@ -1,0 +1,147 @@
+# Hanzo Dev Configuration
+# This configuration enables Qwen3 models and local Hanzo services
+
+# Default model selection - prioritize local Hanzo/Qwen3
+model = "qwen3-8b"
+
+# Hanzo Engine Configuration
+[hanzo]
+engine_url = "http://localhost:36900"
+node_url = "http://localhost:3690"
+enable_qwen3 = true
+enable_reranker = true
+fallback_enabled = true
+
+# Model Provider Configuration with Fallback Chain
+[[model_providers]]
+id = "hanzo-local"
+name = "Hanzo Local Engine"
+priority = 1
+base_url = "http://localhost:36900/v1"
+api_type = "openai-compatible"
+models = ["qwen3-8b", "qwen3-14b", "qwen3-30b-a3b", "qwen3-72b", "qwen3-reranker", "qwen2-vl"]
+
+[[model_providers]]
+id = "hanzo-node"
+name = "Hanzo Node"
+priority = 2
+base_url = "http://localhost:3690/v2"
+api_type = "hanzo-native"
+
+[[model_providers]]
+id = "openai"
+name = "OpenAI"
+priority = 3
+api_type = "openai"
+# Will use OPENAI_API_KEY from environment
+
+[[model_providers]]
+id = "claude"
+name = "Anthropic Claude"
+priority = 4
+api_type = "anthropic"
+# Will use ANTHROPIC_API_KEY from environment
+
+[[model_providers]]
+id = "dashscope"
+name = "DashScope/Qwen Cloud"
+priority = 5
+base_url = "https://dashscope.aliyuncs.com/api/v1"
+api_type = "openai-compatible"
+# Will use DASHSCOPE_API_KEY or QWEN_API_KEY from environment
+
+# Agent Configuration for Qwen3
+[[agents]]
+name = "qwen3"
+command = "hanzo"
+enabled = true
+read-only = false
+description = "Qwen3 with hybrid reasoning and tool calling"
+args = ["--model", "qwen3-8b", "--enable-thinking"]
+env = { HANZO_ENGINE_URL = "http://localhost:36900" }
+
+[[agents]]
+name = "qwen3-safe"
+command = "hanzo"
+enabled = true
+read-only = true
+description = "Qwen3 in read-only mode"
+args = ["--model", "qwen3-8b", "--read-only"]
+
+[[agents]]
+name = "qwen3-72b"
+command = "hanzo"
+enabled = true
+read-only = false
+description = "Qwen3 72B - larger model for complex tasks"
+args = ["--model", "qwen3-72b", "--enable-thinking"]
+
+[[agents]]
+name = "qwen3-reranker"
+command = "hanzo"
+enabled = true
+read-only = true
+description = "Qwen3 Reranker for search result optimization"
+args = ["--model", "qwen3-reranker", "--mode", "rerank"]
+
+[[agents]]
+name = "qwen2-vl"
+command = "hanzo"
+enabled = true
+read-only = false
+description = "Qwen2-VL for vision-language tasks"
+args = ["--model", "qwen2-vl", "--multimodal"]
+
+# MCP Server Configuration for Hanzo
+[mcp-servers.hanzo-engine]
+command = "hanzo-engine"
+args = ["serve", "--port", "36900"]
+env = { RUST_LOG = "info" }
+
+[mcp-servers.hanzo-node]
+command = "hanzod"
+args = ["--port", "3690"]
+env = { NODE_ENV = "production" }
+
+# Sandbox Configuration
+sandbox-mode = "workspace-write"
+
+[sandbox-workspace-write]
+writable-roots = ["."]
+network-access = true
+exclude-tmpdir-env-var = false
+exclude-slash-tmp = false
+
+# Shell Environment Configuration
+[shell-environment-policy]
+inherit = "all"
+ignore-default-excludes = false
+exclude = ["*SECRET*", "*PASSWORD*", "*CREDENTIAL*", "*TOKEN*"]
+set = { 
+    HANZO_ENGINE_URL = "http://localhost:36900",
+    HANZO_NODE_URL = "http://localhost:3690",
+    EMBEDDINGS_SERVER_URL = "http://localhost:36900",
+    HANZO_ENABLE_QWEN3 = "true",
+    HANZO_ENABLE_RERANKER = "true"
+}
+
+# History Configuration
+[history]
+persistence = "save-all"
+max-bytes = 10485760  # 10MB
+
+# File Opener Configuration
+file-opener = "vscode"
+
+# Reasoning Configuration for Qwen3
+[reasoning]
+enable_thinking = true
+effort = "high"
+summary_format = "experimental"
+
+# Tool Configuration
+[tools]
+enable_web_search = true
+enable_code_execution = true
+enable_file_operations = true
+enable_network_requests = true

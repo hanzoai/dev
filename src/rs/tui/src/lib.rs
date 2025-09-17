@@ -12,10 +12,10 @@ use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_overrides;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
-use codex_login::AuthMode;
-use codex_login::CodexAuth;
+use dev_login::AuthMode;
+use dev_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
-use codex_protocol::config_types::SandboxMode;
+use dev_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use tracing_appender::non_blocking;
@@ -245,7 +245,7 @@ pub async fn run_main(
     #[allow(clippy::print_stderr)]
     #[cfg(not(debug_assertions))]
     if let Some(latest_version) = updates::get_upgrade_version(&config) {
-        let current_version = codex_version::version();
+        let current_version = dev_version::version();
         let exe = std::env::current_exe()?;
         let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
 
@@ -317,7 +317,7 @@ fn run_ratatui_app(
         use ratatui::text::Line;
         use ratatui::text::Span;
 
-        let current_version = codex_version::version();
+        let current_version = dev_version::version();
         let exe = std::env::current_exe()?;
         let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
 

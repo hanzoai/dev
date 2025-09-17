@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::AuthManager;
 use crate::CodexAuth;
-use codex_protocol::mcp_protocol::AuthMode;
+use dev_protocol::mcp_protocol::AuthMode;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
 use crate::rollout::RolloutRecorder;
-use codex_protocol::models::ResponseItem;
+use dev_protocol::models::ResponseItem;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InitialHistory {
@@ -206,9 +206,9 @@ fn truncate_after_dropping_last_messages(items: Vec<ResponseItem>, n: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ReasoningItemReasoningSummary;
-    use codex_protocol::models::ResponseItem;
+    use dev_protocol::models::ContentItem;
+    use dev_protocol::models::ReasoningItemReasoningSummary;
+    use dev_protocol::models::ResponseItem;
 
     fn user_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {

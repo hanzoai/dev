@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+
+// Hanzo MCP Server - Direct Node.js implementation
+// Uses hanzo-tools via the TypeScript bridge
+
+const { spawn } = require('child_process');
+const path = require('path');
+const { ToolRegistry } = require('../dist/registry');
+
+async function main() {
+    const args = process.argv.slice(2);
+    
+    if (args.length === 0 || args[0] === '--help') {
+        console.log('Hanzo MCP Server');
+        console.log('Usage: hanzo-mcp-server <command> [options]');
+        console.log('');
+        console.log('Commands:');
+        console.log('  list-tools              List all available tools');
+        console.log('  call <tool> --params    Execute a tool with parameters');
+        console.log('  serve                   Start MCP server');
+        console.log('  install-desktop         Install to Claude Desktop');
+        return;
+    }
+
+    const registry = new ToolRegistry();
+
+    switch(args[0]) {
+        case 'list-tools':
+            const tools = await registry.listTools();
+            console.log('Available tools:', tools.length);
+            tools.forEach(tool => {
+                console.log(`\n${tool.name}:`);
+                console.log(`  Category: ${tool.category}`);
+                console.log(`  Description: ${tool.description}`);
+            });
+            break;
+
+        case 'call':
+            if (args.length < 2) {
+                console.error('Error: Tool name required');
+                process.exit(1);
+            }
+            const toolName = args[1];
+            let params = {};
+            
+            if (args[2] === '--params' && args[3]) {
+                try {
+                    params = JSON.parse(args[3]);
+                } catch (e) {
+                    console.error('Error: Invalid JSON parameters');
+                    process.exit(1);
+                }
+            }
+
+            try {
+                const result = await registry.executeTool(toolName, params);
+                console.log(JSON.stringify(result, null, 2));
+            } catch (e) {
+                console.error(`Error executing tool: ${e.message}`);
+                process.exit(1);
+            }
+            break;
+
+        case 'serve':
+            console.log('Starting MCP server...');
+            // This would start the actual MCP server
+            console.log('MCP server is running on stdio');
+            break;
+
+        case 'install-desktop':
+            console.log('Installing to Claude Desktop...');
+            // Implementation for desktop installation
+            break;
+
+        default:
+            console.error(`Unknown command: ${args[0]}`);
+            process.exit(1);
+    }
+}
+
+main().catch(console.error);

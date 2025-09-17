@@ -274,7 +274,6 @@ reasoning: {:?}"#,
                             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
                             screenshot_content = Some(ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                                detail: Some("high".to_string()),
                             });
                             include_screenshot = true;
                             ""
@@ -1094,6 +1093,7 @@ impl Session {
             aggregated_output: _,
             duration,
             exit_code,
+            timed_out,
         } = output;
         // Because stdout and stderr could each be up to 100 KiB, we send
         // truncated versions.
@@ -1699,7 +1699,7 @@ async fn submission_loop(
                     notify,
                     state: Mutex::new(state),
                     rollout: Mutex::new(rollout_recorder),
-                    dev_linux_sandbox_exe: config.dev_linux_sandbox_exe.clone(),
+                    dev_linux_sandbox_exe: config.codex_linux_sandbox_exe.clone(),
                     disable_response_storage,
                     user_shell: default_shell,
                     show_raw_agent_reasoning: config.show_raw_agent_reasoning,

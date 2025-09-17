@@ -13,7 +13,7 @@ pub const DEFAULT_ORIGINATOR: &str = "codex_cli_rs";
 pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 pub fn get_codex_user_agent(originator: Option<&str>) -> String {
-    let build_version = codex_version::version();
+    let build_version = dev_version::version();
     let os_info = os_info::get();
     let prefix = format!(
         "{}/{build_version} ({} {}; {}) {}",
@@ -39,6 +39,11 @@ pub fn get_codex_user_agent(originator: Option<&str>) -> String {
 /// Convenience wrapper using the default originator.
 pub fn get_codex_user_agent_default() -> String {
     get_codex_user_agent(None)
+}
+
+/// Alias for dev compatibility
+pub fn get_dev_user_agent(originator: Option<&str>) -> String {
+    get_codex_user_agent(originator)
 }
 
 /// Replace invalid header characters with '_' and ensure the UA is syntactically valid.

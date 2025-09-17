@@ -17,6 +17,15 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
 
+/// Text format enumeration
+#[derive(Debug, Clone, Serialize)]
+pub enum TextFormat {
+    Plain,
+    Markdown,
+    Html,
+}
+
+
 /// The `instructions` field in the payload sent to a model should always start
 /// with this content.
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
@@ -58,6 +67,9 @@ pub struct Prompt {
 
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
+
+    /// Optional text format specification
+    pub text_format: Option<TextFormat>,
 }
 
 impl Prompt {
@@ -212,6 +224,8 @@ pub(crate) struct Reasoning {
 #[derive(Debug, Serialize)]
 pub(crate) struct Text {
     pub(crate) verbosity: OpenAiTextVerbosity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) format: Option<TextFormat>,
 }
 
 /// OpenAI text verbosity level for serialization.

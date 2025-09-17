@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+# Hanzo Dev CLI - Native Engine Integration
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Configuration
+ENGINE_DIR="${HANZO_ENGINE_DIR:-$HOME/work/hanzo/engine}"
+ENGINE_PORT="${HANZO_ENGINE_PORT:-36900}"
+FALLBACK_TO_OLLAMA="${HANZO_FALLBACK_OLLAMA:-true}"
+MODEL="${HANZO_MODEL:-qwen2.5:7b}"
+
+# Function to check if port is in use
+check_port() {
+    lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null 2>&1
+}
+
+# Function to start native engine
+start_native_engine() {
+    echo -e "${BLUE}Starting native Hanzo Engine...${NC}"
+    
+    # Check if already running
+    if check_port $ENGINE_PORT; then
+        echo -e "${GREEN}✓ Engine already running on port $ENGINE_PORT${NC}"
+        return 0
+    fi
+    
+    # Find engine binary
+    local engine_bin=""
+    for path in \
+        "$ENGINE_DIR/target/release/mistralrs-server" \
+        "$ENGINE_DIR/target/release/hanzo-engine" \
+        "/usr/local/bin/hanzo-engine" \
+        "./hanzo-engine"; do
+        if [ -f "$path" ]; then
+            engine_bin="$path"
+            break
+        fi
+    done
+    
+    if [ -z "$engine_bin" ]; then
+        echo -e "${YELLOW}Native engine not found. Building...${NC}"
+        (
+            cd "$ENGINE_DIR"
+            cargo build --release --no-default-features --features metal 2>&1 | tail -5
+        )
+        engine_bin="$ENGINE_DIR/target/release/mistralrs-server"
+    fi
+    
+    if [ -f "$engine_bin" ]; then
+        echo -e "${BLUE}Starting engine: $engine_bin${NC}"
+        $engine_bin \
+            --port $ENGINE_PORT \
+            --model-id "Qwen/Qwen2.5-7B-Instruct" \
+            --arch qwen2 \
+            --device metal \
+            --from-huggingface &
+        ENGINE_PID=$!
+        
+        # Wait for startup
+        sleep 5
+        
+        if check_port $ENGINE_PORT; then
+            echo -e "${GREEN}✓ Native engine started (PID: $ENGINE_PID)${NC}"
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Function to use Ollama as fallback
+use_ollama() {
+    echo -e "${YELLOW}Using Ollama as fallback...${NC}"
+    
+    if ! check_port 11434; then
+        echo -e "${YELLOW}Starting Ollama...${NC}"
+        ollama serve &
+        sleep 3
+    fi
+    
+    # Ensure Qwen model is available
+    if ! ollama list | grep -q "$MODEL"; then
+        echo -e "${YELLOW}Pulling $MODEL...${NC}"
+        ollama pull $MODEL
+    fi
+    
+    export HANZO_PROVIDER=ollama
+    export HANZO_API_URL=http://localhost:11434
+}
+
+# Function to send request to engine
+query_engine() {
+    local prompt="$1"
+    local url="http://localhost:$ENGINE_PORT/v1/chat/completions"
+    
+    local response=$(curl -s -X POST "$url" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"$prompt\"}],
+            \"max_tokens\": 4096,
+            \"temperature\": 0.7
+        }" 2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$response" ]; then
+        echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null || echo "$response"
+    else
+        return 1
+    fi
+}
+
+# Function to send request to Ollama
+query_ollama() {
+    local prompt="$1"
+    local response=$(curl -s -X POST http://localhost:11434/api/generate \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$MODEL\",
+            \"prompt\": \"$prompt\",
+            \"stream\": false
+        }" 2>/dev/null | jq -r '.response' 2>/dev/null)
+    
+    echo "$response"
+}
+
+# Main CLI logic
+main() {
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║                     Hanzo Dev CLI                             ║${NC}"
+    echo -e "${CYAN}║                   Rust Dev Integration                        ║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Parse command
+    local command="${1:-help}"
+    shift || true
+    
+    case "$command" in
+        start)
+            echo -e "${BLUE}Starting Hanzo Dev environment...${NC}"
+            if start_native_engine; then
+                export HANZO_PROVIDER=native
+                export HANZO_API_URL="http://localhost:$ENGINE_PORT"
+                echo -e "${GREEN}✓ Native engine ready${NC}"
+            elif [ "$FALLBACK_TO_OLLAMA" = "true" ]; then
+                use_ollama
+                echo -e "${GREEN}✓ Ollama ready${NC}"
+            else
+                echo -e "${RED}Failed to start engine${NC}"
+                exit 1
+            fi
+            ;;
+            
+        chat)
+            local prompt="$*"
+            if [ -z "$prompt" ]; then
+                echo "Usage: hanzo-dev chat <prompt>"
+                exit 1
+            fi
+            
+            echo -e "${BLUE}Processing...${NC}"
+            
+            # Try native engine first
+            if check_port $ENGINE_PORT; then
+                response=$(query_engine "$prompt")
+                if [ $? -eq 0 ] && [ -n "$response" ]; then
+                    echo -e "\n${GREEN}Response (Native Engine):${NC}"
+                    echo "$response"
+                    exit 0
+                fi
+            fi
+            
+            # Fallback to Ollama
+            if [ "$FALLBACK_TO_OLLAMA" = "true" ] && check_port 11434; then
+                response=$(query_ollama "$prompt")
+                if [ -n "$response" ]; then
+                    echo -e "\n${GREEN}Response (Ollama):${NC}"
+                    echo "$response"
+                    exit 0
+                fi
+            fi
+            
+            echo -e "${RED}No AI provider available${NC}"
+            exit 1
+            ;;
+            
+        status)
+            echo -e "${BLUE}Service Status:${NC}"
+            echo "═══════════════"
+            
+            if check_port $ENGINE_PORT; then
+                echo -e "${GREEN}✓ Native Engine running on port $ENGINE_PORT${NC}"
+            else
+                echo -e "${RED}✗ Native Engine not running${NC}"
+            fi
+            
+            if check_port 11434; then
+                echo -e "${GREEN}✓ Ollama running on port 11434${NC}"
+            else
+                echo -e "${RED}✗ Ollama not running${NC}"
+            fi
+            
+            if check_port 3690; then
+                echo -e "${GREEN}✓ Node API running on port 3690${NC}"
+            else
+                echo -e "${RED}✗ Node API not running${NC}"
+            fi
+            ;;
+            
+        download)
+            local model="${1:-Qwen/Qwen2.5-7B-Instruct}"
+            echo -e "${BLUE}Downloading model: $model${NC}"
+            
+            # Check if Python and huggingface_hub are available
+            if ! python3 -c "import huggingface_hub" 2>/dev/null; then
+                echo -e "${YELLOW}Installing huggingface_hub...${NC}"
+                pip3 install huggingface_hub --quiet
+            fi
+            
+            python3 << EOF
+import os
+import sys
+from huggingface_hub import snapshot_download
+
+model_id = "$model"
+cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+
+print(f"Downloading {model_id}...")
+print(f"Cache directory: {cache_dir}")
+print("This may take a while for large models...")
+
+try:
+    path = snapshot_download(
+        repo_id=model_id,
+        cache_dir=cache_dir,
+        ignore_patterns=["*.bin", "*.pth"],
+        resume_download=True
+    )
+    print(f"✓ Downloaded to: {path}")
+    
+    # Also try to convert for Ollama if it's a Qwen model
+    if "Qwen" in model_id:
+        print("\nTo use with Ollama, run:")
+        print(f"  ollama create qwen-custom -f Modelfile")
+        print("Where Modelfile contains:")
+        print(f"  FROM {path}")
+except Exception as e:
+    print(f"Error downloading model: {e}")
+    sys.exit(1)
+EOF
+            ;;
+            
+        test)
+            echo -e "${BLUE}Testing AI providers...${NC}"
+            
+            # Test native engine
+            if check_port $ENGINE_PORT; then
+                echo -e "\n${YELLOW}Testing Native Engine...${NC}"
+                response=$(query_engine "What is 2+2?")
+                if [ $? -eq 0 ] && [ -n "$response" ]; then
+                    echo -e "${GREEN}✓ Native Engine working${NC}"
+                else
+                    echo -e "${RED}✗ Native Engine failed${NC}"
+                fi
+            fi
+            
+            # Test Ollama
+            if check_port 11434; then
+                echo -e "\n${YELLOW}Testing Ollama...${NC}"
+                response=$(query_ollama "What is 2+2?")
+                if [ -n "$response" ]; then
+                    echo -e "${GREEN}✓ Ollama working${NC}"
+                else
+                    echo -e "${RED}✗ Ollama failed${NC}"
+                fi
+            fi
+            ;;
+            
+        help|*)
+            echo "Usage: hanzo-dev <command> [options]"
+            echo ""
+            echo "Commands:"
+            echo "  start              Start native engine (with Ollama fallback)"
+            echo "  chat <prompt>      Send a chat prompt to AI"
+            echo "  status             Check service status"
+            echo "  download [model]   Download a model from Hugging Face"
+            echo "  test               Test all AI providers"
+            echo "  help               Show this help message"
+            echo ""
+            echo "Environment Variables:"
+            echo "  HANZO_ENGINE_DIR   Engine directory (default: ~/work/hanzo/engine)"
+            echo "  HANZO_ENGINE_PORT  Engine port (default: 36900)"
+            echo "  HANZO_MODEL        Default model (default: qwen2.5:7b)"
+            echo "  HANZO_FALLBACK_OLLAMA  Use Ollama if native fails (default: true)"
+            echo ""
+            echo "Examples:"
+            echo "  hanzo-dev start"
+            echo "  hanzo-dev chat 'Explain quantum computing'"
+            echo "  hanzo-dev download 'Qwen/Qwen2.5-14B-Instruct'"
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"

@@ -1,4 +1,4 @@
-use codex_protocol::mcp_protocol::GetUserAgentResponse;
+use dev_protocol::mcp_protocol::GetUserAgentResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::to_response;
 use mcp_types::JSONRPCResponse;

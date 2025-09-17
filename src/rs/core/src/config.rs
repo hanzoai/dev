@@ -22,8 +22,8 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
-use codex_protocol::mcp_protocol::AuthMode;
-use codex_protocol::config_types::SandboxMode;
+use dev_protocol::mcp_protocol::AuthMode;
+use dev_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -134,6 +134,9 @@ pub struct Config {
     /// Directory containing all Codex state (defaults to `~/.codex` but can be
     /// overridden by the `CODEX_HOME` environment variable).
     pub codex_home: PathBuf,
+
+    /// Alias for codex_home for dev compatibility
+    pub dev_home: PathBuf,
 
     /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
     pub history: History,
@@ -1405,7 +1408,7 @@ impl Config {
 
     /// Check if we're using ChatGPT authentication
     fn is_using_chatgpt_auth(codex_home: &Path) -> bool {
-        use codex_protocol::mcp_protocol::AuthMode;
+        use dev_protocol::mcp_protocol::AuthMode;
         use crate::CodexAuth;
         
         // Prefer ChatGPT when both ChatGPT tokens and an API key are present.
@@ -1486,6 +1489,10 @@ fn default_model() -> String {
 /// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
+pub fn find_dev_home() -> std::io::Result<PathBuf> {
+    find_codex_home()
+}
+
 pub fn find_codex_home() -> std::io::Result<PathBuf> {
     // First check CODE_HOME for the fork
     if let Ok(val) = std::env::var("CODE_HOME") {

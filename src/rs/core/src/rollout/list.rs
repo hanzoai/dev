@@ -4,7 +4,7 @@ use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_file_search as file_search;
+use dev_file_search as file_search;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,9 +15,9 @@ use time::macros::format_description;
 use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
-use codex_protocol::protocol::EventMsg as ProtocolEventMsg;
-use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::RolloutLine;
+use dev_protocol::protocol::EventMsg as ProtocolEventMsg;
+use dev_protocol::protocol::RolloutItem;
+use dev_protocol::protocol::RolloutLine;
 
 /// Returned page of conversation summaries.
 #[derive(Debug, Default, PartialEq)]

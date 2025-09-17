@@ -49,7 +49,7 @@ pub use model_provider_info::built_in_model_providers;
 pub use model_provider_info::create_oss_provider_with_base_url;
 mod conversation_manager;
 mod event_mapping;
-pub use codex_protocol::protocol::InitialHistory;
+pub use dev_protocol::protocol::InitialHistory;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
 // Re-export common auth types for workspace consumers
@@ -73,14 +73,18 @@ pub use rollout::list::ConversationsPage;
 mod user_notification;
 pub mod util;
 pub mod http_client;
+pub mod hanzo_integration;
+pub mod qwen_model_info;
+pub mod node_client;
+pub mod engine_integration;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use safety::get_platform_sandbox;
 // Use our local protocol definitions to preserve custom events and input items.
 pub mod protocol;
 // Optionally expose upstream protocol config enums for callers that need them.
-pub use codex_protocol::config_types as protocol_config_types;
+pub use dev_protocol::config_types as protocol_config_types;
 // Re-export protocol models for compatibility with existing imports.
-pub use codex_protocol::models as models;
+pub use dev_protocol::models as models;
 // Public re-exports for API compatibility with downstream users and tests.
 // Keep these stable to avoid breaking callers.
 pub use crate::client::ModelClient;
@@ -88,6 +92,6 @@ pub use crate::client_common::Prompt;
 pub use crate::client_common::TextFormat;
 pub use crate::client_common::ResponseEvent;
 pub use crate::client_common::ResponseStream;
-pub use codex_protocol::models::ContentItem;
-pub use codex_protocol::models::ReasoningItemContent;
-pub use codex_protocol::models::ResponseItem;
+pub use dev_protocol::models::ContentItem;
+pub use dev_protocol::models::ReasoningItemContent;
+pub use dev_protocol::models::ResponseItem;

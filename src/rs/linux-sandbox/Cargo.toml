@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "codex-linux-sandbox"
+name = "dev-linux-sandbox"
 version = { workspace = true }
 
 [[bin]]
-name = "codex-linux-sandbox"
+name = "dev-linux-sandbox"
 path = "src/main.rs"
 
 [lib]

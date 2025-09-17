@@ -1,6 +1,54 @@
 use crate::config_types::ReasoningSummaryFormat;
 use crate::tool_apply_patch::ApplyPatchToolType;
 
+/// Model family enum for proper typing
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ModelFamilyType {
+    GPT35,
+    GPT4,
+    GPT4O,
+    GPT41,
+    GPT5,
+    GPT5Codex,
+    O3,
+    O4Mini,
+    CodexMiniLatest,
+    GptOss,
+    QwenV2,
+    QwenV3,
+    Custom(String),
+}
+
+impl ModelFamilyType {
+    pub fn from_slug(slug: &str) -> Self {
+        if slug.starts_with("o3") {
+            Self::O3
+        } else if slug.starts_with("o4-mini") {
+            Self::O4Mini
+        } else if slug.starts_with("codex-mini-latest") {
+            Self::CodexMiniLatest
+        } else if slug.starts_with("gpt-4.1") {
+            Self::GPT41
+        } else if slug.starts_with("gpt-oss") {
+            Self::GptOss
+        } else if slug.starts_with("gpt-4o") {
+            Self::GPT4O
+        } else if slug.starts_with("gpt-3.5") {
+            Self::GPT35
+        } else if slug.starts_with("codex-") || slug.starts_with("gpt-5-codex") {
+            Self::GPT5Codex
+        } else if slug.starts_with("gpt-5") {
+            Self::GPT5
+        } else if slug.starts_with("qwen3") || slug.starts_with("Qwen3") {
+            Self::QwenV3
+        } else if slug.starts_with("qwen2") || slug.starts_with("Qwen2") {
+            Self::QwenV2
+        } else {
+            Self::Custom(slug.to_string())
+        }
+    }
+}
+
 /// The `instructions` field in the payload sent to a model should always start
 /// with this content.
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
@@ -111,6 +159,19 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             slug, "gpt-5",
             supports_reasoning_summaries: true,
             needs_special_apply_patch_instructions: true,
+        )
+    } else if slug.starts_with("qwen3") || slug.starts_with("Qwen3") || slug.starts_with("qwen/qwen3") {
+        model_family!(
+            slug, "qwen3",
+            supports_reasoning_summaries: true,
+            needs_special_apply_patch_instructions: true,
+            apply_patch_tool_type: Some(ApplyPatchToolType::Function),
+        )
+    } else if slug.starts_with("qwen2") || slug.starts_with("Qwen2") || slug.starts_with("qwen/qwen2") {
+        model_family!(
+            slug, "qwen2",
+            needs_special_apply_patch_instructions: true,
+            apply_patch_tool_type: Some(ApplyPatchToolType::Function),
         )
     } else {
         None

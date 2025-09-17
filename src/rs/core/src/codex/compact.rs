@@ -21,10 +21,10 @@ use crate::protocol::TaskStartedEvent;
 use crate::protocol::TurnContextItem;
 use crate::util::backoff;
 use askama::Template;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::RolloutItem;
+use dev_protocol::models::ContentItem;
+use dev_protocol::models::ResponseInputItem;
+use dev_protocol::models::ResponseItem;
+use dev_protocol::protocol::RolloutItem;
 use futures::prelude::*;
 
 pub(super) const COMPACT_TRIGGER_TEXT: &str = "Start Summarization";

@@ -25,7 +25,7 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     });
 
     info.and_then(|info| {
-        let current_version = codex_version::version();
+        let current_version = dev_version::version();
         if is_newer(&info.latest_version, current_version).unwrap_or(false) {
             Some(info.latest_version)
         } else {

@@ -1,6 +1,6 @@
 use codex_core::config::GPT_5_CODEX_MEDIUM_MODEL;
 use codex_core::protocol_config_types::ReasoningEffort;
-use codex_protocol::mcp_protocol::AuthMode;
+use dev_protocol::mcp_protocol::AuthMode;
 
 /// A simple preset pairing a model slug with a reasoning effort.
 #[derive(Debug, Clone, Copy)]
