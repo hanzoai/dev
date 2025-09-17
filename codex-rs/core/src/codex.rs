@@ -454,6 +454,7 @@ use codex_protocol::models::ShellToolCallParams;
 use crate::openai_model_info::get_model_info;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
+use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
@@ -615,6 +616,7 @@ struct State {
     event_seq_by_sub_id: HashMap<String, u64>,
     /// 1-based ordinal of the current HTTP request attempt in this session.
     request_ordinal: u64,
+    dry_run_guard: DryRunGuardState,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -1225,14 +1227,18 @@ impl Session {
         self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
             .await;
 
-            let result = process_exec_tool_call(
-                exec_args.params,
-                exec_args.sandbox_type,
-                exec_args.sandbox_policy,
-                exec_args.codex_linux_sandbox_exe,
-                exec_args.stdout_stream,
-            )
-            .await;
+        let ExecInvokeArgs { params, sandbox_type, sandbox_policy, codex_linux_sandbox_exe, stdout_stream } = exec_args;
+        let tracking_command = params.command.clone();
+        let dry_run_analysis = analyze_command(&tracking_command);
+
+        let result = process_exec_tool_call(
+            params,
+            sandbox_type,
+            sandbox_policy,
+            codex_linux_sandbox_exe,
+            stdout_stream,
+        )
+        .await;
 
         let output_stderr;
         let borrowed: &ExecToolCallOutput = match &result {
@@ -1261,6 +1267,11 @@ impl Session {
             attempt_req,
         )
         .await;
+
+        if let Some(analysis) = dry_run_analysis.as_ref() {
+            let mut state = self.state.lock().unwrap();
+            state.dry_run_guard.note_execution(analysis);
+        }
 
         result
     }
@@ -1512,6 +1523,7 @@ impl State {
             // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
+            dry_run_guard: self.dry_run_guard.clone(),
             ..Default::default()
         }
     }
@@ -5154,6 +5166,27 @@ async fn handle_container_exec_with_params(
         }
     }
 
+    fn guidance_for_dry_run_guard(
+        analysis: &DryRunAnalysis,
+        original_label: &str,
+        original_value: &str,
+        resend_exact_argv: Vec<String>,
+    ) -> String {
+        let suggested_confirm = serde_json::to_string(&resend_exact_argv)
+            .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+        let suggested_dry_run = analysis
+            .suggested_dry_run()
+            .unwrap_or_else(|| "<no canonical dry-run variant; remove mutating flags or use confirm:>".to_string());
+        format!(
+            "Blocked {} without a prior dry run. Run the dry-run variant first or resend with 'confirm:' if explicitly requested.\n\n{}: {}\nresend_exact_argv: {}\nsuggested_dry_run: {}",
+            analysis.display_name(),
+            original_label,
+            original_value,
+            suggested_confirm,
+            suggested_dry_run
+        )
+    }
+
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
     let mut seq_hint_for_exec = seq_hint;
@@ -5217,6 +5250,37 @@ async fn handle_container_exec_with_params(
                 })
                 .unwrap_or_else(|| trimmed.to_string());
             params.command[script_index] = without_prefix;
+        }
+
+        let dry_run_analysis = analyze_command(&params.command);
+        if !has_confirm_prefix {
+            if let Some(analysis) = dry_run_analysis.as_ref() {
+                if analysis.disposition == DryRunDisposition::Mutating {
+                    let needs_dry_run = {
+                        let state = sess.state.lock().unwrap();
+                        !state.dry_run_guard.has_recent_dry_run(analysis.key)
+                    };
+                    if needs_dry_run {
+                        let mut argv_confirm = params.command.clone();
+                        argv_confirm[script_index] = format!("confirm: {}", params.command[script_index].trim_start());
+                        let guidance = guidance_for_dry_run_guard(
+                            analysis,
+                            "original_script",
+                            &params.command[script_index],
+                            argv_confirm,
+                        );
+
+                        sess
+                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .await;
+
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload { content: guidance, success: None },
+                        };
+                    }
+                }
+            }
         }
 
         // Detect an embedded `apply_patch <<EOF ... EOF` in a larger script and split it out
@@ -5363,8 +5427,8 @@ async fn handle_container_exec_with_params(
 
     // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
     if extract_shell_script_from_wrapper(&params.command).is_none() {
+        let joined = params.command.join(" ");
         if !sess.confirm_guard.is_empty() {
-            let joined = params.command.join(" ");
             if let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
                 let suggested = serde_json::to_string(&vec![
                     "bash".to_string(),
@@ -5386,6 +5450,37 @@ async fn handle_container_exec_with_params(
                     call_id,
                     output: FunctionCallOutputPayload { content: guidance, success: None },
                 };
+            }
+        }
+
+        if let Some(analysis) = analyze_command(&params.command) {
+            if analysis.disposition == DryRunDisposition::Mutating {
+                let needs_dry_run = {
+                    let state = sess.state.lock().unwrap();
+                    !state.dry_run_guard.has_recent_dry_run(analysis.key)
+                };
+                if needs_dry_run {
+                    let resend = vec![
+                        "bash".to_string(),
+                        "-lc".to_string(),
+                        format!("confirm: {}", joined),
+                    ];
+                    let guidance = guidance_for_dry_run_guard(
+                        &analysis,
+                        "original_argv",
+                        &format!("{:?}", params.command),
+                        resend,
+                    );
+
+                    sess
+                        .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                        .await;
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload { content: guidance, success: None },
+                    };
+                }
             }
         }
 
