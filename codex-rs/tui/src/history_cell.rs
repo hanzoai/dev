@@ -879,7 +879,7 @@ impl HistoryCell for ExploreAggregationCell {
                 Style::default().add_modifier(Modifier::DIM),
             )];
             spans.push(Span::styled(
-                format!("{} ", entry.label()),
+                format!("{:<8} ", entry.label()),
                 Style::default().fg(crate::colors::text_dim()),
             ));
             spans.extend(entry.summary_spans());
