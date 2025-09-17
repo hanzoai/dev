@@ -391,7 +391,7 @@ impl ExploreEntry {
         }
         match self.action {
             ExecAction::Read => "Read",
-            ExecAction::Search => "Searched",
+            ExecAction::Search => "Search",
             ExecAction::List => "List",
             ExecAction::Run => "Run",
         }
@@ -660,13 +660,19 @@ fn annotation_for_range(start: u32, end: u32) -> Option<String> {
 
 pub(crate) struct ExploreAggregationCell {
     entries: Vec<ExploreEntry>,
+    is_trailing: bool,
 }
 
 impl ExploreAggregationCell {
     pub(crate) fn new() -> Self {
         Self {
             entries: Vec::new(),
+            is_trailing: true,
         }
+    }
+
+    pub(crate) fn set_trailing(&mut self, trailing: bool) {
+        self.is_trailing = trailing;
     }
 
     pub(crate) fn push_from_parsed(
@@ -859,18 +865,31 @@ impl HistoryCell for ExploreAggregationCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
+        let header = if self.is_trailing {
+            "Exploring..."
+        } else {
+            "Explored"
+        };
+
         if self.entries.is_empty() {
             return vec![Line::styled(
-                "Exploring",
+                header,
                 Style::default().fg(crate::colors::text()),
             )];
         }
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::styled(
-            "Exploring",
+            header,
             Style::default().fg(crate::colors::text()),
         ));
+
+        let max_label_len = self
+            .entries
+            .iter()
+            .map(|e| e.label().chars().count())
+            .max()
+            .unwrap_or(0);
 
         for (idx, entry) in self.entries.iter().enumerate() {
             let prefix = if idx == 0 { "└ " } else { "  " };
@@ -878,8 +897,14 @@ impl HistoryCell for ExploreAggregationCell {
                 prefix,
                 Style::default().add_modifier(Modifier::DIM),
             )];
+            let label = entry.label();
+            let label_len = label.chars().count();
+            let padding = max_label_len.saturating_sub(label_len) + 1;
+            let mut padded_label = String::with_capacity(label.len() + padding);
+            padded_label.push_str(label);
+            padded_label.extend(std::iter::repeat(' ').take(padding));
             spans.push(Span::styled(
-                format!("{:<8} ", entry.label()),
+                padded_label,
                 Style::default().fg(crate::colors::text_dim()),
             ));
             spans.extend(entry.summary_spans());
@@ -2425,7 +2450,7 @@ impl HistoryCell for MergedExecCell {
                 Style::default().fg(crate::colors::text()),
             )),
             ExecKind::Search => Some(Line::styled(
-                "Searched",
+                "Search",
                 Style::default().fg(crate::colors::text_dim()),
             )),
             ExecKind::List => Some(Line::styled(
@@ -2808,7 +2833,7 @@ fn exec_render_parts_parsed(
                     Style::default().fg(crate::colors::text()),
                 )),
                 ExecAction::Search => pre.push(Line::styled(
-                    "Searched",
+                    "Search",
                     Style::default().fg(crate::colors::text_dim()),
                 )),
                 ExecAction::List => pre.push(Line::styled(
@@ -2830,7 +2855,7 @@ fn exec_render_parts_parsed(
             Some(o) if o.exit_code == 0 => {
                 let done = match action {
                     ExecAction::Read => "Read".to_string(),
-                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::Search => "Search".to_string(),
                     ExecAction::List => "List".to_string(),
                     ExecAction::Run => match &ctx_path {
                         Some(p) => format!("Ran in {}", p),
@@ -2857,7 +2882,7 @@ fn exec_render_parts_parsed(
             Some(_) => {
                 let done = match action {
                     ExecAction::Read => "Read".to_string(),
-                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::Search => "Search".to_string(),
                     ExecAction::List => "List".to_string(),
                     ExecAction::Run => match &ctx_path {
                         Some(p) => format!("Ran in {}", p),
@@ -5924,7 +5949,7 @@ fn new_parsed_command(
                     };
                     let header = match action {
                         ExecAction::Read => "Read",
-                        ExecAction::Search => "Searched",
+                        ExecAction::Search => "Search",
                         ExecAction::List => "List",
                         ExecAction::Run => unreachable!(),
                     };
@@ -5942,7 +5967,7 @@ fn new_parsed_command(
                     lines.push(Line::styled(
                         match action {
                             ExecAction::Read => "Read",
-                            ExecAction::Search => "Searched",
+                            ExecAction::Search => "Search",
                             ExecAction::List => "List",
                             ExecAction::Run => unreachable!(),
                         },
@@ -5969,7 +5994,7 @@ fn new_parsed_command(
                     lines.push(Line::styled(
                         match action {
                             ExecAction::Read => "Read",
-                            ExecAction::Search => "Searched",
+                            ExecAction::Search => "Search",
                             ExecAction::List => "List",
                             ExecAction::Run => unreachable!(),
                         },

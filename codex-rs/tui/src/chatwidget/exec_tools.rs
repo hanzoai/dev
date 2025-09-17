@@ -477,7 +477,7 @@ pub(super) fn handle_exec_begin_now(
         },
     );
     if !chat.tools_state.running_web_search.is_empty() {
-        chat.bottom_pane.update_status_text("Searched".to_string());
+        chat.bottom_pane.update_status_text("Search".to_string());
     } else {
         let preview = chat
             .exec
