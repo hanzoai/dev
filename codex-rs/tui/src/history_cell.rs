@@ -350,6 +350,12 @@ pub(crate) enum ExploreEntryStatus {
 }
 
 #[derive(Clone)]
+struct CommandSummary {
+    display: String,
+    annotation: Option<String>,
+}
+
+#[derive(Clone)]
 enum ExploreSummary {
     Search {
         query: Option<String>,
@@ -364,7 +370,7 @@ enum ExploreSummary {
         range: Option<(u32, u32)>,
     },
     Command {
-        command: String,
+        command: CommandSummary,
     },
     Fallback {
         text: String,
@@ -441,7 +447,16 @@ impl ExploreEntry {
                 }
                 spans
             }
-            ExploreSummary::Command { command } => highlight_command_summary(command),
+            ExploreSummary::Command { command } => {
+                let mut spans = highlight_command_summary(&command.display);
+                if let Some(annotation) = &command.annotation {
+                    spans.push(Span::styled(
+                        format!(" {}", annotation),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                spans
+            }
             ExploreSummary::Fallback { text } => vec![Span::styled(
                 text.clone(),
                 Style::default().fg(crate::colors::text()),
@@ -471,6 +486,69 @@ fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
             Style::default().fg(crate::colors::text()),
         )]
     }
+}
+
+fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
+    let display = select_command_display(cmd, original_command);
+    let (annotation, _) = parse_read_line_annotation_with_range(&display);
+    CommandSummary {
+        display,
+        annotation,
+    }
+}
+
+fn select_command_display(cmd: &str, original_command: &[String]) -> String {
+    if let Some(script) = extract_bash_script(original_command) {
+        let trimmed = script.trim();
+        if !trimmed.is_empty() {
+            if command_string_has_connector(trimmed) || trimmed != cmd {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    if command_tokens_have_connectors(original_command) {
+        let joined = original_command.join(" ").trim().to_string();
+        if !joined.is_empty() {
+            if command_string_has_connector(&joined) || joined != cmd {
+                return joined;
+            }
+        }
+    }
+
+    cmd.to_string()
+}
+
+fn extract_bash_script(command: &[String]) -> Option<String> {
+    if command.len() < 3 {
+        return None;
+    }
+    let exe = command[0].as_str();
+    let flag = command[1].as_str();
+    if looks_like_bash(exe) && (flag == "-c" || flag == "-lc") {
+        command.get(2).cloned()
+    } else {
+        None
+    }
+}
+
+fn looks_like_bash(exe: &str) -> bool {
+    if exe.eq_ignore_ascii_case("bash") || exe.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(exe)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
+
+fn command_tokens_have_connectors(command: &[String]) -> bool {
+    command.iter().any(|token| matches!(token.as_str(), "|" | "&&" | "||" | ";"))
+}
+
+fn command_string_has_connector(value: &str) -> bool {
+    value.contains('|') || value.contains("&&") || value.contains("||") || value.contains(';')
 }
 
 fn normalize_separators(mut value: String) -> String {
@@ -597,6 +675,7 @@ impl ExploreAggregationCell {
         status: ExploreEntryStatus,
         cwd: &Path,
         session_root: &Path,
+        original_command: &[String],
     ) -> Option<usize> {
         let action = action_enum_from_parsed(&parsed.to_vec());
         let summary = match action {
@@ -639,7 +718,7 @@ impl ExploreAggregationCell {
             }),
             ExecAction::Run => parsed.iter().find_map(|p| match p {
                 ParsedCommand::ReadCommand { cmd } => Some(ExploreSummary::Command {
-                    command: cmd.clone(),
+                    command: build_command_summary(cmd, original_command),
                 }),
                 _ => None,
             }),
@@ -721,6 +800,20 @@ impl ExploreAggregationCell {
                             self.entries[idx].status = status;
                             return Some(idx);
                         }
+                    }
+                }
+            }
+        }
+
+        if let ExploreSummary::Command { command: new_cmd } = &summary {
+            for idx in (0..self.entries.len()).rev() {
+                if let ExploreSummary::Command { command: existing } = &mut self.entries[idx].summary
+                {
+                    if existing.display == new_cmd.display
+                        && existing.annotation == new_cmd.annotation
+                    {
+                        self.entries[idx].status = status;
+                        return Some(idx);
                     }
                 }
             }
