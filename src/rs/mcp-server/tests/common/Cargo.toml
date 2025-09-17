@@ -9,7 +9,7 @@ path = "lib.rs"
 [dependencies]
 anyhow = "1"
 assert_cmd = "2"
-codex-core = { path = "../../../core" }
+hanzo-dev = { path = "../../../core" }
 codex-mcp-server = { path = "../.." }
 dev-protocol = { path = "../../../protocol" }
 mcp-types = { path = "../../../mcp-types" }

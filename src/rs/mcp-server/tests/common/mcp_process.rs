@@ -156,7 +156,7 @@ impl McpProcess {
             os_info.os_type(),
             os_info.version(),
             os_info.architecture().unwrap_or("unknown"),
-            codex_core::terminal::user_agent()
+            hanzo_dev::terminal::user_agent()
         );
         assert_eq!(
             JSONRPCMessage::Response(JSONRPCResponse {

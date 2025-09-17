@@ -1,19 +1,19 @@
-use codex_core::CodexAuth;
-use codex_core::CodexConversation;
-use codex_core::ConversationManager;
-use codex_core::ModelProviderInfo;
-use codex_core::built_in_model_providers;
-use codex_core::config::Config;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::ExitedReviewModeEvent;
-use codex_core::protocol::InputItem;
-use codex_core::protocol::Op;
-use codex_core::protocol::ReviewCodeLocation;
-use codex_core::protocol::ReviewFinding;
-use codex_core::protocol::ReviewLineRange;
-use codex_core::protocol::ReviewOutputEvent;
-use codex_core::protocol::ReviewRequest;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::CodexAuth;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::built_in_model_providers;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::ExitedReviewModeEvent;
+use hanzo_dev::protocol::InputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::ReviewCodeLocation;
+use hanzo_dev::protocol::ReviewFinding;
+use hanzo_dev::protocol::ReviewLineRange;
+use hanzo_dev::protocol::ReviewOutputEvent;
+use hanzo_dev::protocol::ReviewRequest;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id_from_str;
 use core_test_support::wait_for_event;
@@ -589,7 +589,7 @@ where
     let conversation_manager =
         ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
     let auth_manager =
-        codex_core::AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+        hanzo_dev::AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
     conversation_manager
         .resume_conversation_from_rollout(config, resume_path, auth_manager)
         .await

@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
             .splice(0..0, top_cli.config_overrides.raw_overrides);
         let usage = run_main(inner, dev_linux_sandbox_exe).await?;
         if !usage.is_zero() {
-            println!("{}", dev_core::protocol::FinalOutput::from(usage));
+            println!("{}", hanzo_dev::protocol::FinalOutput::from(usage));
         }
         Ok(())
     })

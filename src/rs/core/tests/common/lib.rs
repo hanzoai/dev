@@ -2,10 +2,10 @@
 
 use tempfile::TempDir;
 
-use dev_core::CodexConversation;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
-use dev_core::config::ConfigToml;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::config::ConfigToml;
 
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
@@ -95,9 +95,9 @@ pub fn load_sse_fixture_with_id(path: impl AsRef<std::path::Path>, id: &str) -> 
 pub async fn wait_for_event<F>(
     codex: &CodexConversation,
     predicate: F,
-) -> dev_core::protocol::EventMsg
+) -> hanzo_dev::protocol::EventMsg
 where
-    F: FnMut(&dev_core::protocol::EventMsg) -> bool,
+    F: FnMut(&hanzo_dev::protocol::EventMsg) -> bool,
 {
     use tokio::time::Duration;
     wait_for_event_with_timeout(codex, predicate, Duration::from_secs(1)).await
@@ -107,9 +107,9 @@ pub async fn wait_for_event_with_timeout<F>(
     codex: &CodexConversation,
     mut predicate: F,
     wait_time: tokio::time::Duration,
-) -> dev_core::protocol::EventMsg
+) -> hanzo_dev::protocol::EventMsg
 where
-    F: FnMut(&dev_core::protocol::EventMsg) -> bool,
+    F: FnMut(&hanzo_dev::protocol::EventMsg) -> bool,
 {
     use tokio::time::Duration;
     use tokio::time::timeout;

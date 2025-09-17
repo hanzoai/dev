@@ -3,7 +3,7 @@ use crate::backtrack_helpers;
 use crate::pager_overlay::Overlay;
 use crate::tui;
 use crate::tui::TuiEvent;
-use codex_core::protocol::ConversationHistoryResponseEvent;
+use hanzo_dev::protocol::ConversationHistoryResponseEvent;
 use dev_protocol::mcp_protocol::ConversationId;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
@@ -98,7 +98,7 @@ impl App {
     ) {
         self.backtrack.pending = Some((base_id, drop_last_messages, prefill));
         self.app_event_tx.send(crate::app_event::AppEvent::CodexOp(
-            codex_core::protocol::Op::GetHistory,
+            hanzo_dev::protocol::Op::GetHistory,
         ));
     }
 
@@ -303,8 +303,8 @@ impl App {
         &self,
         entries: Vec<dev_protocol::models::ResponseItem>,
         drop_count: usize,
-        cfg: codex_core::config::Config,
-    ) -> codex_core::error::Result<codex_core::NewConversation> {
+        cfg: hanzo_dev::config::Config,
+    ) -> hanzo_dev::error::Result<hanzo_dev::NewConversation> {
         self.server
             .fork_conversation(entries, drop_count, cfg)
             .await
@@ -314,8 +314,8 @@ impl App {
     fn install_forked_conversation(
         &mut self,
         tui: &mut tui::Tui,
-        cfg: codex_core::config::Config,
-        new_conv: codex_core::NewConversation,
+        cfg: hanzo_dev::config::Config,
+        new_conv: hanzo_dev::NewConversation,
         drop_count: usize,
         prefill: &str,
     ) {

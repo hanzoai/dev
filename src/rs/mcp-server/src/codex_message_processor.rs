@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dev_core::AuthManager;
-use dev_core::CodexConversation;
-use dev_core::ConversationManager;
-use dev_core::NewConversation;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
-use dev_core::config::ConfigToml;
-use dev_core::config::load_config_as_toml;
-use dev_core::git_info::git_diff_to_remote;
-use dev_core::protocol::ApplyPatchApprovalRequestEvent;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::ExecApprovalRequestEvent;
+use hanzo_dev::AuthManager;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::NewConversation;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::config::ConfigToml;
+use hanzo_dev::config::load_config_as_toml;
+use hanzo_dev::git_info::git_diff_to_remote;
+use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::ExecApprovalRequestEvent;
 use dev_protocol::protocol::ReviewDecision;
 use mcp_types::JSONRPCErrorError;
 use mcp_types::RequestId;
@@ -29,9 +29,9 @@ use crate::json_to_toml::json_to_toml;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
 use dev_protocol::protocol::TurnAbortReason;
-use dev_core::protocol::InputItem as CoreInputItem;
-use dev_core::protocol::Op;
-use dev_core::protocol as core_protocol;
+use hanzo_dev::protocol::InputItem as CoreInputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol as core_protocol;
 use dev_protocol::mcp_protocol::APPLY_PATCH_APPROVAL_METHOD;
 use dev_protocol::mcp_protocol::AddConversationListenerParams;
 use dev_protocol::mcp_protocol::AddConversationSubscriptionResponse;
@@ -190,8 +190,8 @@ impl CodexMessageProcessor {
                 (
                     k,
                     // Define this explicitly here to avoid the need to
-                    // implement `From<dev_core::config_profile::ConfigProfile>`
-                    // for the `ConfigProfile` type and introduce a dependency on dev_core
+                    // implement `From<hanzo_dev::config_profile::ConfigProfile>`
+                    // for the `ConfigProfile` type and introduce a dependency on hanzo_dev
                     dev_protocol::config_types::ConfigProfile {
                         model: v.model,
                         approval_policy: v.approval_policy.map(map_ask_for_approval_to_wire),
@@ -512,13 +512,13 @@ async fn apply_bespoke_event_handling(
                 .into_iter()
                 .map(|(p, c)| {
                     let mapped = match c {
-                        dev_core::protocol::FileChange::Add { content } => {
+                        hanzo_dev::protocol::FileChange::Add { content } => {
                             dev_protocol::protocol::FileChange::Add { content }
                         }
-                        dev_core::protocol::FileChange::Delete => {
+                        hanzo_dev::protocol::FileChange::Delete => {
                             dev_protocol::protocol::FileChange::Delete { content: String::new() }
                         }
-                        dev_core::protocol::FileChange::Update { unified_diff, move_path } => {
+                        hanzo_dev::protocol::FileChange::Update { unified_diff, move_path } => {
                             dev_protocol::protocol::FileChange::Update { unified_diff, move_path }
                         }
                     };
@@ -719,9 +719,9 @@ fn map_ask_for_approval_to_wire(a: core_protocol::AskForApproval) -> dev_protoco
 }
 
 fn map_reasoning_effort_to_wire(
-    e: dev_core::config_types::ReasoningEffort,
+    e: hanzo_dev::config_types::ReasoningEffort,
 ) -> dev_protocol::config_types::ReasoningEffort {
-    use dev_core::config_types::ReasoningEffort as CoreRE;
+    use hanzo_dev::config_types::ReasoningEffort as CoreRE;
     use dev_protocol::config_types::ReasoningEffort as WireRE;
     match e {
         CoreRE::Minimal => WireRE::Minimal,

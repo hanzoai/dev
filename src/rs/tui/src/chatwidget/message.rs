@@ -1,6 +1,6 @@
 //! Message composition helpers and types for the chat widget.
 
-use dev_core::protocol::InputItem;
+use hanzo_dev::protocol::InputItem;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

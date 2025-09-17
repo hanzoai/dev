@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use dev_core::protocol::TurnAbortReason;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::protocol::TurnAbortReason;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use dev_protocol::mcp_protocol::AddConversationListenerParams;
 use dev_protocol::mcp_protocol::InterruptConversationParams;
 use dev_protocol::mcp_protocol::InterruptConversationResponse;

@@ -2,7 +2,7 @@
 
 use super::{ChatWidget, OrderKey};
 use crate::history_cell;
-use dev_core::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent};
+use hanzo_dev::protocol::{McpToolCallBeginEvent, McpToolCallEndEvent};
 
 pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query: Option<String>, key: OrderKey) {
     for cell in &chat.history_cells { cell.trigger_fade(); }

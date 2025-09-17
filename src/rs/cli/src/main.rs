@@ -203,7 +203,7 @@ async fn cli_main(dev_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> 
             prepend_config_flags(&mut tui_cli.config_overrides, cli.config_overrides);
             let usage = dev_tui::run_main(tui_cli, dev_linux_sandbox_exe).await?;
             if !usage.is_zero() {
-                println!("{}", dev_core::protocol::FinalOutput::from(usage));
+                println!("{}", hanzo_dev::protocol::FinalOutput::from(usage));
             }
         }
         Some(Subcommand::Exec(mut exec_cli)) => {

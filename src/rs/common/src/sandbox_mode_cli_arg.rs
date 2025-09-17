@@ -1,6 +1,6 @@
 //! Standard type to use with the `--sandbox` (`-s`) CLI option.
 //!
-//! This mirrors the variants of [`dev_core::protocol::SandboxPolicy`], but
+//! This mirrors the variants of [`hanzo_dev::protocol::SandboxPolicy`], but
 //! without any of the associated data so it can be expressed as a simple flag
 //! on the command-line. Users that need to tweak the advanced options for
 //! `workspace-write` can continue to do so via `-c` overrides or their

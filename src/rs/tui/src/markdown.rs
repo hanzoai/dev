@@ -1,5 +1,5 @@
-use codex_core::config::Config;
-use codex_core::config_types::UriBasedFileOpener;
+use hanzo_dev::config::Config;
+use hanzo_dev::config_types::UriBasedFileOpener;
 use ratatui::text::Line;
 use std::path::Path;
 
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn append_markdown_preserves_full_text_line() {
-        use codex_core::config_types::UriBasedFileOpener;
+        use hanzo_dev::config_types::UriBasedFileOpener;
         use std::path::Path;
         let src = "Hi! How can I help with codex-rs today? Want me to explore the repo, run tests, or work on a specific change?\n";
         let cwd = Path::new("/");
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn append_markdown_matches_tui_markdown_for_ordered_item() {
-        use codex_core::config_types::UriBasedFileOpener;
+        use hanzo_dev::config_types::UriBasedFileOpener;
         use std::path::Path;
         let cwd = Path::new("/");
         let mut out = Vec::new();
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn append_markdown_keeps_ordered_list_line_unsplit_in_context() {
-        use codex_core::config_types::UriBasedFileOpener;
+        use hanzo_dev::config_types::UriBasedFileOpener;
         use std::path::Path;
         let src = "Loose vs. tight list items:\n1. Tight item\n";
         let cwd = Path::new("/");

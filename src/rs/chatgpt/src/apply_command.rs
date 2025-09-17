@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use codex_common::CliConfigOverrides;
-use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
 
 use crate::chatgpt_token::init_chatgpt_token_from_auth;
 use crate::get_task::GetTaskResponse;

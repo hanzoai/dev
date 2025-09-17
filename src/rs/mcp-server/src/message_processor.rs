@@ -10,10 +10,10 @@ use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::outgoing_message::OutgoingMessageSender;
 use dev_protocol::mcp_protocol::ClientRequest;
 
-use dev_core::AuthManager;
-use dev_core::ConversationManager;
-use dev_core::config::Config;
-use dev_core::protocol::Submission;
+use hanzo_dev::AuthManager;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::Submission;
 use dev_protocol::mcp_protocol::AuthMode;
 use mcp_types::CallToolRequestParams;
 use mcp_types::CallToolResult;
@@ -591,7 +591,7 @@ impl MessageProcessor {
         let err = codex_arc
             .submit_with_id(Submission {
                 id: request_id_string,
-                op: dev_core::protocol::Op::Interrupt,
+                op: hanzo_dev::protocol::Op::Interrupt,
             })
             .await;
         if let Err(e) = err {

@@ -6,8 +6,8 @@ use std::io::Result as IoResult;
 use std::path::PathBuf;
 
 use dev_common::CliConfigOverrides;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
 
 use mcp_types::JSONRPCMessage;
 use tokio::io::AsyncBufReadExt;

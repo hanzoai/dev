@@ -1,18 +1,18 @@
 #![allow(clippy::unwrap_used)]
 
-use dev_core::CodexAuth;
-use dev_core::ConversationManager;
-use dev_core::ModelProviderInfo;
-use dev_core::built_in_model_providers;
-use dev_core::model_family::find_family_for_model;
-use dev_core::protocol::AskForApproval;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::InputItem;
-use dev_core::protocol::Op;
-use dev_core::protocol::SandboxPolicy;
-use dev_core::protocol_config_types::ReasoningEffort;
-use dev_core::protocol_config_types::ReasoningSummary;
-use dev_core::shell::default_user_shell;
+use hanzo_dev::CodexAuth;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::built_in_model_providers;
+use hanzo_dev::model_family::find_family_for_model;
+use hanzo_dev::protocol::AskForApproval;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::InputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::SandboxPolicy;
+use hanzo_dev::protocol_config_types::ReasoningEffort;
+use hanzo_dev::protocol_config_types::ReasoningSummary;
+use hanzo_dev::shell::default_user_shell;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id;
 use core_test_support::wait_for_event;

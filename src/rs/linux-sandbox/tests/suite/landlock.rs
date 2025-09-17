@@ -1,12 +1,12 @@
 #![cfg(target_os = "linux")]
-use dev_core::config_types::ShellEnvironmentPolicy;
-use dev_core::error::CodexErr;
-use dev_core::error::SandboxErr;
-use dev_core::exec::ExecParams;
-use dev_core::exec::SandboxType;
-use dev_core::exec::process_exec_tool_call;
-use dev_core::exec_env::create_env;
-use dev_core::protocol::SandboxPolicy;
+use hanzo_dev::config_types::ShellEnvironmentPolicy;
+use hanzo_dev::error::CodexErr;
+use hanzo_dev::error::SandboxErr;
+use hanzo_dev::exec::ExecParams;
+use hanzo_dev::exec::SandboxType;
+use hanzo_dev::exec::process_exec_tool_call;
+use hanzo_dev::exec_env::create_env;
+use hanzo_dev::protocol::SandboxPolicy;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;

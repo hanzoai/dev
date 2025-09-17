@@ -3,9 +3,9 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
-use dev_core::protocol::FileChange;
-use dev_core::protocol::ReviewDecision;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::protocol::FileChange;
+use hanzo_dev::protocol::ReviewDecision;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use dev_mcp_server::CodexToolCallParam;
 use dev_mcp_server::ExecApprovalElicitRequestParams;
 use dev_mcp_server::ExecApprovalResponse;

@@ -15,7 +15,7 @@ export interface ToolSchema {
   required?: string[];
 }
 
-export type ToolCategory = 
+export type ToolCategory =
   | 'file'
   | 'search'
   | 'shell'
@@ -24,7 +24,9 @@ export type ToolCategory =
   | 'ast'
   | 'browser'
   | 'ai'
-  | 'project';
+  | 'project'
+  | 'system'
+  | 'web';
 
 export interface ToolResult {
   success: boolean;

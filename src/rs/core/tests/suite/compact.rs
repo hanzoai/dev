@@ -1,17 +1,17 @@
 #![expect(clippy::unwrap_used)]
 
-use codex_core::CodexAuth;
-use codex_core::ConversationManager;
-use codex_core::ModelProviderInfo;
-use codex_core::NewConversation;
-use codex_core::built_in_model_providers;
-use codex_core::protocol::ErrorEvent;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::InputItem;
-use codex_core::protocol::Op;
-use codex_core::protocol::RolloutItem;
-use codex_core::protocol::RolloutLine;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::CodexAuth;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::NewConversation;
+use hanzo_dev::built_in_model_providers;
+use hanzo_dev::protocol::ErrorEvent;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::InputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::RolloutItem;
+use hanzo_dev::protocol::RolloutLine;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
 use serde_json::Value;

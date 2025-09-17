@@ -1,4 +1,4 @@
-use dev_core::config_types::ThemeName;
+use hanzo_dev::config_types::ThemeName;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -289,7 +289,7 @@ impl ThemeSelectionView {
             };
             let _ = rt.block_on(async move {
                 // Load current config (CLI-style) and construct a one-off ModelClient
-                let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                let cfg = match hanzo_dev::config::Config::load_with_cli_overrides(vec![], hanzo_dev::config::ConfigOverrides::default()) {
                     Ok(c) => c,
                     Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Config error: {}", e))); return; }
                 };
@@ -300,21 +300,21 @@ impl ThemeSelectionView {
                 } else {
                     codex_protocol::mcp_protocol::AuthMode::ApiKey
                 };
-                let auth_mgr = codex_core::AuthManager::shared(
+                let auth_mgr = hanzo_dev::AuthManager::shared(
                     cfg.codex_home.clone(),
                     preferred_auth,
                     cfg.responses_originator_header.clone(),
                 );
-                let client = codex_core::ModelClient::new(
+                let client = hanzo_dev::ModelClient::new(
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     cfg.model_provider.clone(),
-                    codex_core::config_types::ReasoningEffort::Low,
+                    hanzo_dev::config_types::ReasoningEffort::Low,
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
                     // Enable debug logs for targeted triage of stream issues
-                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(true).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                    std::sync::Arc::new(std::sync::Mutex::new(hanzo_dev::debug_logger::DebugLogger::new(true).unwrap_or_else(|_| hanzo_dev::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
                 // Build developer guidance and input
@@ -340,9 +340,9 @@ impl ThemeSelectionView {
                     "required": ["name", "interval", "frames"],
                     "additionalProperties": false
                 });
-                let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
+                let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
 
-                let mut prompt = codex_core::Prompt::default();
+                let mut prompt = hanzo_dev::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
@@ -357,17 +357,17 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(codex_core::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
-                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
-                        Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
-                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
-                        Ok(codex_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                        Ok(hanzo_dev::ResponseEvent::Created) => { tracing::info!("LLM: created"); let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string())); }
+                        Ok(hanzo_dev::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[thinking]: {}", delta); let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta.clone())); think_sum.push_str(&delta); }
+                        Ok(hanzo_dev::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
+                        Ok(hanzo_dev::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
+                        Ok(hanzo_dev::ResponseEvent::OutputItemDone { item, .. }) => {
                             if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
                                 for c in content { if let codex_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
                             }
                             tracing::info!(target: "spinner", "LLM[item_done]");
                         }
-                        Ok(codex_core::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
+                        Ok(hanzo_dev::ResponseEvent::Completed { .. }) => { tracing::info!("LLM: completed"); break; }
                         Err(e) => {
                             let msg = format!("{}", e);
                             tracing::info!("LLM stream error: {}", msg);
@@ -588,16 +588,16 @@ impl ThemeSelectionView {
                 }
             };
             let _ = rt.block_on(async move {
-                let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
+                let cfg = match hanzo_dev::config::Config::load_with_cli_overrides(vec![], hanzo_dev::config::ConfigOverrides::default()) {
                     Ok(c) => c,
                     Err(e) => { tx.send(AppEvent::InsertBackgroundEventEarly(format!("Config error: {}", e))); return; }
                 };
-                let auth_mgr = codex_core::AuthManager::shared(
+                let auth_mgr = hanzo_dev::AuthManager::shared(
                     cfg.codex_home.clone(),
                     codex_protocol::mcp_protocol::AuthMode::ApiKey,
                     cfg.responses_originator_header.clone(),
                 );
-                let client = codex_core::ModelClient::new(
+                let client = hanzo_dev::ModelClient::new(
                     std::sync::Arc::new(cfg.clone()),
                     Some(auth_mgr),
                     cfg.model_provider.clone(),
@@ -605,7 +605,7 @@ impl ThemeSelectionView {
                     cfg.model_reasoning_summary,
                     cfg.model_text_verbosity,
                     uuid::Uuid::new_v4(),
-                    std::sync::Arc::new(std::sync::Mutex::new(codex_core::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| codex_core::debug_logger::DebugLogger::new(false).expect("debug logger")))),
+                    std::sync::Arc::new(std::sync::Mutex::new(hanzo_dev::debug_logger::DebugLogger::new(false).unwrap_or_else(|_| hanzo_dev::debug_logger::DebugLogger::new(false).expect("debug logger")))),
                 );
 
                 // Prompt with example and detailed field usage to help the model choose appropriate colors
@@ -659,9 +659,9 @@ impl ThemeSelectionView {
                     "required": ["name", "is_dark", "colors"],
                     "additionalProperties": false
                 });
-                let format = codex_core::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
+                let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
 
-                let mut prompt = codex_core::Prompt::default();
+                let mut prompt = hanzo_dev::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
@@ -680,20 +680,20 @@ impl ThemeSelectionView {
                 let mut last_err: Option<String> = None;
                 while let Some(ev) = stream.next().await {
                     match ev {
-                        Ok(codex_core::ResponseEvent::Created) => {
+                        Ok(hanzo_dev::ResponseEvent::Created) => {
                             let _ = progress_tx.send(ProgressMsg::SetStatus("(starting generation)".to_string()));
                         }
-                        Ok(codex_core::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
+                        Ok(hanzo_dev::ResponseEvent::ReasoningSummaryDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
                         }
-                        Ok(codex_core::ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                        Ok(hanzo_dev::ResponseEvent::ReasoningContentDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(delta));
                         }
-                        Ok(codex_core::ResponseEvent::OutputTextDelta { delta, .. }) => {
+                        Ok(hanzo_dev::ResponseEvent::OutputTextDelta { delta, .. }) => {
                             let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone()));
                             out.push_str(&delta);
                         }
-                        Ok(codex_core::ResponseEvent::OutputItemDone { item, .. }) => {
+                        Ok(hanzo_dev::ResponseEvent::OutputItemDone { item, .. }) => {
                             if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
                                 for c in content {
                                     if let codex_protocol::models::ContentItem::OutputText { text } = c {
@@ -702,7 +702,7 @@ impl ThemeSelectionView {
                                 }
                             }
                         }
-                        Ok(codex_core::ResponseEvent::Completed { .. }) => break,
+                        Ok(hanzo_dev::ResponseEvent::Completed { .. }) => break,
                         Err(e) => {
                             let msg = format!("{}", e);
                             let _ = progress_tx.send(ProgressMsg::ThinkingDelta(format!("(stream error: {})", msg)));
@@ -777,7 +777,7 @@ impl ThemeSelectionView {
                 };
                 let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("Custom").trim().to_string();
                 let is_dark = v.get("is_dark").and_then(|x| x.as_bool());
-                let mut colors = codex_core::config_types::ThemeColors::default();
+                let mut colors = hanzo_dev::config_types::ThemeColors::default();
                 if let Some(map) = v.get("colors").and_then(|x| x.as_object()) {
                     let get = |k: &str| map.get(k).and_then(|x| x.as_str()).map(|s| s.trim().to_string());
                     colors.primary = get("primary");
@@ -846,7 +846,7 @@ struct CreateThemeState {
     thinking_lines: std::cell::RefCell<Vec<String>>,
     thinking_current: std::cell::RefCell<String>,
     proposed_name: std::cell::RefCell<Option<String>>,
-    proposed_colors: std::cell::RefCell<Option<codex_core::config_types::ThemeColors>>,
+    proposed_colors: std::cell::RefCell<Option<hanzo_dev::config_types::ThemeColors>>,
     preview_on: std::cell::Cell<bool>,
     review_focus_is_toggle: std::cell::Cell<bool>,
     last_raw_output: std::cell::RefCell<Option<String>>,
@@ -870,7 +870,7 @@ enum ProgressMsg {
         interval: u64,
         frames: Vec<String>,
     },
-    CompletedThemeOk(String, codex_core::config_types::ThemeColors, Option<bool>),
+    CompletedThemeOk(String, hanzo_dev::config_types::ThemeColors, Option<bool>),
     // `_raw_snippet` is captured for potential future display/debugging
     CompletedErr {
         error: String,
@@ -1240,8 +1240,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             .as_ref()
                                             .cloned()
                                             .unwrap_or_else(|| "Custom".to_string());
-                                        if let Ok(home) = codex_core::config::find_codex_home() {
-                                            let _ = codex_core::config::set_custom_spinner(
+                                        if let Ok(home) = hanzo_dev::config::find_codex_home() {
+                                            let _ = hanzo_dev::config::set_custom_spinner(
                                                 &home,
                                                 "custom",
                                                 &display_name,
@@ -1332,7 +1332,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                             crate::theme::set_custom_theme_colors(colors.clone());
                                             crate::theme::set_custom_theme_label(name.clone());
                                             crate::theme::init_theme(
-                                                &codex_core::config_types::ThemeConfig {
+                                                &hanzo_dev::config_types::ThemeConfig {
                                                     name: ThemeName::Custom,
                                                     colors,
                                                     label: Some(name),
@@ -1357,8 +1357,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         s.proposed_name.borrow().clone(),
                                         s.proposed_colors.borrow().clone(),
                                     ) {
-                                        if let Ok(home) = codex_core::config::find_codex_home() {
-                                            let _ = codex_core::config::set_custom_theme(
+                                        if let Ok(home) = hanzo_dev::config::find_codex_home() {
+                                            let _ = hanzo_dev::config::set_custom_theme(
                                                 &home,
                                                 &name,
                                                 &colors,
@@ -1374,7 +1374,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         if s.preview_on.get() {
                                             // Keep preview and set active in UI if chosen
                                             crate::theme::init_theme(
-                                                &codex_core::config_types::ThemeConfig {
+                                                &hanzo_dev::config_types::ThemeConfig {
                                                     name: ThemeName::Custom,
                                                     colors: colors.clone(),
                                                     label: Some(name.clone()),
@@ -2201,7 +2201,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                     crate::theme::set_custom_theme_label(name.clone());
                                     crate::theme::set_custom_theme_is_dark(is_dark);
                                     crate::theme::init_theme(
-                                        &codex_core::config_types::ThemeConfig {
+                                        &hanzo_dev::config_types::ThemeConfig {
                                             name: ThemeName::Custom,
                                             colors: colors.clone(),
                                             label: Some(name),

@@ -1,4 +1,4 @@
-use dev_core::config::Config;
+use hanzo_dev::config::Config;
 use serde::Deserialize;
 
 use crate::chatgpt_client::chatgpt_get_request;

@@ -1,4 +1,4 @@
-use codex_core::protocol::TokenUsage;
+use hanzo_dev::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;

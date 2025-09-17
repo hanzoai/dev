@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use codex_core::ContentItem;
-use codex_core::ModelClient;
-use codex_core::ModelProviderInfo;
-use codex_core::Prompt;
-use codex_core::ResponseEvent;
-use codex_core::ResponseItem;
-use codex_core::WireApi;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::ContentItem;
+use hanzo_dev::ModelClient;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::Prompt;
+use hanzo_dev::ResponseEvent;
+use hanzo_dev::ResponseItem;
+use hanzo_dev::WireApi;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use futures::StreamExt;
 use tempfile::TempDir;
@@ -119,8 +119,8 @@ fn assert_reasoning(item: &ResponseItem, expected: &str) {
         let mut combined = String::new();
         for part in parts {
             match part {
-                codex_core::ReasoningItemContent::ReasoningText { text }
-                | codex_core::ReasoningItemContent::Text { text } => combined.push_str(text),
+                hanzo_dev::ReasoningItemContent::ReasoningText { text }
+                | hanzo_dev::ReasoningItemContent::Text { text } => combined.push_str(text),
             }
         }
         assert_eq!(combined, expected);

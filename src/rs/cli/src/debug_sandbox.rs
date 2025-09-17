@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use dev_common::CliConfigOverrides;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
-use dev_core::exec_env::create_env;
-use dev_core::landlock::spawn_command_under_linux_sandbox;
-use dev_core::seatbelt::spawn_command_under_seatbelt;
-use dev_core::spawn::StdioPolicy;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::exec_env::create_env;
+use hanzo_dev::landlock::spawn_command_under_linux_sandbox;
+use hanzo_dev::seatbelt::spawn_command_under_seatbelt;
+use hanzo_dev::spawn::StdioPolicy;
 use dev_protocol::config_types::SandboxMode;
 
 use crate::LandlockCommand;

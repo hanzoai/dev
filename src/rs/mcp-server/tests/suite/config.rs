@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use dev_core::protocol::AskForApproval;
+use hanzo_dev::protocol::AskForApproval;
 use dev_protocol::config_types::ConfigProfile;
 use dev_protocol::config_types::ReasoningEffort;
 use dev_protocol::config_types::SandboxMode;

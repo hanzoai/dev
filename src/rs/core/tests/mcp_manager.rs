@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use codex_core::config_types::McpServerConfig;
-use codex_core::mcp_connection_manager::McpConnectionManager;
+use hanzo_dev::config_types::McpServerConfig;
+use hanzo_dev::mcp_connection_manager::McpConnectionManager;
 
 fn server_bin_path() -> PathBuf {
     // Compute workspace root from this crate dir

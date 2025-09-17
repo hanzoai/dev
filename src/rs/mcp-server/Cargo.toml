@@ -18,7 +18,7 @@ workspace = true
 anyhow = "1"
 dev-arg0 = { path = "../arg0" }
 dev-common = { path = "../common", features = ["cli"] }
-codex-core = { path = "../core" }
+hanzo-dev = { path = "../core" }
 dev-login = { path = "../login" }
 dev-protocol = { path = "../protocol" }
 mcp-types = { path = "../mcp-types" }

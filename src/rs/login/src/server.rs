@@ -14,10 +14,10 @@ use crate::pkce::PkceCodes;
 use crate::pkce::generate_pkce;
 use base64::Engine;
 use chrono::Utc;
-use codex_core::auth::AuthDotJson;
-use codex_core::auth::get_auth_file;
-use codex_core::token_data::TokenData;
-use codex_core::token_data::parse_id_token;
+use hanzo_dev::auth::AuthDotJson;
+use hanzo_dev::auth::get_auth_file;
+use hanzo_dev::token_data::TokenData;
+use hanzo_dev::token_data::parse_id_token;
 use rand::RngCore;
 use tiny_http::Header;
 use tiny_http::Request;
@@ -485,7 +485,7 @@ async fn persist_tokens_async(
             tokens: Some(tokens),
             last_refresh: Some(Utc::now()),
         };
-        codex_core::auth::write_auth_json(&auth_file, &auth)
+        hanzo_dev::auth::write_auth_json(&auth_file, &auth)
     })
     .await
     .map_err(|e| io::Error::other(format!("persist task failed: {e}")))?

@@ -3,27 +3,27 @@
 use super::*;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use dev_core::config::Config;
-use dev_core::config::ConfigOverrides;
-use dev_core::config::ConfigToml;
-use dev_core::plan_tool::PlanItemArg;
-use dev_core::plan_tool::StepStatus;
-use dev_core::plan_tool::UpdatePlanArgs;
-use dev_core::protocol::AgentMessageDeltaEvent;
-use dev_core::protocol::AgentMessageEvent;
-use dev_core::protocol::AgentReasoningDeltaEvent;
-use dev_core::protocol::AgentReasoningEvent;
-use dev_core::protocol::ApplyPatchApprovalRequestEvent;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::ExecApprovalRequestEvent;
-use dev_core::protocol::ExecCommandBeginEvent;
-use dev_core::protocol::ExecCommandEndEvent;
-use dev_core::protocol::FileChange;
-use dev_core::protocol::PatchApplyBeginEvent;
-use dev_core::protocol::PatchApplyEndEvent;
-use dev_core::protocol::StreamErrorEvent;
-use dev_core::protocol::TaskCompleteEvent;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::config::ConfigToml;
+use hanzo_dev::plan_tool::PlanItemArg;
+use hanzo_dev::plan_tool::StepStatus;
+use hanzo_dev::plan_tool::UpdatePlanArgs;
+use hanzo_dev::protocol::AgentMessageDeltaEvent;
+use hanzo_dev::protocol::AgentMessageEvent;
+use hanzo_dev::protocol::AgentReasoningDeltaEvent;
+use hanzo_dev::protocol::AgentReasoningEvent;
+use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::ExecApprovalRequestEvent;
+use hanzo_dev::protocol::ExecCommandBeginEvent;
+use hanzo_dev::protocol::ExecCommandEndEvent;
+use hanzo_dev::protocol::FileChange;
+use hanzo_dev::protocol::PatchApplyBeginEvent;
+use hanzo_dev::protocol::PatchApplyEndEvent;
+use hanzo_dev::protocol::StreamErrorEvent;
+use hanzo_dev::protocol::TaskCompleteEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -39,7 +39,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 fn test_config() -> Config {
     // Use base defaults to avoid depending on host state.
-    dev_core::config::Config::load_from_base_config_with_overrides(
+    hanzo_dev::config::Config::load_from_base_config_with_overrides(
         ConfigToml::default(),
         ConfigOverrides::default(),
         std::env::temp_dir(),
@@ -228,7 +228,7 @@ fn exec_history_cell_shows_working_then_completed() {
             call_id: "call-1".into(),
             command: vec!["bash".into(), "-lc".into(), "echo done".into()],
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            parsed_cmd: vec![dev_core::parse_command::ParsedCommand::Unknown {
+            parsed_cmd: vec![hanzo_dev::parse_command::ParsedCommand::Unknown {
                 cmd: "echo done".into(),
             }],
         }),
@@ -271,7 +271,7 @@ fn exec_history_cell_shows_working_then_failed() {
             call_id: "call-2".into(),
             command: vec!["bash".into(), "-lc".into(), "false".into()],
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            parsed_cmd: vec![dev_core::parse_command::ParsedCommand::Unknown {
+            parsed_cmd: vec![hanzo_dev::parse_command::ParsedCommand::Unknown {
                 cmd: "false".into(),
             }],
         }),
@@ -450,7 +450,7 @@ fn approval_modal_exec_snapshot() {
     // Build a chat widget with manual channels to avoid spawning the agent.
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
     // Ensure policy allows surfacing approvals explicitly (not strictly required for direct event).
-    chat.config.approval_policy = dev_core::protocol::AskForApproval::OnRequest;
+    chat.config.approval_policy = hanzo_dev::protocol::AskForApproval::OnRequest;
     // Inject an exec approval request to display the approval modal.
     let ev = ExecApprovalRequestEvent {
         call_id: "call-approve-cmd".into(),
@@ -477,7 +477,7 @@ fn approval_modal_exec_snapshot() {
 #[test]
 fn approval_modal_patch_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
-    chat.config.approval_policy = dev_core::protocol::AskForApproval::OnRequest;
+    chat.config.approval_policy = hanzo_dev::protocol::AskForApproval::OnRequest;
 
     // Build a small changeset and a reason/grant_root to exercise the prompt text.
     let mut changes = std::collections::HashMap::new();
@@ -525,8 +525,8 @@ fn interrupt_restores_queued_messages_into_composer() {
     // Deliver a TurnAborted event with Interrupted reason (as if Esc was pressed).
     chat.handle_dev_event(Event {
         id: "turn-1".into(),
-        msg: EventMsg::TurnAborted(dev_core::protocol::TurnAbortedEvent {
-            reason: dev_core::protocol::TurnAbortReason::Interrupted,
+        msg: EventMsg::TurnAborted(hanzo_dev::protocol::TurnAbortedEvent {
+            reason: hanzo_dev::protocol::TurnAbortReason::Interrupted,
         }),
     });
 
@@ -599,7 +599,7 @@ fn ui_snapshots_small_heights_task_running() {
 // task (status indicator active) while an approval request is shown.
 #[test]
 fn status_widget_and_approval_modal_snapshot() {
-    use dev_core::protocol::ExecApprovalRequestEvent;
+    use hanzo_dev::protocol::ExecApprovalRequestEvent;
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
     // Begin a running task so the status indicator would be active.
@@ -775,7 +775,7 @@ fn apply_patch_approval_sends_op_with_submission_id() {
             assert_eq!(id, "sub-123");
             assert!(matches!(
                 decision,
-                dev_core::protocol::ReviewDecision::Approved
+                hanzo_dev::protocol::ReviewDecision::Approved
             ));
             found = true;
             break;
@@ -825,7 +825,7 @@ fn apply_patch_full_flow_integration_like() {
             assert_eq!(id, "sub-xyz");
             assert!(matches!(
                 decision,
-                dev_core::protocol::ReviewDecision::Approved
+                hanzo_dev::protocol::ReviewDecision::Approved
             ));
         }
         other => panic!("unexpected op forwarded: {other:?}"),
@@ -860,7 +860,7 @@ fn apply_patch_full_flow_integration_like() {
 fn apply_patch_untrusted_shows_approval_modal() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
     // Ensure approval policy is untrusted (OnRequest)
-    chat.config.approval_policy = dev_core::protocol::AskForApproval::OnRequest;
+    chat.config.approval_policy = hanzo_dev::protocol::AskForApproval::OnRequest;
 
     // Simulate a patch approval request from backend
     let mut changes = HashMap::new();
@@ -905,7 +905,7 @@ fn apply_patch_request_shows_diff_summary() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 
     // Ensure we are in OnRequest so an approval is surfaced
-    chat.config.approval_policy = dev_core::protocol::AskForApproval::OnRequest;
+    chat.config.approval_policy = hanzo_dev::protocol::AskForApproval::OnRequest;
 
     // Simulate backend asking to apply a patch adding two lines to README.md
     let mut changes = HashMap::new();
@@ -1325,7 +1325,7 @@ fn deltas_then_same_final_message_are_rendered_snapshot() {
 
 #[test]
 fn late_final_does_not_duplicate_when_stream_finalized_early() {
-    use dev_core::protocol::*;
+    use hanzo_dev::protocol::*;
 
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 

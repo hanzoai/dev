@@ -6,16 +6,16 @@ use base64::Engine;
 use dev_ansi_escape::ansi_escape_line;
 use dev_common::create_config_summary_entries;
 use dev_common::elapsed::format_duration;
-use dev_core::config::Config;
-use dev_core::config_types::ReasoningEffort;
-use dev_core::parse_command::ParsedCommand;
-use dev_core::plan_tool::PlanItemArg;
-use dev_core::plan_tool::StepStatus;
-use dev_core::plan_tool::UpdatePlanArgs;
-use dev_core::protocol::FileChange;
-use dev_core::protocol::McpInvocation;
-use dev_core::protocol::SessionConfiguredEvent;
-use dev_core::protocol::TokenUsage;
+use hanzo_dev::config::Config;
+use hanzo_dev::config_types::ReasoningEffort;
+use hanzo_dev::parse_command::ParsedCommand;
+use hanzo_dev::plan_tool::PlanItemArg;
+use hanzo_dev::plan_tool::StepStatus;
+use hanzo_dev::plan_tool::UpdatePlanArgs;
+use hanzo_dev::protocol::FileChange;
+use hanzo_dev::protocol::McpInvocation;
+use hanzo_dev::protocol::SessionConfiguredEvent;
+use hanzo_dev::protocol::TokenUsage;
 use image::DynamicImage;
 use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
@@ -92,8 +92,8 @@ pub(crate) enum ExecAction {
     Run,
 }
 
-pub(crate) fn action_enum_from_parsed(parsed: &Vec<dev_core::parse_command::ParsedCommand>) -> ExecAction {
-    use dev_core::parse_command::ParsedCommand;
+pub(crate) fn action_enum_from_parsed(parsed: &Vec<hanzo_dev::parse_command::ParsedCommand>) -> ExecAction {
+    use hanzo_dev::parse_command::ParsedCommand;
     for p in parsed {
         match p {
             ParsedCommand::Read { .. } => return ExecAction::Read,
@@ -533,14 +533,14 @@ pub(crate) struct AssistantMarkdownCell {
 
 impl AssistantMarkdownCell {
     #[allow(dead_code)]
-    pub(crate) fn new(raw: String, cfg: &dev_core::config::Config) -> Self {
+    pub(crate) fn new(raw: String, cfg: &hanzo_dev::config::Config) -> Self {
         Self::new_with_id(raw, None, cfg)
     }
 
     pub(crate) fn new_with_id(
         raw: String,
         id: Option<String>,
-        cfg: &dev_core::config::Config,
+        cfg: &hanzo_dev::config::Config,
     ) -> Self {
         let mut me = Self {
             raw,
@@ -551,7 +551,7 @@ impl AssistantMarkdownCell {
         me.rebuild(cfg);
         me
     }
-    pub(crate) fn rebuild(&mut self, cfg: &dev_core::config::Config) {
+    pub(crate) fn rebuild(&mut self, cfg: &hanzo_dev::config::Config) {
         let mut out: Vec<Line<'static>> = Vec::new();
         out.push(Line::from("codex"));
         crate::markdown::append_markdown_with_bold_first(&self.raw, &mut out, cfg);
@@ -1383,7 +1383,7 @@ impl MergedExecCell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dev_core::parse_command::ParsedCommand;
+    use hanzo_dev::parse_command::ParsedCommand;
 
     #[test]
     fn action_enum_from_parsed_variants() {

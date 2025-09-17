@@ -2,17 +2,17 @@
 
 use std::collections::HashMap;
 
-use dev_core::exec::ExecParams;
-use dev_core::exec::ExecToolCallOutput;
-use dev_core::exec::SandboxType;
-use dev_core::exec::process_exec_tool_call;
-use dev_core::protocol::SandboxPolicy;
-use dev_core::spawn::CODEX_SANDBOX_ENV_VAR;
+use hanzo_dev::exec::ExecParams;
+use hanzo_dev::exec::ExecToolCallOutput;
+use hanzo_dev::exec::SandboxType;
+use hanzo_dev::exec::process_exec_tool_call;
+use hanzo_dev::protocol::SandboxPolicy;
+use hanzo_dev::spawn::CODEX_SANDBOX_ENV_VAR;
 use tempfile::TempDir;
 
-use dev_core::error::Result;
+use hanzo_dev::error::Result;
 
-use dev_core::get_platform_sandbox;
+use hanzo_dev::get_platform_sandbox;
 
 fn skip_test() -> bool {
     if std::env::var(CODEX_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {

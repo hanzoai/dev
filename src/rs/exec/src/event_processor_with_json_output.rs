@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use dev_core::config::Config;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::TaskCompleteEvent;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::TaskCompleteEvent;
 use serde_json::json;
 
 use crate::event_processor::CodexStatus;

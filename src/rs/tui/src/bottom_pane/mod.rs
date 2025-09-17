@@ -4,7 +4,7 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::user_approval_widget::ApprovalRequest;
 use bottom_pane_view::BottomPaneView;
-use dev_core::protocol::TokenUsage;
+use hanzo_dev::protocol::TokenUsage;
 use dev_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
@@ -42,11 +42,11 @@ pub(crate) enum CancellationEvent {
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 
-use dev_core::protocol::Op;
+use hanzo_dev::protocol::Op;
 use approval_modal_view::ApprovalModalView;
-use dev_core::config_types::ReasoningEffort;
-use dev_core::config_types::TextVerbosity;
-use dev_core::config_types::ThemeName;
+use hanzo_dev::config_types::ReasoningEffort;
+use hanzo_dev::config_types::TextVerbosity;
+use hanzo_dev::config_types::ThemeName;
 use reasoning_selection_view::ReasoningSelectionView;
 use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;

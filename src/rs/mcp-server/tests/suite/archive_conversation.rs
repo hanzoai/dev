@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use codex_core::ARCHIVED_SESSIONS_SUBDIR;
+use hanzo_dev::ARCHIVED_SESSIONS_SUBDIR;
 use dev_protocol::mcp_protocol::ArchiveConversationParams;
 use dev_protocol::mcp_protocol::ArchiveConversationResponse;
 use dev_protocol::mcp_protocol::NewConversationParams;

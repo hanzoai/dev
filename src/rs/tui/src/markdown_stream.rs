@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use codex_core::config::Config;
+use hanzo_dev::config::Config;
 use ratatui::text::Line;
 
 use crate::markdown;
@@ -544,8 +544,8 @@ pub(crate) fn simulate_stream_markdown_for_tests(
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
-    use codex_core::config::Config;
-    use codex_core::config::ConfigOverrides;
+    use hanzo_dev::config::Config;
+    use hanzo_dev::config::ConfigOverrides;
 
     fn test_config() -> Config {
         let overrides = ConfigOverrides {

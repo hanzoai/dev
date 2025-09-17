@@ -1,7 +1,7 @@
 use assert_cmd::Command as AssertCommand;
-use codex_core::RolloutRecorder;
-use codex_core::protocol::GitInfo;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::RolloutRecorder;
+use hanzo_dev::protocol::GitInfo;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use std::time::Duration;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -567,7 +567,7 @@ async fn integration_git_info_unit_test() {
         .unwrap();
 
     // 3. Test git info collection directly
-    let git_info = codex_core::git_info::collect_git_info(&git_repo).await;
+    let git_info = hanzo_dev::git_info::collect_git_info(&git_repo).await;
 
     // 4. Verify git info is present and contains expected data
     assert!(git_info.is_some(), "Git info should be collected");

@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use assert_cmd::prelude::*;
-use dev_core::CODEX_APPLY_PATCH_ARG1;
+use hanzo_dev::CODEX_APPLY_PATCH_ARG1;
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -44,7 +44,7 @@ fn test_standalone_exec_cli_can_use_apply_patch() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_apply_patch_tool() -> anyhow::Result<()> {
     use crate::suite::common::run_e2e_exec_test;
-    use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+    use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 
     if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
@@ -76,7 +76,7 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
     use crate::suite::common::run_e2e_exec_test;
-    use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+    use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 
     if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(

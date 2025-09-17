@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use dev_core::config::Config;
+use hanzo_dev::config::Config;
 use ratatui::text::Line;
 use ratatui::style::Modifier;
 
@@ -807,8 +807,8 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
-    use dev_core::config::Config;
-    use dev_core::config::ConfigOverrides;
+    use hanzo_dev::config::Config;
+    use hanzo_dev::config::ConfigOverrides;
     use std::cell::RefCell;
 
     fn test_config() -> Config {

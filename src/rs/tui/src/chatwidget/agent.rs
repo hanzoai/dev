@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use dev_core::CodexConversation;
-use dev_core::ConversationManager;
-use dev_core::NewConversation;
-use dev_core::config::Config;
-use dev_core::protocol::Op;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::NewConversation;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::Op;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -36,10 +36,10 @@ pub(crate) fn spawn_agent(
         };
 
         // Forward the captured `SessionConfigured` event so it can be rendered in the UI.
-        let ev = dev_core::protocol::Event {
+        let ev = hanzo_dev::protocol::Event {
             // The `id` does not matter for rendering, so we can use a fake value.
             id: "".to_string(),
-            msg: dev_core::protocol::EventMsg::SessionConfigured(session_configured),
+            msg: hanzo_dev::protocol::EventMsg::SessionConfigured(session_configured),
         };
         app_event_tx_clone.send(AppEvent::CodexEvent(ev));
 
@@ -66,7 +66,7 @@ pub(crate) fn spawn_agent(
 /// events and accepts Ops for submission.
 pub(crate) fn spawn_agent_from_existing(
     conversation: std::sync::Arc<CodexConversation>,
-    session_configured: dev_core::protocol::SessionConfiguredEvent,
+    session_configured: hanzo_dev::protocol::SessionConfiguredEvent,
     app_event_tx: AppEventSender,
 ) -> UnboundedSender<Op> {
     let (dev_op_tx, mut dev_op_rx) = unbounded_channel::<Op>();
@@ -74,9 +74,9 @@ pub(crate) fn spawn_agent_from_existing(
     let app_event_tx_clone = app_event_tx.clone();
     tokio::spawn(async move {
         // Forward the captured `SessionConfigured` event so it can be rendered in the UI.
-        let ev = dev_core::protocol::Event {
+        let ev = hanzo_dev::protocol::Event {
             id: "".to_string(),
-            msg: dev_core::protocol::EventMsg::SessionConfigured(session_configured),
+            msg: hanzo_dev::protocol::EventMsg::SessionConfigured(session_configured),
         };
         app_event_tx_clone.send(AppEvent::CodexEvent(ev));
 

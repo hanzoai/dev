@@ -4,7 +4,7 @@ mod pull;
 mod url;
 
 pub use client::OllamaClient;
-use dev_core::config::Config;
+use hanzo_dev::config::Config;
 pub use pull::CliProgressReporter;
 pub use pull::PullEvent;
 pub use pull::PullProgressReporter;

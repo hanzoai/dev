@@ -24,7 +24,7 @@ dev-common = { path = "../common", features = [
     "elapsed",
     "sandbox_summary",
 ] }
-codex-core = { path = "../core" }
+hanzo-dev = { path = "../core" }
 codex-ollama = { path = "../ollama" }
 dev-protocol = { path = "../protocol" }
 owo-colors = "4.2.0"

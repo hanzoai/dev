@@ -2,7 +2,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use codex_core::find_conversation_path_by_id_str;
+use hanzo_dev::find_conversation_path_by_id_str;
 use tempfile::TempDir;
 use uuid::Uuid;
 

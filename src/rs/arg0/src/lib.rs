@@ -2,7 +2,7 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_core::CODEX_APPLY_PATCH_ARG1;
+use hanzo_dev::CODEX_APPLY_PATCH_ARG1;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
@@ -29,7 +29,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 /// 4.  Execute the provided async `main_fn` inside that runtime, forwarding any
 ///     error. Note that `main_fn` receives `codex_linux_sandbox_exe:
 ///     Option<PathBuf>`, as an argument, which is generally needed as part of
-///     constructing [`codex_core::config::Config`].
+///     constructing [`hanzo_dev::config::Config`].
 ///
 /// This function should be used to wrap any `main()` function in binary crates
 /// in this workspace that depends on these helper CLIs.
@@ -112,7 +112,7 @@ const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
     // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
-    if let Ok(codex_home) = codex_core::config::find_codex_home() {
+    if let Ok(codex_home) = hanzo_dev::config::find_codex_home() {
         if let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env")) {
             // Global env may legitimately contain provider keys for Code usage.
             set_filtered(iter);

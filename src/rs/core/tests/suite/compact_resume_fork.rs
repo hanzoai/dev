@@ -14,18 +14,18 @@ use super::compact::ev_assistant_message;
 use super::compact::ev_completed;
 use super::compact::mount_sse_once;
 use super::compact::sse;
-use codex_core::CodexAuth;
-use codex_core::CodexConversation;
-use codex_core::ConversationManager;
-use codex_core::ModelProviderInfo;
-use codex_core::NewConversation;
-use codex_core::built_in_model_providers;
-use codex_core::config::Config;
-use codex_core::protocol::ConversationPathResponseEvent;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::InputItem;
-use codex_core::protocol::Op;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::CodexAuth;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::NewConversation;
+use hanzo_dev::built_in_model_providers;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::ConversationPathResponseEvent;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::InputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -816,7 +816,7 @@ async fn resume_conversation(
     path: std::path::PathBuf,
 ) -> Arc<CodexConversation> {
     let auth_manager =
-        codex_core::AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
+        hanzo_dev::AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
     let NewConversation { conversation, .. } = manager
         .resume_conversation_from_rollout(config.clone(), path, auth_manager)
         .await

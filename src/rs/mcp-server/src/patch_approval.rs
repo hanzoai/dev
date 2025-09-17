@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dev_core::CodexConversation;
-use dev_core::protocol::FileChange;
-use dev_core::protocol::Op;
-use dev_core::protocol::ReviewDecision;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::protocol::FileChange;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::ReviewDecision;
 use mcp_types::ElicitRequest;
 use mcp_types::ElicitRequestParamsRequestedSchema;
 use mcp_types::JSONRPCErrorError;

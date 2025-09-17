@@ -35,7 +35,7 @@ dev-common = { path = "../common", features = [
     "elapsed",
     "sandbox_summary",
 ] }
-codex-core = { path = "../core" }
+hanzo-dev = { path = "../core" }
 dev-file-search = { path = "../file-search" }
 dev-login = { path = "../login" }
 codex-ollama = { path = "../ollama" }

@@ -1,7 +1,7 @@
-use dev_core::config_types::ReasoningEffort;
-use dev_core::config_types::TextVerbosity;
-use dev_core::config_types::ThemeName;
-use dev_core::protocol::Event;
+use hanzo_dev::config_types::ReasoningEffort;
+use hanzo_dev::config_types::TextVerbosity;
+use hanzo_dev::config_types::ThemeName;
+use hanzo_dev::protocol::Event;
 use dev_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -57,7 +57,7 @@ pub(crate) enum AppEvent {
 
     /// Forward an `Op` to the Agent. Using an `AppEvent` for this avoids
     /// bubbling channels through layers of widgets.
-    CodexOp(dev_core::protocol::Op),
+    CodexOp(hanzo_dev::protocol::Op),
 
     /// Dispatch a recognized slash command from the UI (composer) to the app
     /// layer so it can be handled centrally. Includes the full command text.
@@ -128,8 +128,8 @@ pub(crate) enum AppEvent {
     /// Result of an async jump-back fork operation performed off the UI thread.
     /// Carries the forked conversation, trimmed prefix to replay, and composer prefill.
     JumpBackForked {
-        cfg: dev_core::config::Config,
-        new_conv: Redacted<dev_core::NewConversation>,
+        cfg: hanzo_dev::config::Config,
+        new_conv: Redacted<hanzo_dev::NewConversation>,
         prefix_items: Vec<ResponseItem>,
         prefill: String,
     },

@@ -5,17 +5,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_channel::Receiver;
-use codex_core::error::CodexErr;
-use codex_core::error::SandboxErr;
-use codex_core::exec::ExecParams;
-use codex_core::exec::SandboxType;
-use codex_core::exec::StdoutStream;
-use codex_core::exec::process_exec_tool_call;
-use codex_core::protocol::Event;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::ExecCommandOutputDeltaEvent;
-use codex_core::protocol::ExecOutputStream;
-use codex_core::protocol::SandboxPolicy;
+use hanzo_dev::error::CodexErr;
+use hanzo_dev::error::SandboxErr;
+use hanzo_dev::exec::ExecParams;
+use hanzo_dev::exec::SandboxType;
+use hanzo_dev::exec::StdoutStream;
+use hanzo_dev::exec::process_exec_tool_call;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::ExecCommandOutputDeltaEvent;
+use hanzo_dev::protocol::ExecOutputStream;
+use hanzo_dev::protocol::SandboxPolicy;
 
 fn collect_stdout_events(rx: Receiver<Event>) -> Vec<u8> {
     let mut out = Vec::new();

@@ -5,7 +5,7 @@ use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
 use crate::history_cell::{self, HistoryCell};
 use crate::history_cell::CommandOutput;
-use dev_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use hanzo_dev::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
 
 pub(super) fn finalize_exec_cell_at(
     chat: &mut ChatWidget<'_>,

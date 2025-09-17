@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use codex_core::ContentItem;
-use codex_core::LocalShellAction;
-use codex_core::LocalShellExecAction;
-use codex_core::LocalShellStatus;
-use codex_core::ModelClient;
-use codex_core::ModelProviderInfo;
-use codex_core::Prompt;
-use codex_core::ReasoningItemContent;
-use codex_core::ResponseItem;
-use codex_core::WireApi;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::ContentItem;
+use hanzo_dev::LocalShellAction;
+use hanzo_dev::LocalShellExecAction;
+use hanzo_dev::LocalShellStatus;
+use hanzo_dev::ModelClient;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::Prompt;
+use hanzo_dev::ReasoningItemContent;
+use hanzo_dev::ResponseItem;
+use hanzo_dev::WireApi;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use futures::StreamExt;
 use serde_json::Value;

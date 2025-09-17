@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use dev_core::protocol::Op;
+use hanzo_dev::protocol::Op;
 
 /// State machine that manages shell-style history navigation (Up/Down) inside
 /// the chat composer. This struct is intentionally decoupled from the
@@ -242,7 +242,7 @@ mod tests {
     #![expect(clippy::expect_used)]
     use super::*;
     use crate::app_event::AppEvent;
-    use dev_core::protocol::Op;
+    use hanzo_dev::protocol::Op;
     use std::sync::mpsc::channel;
 
     #[test]

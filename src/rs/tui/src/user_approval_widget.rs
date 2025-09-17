@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-use codex_core::protocol::Op;
-use codex_core::protocol::ReviewDecision;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::ReviewDecision;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;

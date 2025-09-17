@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use codex_core::protocol::AskForApproval;
-use codex_core::protocol::SandboxPolicy;
-use codex_core::protocol_config_types::ReasoningEffort;
-use codex_core::protocol_config_types::ReasoningSummary;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::protocol::AskForApproval;
+use hanzo_dev::protocol::SandboxPolicy;
+use hanzo_dev::protocol_config_types::ReasoningEffort;
+use hanzo_dev::protocol_config_types::ReasoningSummary;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use dev_protocol::mcp_protocol::AddConversationListenerParams;
 use dev_protocol::mcp_protocol::AddConversationSubscriptionResponse;
 use dev_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
@@ -293,7 +293,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     // Approve so the first turn can complete
     mcp.send_response(
         request.id,
-        serde_json::json!({ "decision": codex_core::protocol::ReviewDecision::Approved }),
+        serde_json::json!({ "decision": hanzo_dev::protocol::ReviewDecision::Approved }),
     )
     .await
     .expect("send approval response");

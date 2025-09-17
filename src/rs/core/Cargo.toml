@@ -1,10 +1,10 @@
 [package]
 edition = "2024"
-name = "codex-core"
+name = "hanzo-dev"
 version = { workspace = true }
 
 [lib]
-name = "codex_core"
+name = "hanzo_dev"
 path = "src/lib.rs"
 doctest = false
 

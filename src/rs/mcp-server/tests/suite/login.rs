@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use codex_core::auth::login_with_api_key;
+use hanzo_dev::auth::login_with_api_key;
 use dev_protocol::mcp_protocol::CancelLoginChatGptParams;
 use dev_protocol::mcp_protocol::CancelLoginChatGptResponse;
 use dev_protocol::mcp_protocol::GetAuthStatusParams;

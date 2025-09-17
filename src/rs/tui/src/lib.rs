@@ -4,14 +4,14 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
-use codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
-use codex_core::config::ConfigToml;
-use codex_core::config::find_codex_home;
-use codex_core::config::load_config_as_toml_with_cli_overrides;
-use codex_core::protocol::AskForApproval;
-use codex_core::protocol::SandboxPolicy;
+use hanzo_dev::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::config::ConfigToml;
+use hanzo_dev::config::find_codex_home;
+use hanzo_dev::config::load_config_as_toml_with_cli_overrides;
+use hanzo_dev::protocol::AskForApproval;
+use hanzo_dev::protocol::SandboxPolicy;
 use dev_login::AuthMode;
 use dev_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
@@ -93,7 +93,7 @@ pub use cli::Cli;
 pub async fn run_main(
     cli: Cli,
     codex_linux_sandbox_exe: Option<PathBuf>,
-) -> std::io::Result<codex_core::protocol::TokenUsage> {
+) -> std::io::Result<hanzo_dev::protocol::TokenUsage> {
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -199,7 +199,7 @@ pub async fn run_main(
         cli.config_profile.clone(),
     )?;
 
-    let log_dir = codex_core::config::log_dir(&config)?;
+    let log_dir = hanzo_dev::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
     // Open (or create) your log file, appending to it.
     let mut log_file_opts = OpenOptions::new();
@@ -223,7 +223,7 @@ pub async fn run_main(
     // use RUST_LOG env var, default to info for codex crates.
     let env_filter = || {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("codex_core=info,codex_tui=info,codex_browser=info")
+            EnvFilter::new("hanzo_dev=info,codex_tui=info,codex_browser=info")
         })
     };
 
@@ -282,7 +282,7 @@ fn run_ratatui_app(
     cli: Cli,
     config: Config,
     should_show_trust_screen: bool,
-) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
+) -> color_eyre::Result<hanzo_dev::protocol::TokenUsage> {
     color_eyre::install()?;
 
     // Forward panic reports through tracing so they appear in the UI status

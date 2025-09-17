@@ -345,8 +345,8 @@ pub enum ServerRequest {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ApplyPatchApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [codex_core::protocol::PatchApplyBeginEvent]
-    /// and [codex_core::protocol::PatchApplyEndEvent].
+    /// Use to correlate this with [hanzo_dev::protocol::PatchApplyBeginEvent]
+    /// and [hanzo_dev::protocol::PatchApplyEndEvent].
     pub call_id: String,
     pub file_changes: HashMap<PathBuf, FileChange>,
     /// Optional explanatory reason (e.g. request for extra write access).
@@ -361,8 +361,8 @@ pub struct ApplyPatchApprovalParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 pub struct ExecCommandApprovalParams {
     pub conversation_id: ConversationId,
-    /// Use to correlate this with [codex_core::protocol::ExecCommandBeginEvent]
-    /// and [codex_core::protocol::ExecCommandEndEvent].
+    /// Use to correlate this with [hanzo_dev::protocol::ExecCommandBeginEvent]
+    /// and [hanzo_dev::protocol::ExecCommandEndEvent].
     pub call_id: String,
     pub command: Vec<String>,
     pub cwd: PathBuf,

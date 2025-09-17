@@ -4,8 +4,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use dev_core::config::Config;
-use dev_core::protocol::Op;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::Op;
 use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
@@ -92,7 +92,7 @@ pub(crate) fn maybe_init(config: &Config) {
     let path = if let Ok(path) = std::env::var("CODEX_TUI_SESSION_LOG_PATH") {
         PathBuf::from(path)
     } else {
-        let mut p = match dev_core::config::log_dir(config) {
+        let mut p = match hanzo_dev::config::log_dir(config) {
             Ok(dir) => dir,
             Err(_) => std::env::temp_dir(),
         };

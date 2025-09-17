@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use codex_core::auth::login_with_api_key;
+use hanzo_dev::auth::login_with_api_key;
 use dev_protocol::mcp_protocol::AuthMode;
 use dev_protocol::mcp_protocol::GetAuthStatusParams;
 use dev_protocol::mcp_protocol::GetAuthStatusResponse;

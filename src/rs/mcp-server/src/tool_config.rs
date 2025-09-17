@@ -1,6 +1,6 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
-use dev_core::protocol::AskForApproval;
+use hanzo_dev::protocol::AskForApproval;
 use dev_protocol::config_types::SandboxMode;
 use mcp_types::Tool;
 use mcp_types::ToolInputSchema;
@@ -136,7 +136,7 @@ impl CodexToolCallParam {
     pub fn into_config(
         self,
         dev_linux_sandbox_exe: Option<PathBuf>,
-    ) -> std::io::Result<(String, dev_core::config::Config)> {
+    ) -> std::io::Result<(String, hanzo_dev::config::Config)> {
         let Self {
             prompt,
             model,
@@ -150,7 +150,7 @@ impl CodexToolCallParam {
         } = self;
 
         // Build the `ConfigOverrides` recognized by codex-core.
-        let overrides = dev_core::config::ConfigOverrides {
+        let overrides = hanzo_dev::config::ConfigOverrides {
             model,
             review_model: None,
             config_profile: profile,
@@ -173,7 +173,7 @@ impl CodexToolCallParam {
             .map(|(k, v)| (k, json_to_toml(v)))
             .collect();
 
-        let cfg = dev_core::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
+        let cfg = hanzo_dev::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
 
         Ok((prompt, cfg))
     }

@@ -7,19 +7,19 @@
 fn assert_type<T>() {}
 
 #[test]
-fn codex_core_public_api_reexports_exist() {
+fn hanzo_dev_public_api_reexports_exist() {
     // Core client and stream types must remain publicly re-exported from
-    // codex_core so downstream crates (tests, tools) can compile unchanged.
-    assert_type::<codex_core::ModelClient>();
-    assert_type::<codex_core::Prompt>();
-    assert_type::<codex_core::ResponseEvent>();
-    assert_type::<codex_core::ResponseStream>();
+    // hanzo_dev so downstream crates (tests, tools) can compile unchanged.
+    assert_type::<hanzo_dev::ModelClient>();
+    assert_type::<hanzo_dev::Prompt>();
+    assert_type::<hanzo_dev::ResponseEvent>();
+    assert_type::<hanzo_dev::ResponseStream>();
 }
 
 #[test]
-fn codex_core_protocol_models_are_exposed() {
-    // The models namespace should remain accessible via codex_core::models
+fn hanzo_dev_protocol_models_are_exposed() {
+    // The models namespace should remain accessible via hanzo_dev::models
     // to keep imports stable in TUI/tests.
-    assert_type::<codex_core::models::ResponseItem>();
+    assert_type::<hanzo_dev::models::ResponseItem>();
 }
 

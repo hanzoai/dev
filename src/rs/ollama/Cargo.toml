@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 async-stream = "0.3"
 bytes = "1.10.1"
-codex-core = { path = "../core" }
+hanzo-dev = { path = "../core" }
 futures = "0.3"
 # Force rustls; avoid native-tls/OpenSSL in CI
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }

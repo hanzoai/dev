@@ -1,6 +1,6 @@
 #![cfg(unix)]
-use dev_core::protocol::SandboxPolicy;
-use dev_core::spawn::StdioPolicy;
+use hanzo_dev::protocol::SandboxPolicy;
+use hanzo_dev::spawn::StdioPolicy;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
@@ -16,7 +16,7 @@ async fn spawn_command_under_sandbox(
     stdio_policy: StdioPolicy,
     env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
-    use dev_core::seatbelt::spawn_command_under_seatbelt;
+    use hanzo_dev::seatbelt::spawn_command_under_seatbelt;
     spawn_command_under_seatbelt(command, sandbox_policy, cwd, stdio_policy, env).await
 }
 
@@ -28,7 +28,7 @@ async fn spawn_command_under_sandbox(
     stdio_policy: StdioPolicy,
     env: HashMap<String, String>,
 ) -> std::io::Result<Child> {
-    use dev_core::landlock::spawn_command_under_linux_sandbox;
+    use hanzo_dev::landlock::spawn_command_under_linux_sandbox;
     let dev_linux_sandbox_exe = assert_cmd::cargo::cargo_bin("codex-exec");
     spawn_command_under_linux_sandbox(
         dev_linux_sandbox_exe,

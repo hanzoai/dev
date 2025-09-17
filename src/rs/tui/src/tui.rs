@@ -3,7 +3,7 @@ use std::io::Stdout;
 use std::io::stdout;
 use std::io::BufWriter;
 
-use dev_core::config::Config;
+use hanzo_dev::config::Config;
 use crossterm::cursor::MoveTo;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableMouseCapture;

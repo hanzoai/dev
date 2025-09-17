@@ -7,12 +7,12 @@ use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
 use codex_common::CliConfigOverrides;
-use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
-use codex_core::config::find_codex_home;
-use codex_core::config::load_global_mcp_servers;
-use codex_core::config::write_global_mcp_servers;
-use codex_core::config_types::McpServerConfig;
+use hanzo_dev::config::Config;
+use hanzo_dev::config::ConfigOverrides;
+use hanzo_dev::config::find_codex_home;
+use hanzo_dev::config::load_global_mcp_servers;
+use hanzo_dev::config::write_global_mcp_servers;
+use hanzo_dev::config_types::McpServerConfig;
 
 /// [experimental] Launch Codex as an MCP server or manage configured MCP servers.
 ///

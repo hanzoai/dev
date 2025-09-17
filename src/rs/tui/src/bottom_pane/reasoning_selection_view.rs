@@ -1,4 +1,4 @@
-use dev_core::config_types::ReasoningEffort;
+use hanzo_dev::config_types::ReasoningEffort;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;

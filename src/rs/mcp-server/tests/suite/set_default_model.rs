@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use codex_core::config::ConfigToml;
+use hanzo_dev::config::ConfigToml;
 use dev_protocol::mcp_protocol::SetDefaultModelParams;
 use dev_protocol::mcp_protocol::SetDefaultModelResponse;
 use mcp_test_support::McpProcess;

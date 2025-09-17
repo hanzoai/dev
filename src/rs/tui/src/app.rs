@@ -11,11 +11,11 @@ use crate::slash_command::SlashCommand;
 use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
-use dev_core::ConversationManager;
+use hanzo_dev::ConversationManager;
 use dev_login::{AuthManager, AuthMode};
-use dev_core::config::Config;
-use dev_core::protocol::Event;
-use dev_core::protocol::Op;
+use hanzo_dev::config::Config;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::Op;
 use color_eyre::eyre::Result;
 use crossterm::SynchronizedUpdate;
 use crossterm::event::KeyCode;
@@ -782,11 +782,11 @@ impl App<'_> {
                         }
                         #[cfg(debug_assertions)]
                         SlashCommand::TestApproval => {
-                            use dev_core::protocol::EventMsg;
+                            use hanzo_dev::protocol::EventMsg;
                             use std::collections::HashMap;
 
-                            use dev_core::protocol::ApplyPatchApprovalRequestEvent;
-                            use dev_core::protocol::FileChange;
+                            use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
+                            use hanzo_dev::protocol::FileChange;
 
                             self.app_event_tx.send(AppEvent::CodexEvent(Event {
                                 id: "1".to_string(),
@@ -1043,11 +1043,11 @@ impl App<'_> {
                     self.clear_on_first_frame = true;
 
                     // Replay prefix to the UI
-                    let ev = dev_core::protocol::Event {
+                    let ev = hanzo_dev::protocol::Event {
                         id: "fork".to_string(),
                         event_seq: 0,
-                        msg: dev_core::protocol::EventMsg::ReplayHistory(
-                            dev_core::protocol::ReplayHistoryEvent { items: prefix_items }
+                        msg: hanzo_dev::protocol::EventMsg::ReplayHistory(
+                            hanzo_dev::protocol::ReplayHistoryEvent { items: prefix_items }
                         ),
                         order: None,
                     };
@@ -1106,10 +1106,10 @@ impl App<'_> {
         Ok(())
     }
 
-    pub(crate) fn token_usage(&self) -> dev_core::protocol::TokenUsage {
+    pub(crate) fn token_usage(&self) -> hanzo_dev::protocol::TokenUsage {
         let usage = match &self.app_state {
             AppState::Chat { widget } => widget.token_usage().clone(),
-            AppState::Onboarding { .. } => dev_core::protocol::TokenUsage::default(),
+            AppState::Onboarding { .. } => hanzo_dev::protocol::TokenUsage::default(),
         };
         // ensure background helpers stop before returning
         self.commit_anim_running.store(false, Ordering::Release);

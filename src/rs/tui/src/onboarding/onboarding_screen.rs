@@ -1,4 +1,4 @@
-use codex_core::git_info::get_git_repo_root;
+use hanzo_dev::git_info::get_git_repo_root;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

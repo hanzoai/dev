@@ -7,7 +7,7 @@ use ratatui::text::Span as RtSpan;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use dev_core::protocol::FileChange;
+use hanzo_dev::protocol::FileChange;
 
 use crate::history_cell::PatchEventType;
 use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};

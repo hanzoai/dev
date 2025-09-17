@@ -7,11 +7,11 @@ use std::sync::Mutex;
 
 use ratatui::style::{Modifier, Style};
 
-use dev_core::ConversationManager;
+use hanzo_dev::ConversationManager;
 use dev_login::{AuthManager, AuthMode};
-use dev_core::config::Config;
-use dev_core::config_types::ReasoningEffort;
-use dev_core::config_types::TextVerbosity;
+use hanzo_dev::config::Config;
+use hanzo_dev::config_types::ReasoningEffort;
+use hanzo_dev::config_types::TextVerbosity;
 
 mod interrupts;
 mod streaming;
@@ -22,35 +22,35 @@ mod diff_handlers;
 mod perf;
 mod diff_ui;
 mod message;
-use dev_core::parse_command::ParsedCommand;
-use dev_core::protocol::AgentMessageDeltaEvent;
-use dev_core::protocol::AgentMessageEvent;
-use dev_core::protocol::AgentReasoningDeltaEvent;
-use dev_core::protocol::AgentReasoningEvent;
-use dev_core::protocol::AgentReasoningSectionBreakEvent;
-use dev_core::protocol::AgentReasoningRawContentDeltaEvent;
-use dev_core::protocol::AgentReasoningRawContentEvent;
-use dev_core::protocol::AgentStatusUpdateEvent;
-use dev_core::protocol::ApplyPatchApprovalRequestEvent;
-use dev_core::protocol::BackgroundEventEvent;
-use dev_core::protocol::BrowserScreenshotUpdateEvent;
-use dev_core::protocol::CustomToolCallBeginEvent;
-use dev_core::protocol::CustomToolCallEndEvent;
-use dev_core::protocol::ErrorEvent;
-use dev_core::protocol::Event;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::SessionConfiguredEvent;
-use dev_core::protocol::ExecApprovalRequestEvent;
-use dev_core::protocol::ExecCommandBeginEvent;
-use dev_core::protocol::ExecCommandEndEvent;
-use dev_core::protocol::InputItem;
+use hanzo_dev::parse_command::ParsedCommand;
+use hanzo_dev::protocol::AgentMessageDeltaEvent;
+use hanzo_dev::protocol::AgentMessageEvent;
+use hanzo_dev::protocol::AgentReasoningDeltaEvent;
+use hanzo_dev::protocol::AgentReasoningEvent;
+use hanzo_dev::protocol::AgentReasoningSectionBreakEvent;
+use hanzo_dev::protocol::AgentReasoningRawContentDeltaEvent;
+use hanzo_dev::protocol::AgentReasoningRawContentEvent;
+use hanzo_dev::protocol::AgentStatusUpdateEvent;
+use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_dev::protocol::BackgroundEventEvent;
+use hanzo_dev::protocol::BrowserScreenshotUpdateEvent;
+use hanzo_dev::protocol::CustomToolCallBeginEvent;
+use hanzo_dev::protocol::CustomToolCallEndEvent;
+use hanzo_dev::protocol::ErrorEvent;
+use hanzo_dev::protocol::Event;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::SessionConfiguredEvent;
+use hanzo_dev::protocol::ExecApprovalRequestEvent;
+use hanzo_dev::protocol::ExecCommandBeginEvent;
+use hanzo_dev::protocol::ExecCommandEndEvent;
+use hanzo_dev::protocol::InputItem;
 // MCP tool call handlers moved into chatwidget::tools
-use dev_core::protocol::Op;
-use dev_core::protocol::PatchApplyBeginEvent;
-use dev_core::protocol::PatchApplyEndEvent;
-use dev_core::protocol::TaskCompleteEvent;
-use dev_core::protocol::TokenUsage;
-use dev_core::protocol::TurnDiffEvent;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::protocol::PatchApplyBeginEvent;
+use hanzo_dev::protocol::PatchApplyEndEvent;
+use hanzo_dev::protocol::TaskCompleteEvent;
+use hanzo_dev::protocol::TokenUsage;
+use hanzo_dev::protocol::TurnDiffEvent;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use image::imageops::FilterType;
@@ -92,7 +92,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarSta
 use ratatui::widgets::ScrollbarOrientation;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use serde::{Deserialize, Serialize};
-use dev_core::config::find_dev_home;
+use hanzo_dev::config::find_dev_home;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedConnection {
@@ -354,13 +354,13 @@ impl ChatWidget<'_> {
     pub(crate) fn perf_summary(&self) -> String { self.perf_state.stats.borrow().summary() }
     // Build an ordered key from model-provided OrderMeta. Callers must
     // guarantee presence by passing a concrete reference (compile-time guard).
-    fn order_key_from_order_meta(om: &dev_core::protocol::OrderMeta) -> OrderKey {
+    fn order_key_from_order_meta(om: &hanzo_dev::protocol::OrderMeta) -> OrderKey {
         // sequence_number can be None on some terminal events; treat as 0 for stable placement
         OrderKey { req: om.request_ordinal, out: om.output_index.map(|v| v as i32).unwrap_or(0), seq: om.sequence_number.unwrap_or(0) }
     }
 
     // Track latest request index observed from provider so internal inserts can anchor to it.
-    fn note_order(&mut self, order: Option<&dev_core::protocol::OrderMeta>) {
+    fn note_order(&mut self, order: Option<&hanzo_dev::protocol::OrderMeta>) {
         if let Some(om) = order { self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal); }
     }
 
@@ -743,7 +743,7 @@ impl ChatWidget<'_> {
         if let Some(last) = self.diffs.session_patch_sets.last() {
             for (src_path, chg) in last.iter() {
                 match chg {
-                    dev_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
+                    hanzo_dev::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
                         if let Some(baseline) = self.diffs.baseline_file_contents.get(src_path).cloned() {
                             // Mirror baseline under destination so tabs use the new path
                             self.diffs.baseline_file_contents.entry(dest_path.clone()).or_insert(baseline);
@@ -771,12 +771,12 @@ impl ChatWidget<'_> {
     }
 
     /// Handle exec command begin immediately
-    fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent, order: &dev_core::protocol::OrderMeta) {
+    fn handle_exec_begin_now(&mut self, ev: ExecCommandBeginEvent, order: &hanzo_dev::protocol::OrderMeta) {
         exec_tools::handle_exec_begin_now(self, ev, order);
     }
 
     /// Handle exec command end immediately
-    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent, order: &dev_core::protocol::OrderMeta) { exec_tools::handle_exec_end_now(self, ev, order); }
+    fn handle_exec_end_now(&mut self, ev: ExecCommandEndEvent, order: &hanzo_dev::protocol::OrderMeta) { exec_tools::handle_exec_end_now(self, ev, order); }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
     /// previous cell when they represent the same action header (e.g., Searched, Read).
@@ -1189,7 +1189,7 @@ impl ChatWidget<'_> {
     /// Construct a ChatWidget from an existing conversation (forked session).
     pub(crate) fn new_from_existing(
         config: Config,
-        conversation: std::sync::Arc<dev_core::CodexConversation>,
+        conversation: std::sync::Arc<hanzo_dev::CodexConversation>,
         session_configured: SessionConfiguredEvent,
         app_event_tx: AppEventSender,
         enhanced_keys_supported: bool,
@@ -2555,7 +2555,7 @@ impl ChatWidget<'_> {
                 if let Some(last) = self.diffs.session_patch_sets.last() {
                     for (src_path, chg) in last.iter() {
                         match chg {
-                            dev_core::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
+                            hanzo_dev::protocol::FileChange::Update { move_path: Some(dest_path), .. } => {
                                 // Prefer to carry forward existing baseline from src to dest.
                                 if let Some(baseline) = self.diffs.baseline_file_contents.remove(src_path) {
                                     self.diffs.baseline_file_contents.insert(dest_path.clone(), baseline);
@@ -2737,7 +2737,7 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
             }
             EventMsg::GetHistoryEntryResponse(event) => {
-                let dev_core::protocol::GetHistoryEntryResponseEvent {
+                let hanzo_dev::protocol::GetHistoryEntryResponseEvent {
                     offset,
                     log_id,
                     entry,
@@ -2957,7 +2957,7 @@ impl ChatWidget<'_> {
         let arch = std::env::consts::ARCH;
         lines.push(Line::from(format!("  • Platform: {os}-{arch}")));
         lines.push(Line::from(format!("  • CWD: {}", self.config.cwd.display())));
-        let in_git = dev_core::git_info::get_git_repo_root(&self.config.cwd).is_some();
+        let in_git = hanzo_dev::git_info::get_git_repo_root(&self.config.cwd).is_some();
         lines.push(Line::from(format!(
             "  • Git repo: {}",
             if in_git { "yes" } else { "no" }
@@ -3062,7 +3062,7 @@ impl ChatWidget<'_> {
             for (path, change) in changes.iter() {
                 // If this change represents a move/rename, show the destination path in the tabs
                 let display_path: PathBuf = match change {
-                    dev_core::protocol::FileChange::Update { move_path: Some(dest), .. } => dest.clone(),
+                    hanzo_dev::protocol::FileChange::Update { move_path: Some(dest), .. } => dest.clone(),
                     _ => path.clone(),
                 };
                 if seen.insert(display_path.clone()) {
@@ -3086,7 +3086,7 @@ impl ChatWidget<'_> {
             let mut single = HashMap::new();
             single.insert(
                 path.clone(),
-                dev_core::protocol::FileChange::Update { unified_diff: unified.clone(), move_path: None },
+                hanzo_dev::protocol::FileChange::Update { unified_diff: unified.clone(), move_path: None },
             );
             let detail = create_diff_details_only(&single);
             let mut blocks: Vec<DiffBlock> = vec![DiffBlock { lines: detail }];
@@ -3424,7 +3424,7 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
-    pub(crate) fn set_theme(&mut self, new_theme: dev_core::config_types::ThemeName) {
+    pub(crate) fn set_theme(&mut self, new_theme: hanzo_dev::config_types::ThemeName) {
         // Update the config
         self.config.tui.theme.name = new_theme;
 
@@ -3437,22 +3437,22 @@ impl ChatWidget<'_> {
         // Add confirmation message to history
         let theme_name = match new_theme {
             // Light themes
-            dev_core::config_types::ThemeName::LightPhoton => "Light - Photon",
-            dev_core::config_types::ThemeName::LightPrismRainbow => "Light - Prism Rainbow",
-            dev_core::config_types::ThemeName::LightVividTriad => "Light - Vivid Triad",
-            dev_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain",
-            dev_core::config_types::ThemeName::LightSandbar => "Light - Sandbar",
-            dev_core::config_types::ThemeName::LightGlacier => "Light - Glacier",
+            hanzo_dev::config_types::ThemeName::LightPhoton => "Light - Photon",
+            hanzo_dev::config_types::ThemeName::LightPrismRainbow => "Light - Prism Rainbow",
+            hanzo_dev::config_types::ThemeName::LightVividTriad => "Light - Vivid Triad",
+            hanzo_dev::config_types::ThemeName::LightPorcelain => "Light - Porcelain",
+            hanzo_dev::config_types::ThemeName::LightSandbar => "Light - Sandbar",
+            hanzo_dev::config_types::ThemeName::LightGlacier => "Light - Glacier",
             // Dark themes
-            dev_core::config_types::ThemeName::DarkCarbonNight => "Dark - Carbon Night",
-            dev_core::config_types::ThemeName::DarkShinobiDusk => "Dark - Shinobi Dusk",
-            dev_core::config_types::ThemeName::DarkOledBlackPro => "Dark - OLED Black Pro",
-            dev_core::config_types::ThemeName::DarkAmberTerminal => "Dark - Amber Terminal",
-            dev_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux",
-            dev_core::config_types::ThemeName::DarkCharcoalRainbow => "Dark - Charcoal Rainbow",
-            dev_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden",
-            dev_core::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro",
-            dev_core::config_types::ThemeName::Custom => "Custom",
+            hanzo_dev::config_types::ThemeName::DarkCarbonNight => "Dark - Carbon Night",
+            hanzo_dev::config_types::ThemeName::DarkShinobiDusk => "Dark - Shinobi Dusk",
+            hanzo_dev::config_types::ThemeName::DarkOledBlackPro => "Dark - OLED Black Pro",
+            hanzo_dev::config_types::ThemeName::DarkAmberTerminal => "Dark - Amber Terminal",
+            hanzo_dev::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux",
+            hanzo_dev::config_types::ThemeName::DarkCharcoalRainbow => "Dark - Charcoal Rainbow",
+            hanzo_dev::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden",
+            hanzo_dev::config_types::ThemeName::DarkPaperLightPro => "Dark - Paper Light Pro",
+            hanzo_dev::config_types::ThemeName::Custom => "Custom",
         };
         let message = format!("✓ Theme changed to {}", theme_name);
         self.history_push(history_cell::new_background_event(message));
@@ -3490,11 +3490,11 @@ impl ChatWidget<'_> {
         self.restyle_history_after_theme_change();
     }
 
-    fn save_theme_to_config(&self, new_theme: dev_core::config_types::ThemeName) {
+    fn save_theme_to_config(&self, new_theme: hanzo_dev::config_types::ThemeName) {
         // Persist the theme selection to CODE_HOME/CODEX_HOME config.toml
-        match dev_core::config::find_dev_home() {
+        match hanzo_dev::config::find_dev_home() {
             Ok(home) => {
-                if let Err(e) = dev_core::config::set_tui_theme_name(&home, new_theme) {
+                if let Err(e) = hanzo_dev::config::set_tui_theme_name(&home, new_theme) {
                     tracing::warn!("Failed to persist theme to config.toml: {}", e);
                 } else {
                     tracing::info!("Persisted TUI theme selection to config.toml");
@@ -4370,7 +4370,7 @@ impl ChatWidget<'_> {
         match connect_result {
             Err(_) => {
                 tracing::error!("[cdp] connect_to_chrome_only timed out after {:?}", connect_deadline);
-                use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                     id: uuid::Uuid::new_v4().to_string(),
                     event_seq: 0,
@@ -4422,7 +4422,7 @@ impl ChatWidget<'_> {
                     };
 
                     // Immediately notify success (do not block on screenshots)
-                    use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
@@ -4465,7 +4465,7 @@ impl ChatWidget<'_> {
                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                             }
 
-                                            use dev_core::protocol::{
+                                            use hanzo_dev::protocol::{
                                                 BrowserScreenshotUpdateEvent, Event, EventMsg,
                                             };
                                             let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
@@ -4518,7 +4518,7 @@ impl ChatWidget<'_> {
                                                     url.clone().unwrap_or_else(|| "Chrome".to_string()),
                                                 ));
                                             }
-                                            use dev_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                            use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                             let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                 id: uuid::Uuid::new_v4().to_string(),
                                                 event_seq: 0,
@@ -4589,7 +4589,7 @@ impl ChatWidget<'_> {
                                     }
                                     _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
-                                use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: success_msg }), order: None }));
 
                                 // Persist last connection cache
@@ -4621,7 +4621,7 @@ impl ChatWidget<'_> {
                                                             if let Ok(mut latest) = latest_screenshot_inner.lock() {
                                                                 *latest = Some((first_path.clone(), url_inner.clone()));
                                                             }
-                                                            use dev_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                            use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                                             let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event {
                                                                 id: uuid::Uuid::new_v4().to_string(),
                                                                 event_seq: 0,
@@ -4668,7 +4668,7 @@ impl ChatWidget<'_> {
                                                                 url.clone().unwrap_or_else(|| "Chrome".to_string()),
                                                             ));
                                                         }
-                                                        use dev_core::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
+                                                        use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, Event, EventMsg};
                                                         let _ = app_event_tx_bg.send(AppEvent::CodexEvent(Event {
                                                             id: uuid::Uuid::new_v4().to_string(),
                                                             event_seq: 0,
@@ -4694,7 +4694,7 @@ impl ChatWidget<'_> {
                             }
                             Ok(Err(e2)) => {
                                 tracing::error!("[cdp] Fallback connect failed: {}", e2);
-                                use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
@@ -4707,7 +4707,7 @@ impl ChatWidget<'_> {
                             }
                             Err(_) => {
                                 tracing::error!("[cdp] Fallback connect timed out after {:?}", retry_deadline);
-                                use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                                use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                                 let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent {
                                         message: format!(
                                             "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
@@ -4721,7 +4721,7 @@ impl ChatWidget<'_> {
                         }
                     } else {
                         tracing::error!("[cdp] connect_to_chrome_only failed immediately: {}", err_msg);
-                        use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                        use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("❌ Failed to connect to Chrome: {}", err_msg) }), order: None }));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
@@ -4866,7 +4866,7 @@ impl ChatWidget<'_> {
                     if let Err(e) = browser_manager.set_enabled(false).await {
                         tracing::warn!("[/browser] failed to disable internal browser: {}", e);
                     }
-                    use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event {
                         id: uuid::Uuid::new_v4().to_string(),
                         event_seq: 0,
@@ -4892,7 +4892,7 @@ impl ChatWidget<'_> {
 
                     if let Err(e) = browser_manager.start().await {
                         tracing::error!("[/browser] failed to start internal browser: {}", e);
-                        use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                        use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("❌ Failed to start internal browser: {}", e) }), order: None }));
                         return;
                     }
@@ -4906,7 +4906,7 @@ impl ChatWidget<'_> {
                     }
 
                     // Emit confirmation
-                    use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "✅ Browser enabled (about:blank)".to_string() }), order: None }));
                 }
             });
@@ -5005,7 +5005,7 @@ impl ChatWidget<'_> {
                                                 }
 
                                                 // Send update event
-                                                use dev_core::protocol::{
+                                                use hanzo_dev::protocol::{
                                                     BrowserScreenshotUpdateEvent, EventMsg,
                                                 };
                                                 let _ = app_event_tx_inner.send(
@@ -5069,7 +5069,7 @@ impl ChatWidget<'_> {
                                                 }
 
                                                 // Send update event
-                                                use dev_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                                                use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
                                                 let _ = app_event_tx_inner.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
                                                         screenshot_path: first_path.clone(),
                                                         url: url_inner,
@@ -5095,7 +5095,7 @@ impl ChatWidget<'_> {
                             );
 
                             // Send success message to chat
-                            use dev_core::protocol::{BackgroundEventEvent, EventMsg};
+                            use hanzo_dev::protocol::{BackgroundEventEvent, EventMsg};
                             let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: format!("✅ Internal browser opened: {}", result.url) }), order: None }));
 
                             // Capture initial screenshot
@@ -5117,8 +5117,8 @@ impl ChatWidget<'_> {
                                         }
 
                                         // Send update event
-                                        use dev_core::protocol::BrowserScreenshotUpdateEvent;
-                                        use dev_core::protocol::EventMsg;
+                                        use hanzo_dev::protocol::BrowserScreenshotUpdateEvent;
+                                        use hanzo_dev::protocol::EventMsg;
                                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| result.url.clone()) }), order: None }));
                                     }
                                 }
@@ -5323,7 +5323,7 @@ impl ChatWidget<'_> {
                                 url.clone().unwrap_or_else(|| "Browser".to_string()),
                             ));
                         }
-                        use dev_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                        use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
                         let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| "Browser".to_string()) }), order: None }));
                     }
                 }
@@ -5388,7 +5388,7 @@ impl ChatWidget<'_> {
                         tracing::warn!("[cdp] failed to stop external Chrome connection: {}", e);
                     }
                     // Notify UI
-                    use dev_core::protocol::{BackgroundEventEvent, Event, EventMsg};
+                    use hanzo_dev::protocol::{BackgroundEventEvent, Event, EventMsg};
                     let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: "🔌 Disconnected from Chrome".to_string() }), order: None }));
                     let _ = tx.send(true);
                 } else {
@@ -5472,7 +5472,7 @@ impl ChatWidget<'_> {
                                     url.clone().unwrap_or_else(|| "Browser".to_string()),
                                 ));
                             }
-                            use dev_core::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
+                            use hanzo_dev::protocol::{BrowserScreenshotUpdateEvent, EventMsg};
                             let _ = app_event_tx.send(AppEvent::CodexEvent(Event { id: uuid::Uuid::new_v4().to_string(), event_seq: 0, msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent { screenshot_path: first_path.clone(), url: url.unwrap_or_else(|| "Browser".to_string()) }), order: None }));
                         }
                     }
@@ -5937,10 +5937,10 @@ impl ChatWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dev_core::config::{Config, ConfigOverrides, ConfigToml};
+    use hanzo_dev::config::{Config, ConfigOverrides, ConfigToml};
 
     fn test_config() -> Config {
-        dev_core::config::Config::load_from_base_config_with_overrides(
+        hanzo_dev::config::Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
             ConfigOverrides::default(),
             std::env::temp_dir(),
@@ -5958,15 +5958,15 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn exec_end_before_begin_yields_completed_cell_once() {
         let mut chat = make_widget();
-        chat.handle_dev_event(dev_core::protocol::Event {
+        chat.handle_dev_event(hanzo_dev::protocol::Event {
             id: "call-x".into(),
-            msg: dev_core::protocol::EventMsg::ExecCommandEnd(dev_core::protocol::ExecCommandEndEvent {
+            msg: hanzo_dev::protocol::EventMsg::ExecCommandEnd(hanzo_dev::protocol::ExecCommandEndEvent {
                 call_id: "call-x".into(), exit_code: 0, duration: std::time::Duration::from_millis(5), stdout: "ok".into(), stderr: String::new()
             })
         });
-        chat.handle_dev_event(dev_core::protocol::Event {
+        chat.handle_dev_event(hanzo_dev::protocol::Event {
             id: "call-x".into(),
-            msg: dev_core::protocol::EventMsg::ExecCommandBegin(dev_core::protocol::ExecCommandBeginEvent {
+            msg: hanzo_dev::protocol::EventMsg::ExecCommandBegin(hanzo_dev::protocol::ExecCommandBeginEvent {
                 call_id: "call-x".into(), command: vec!["echo".into(), "ok".into()], cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")), parsed_cmd: vec![]
             })
         });
@@ -5977,12 +5977,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn answer_final_then_delta_ignores_late_delta() {
         let mut chat = make_widget();
-        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(),
+        chat.handle_dev_event(hanzo_dev::protocol::Event { id: "ans-1".into(),
             event_seq: 0,
-            order: 0, msg: dev_core::protocol::EventMsg::AgentMessage(dev_core::protocol::AgentMessageEvent { message: "hello".into() })});
-        chat.handle_dev_event(dev_core::protocol::Event { id: "ans-1".into(),
+            order: 0, msg: hanzo_dev::protocol::EventMsg::AgentMessage(hanzo_dev::protocol::AgentMessageEvent { message: "hello".into() })});
+        chat.handle_dev_event(hanzo_dev::protocol::Event { id: "ans-1".into(),
             event_seq: 0,
-            order: 0, msg: dev_core::protocol::EventMsg::AgentMessageDelta(dev_core::protocol::AgentMessageDeltaEvent { delta: " world".into() })});
+            order: 0, msg: hanzo_dev::protocol::EventMsg::AgentMessageDelta(hanzo_dev::protocol::AgentMessageDeltaEvent { delta: " world".into() })});
         assert_eq!(chat.last_assistant_message.as_deref(), Some("hello"));
         // Late delta should be ignored; closed set contains the id
         assert!(chat.stream_state.closed_answer_ids.contains(&StreamId("ans-1".into())));
@@ -5991,12 +5991,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn reasoning_final_then_delta_ignores_late_delta() {
         let mut chat = make_widget();
-        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(),
+        chat.handle_dev_event(hanzo_dev::protocol::Event { id: "r-1".into(),
             event_seq: 0,
-            order: 0, msg: dev_core::protocol::EventMsg::AgentReasoning(dev_core::protocol::AgentReasoningEvent { text: "think".into() })});
-        chat.handle_dev_event(dev_core::protocol::Event { id: "r-1".into(),
+            order: 0, msg: hanzo_dev::protocol::EventMsg::AgentReasoning(hanzo_dev::protocol::AgentReasoningEvent { text: "think".into() })});
+        chat.handle_dev_event(hanzo_dev::protocol::Event { id: "r-1".into(),
             event_seq: 0,
-            order: 0, msg: dev_core::protocol::EventMsg::AgentReasoningDelta(dev_core::protocol::AgentReasoningDeltaEvent { delta: " harder".into() })});
+            order: 0, msg: hanzo_dev::protocol::EventMsg::AgentReasoningDelta(hanzo_dev::protocol::AgentReasoningDeltaEvent { delta: " harder".into() })});
         assert!(chat.stream_state.closed_reasoning_ids.contains(&StreamId("r-1".into())));
     }
 }
@@ -7726,7 +7726,7 @@ struct ExecState {
     // Pairing map for out-of-order exec events. If an ExecEnd arrives before
     // ExecBegin, we stash it briefly and either pair it when Begin arrives or
     // flush it after a short timeout to show a fallback cell.
-    pending_exec_ends: HashMap<ExecCallId, (ExecCommandEndEvent, dev_core::protocol::OrderMeta, std::time::Instant)>,
+    pending_exec_ends: HashMap<ExecCallId, (ExecCommandEndEvent, hanzo_dev::protocol::OrderMeta, std::time::Instant)>,
 }
 
 #[derive(Default)]
@@ -7765,7 +7765,7 @@ struct LayoutState {
 
 #[derive(Default)]
 struct DiffsState {
-    session_patch_sets: Vec<HashMap<PathBuf, dev_core::protocol::FileChange>>,
+    session_patch_sets: Vec<HashMap<PathBuf, hanzo_dev::protocol::FileChange>>,
     baseline_file_contents: HashMap<PathBuf, String>,
     overlay: Option<DiffOverlay>,
     confirm: Option<DiffConfirm>,

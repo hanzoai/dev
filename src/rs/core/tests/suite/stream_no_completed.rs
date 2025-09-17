@@ -3,13 +3,13 @@
 
 use std::time::Duration;
 
-use dev_core::CodexAuth;
-use dev_core::ConversationManager;
-use dev_core::ModelProviderInfo;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::InputItem;
-use dev_core::protocol::Op;
-use dev_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use hanzo_dev::CodexAuth;
+use hanzo_dev::ConversationManager;
+use hanzo_dev::ModelProviderInfo;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::InputItem;
+use hanzo_dev::protocol::Op;
+use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture;
 use core_test_support::load_sse_fixture_with_id;
@@ -79,7 +79,7 @@ async fn retries_on_early_close() {
         // provider is not set.
         env_key: Some("PATH".into()),
         env_key_instructions: None,
-        wire_api: dev_core::WireApi::Responses,
+        wire_api: hanzo_dev::WireApi::Responses,
         query_params: None,
         http_headers: None,
         env_http_headers: None,

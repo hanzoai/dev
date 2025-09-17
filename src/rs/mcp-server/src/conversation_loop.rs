@@ -4,11 +4,11 @@ use crate::exec_approval::handle_exec_approval_request;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
-use dev_core::CodexConversation;
-use dev_core::protocol::AgentMessageEvent;
-use dev_core::protocol::ApplyPatchApprovalRequestEvent;
-use dev_core::protocol::EventMsg;
-use dev_core::protocol::ExecApprovalRequestEvent;
+use hanzo_dev::CodexConversation;
+use hanzo_dev::protocol::AgentMessageEvent;
+use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
+use hanzo_dev::protocol::EventMsg;
+use hanzo_dev::protocol::ExecApprovalRequestEvent;
 use mcp_types::RequestId;
 use tracing::error;
 

@@ -332,7 +332,7 @@ impl AuthModeWidget {
         let opts = ServerOptions::new(
             self.dev_home.clone(),
             CLIENT_ID.to_string(),
-            dev_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+            hanzo_dev::default_client::DEFAULT_ORIGINATOR.to_string(),
         );
         let server = run_login_server(opts);
         match server {

@@ -39,7 +39,7 @@ async fn get_user_agent_returns_current_codex_user_agent() {
         os_info.os_type(),
         os_info.version(),
         os_info.architecture().unwrap_or("unknown"),
-        codex_core::terminal::user_agent()
+        hanzo_dev::terminal::user_agent()
     );
 
     let received: GetUserAgentResponse =

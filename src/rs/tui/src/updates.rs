@@ -7,8 +7,8 @@ use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_core::config::Config;
-use codex_core::default_client::create_client;
+use hanzo_dev::config::Config;
+use hanzo_dev::default_client::create_client;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
