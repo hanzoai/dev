@@ -429,6 +429,7 @@ pub(super) fn handle_exec_begin_now(
                         history_cell::ExploreEntryStatus::Running,
                         &ev.cwd,
                         &chat.config.cwd,
+                        &ev.command,
                     )
                 });
             if let Some(entry_idx) = entry_idx {
