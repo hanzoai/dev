@@ -15,7 +15,7 @@ pub(super) fn web_search_begin(chat: &mut ChatWidget<'_>, call_id: String, query
     chat.tools_state
         .running_web_search
         .insert(super::ToolCallId(call_id), (idx, query));
-    chat.bottom_pane.update_status_text("Searched".to_string());
+    chat.bottom_pane.update_status_text("Search".to_string());
     chat.mark_needs_redraw();
 }
 

@@ -24,9 +24,17 @@ impl AgentsOverviewView {
     pub fn new(
         agents: Vec<(String, bool, bool, String)>,
         commands: Vec<String>,
+        selected_index: usize,
         app_event_tx: AppEventSender,
     ) -> Self {
-        Self { agents, commands, selected: 0, is_complete: false, app_event_tx }
+        let mut view = Self { agents, commands, selected: 0, is_complete: false, app_event_tx };
+        let total = view.total_rows();
+        if total == 0 {
+            view.selected = 0;
+        } else {
+            view.selected = selected_index.min(total.saturating_sub(1));
+        }
+        view
     }
 
     fn total_rows(&self) -> usize { self.agents.len().saturating_add(self.commands.len()).saturating_add(1) /* Add new… */ }
@@ -66,7 +74,12 @@ impl AgentsOverviewView {
             ];
             if sel {
                 spans.push(Span::raw("  "));
-                spans.push(Span::styled("(press Enter to configure)", Style::default().fg(crate::colors::text_dim())));
+                let hint = if !*installed {
+                    "(press Enter to install)"
+                } else {
+                    "(press Enter to configure)"
+                };
+                spans.push(Span::styled(hint, Style::default().fg(crate::colors::text_dim())));
             }
             lines.push(Line::from(spans));
         }
@@ -126,18 +139,25 @@ impl<'a> BottomPaneView<'a> for AgentsOverviewView {
             KeyEvent { code: KeyCode::Up, .. } => {
                 if self.total_rows() == 0 { return; }
                 if self.selected == 0 { self.selected = self.total_rows() - 1; } else { self.selected -= 1; }
+                self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged { index: self.selected });
             }
             KeyEvent { code: KeyCode::Down, .. } => {
                 if self.total_rows() == 0 { return; }
                 self.selected = (self.selected + 1) % self.total_rows();
+                self.app_event_tx.send(AppEvent::AgentsOverviewSelectionChanged { index: self.selected });
             }
             KeyEvent { code: KeyCode::Enter, .. } => {
                 let idx = self.selected;
                 if idx < self.agents.len() {
                     // Open Agent editor
-                    let (name, _en, _inst, _cmd) = self.agents[idx].clone();
-                    self.app_event_tx.send(AppEvent::ShowAgentEditor { name });
-                    self.is_complete = true;
+                    let (name, _en, installed, _cmd) = self.agents[idx].clone();
+                    if !installed {
+                        self.app_event_tx.send(AppEvent::RequestAgentInstall { name, selected_index: idx });
+                        self.is_complete = true;
+                    } else {
+                        self.app_event_tx.send(AppEvent::ShowAgentEditor { name });
+                        self.is_complete = true;
+                    }
                 } else {
                     // Commands region: specific name or Add new…
                     let cmd_idx = idx - self.agents.len();
