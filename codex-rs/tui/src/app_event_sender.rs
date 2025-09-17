@@ -40,6 +40,7 @@ impl AppEventSender {
                 | AppEvent::RequestRedraw
                 | AppEvent::Redraw
                 | AppEvent::ExitRequest
+                | AppEvent::SetTerminalTitle { .. }
         );
 
         let tx = if is_high { &self.high_tx } else { &self.bulk_tx };

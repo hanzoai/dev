@@ -655,8 +655,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!();
             }
             EventMsg::PlanUpdate(plan_update_event) => {
-                let UpdatePlanArgs { explanation, plan } = plan_update_event;
-                ts_println!(self, "explanation: {explanation:?}");
+                let UpdatePlanArgs { name, plan } = plan_update_event;
+                ts_println!(self, "name: {name:?}");
                 ts_println!(self, "plan: {plan:?}");
             }
             EventMsg::GetHistoryEntryResponse(_) => {
